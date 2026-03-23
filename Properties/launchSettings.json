@@ -1,0 +1,8 @@
+{
+  "profiles": {
+    "CS2SX": {
+      "commandName": "Project",
+      "commandLineArgs": "build C:\\Users\\Johannes\\source\\repos\\SwitchDevApp\\SwitchDevApp.csproj"
+    }
+  }
+}
