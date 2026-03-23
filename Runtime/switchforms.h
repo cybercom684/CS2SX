@@ -418,6 +418,98 @@ static inline void List_char_Remove(List_char* l, int idx) {
     l->count--;
 }
 
+// =============================================================================
+// Dictionary<TKey, TValue> — einfacher Hash-Map-ähnlicher Key-Value-Speicher
+// =============================================================================
+
+#define CS2SX_DICT_DEFINE(K, V) \
+typedef struct { K* keys; V* vals; int count; int capacity; } Dict_##K##_##V; \
+static inline Dict_##K##_##V* Dict_##K##_##V##_New(void) { \
+    Dict_##K##_##V* d = (Dict_##K##_##V*)malloc(sizeof(Dict_##K##_##V)); \
+    d->keys = (K*)malloc(8 * sizeof(K)); \
+    d->vals = (V*)malloc(8 * sizeof(V)); \
+    d->count = 0; d->capacity = 8; return d; } \
+static inline void Dict_##K##_##V##_Add(Dict_##K##_##V* d, K key, V val) { \
+    if (d->count >= d->capacity) { \
+        d->capacity *= 2; \
+        d->keys = (K*)realloc(d->keys, d->capacity * sizeof(K)); \
+        d->vals = (V*)realloc(d->vals, d->capacity * sizeof(V)); } \
+    d->keys[d->count] = key; d->vals[d->count] = val; d->count++; } \
+static inline int Dict_##K##_##V##_ContainsKey(Dict_##K##_##V* d, K key) { \
+    for (int _i = 0; _i < d->count; _i++) { if (d->keys[_i] == key) return 1; } return 0; } \
+static inline V* Dict_##K##_##V##_TryGetValue(Dict_##K##_##V* d, K key) { \
+    for (int _i = 0; _i < d->count; _i++) { if (d->keys[_i] == key) return &d->vals[_i]; } return NULL; } \
+static inline void Dict_##K##_##V##_Remove(Dict_##K##_##V* d, K key) { \
+    for (int _i = 0; _i < d->count; _i++) { \
+        if (d->keys[_i] == key) { \
+            for (int _j = _i; _j < d->count-1; _j++) { d->keys[_j]=d->keys[_j+1]; d->vals[_j]=d->vals[_j+1]; } \
+            d->count--; return; } } } \
+static inline void Dict_##K##_##V##_Clear(Dict_##K##_##V* d) { if (d) d->count = 0; } \
+static inline void Dict_##K##_##V##_Free(Dict_##K##_##V* d) { if (d) { free(d->keys); free(d->vals); free(d); } }
+
+// String-Dictionary braucht strcmp für Key-Vergleich — eigene Variante
+#define CS2SX_DICT_DEFINE_STR_KEY(V) \
+typedef struct { const char** keys; V* vals; int count; int capacity; } Dict_str_##V; \
+static inline Dict_str_##V* Dict_str_##V##_New(void) { \
+    Dict_str_##V* d = (Dict_str_##V*)malloc(sizeof(Dict_str_##V)); \
+    d->keys = (const char**)malloc(8 * sizeof(const char*)); \
+    d->vals = (V*)malloc(8 * sizeof(V)); \
+    d->count = 0; d->capacity = 8; return d; } \
+static inline void Dict_str_##V##_Add(Dict_str_##V* d, const char* key, V val) { \
+    if (d->count >= d->capacity) { \
+        d->capacity *= 2; \
+        d->keys = (const char**)realloc(d->keys, d->capacity * sizeof(const char*)); \
+        d->vals = (V*)realloc(d->vals, d->capacity * sizeof(V)); } \
+    d->keys[d->count] = key; d->vals[d->count] = val; d->count++; } \
+static inline int Dict_str_##V##_ContainsKey(Dict_str_##V* d, const char* key) { \
+    for (int _i = 0; _i < d->count; _i++) { if (strcmp(d->keys[_i], key) == 0) return 1; } return 0; } \
+static inline V* Dict_str_##V##_TryGetValue(Dict_str_##V* d, const char* key) { \
+    for (int _i = 0; _i < d->count; _i++) { if (strcmp(d->keys[_i], key) == 0) return &d->vals[_i]; } return NULL; } \
+static inline void Dict_str_##V##_Remove(Dict_str_##V* d, const char* key) { \
+    for (int _i = 0; _i < d->count; _i++) { \
+        if (strcmp(d->keys[_i], key) == 0) { \
+            for (int _j = _i; _j < d->count-1; _j++) { d->keys[_j]=d->keys[_j+1]; d->vals[_j]=d->vals[_j+1]; } \
+            d->count--; return; } } } \
+static inline void Dict_str_##V##_Clear(Dict_str_##V* d) { if (d) d->count = 0; } \
+static inline void Dict_str_##V##_Free(Dict_str_##V* d) { if (d) { free(d->keys); free(d->vals); free(d); } }
+
+// Vordefinierte Dictionary-Typen
+CS2SX_DICT_DEFINE(int, int)
+CS2SX_DICT_DEFINE_STR_KEY(int)
+CS2SX_DICT_DEFINE_STR_KEY(float)
+// Dictionary<string,string> — komplett manuell da 'str' kein C-Typ ist
+typedef struct { const char** keys; const char** vals; int count; int capacity; } Dict_str_str;
+static inline Dict_str_str* Dict_str_str_New(void) {
+    Dict_str_str* d = (Dict_str_str*)malloc(sizeof(Dict_str_str));
+    d->keys = (const char**)malloc(8 * sizeof(const char*));
+    d->vals = (const char**)malloc(8 * sizeof(const char*));
+    d->count = 0; d->capacity = 8; return d;
+}
+static inline void Dict_str_str_Add(Dict_str_str* d, const char* key, const char* val) {
+    if (d->count >= d->capacity) {
+        d->capacity *= 2;
+        d->keys = (const char**)realloc(d->keys, d->capacity * sizeof(const char*));
+        d->vals = (const char**)realloc(d->vals, d->capacity * sizeof(const char*));
+    }
+    d->keys[d->count] = key; d->vals[d->count] = val; d->count++;
+}
+static inline int Dict_str_str_ContainsKey(Dict_str_str* d, const char* key) {
+    for (int _i = 0; _i < d->count; _i++) { if (strcmp(d->keys[_i], key) == 0) return 1; } return 0;
+}
+static inline const char* Dict_str_str_TryGetValue(Dict_str_str* d, const char* key) {
+    for (int _i = 0; _i < d->count; _i++) { if (strcmp(d->keys[_i], key) == 0) return d->vals[_i]; } return NULL;
+}
+static inline void Dict_str_str_Remove(Dict_str_str* d, const char* key) {
+    for (int _i = 0; _i < d->count; _i++) {
+        if (strcmp(d->keys[_i], key) == 0) {
+            for (int _j = _i; _j < d->count - 1; _j++) { d->keys[_j] = d->keys[_j + 1]; d->vals[_j] = d->vals[_j + 1]; }
+            d->count--; return;
+        }
+    }
+}
+static inline void Dict_str_str_Clear(Dict_str_str* d) { if (d) d->count = 0; }
+static inline void Dict_str_str_Free(Dict_str_str* d) { if (d) { free(d->keys); free(d->vals); free(d); } }
+
 // ============================================================================
 // Form
 // ============================================================================
