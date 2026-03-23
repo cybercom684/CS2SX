@@ -19,7 +19,7 @@ public sealed class ExpressionWriter
 
     public ExpressionWriter(TranspilerContext ctx)
     {
-        _ctx        = ctx;
+        _ctx = ctx;
         _dispatcher = new InvocationDispatcher(ctx, Write);
     }
 
@@ -31,24 +31,24 @@ public sealed class ExpressionWriter
 
         return node switch
         {
-            BinaryExpressionSyntax bin           => WriteBinary(bin),
-            LiteralExpressionSyntax lit          => WriteLiteral(lit),
-            IdentifierNameSyntax id              => WriteIdentifier(id),
-            PrefixUnaryExpressionSyntax pre      => pre.OperatorToken.Text + Write(pre.Operand),
-            PostfixUnaryExpressionSyntax post    => Write(post.Operand) + post.OperatorToken.Text,
-            AssignmentExpressionSyntax assign    => WriteAssignment(assign),
-            MemberAccessExpressionSyntax mem     => WriteMemberAccess(mem),
-            InvocationExpressionSyntax inv       => WriteInvocation(inv),
+            BinaryExpressionSyntax bin => WriteBinary(bin),
+            LiteralExpressionSyntax lit => WriteLiteral(lit),
+            IdentifierNameSyntax id => WriteIdentifier(id),
+            PrefixUnaryExpressionSyntax pre => pre.OperatorToken.Text + Write(pre.Operand),
+            PostfixUnaryExpressionSyntax post => Write(post.Operand) + post.OperatorToken.Text,
+            AssignmentExpressionSyntax assign => WriteAssignment(assign),
+            MemberAccessExpressionSyntax mem => WriteMemberAccess(mem),
+            InvocationExpressionSyntax inv => WriteInvocation(inv),
             InterpolatedStringExpressionSyntax i => FormatStringBuilder.BuildPrintf(i, false, _ctx, Write),
-            ArrayCreationExpressionSyntax arr    => WriteArrayCreation(arr),
-            ObjectCreationExpressionSyntax obj   => WriteObjectCreation(obj),
-            ParenthesizedExpressionSyntax par    => "(" + Write(par.Expression) + ")",
-            ConditionalExpressionSyntax cond     => WriteConditional(cond),
-            CastExpressionSyntax cast            => WriteCast(cast),
-            ElementAccessExpressionSyntax elem   => WriteElementAccess(elem),
-            DefaultExpressionSyntax              => "NULL",
-            ThisExpressionSyntax                 => "self",
-            _                                    => node.ToString(),
+            ArrayCreationExpressionSyntax arr => WriteArrayCreation(arr),
+            ObjectCreationExpressionSyntax obj => WriteObjectCreation(obj),
+            ParenthesizedExpressionSyntax par => "(" + Write(par.Expression) + ")",
+            ConditionalExpressionSyntax cond => WriteConditional(cond),
+            CastExpressionSyntax cast => WriteCast(cast),
+            ElementAccessExpressionSyntax elem => WriteElementAccess(elem),
+            DefaultExpressionSyntax => "NULL",
+            ThisExpressionSyntax => "self",
+            _ => node.ToString(),
         };
     }
 
@@ -56,8 +56,8 @@ public sealed class ExpressionWriter
 
     private string WriteLiteral(LiteralExpressionSyntax lit)
     {
-        if (lit.IsKind(SyntaxKind.NullLiteralExpression))  return "NULL";
-        if (lit.IsKind(SyntaxKind.TrueLiteralExpression))  return "1";
+        if (lit.IsKind(SyntaxKind.NullLiteralExpression)) return "NULL";
+        if (lit.IsKind(SyntaxKind.TrueLiteralExpression)) return "1";
         if (lit.IsKind(SyntaxKind.FalseLiteralExpression)) return "0";
 
         if (lit.Token.IsKind(SyntaxKind.StringLiteralToken))
@@ -101,7 +101,7 @@ public sealed class ExpressionWriter
         if (_ctx.IsFieldAccess(name))
         {
             var trimmed = name.TrimStart('_');
-            var prefix  = TypeRegistry.HasNoPrefix(trimmed) ? "" : "f_";
+            var prefix = TypeRegistry.HasNoPrefix(trimmed) ? "" : "f_";
             return "self->" + prefix + trimmed;
         }
 
@@ -116,9 +116,9 @@ public sealed class ExpressionWriter
 
     private string WriteBinary(BinaryExpressionSyntax bin)
     {
-        var left  = Write(bin.Left);
+        var left = Write(bin.Left);
         var right = Write(bin.Right);
-        var op    = bin.OperatorToken.Text;
+        var op = bin.OperatorToken.Text;
 
         // String-Vergleich → strcmp
         if ((op == "==" || op == "!=") && IsStringExpr(bin.Left))
@@ -144,7 +144,7 @@ public sealed class ExpressionWriter
         if (full.StartsWith("LibNX.", StringComparison.Ordinal))
             return mem.Name.Identifier.Text;
 
-        var obj  = Write(mem.Expression);
+        var obj = Write(mem.Expression);
         var prop = mem.Name.Identifier.Text;
 
         // string.Length → strlen(...)
@@ -161,7 +161,7 @@ public sealed class ExpressionWriter
 
         // libnx Stack-Struct → Punkt-Zugriff
         var rawExpr = mem.Expression.ToString();
-        var key     = rawExpr.TrimStart('_');
+        var key = rawExpr.TrimStart('_');
         if ((_ctx.LocalTypes.TryGetValue(rawExpr, out var lt) && TypeRegistry.IsLibNxStruct(lt))
          || (_ctx.FieldTypes.TryGetValue(key, out var ft) && TypeRegistry.IsLibNxStruct(ft)))
             return obj + "." + prop;
@@ -173,13 +173,13 @@ public sealed class ExpressionWriter
 
     private string WriteAssignment(AssignmentExpressionSyntax assign)
     {
-        var op    = assign.OperatorToken.Text;
+        var op = assign.OperatorToken.Text;
         var right = Write(assign.Right);
 
         if (assign.Left is MemberAccessExpressionSyntax mem)
         {
-            var obj    = Write(mem.Expression);
-            var prop   = mem.Name.Identifier.Text;
+            var obj = Write(mem.Expression);
+            var prop = mem.Name.Identifier.Text;
             var objRaw = mem.Expression.ToString();
             var objKey = objRaw.TrimStart('_');
 
@@ -241,12 +241,21 @@ public sealed class ExpressionWriter
         // new List<T>() → List_T_New()
         if (TypeRegistry.IsList(typeName))
         {
-            var inner  = TypeRegistry.GetListInnerType(typeName)!;
+            var inner = TypeRegistry.GetListInnerType(typeName)!;
             var cInner = inner == "string" ? "char" : TypeRegistry.MapType(inner);
             return "List_" + cInner + "_New()";
         }
 
-        var args     = obj.ArgumentList?.Arguments.Select(a => Write(a.Expression))
+        // new Dictionary<K,V>() → Dict_K_V_New()
+        if (TypeRegistry.IsDictionary(typeName))
+        {
+            var types = TypeRegistry.GetDictionaryTypes(typeName)!.Value;
+            var cKey = types.key == "string" ? "str" : TypeRegistry.MapType(types.key);
+            var cVal = types.val == "string" ? "str" : TypeRegistry.MapType(types.val);
+            return "Dict_" + cKey + "_" + cVal + "_New()";
+        }
+
+        var args = obj.ArgumentList?.Arguments.Select(a => Write(a.Expression))
                        ?? Enumerable.Empty<string>();
         var creation = typeName + "_New(" + string.Join(", ", args) + ")";
 
@@ -259,9 +268,9 @@ public sealed class ExpressionWriter
             {
                 if (expr is AssignmentExpressionSyntax asgn)
                 {
-                    var p    = asgn.Left.ToString().Trim();
-                    var v    = Write(asgn.Right);
-                    var cp   = TypeRegistry.MapProperty(p);
+                    var p = asgn.Left.ToString().Trim();
+                    var v = Write(asgn.Right);
+                    var cp = TypeRegistry.MapProperty(p);
                     _ctx.Out.WriteLine(_ctx.Tab + tmp + "->" + cp + " = " + v + ";");
                 }
             }
@@ -276,7 +285,7 @@ public sealed class ExpressionWriter
     private string WriteArrayCreation(ArrayCreationExpressionSyntax arr)
     {
         var elemType = arr.Type.ElementType.ToString().Trim();
-        var cType    = TypeRegistry.MapType(elemType);
+        var cType = TypeRegistry.MapType(elemType);
 
         if (arr.Type.RankSpecifiers.Count > 0 && arr.Type.RankSpecifiers[0].Sizes.Count > 0)
         {
@@ -296,7 +305,7 @@ public sealed class ExpressionWriter
         if (result != null) return result;
 
         // Fallback: direkter C-Funktionsaufruf
-        var args     = inv.ArgumentList.Arguments.Select(a => Write(a.Expression)).ToList();
+        var args = inv.ArgumentList.Arguments.Select(a => Write(a.Expression)).ToList();
         var calleeStr = inv.Expression.ToString();
         return calleeStr + "(" + string.Join(", ", args) + ")";
     }
