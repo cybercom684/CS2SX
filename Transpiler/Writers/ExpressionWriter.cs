@@ -133,6 +133,10 @@ public sealed class ExpressionWriter
         var obj = Write(mem.Expression);
         var prop = mem.Name.Identifier.Text;
 
+        // base.x, base.y etc. in Control-Subklassen
+        if (mem.Expression is BaseExpressionSyntax)
+            return "((Control*)self)->" + prop.ToLowerInvariant();
+
         if (prop == "Length" && IsStringExpr(mem.Expression))
             return "strlen(" + obj + ")";
 
@@ -334,7 +338,16 @@ public sealed class ExpressionWriter
         => "(" + Write(cond.Condition) + " ? " + Write(cond.WhenTrue) + " : " + Write(cond.WhenFalse) + ")";
 
     private string WriteCast(CastExpressionSyntax cast)
-        => "(" + TypeRegistry.MapType(cast.Type.ToString().Trim()) + ")" + Write(cast.Expression);
+    {
+        var targetType = cast.Type.ToString().Trim();
+        var cType = TypeRegistry.MapType(targetType);
+        var inner = Write(cast.Expression);
+
+        if (TypeRegistry.IsControlType(targetType) || TypeRegistry.NeedsPointerSuffix(targetType))
+            return "((" + cType + "*)" + inner + ")";
+
+        return "((" + cType + ")" + inner + ")";
+    }
 
     private string WriteElementAccess(ElementAccessExpressionSyntax elem)
     {

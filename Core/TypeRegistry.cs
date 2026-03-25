@@ -60,6 +60,20 @@ public static class TypeRegistry
         ["PsmChargerType"]      = "PsmChargerType",
     };
 
+    // ── SwitchForms Control-Typen (Pointer, kein primitiver Wert) ────────────
+
+    /// <summary>
+    /// True wenn der Typ ein Control-Typ ist der als Pointer gespeichert wird.
+    /// MapType gibt keinen * zurück — WriteStructDefinition muss * anhängen.
+    /// </summary>
+    public static bool IsControlType(string csType) =>
+        s_controlTypes.Contains(csType.Trim());
+
+    private static readonly HashSet<string> s_controlTypes = new(StringComparer.Ordinal)
+    {
+        "Control", "Label", "Button", "ProgressBar", "Form", "SwitchApp",
+    };
+
     // ── libnx Stack-Structs (kein Pointer, Stack-Allokation) ─────────────────
 
     private static readonly HashSet<string> s_libNxStructs = new(StringComparer.Ordinal)

@@ -148,8 +148,16 @@ public sealed class CSharpToC : CSharpSyntaxWalker
         _ctx.Out.WriteLine("{");
         _ctx.Indent();
 
+        // Basisklasse einbetten
         if (!string.IsNullOrEmpty(baseType))
-            _ctx.WriteLine(baseType + " base;");
+        {
+            // Alle Control-Subklassen embedden Control als erstes Feld
+            // damit der Cast (Control*)self funktioniert
+            var embedType = baseType is "Label" or "Button" or "ProgressBar"
+                ? "Control"
+                : baseType;
+            _ctx.WriteLine(embedType + " base;");
+        }
 
         foreach (var field in node.Members.OfType<FieldDeclarationSyntax>())
         {
@@ -157,12 +165,16 @@ public sealed class CSharpToC : CSharpSyntaxWalker
 
             var csType = field.Declaration.Type.ToString().Trim();
             var cType = TypeRegistry.MapType(csType);
-            // MapType gibt für List<T>, Dict<K,V>, string bereits * zurück —
-            // NeedsPointerSuffix ist nur für eigene Klassen-Typen true.
-            // StringBuilder ist der einzige Sonderfall der kein * im MapType hat.
-            var ptr = TypeRegistry.IsStringBuilder(csType) ? "*"
-                    : TypeRegistry.NeedsPointerSuffix(csType) ? "*"
-                    : "";
+
+            // * anhängen wenn:
+            // - NeedsPointerSuffix (eigene Klassen-Typen)
+            // - StringBuilder (MapType gibt keinen * zurück)
+            // - Control-Typen (Label, Button etc. — MapType gibt keinen * zurück)
+            // NICHT für List<T>/Dict<K,V> — MapType gibt bereits * zurück
+            var needPtr = TypeRegistry.NeedsPointerSuffix(csType)
+                       || TypeRegistry.IsStringBuilder(csType)
+                       || TypeRegistry.IsControlType(csType);
+            var ptr = needPtr ? "*" : "";
 
             foreach (var v in field.Declaration.Variables)
             {
@@ -203,7 +215,7 @@ public sealed class CSharpToC : CSharpSyntaxWalker
         _ctx.Out.WriteLine("};");
         _ctx.Out.WriteLine();
 
-        // Static-Felder → extern-Deklarationen nach dem Struct
+        // Static-Felder
         foreach (var field in node.Members.OfType<FieldDeclarationSyntax>())
         {
             if (!field.Modifiers.Any(m => m.IsKind(SyntaxKind.StaticKeyword))) continue;
@@ -212,8 +224,7 @@ public sealed class CSharpToC : CSharpSyntaxWalker
             var cType = TypeRegistry.MapType(csType);
             var needPtr = TypeRegistry.NeedsPointerSuffix(csType)
                        || TypeRegistry.IsStringBuilder(csType)
-                       || TypeRegistry.IsList(csType)
-                       || TypeRegistry.IsDictionary(csType);
+                       || TypeRegistry.IsControlType(csType);
             var ptr = needPtr ? "*" : "";
 
             foreach (var v in field.Declaration.Variables)
@@ -229,9 +240,15 @@ public sealed class CSharpToC : CSharpSyntaxWalker
     private void WriteFunctionSignatures(ClassDeclarationSyntax node, bool isSwitchAppChild)
     {
         var name = node.Identifier.Text;
+        var baseType = _ctx.CurrentBaseType;
+
+        var isControlChild = baseType is "Control" or "Label" or "Button" or "ProgressBar";
 
         if (isSwitchAppChild)
             _ctx.Out.WriteLine("void " + name + "_Init(" + name + "* self);");
+        else if (isControlChild)
+            // Controls werden mit malloc allokiert wie andere Heap-Objekte
+            _ctx.Out.WriteLine(name + "* " + name + "_New();");
         else
             _ctx.Out.WriteLine(name + "* " + name + "_New();");
 
@@ -248,10 +265,92 @@ public sealed class CSharpToC : CSharpSyntaxWalker
         var name = node.Identifier.Text;
         var baseType = _ctx.CurrentBaseType;
 
+        var isControlChild = baseType is "Control" or "Label" or "Button" or "ProgressBar";
+
         if (isSwitchAppChild)
             WriteInitConstructor(node, name, baseType);
+        else if (isControlChild)
+            WriteControlConstructor(node, name, baseType);
         else
             WriteNewConstructor(node, name);
+    }
+
+    private void WriteControlConstructor(ClassDeclarationSyntax node, string name, string baseType)
+    {
+        // Static-Felder → globale C-Variablen-Definitionen
+        foreach (var field in node.Members.OfType<FieldDeclarationSyntax>())
+        {
+            if (!field.Modifiers.Any(m => m.IsKind(SyntaxKind.StaticKeyword))) continue;
+
+            var csType = field.Declaration.Type.ToString().Trim();
+            var cType = TypeRegistry.MapType(csType);
+            var needPtr = TypeRegistry.NeedsPointerSuffix(csType)
+                       || TypeRegistry.IsStringBuilder(csType)
+                       || TypeRegistry.IsList(csType)
+                       || TypeRegistry.IsDictionary(csType);
+            var ptr = needPtr ? "*" : "";
+
+            foreach (var v in field.Declaration.Variables)
+            {
+                var fieldName = v.Identifier.Text.TrimStart('_');
+                var init = v.Initializer != null
+                    ? " = " + _exprWriter.Write(v.Initializer.Value)
+                    : "";
+                _ctx.Out.WriteLine(cType + ptr + " " + name + "_" + fieldName + init + ";");
+            }
+        }
+
+        _ctx.Out.WriteLine(name + "* " + name + "_New()");
+        _ctx.Out.WriteLine("{");
+        _ctx.Indent();
+
+        _ctx.WriteLine(name + "* self = (" + name + "*)malloc(sizeof(" + name + "));");
+        _ctx.WriteLine("if (!self) return NULL;");
+        _ctx.WriteLine("memset(self, 0, sizeof(" + name + "));");
+
+        // Basis-Control Defaults
+        _ctx.WriteLine("((Control*)self)->visible = 1;");
+        _ctx.WriteLine("((Control*)self)->focusable = 0;");
+
+        // Draw/Update Funktionszeiger verdrahten
+        foreach (var method in node.Members.OfType<MethodDeclarationSyntax>())
+        {
+            var methodName = method.Identifier.Text;
+            var isOverride = method.Modifiers.Any(m => m.IsKind(SyntaxKind.OverrideKeyword));
+            if (!isOverride) continue;
+
+            if (methodName == "Draw")
+                _ctx.WriteLine("((Control*)self)->Draw = (void(*)(Control*))"
+                    + name + "_Draw;");
+
+            if (methodName == "Update")
+            {
+                _ctx.WriteLine("((Control*)self)->Update = (void(*)(Control*, u64, u64))"
+                    + name + "_Update;");
+                // Hat Update → ist fokussierbar
+                _ctx.WriteLine("((Control*)self)->focusable = 1;");
+            }
+        }
+
+        // Feld-Initializer
+        foreach (var field in node.Members.OfType<FieldDeclarationSyntax>())
+        {
+            if (field.Modifiers.Any(m => m.IsKind(SyntaxKind.StaticKeyword))) continue;
+
+            foreach (var v in field.Declaration.Variables)
+            {
+                if (v.Initializer == null) continue;
+                var fieldName = v.Identifier.Text.TrimStart('_');
+                var prefix = TypeRegistry.HasNoPrefix(fieldName) ? "" : "f_";
+                _ctx.WriteLine("self->" + prefix + fieldName + " = "
+                    + _exprWriter.Write(v.Initializer.Value) + ";");
+            }
+        }
+
+        _ctx.WriteLine("return self;");
+        _ctx.Dedent();
+        _ctx.Out.WriteLine("}");
+        _ctx.Out.WriteLine();
     }
 
     private void WriteInitConstructor(ClassDeclarationSyntax node, string name, string baseType)
@@ -263,7 +362,10 @@ public sealed class CSharpToC : CSharpSyntaxWalker
 
             var csType = field.Declaration.Type.ToString().Trim();
             var cType = TypeRegistry.MapType(csType);
-            var needPtr = TypeRegistry.NeedsPointerSuffix(csType);
+            var needPtr = TypeRegistry.NeedsPointerSuffix(csType)
+                       || TypeRegistry.IsStringBuilder(csType)
+                       || TypeRegistry.IsList(csType)
+                       || TypeRegistry.IsDictionary(csType);
             var ptr = needPtr ? "*" : "";
 
             foreach (var v in field.Declaration.Variables)
@@ -280,21 +382,57 @@ public sealed class CSharpToC : CSharpSyntaxWalker
         _ctx.Out.WriteLine("{");
         _ctx.Indent();
 
-        if (!string.IsNullOrEmpty(baseType) && baseType != SwitchAppBase && baseType != "Control")
-            _ctx.WriteLine(baseType + "_Init((" + baseType + "*)self);");
-
-        foreach (var method in node.Members.OfType<MethodDeclarationSyntax>())
+        // Basis-Init
+        if (!string.IsNullOrEmpty(baseType) && baseType != SwitchAppBase)
         {
-            var methodName = method.Identifier.Text;
-            var isOverride = method.Modifiers.Any(m => m.IsKind(SyntaxKind.OverrideKeyword));
-            var isAbstract = method.Modifiers.Any(m => m.IsKind(SyntaxKind.AbstractKeyword));
-            if (!isOverride && !isAbstract) continue;
-
-            if (methodName is "OnInit" or "OnFrame" or "OnExit")
-                _ctx.WriteLine("((SwitchApp*)self)->" + methodName
-                    + " = (void(*)(SwitchApp*))" + name + "_" + methodName + ";");
+            // Control-Subklassen: memset + Basis-Felder setzen
+            if (baseType is "Control" or "Label" or "Button" or "ProgressBar")
+            {
+                _ctx.WriteLine("memset(self, 0, sizeof(" + name + "));");
+                _ctx.WriteLine("((Control*)self)->visible = 1;");
+            }
+            else
+            {
+                _ctx.WriteLine(baseType + "_Init((" + baseType + "*)self);");
+            }
         }
 
+        // SwitchApp Lifecycle-Funktionszeiger verdrahten
+        if (baseType == SwitchAppBase)
+        {
+            foreach (var method in node.Members.OfType<MethodDeclarationSyntax>())
+            {
+                var methodName = method.Identifier.Text;
+                var isOverride = method.Modifiers.Any(m => m.IsKind(SyntaxKind.OverrideKeyword));
+                var isAbstract = method.Modifiers.Any(m => m.IsKind(SyntaxKind.AbstractKeyword));
+                if (!isOverride && !isAbstract) continue;
+
+                if (methodName is "OnInit" or "OnFrame" or "OnExit")
+                    _ctx.WriteLine("((SwitchApp*)self)->" + methodName
+                        + " = (void(*)(SwitchApp*))" + name + "_" + methodName + ";");
+            }
+        }
+
+        // Control-Subklassen: Draw/Update Funktionszeiger verdrahten
+        if (baseType is "Control" or "Label" or "Button" or "ProgressBar")
+        {
+            foreach (var method in node.Members.OfType<MethodDeclarationSyntax>())
+            {
+                var methodName = method.Identifier.Text;
+                var isOverride = method.Modifiers.Any(m => m.IsKind(SyntaxKind.OverrideKeyword));
+                if (!isOverride) continue;
+
+                if (methodName == "Draw")
+                    _ctx.WriteLine("((Control*)self)->Draw = (void(*)(Control*))"
+                        + name + "_Draw;");
+
+                if (methodName == "Update")
+                    _ctx.WriteLine("((Control*)self)->Update = (void(*)(Control*, u64, u64))"
+                        + name + "_Update;");
+            }
+        }
+
+        // Feld-Initializer
         foreach (var field in node.Members.OfType<FieldDeclarationSyntax>())
         {
             if (field.Modifiers.Any(m => m.IsKind(SyntaxKind.StaticKeyword))) continue;
@@ -467,17 +605,28 @@ public sealed class CSharpToC : CSharpSyntaxWalker
 
     private void LoadBaseFields(string baseType)
     {
-        if (baseType == "Control")
+        if (baseType is "Control" or "Label" or "Button" or "ProgressBar")
         {
             foreach (var f in TypeRegistry.ControlFields)
                 _ctx.BaseFieldTypes[f] = "int";
         }
-        else if (baseType == "Button")
+
+        if (baseType is "Button")
         {
-            foreach (var f in TypeRegistry.ControlFields)
-                _ctx.BaseFieldTypes[f] = "int";
             _ctx.BaseFieldTypes["focused"] = "int";
             _ctx.BaseFieldTypes["OnClick"] = "Action";
+            _ctx.BaseFieldTypes["text"] = "string";
+        }
+
+        if (baseType is "Label")
+        {
+            _ctx.BaseFieldTypes["text"] = "string";
+        }
+
+        if (baseType is "ProgressBar")
+        {
+            _ctx.BaseFieldTypes["value"] = "int";
+            _ctx.BaseFieldTypes["width_chars"] = "int";
         }
     }
 
