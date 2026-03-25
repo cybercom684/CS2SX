@@ -358,7 +358,9 @@ static inline int List_##T##_Contains(List_##T* l, T val) { \
 static inline void List_##T##_Remove(List_##T* l, int idx) { \
     if (!l || idx < 0 || idx >= l->count) return; \
     for (int _i = idx; _i < l->count - 1; _i++) l->data[_i] = l->data[_i+1]; \
-    l->count--; }
+    l->count--; } \
+static inline void List_##T##_RemoveValue(List_##T* l, T val) { \
+    for (int _i = 0; _i < l->count; _i++) { if (l->data[_i] == val) { List_##T##_Remove(l, _i); return; } } }
 
 // Pointer-Variante (fuer Label*, Button* etc.)
 #define CS2SX_LIST_DEFINE_PTR(T) \
@@ -380,7 +382,9 @@ static inline void List_##T##_Free(List_##T* l) { if (l) { free(l->data); free(l
 static inline void List_##T##_Remove(List_##T* l, int idx) { \
     if (!l || idx < 0 || idx >= l->count) return; \
     for (int _i = idx; _i < l->count - 1; _i++) l->data[_i] = l->data[_i+1]; \
-    l->count--; }
+    l->count--; } \
+static inline void List_##T##_RemoveValue(List_##T* l, T* val) { \
+    for (int _i = 0; _i < l->count; _i++) { if (l->data[_i] == val) { List_##T##_Remove(l, _i); return; } } }
 
 // Vordefinierte Typen
 CS2SX_LIST_DEFINE(int)
@@ -417,6 +421,10 @@ static inline void List_char_Remove(List_char* l, int idx) {
     for (int _i = idx; _i < l->count - 1; _i++) l->data[_i] = l->data[_i + 1];
     l->count--;
 }
+static inline void List_char_RemoveValue(List_char* l, const char* val) {
+    \
+        for (int _i = 0; _i < l->count; _i++) { if (strcmp(l->data[_i], val) == 0) { List_char_Remove(l, _i); return; } } \
+}
 
 // =============================================================================
 // Dictionary<TKey, TValue> — einfacher Hash-Map-ähnlicher Key-Value-Speicher
@@ -437,8 +445,8 @@ static inline void Dict_##K##_##V##_Add(Dict_##K##_##V* d, K key, V val) { \
     d->keys[d->count] = key; d->vals[d->count] = val; d->count++; } \
 static inline int Dict_##K##_##V##_ContainsKey(Dict_##K##_##V* d, K key) { \
     for (int _i = 0; _i < d->count; _i++) { if (d->keys[_i] == key) return 1; } return 0; } \
-static inline V* Dict_##K##_##V##_TryGetValue(Dict_##K##_##V* d, K key) { \
-    for (int _i = 0; _i < d->count; _i++) { if (d->keys[_i] == key) return &d->vals[_i]; } return NULL; } \
+static inline int Dict_##K##_##V##_TryGetValue(Dict_##K##_##V* d, K key, V* out_val) { \
+    for (int _i = 0; _i < d->count; _i++) { if (d->keys[_i] == key) { *out_val = d->vals[_i]; return 1; } } return 0; } \
 static inline void Dict_##K##_##V##_Remove(Dict_##K##_##V* d, K key) { \
     for (int _i = 0; _i < d->count; _i++) { \
         if (d->keys[_i] == key) { \
@@ -447,7 +455,6 @@ static inline void Dict_##K##_##V##_Remove(Dict_##K##_##V* d, K key) { \
 static inline void Dict_##K##_##V##_Clear(Dict_##K##_##V* d) { if (d) d->count = 0; } \
 static inline void Dict_##K##_##V##_Free(Dict_##K##_##V* d) { if (d) { free(d->keys); free(d->vals); free(d); } }
 
-// String-Dictionary braucht strcmp für Key-Vergleich — eigene Variante
 #define CS2SX_DICT_DEFINE_STR_KEY(V) \
 typedef struct { const char** keys; V* vals; int count; int capacity; } Dict_str_##V; \
 static inline Dict_str_##V* Dict_str_##V##_New(void) { \
@@ -463,8 +470,8 @@ static inline void Dict_str_##V##_Add(Dict_str_##V* d, const char* key, V val) {
     d->keys[d->count] = key; d->vals[d->count] = val; d->count++; } \
 static inline int Dict_str_##V##_ContainsKey(Dict_str_##V* d, const char* key) { \
     for (int _i = 0; _i < d->count; _i++) { if (strcmp(d->keys[_i], key) == 0) return 1; } return 0; } \
-static inline V* Dict_str_##V##_TryGetValue(Dict_str_##V* d, const char* key) { \
-    for (int _i = 0; _i < d->count; _i++) { if (strcmp(d->keys[_i], key) == 0) return &d->vals[_i]; } return NULL; } \
+static inline int Dict_str_##V##_TryGetValue(Dict_str_##V* d, const char* key, V* out_val) { \
+    for (int _i = 0; _i < d->count; _i++) { if (strcmp(d->keys[_i], key) == 0) { *out_val = d->vals[_i]; return 1; } } return 0; } \
 static inline void Dict_str_##V##_Remove(Dict_str_##V* d, const char* key) { \
     for (int _i = 0; _i < d->count; _i++) { \
         if (strcmp(d->keys[_i], key) == 0) { \
@@ -478,6 +485,7 @@ CS2SX_DICT_DEFINE(int, int)
 CS2SX_DICT_DEFINE_STR_KEY(int)
 CS2SX_DICT_DEFINE_STR_KEY(float)
 // Dictionary<string,string> — komplett manuell da 'str' kein C-Typ ist
+// Dictionary<string,string>
 typedef struct { const char** keys; const char** vals; int count; int capacity; } Dict_str_str;
 static inline Dict_str_str* Dict_str_str_New(void) {
     Dict_str_str* d = (Dict_str_str*)malloc(sizeof(Dict_str_str));
@@ -496,8 +504,8 @@ static inline void Dict_str_str_Add(Dict_str_str* d, const char* key, const char
 static inline int Dict_str_str_ContainsKey(Dict_str_str* d, const char* key) {
     for (int _i = 0; _i < d->count; _i++) { if (strcmp(d->keys[_i], key) == 0) return 1; } return 0;
 }
-static inline const char* Dict_str_str_TryGetValue(Dict_str_str* d, const char* key) {
-    for (int _i = 0; _i < d->count; _i++) { if (strcmp(d->keys[_i], key) == 0) return d->vals[_i]; } return NULL;
+static inline int Dict_str_str_TryGetValue(Dict_str_str* d, const char* key, const char** out_val) {
+    for (int _i = 0; _i < d->count; _i++) { if (strcmp(d->keys[_i], key) == 0) { *out_val = d->vals[_i]; return 1; } } return 0;
 }
 static inline void Dict_str_str_Remove(Dict_str_str* d, const char* key) {
     for (int _i = 0; _i < d->count; _i++) {
@@ -509,7 +517,6 @@ static inline void Dict_str_str_Remove(Dict_str_str* d, const char* key) {
 }
 static inline void Dict_str_str_Clear(Dict_str_str* d) { if (d) d->count = 0; }
 static inline void Dict_str_str_Free(Dict_str_str* d) { if (d) { free(d->keys); free(d->vals); free(d); } }
-
 // ============================================================================
 // Form
 // ============================================================================

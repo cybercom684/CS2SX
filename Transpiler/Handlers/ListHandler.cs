@@ -3,11 +3,6 @@ using CS2SX.Core;
 
 namespace CS2SX.Transpiler.Handlers;
 
-/// <summary>
-/// Behandelt List&lt;T&gt;-Methoden: Add, Clear, RemoveAt, Contains.
-///
-/// Erweiterung: Neuen case in s_methods ergänzen.
-/// </summary>
 public sealed class ListHandler : IInvocationHandler
 {
     private static readonly HashSet<string> s_methods = new(StringComparer.Ordinal)
@@ -20,8 +15,8 @@ public sealed class ListHandler : IInvocationHandler
         if (inv.Expression is not MemberAccessExpressionSyntax mem) return false;
         if (!s_methods.Contains(mem.Name.Identifier.Text)) return false;
 
-        var objStr  = mem.Expression.ToString();
-        var objKey  = objStr.TrimStart('_');
+        var objStr = mem.Expression.ToString();
+        var objKey = objStr.TrimStart('_');
         return ctx.LocalTypes.TryGetValue(objStr, out var lt) && TypeRegistry.IsList(lt)
             || ctx.FieldTypes.TryGetValue(objKey, out var ft) && TypeRegistry.IsList(ft);
     }
@@ -29,12 +24,11 @@ public sealed class ListHandler : IInvocationHandler
     public string Handle(InvocationExpressionSyntax inv, string calleeStr, List<string> args,
         TranspilerContext ctx, Func<Microsoft.CodeAnalysis.SyntaxNode?, string> writeExpr)
     {
-        var mem        = (MemberAccessExpressionSyntax)inv.Expression;
-        var objStr     = mem.Expression.ToString();
-        var objKey     = objStr.TrimStart('_');
+        var mem = (MemberAccessExpressionSyntax)inv.Expression;
+        var objStr = mem.Expression.ToString();
+        var objKey = objStr.TrimStart('_');
         var methodName = mem.Name.Identifier.Text;
 
-        // Typ und C-Ausdruck des List-Objekts ermitteln
         string listType;
         string listExpr;
 
@@ -50,19 +44,21 @@ public sealed class ListHandler : IInvocationHandler
             listExpr = "self->f_" + objKey;
         }
 
-        var inner  = TypeRegistry.GetListInnerType(listType)!;
+        var inner = TypeRegistry.GetListInnerType(listType)!;
         var cInner = inner == "string" ? "char" : TypeRegistry.MapType(inner);
-        var cList  = "List_" + cInner;
+        var cList = "List_" + cInner;
 
         return methodName switch
         {
-            "Add"      => cList + "_Add(" + listExpr + ", " + string.Join(", ", args) + ")",
-            "Clear"    => cList + "_Clear(" + listExpr + ")",
-            "RemoveAt" or "Remove"
-                       => cList + "_Remove(" + listExpr + ", " + string.Join(", ", args) + ")",
+            "Add" => cList + "_Add(" + listExpr + ", " + string.Join(", ", args) + ")",
+            "Clear" => cList + "_Clear(" + listExpr + ")",
+            "RemoveAt" => cList + "_Remove(" + listExpr + ", " + string.Join(", ", args) + ")",
+            "Remove" => args.Count > 0 && args[0] == "int"
+                          ? cList + "_Remove(" + listExpr + ", " + string.Join(", ", args) + ")"   // index
+                          : cList + "_RemoveValue(" + listExpr + ", " + string.Join(", ", args) + ")", // value
             "Contains" => cList + "_Contains(" + listExpr + ", " + string.Join(", ", args) + ")",
-            "Insert"   => cList + "_Insert(" + listExpr + ", " + string.Join(", ", args) + ")",
-            _          => listExpr + "->" + methodName + "(" + string.Join(", ", args) + ")",
+            "Insert" => cList + "_Insert(" + listExpr + ", " + string.Join(", ", args) + ")",
+            _ => listExpr + "->" + methodName + "(" + string.Join(", ", args) + ")",
         };
     }
 }

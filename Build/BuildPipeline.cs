@@ -1,4 +1,5 @@
-﻿using CS2SX.Transpiler;
+﻿using CS2SX.Logging;
+using CS2SX.Transpiler;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using System.Text;
 
@@ -10,8 +11,6 @@ public sealed class BuildPipeline
     private readonly string _projectDir;
     private readonly string _buildDir;
 
-    // SwitchForms-Dateien, die NUR für Forward-Declarations genutzt werden,
-    // aber NICHT transpiliert werden (Implementierung kommt aus switchforms.h).
     private static readonly HashSet<string> s_switchFormsSkipTranspile =
         new(StringComparer.OrdinalIgnoreCase)
         {
@@ -29,150 +28,205 @@ public sealed class BuildPipeline
 
     public void Run()
     {
-        // Output-Verzeichnis bereinigen um Stale-Files zu vermeiden
-        if (Directory.Exists(_buildDir))
+        var started = DateTime.Now;
+
+        using var renderer = new BuildRenderer([
+            new BuildStage { Name = "prepare"   },
+            new BuildStage { Name = "fwd-decl"  },
+            new BuildStage { Name = "transpile" },
+            new BuildStage { Name = "compile"   },
+            new BuildStage { Name = "package"   },
+        ]);
+        Log.AttachRenderer(renderer);
+
+        int warnings = 0;
+
+        try
         {
-            foreach (var f in Directory.GetFiles(_buildDir, "*.c")) File.Delete(f);
-            foreach (var f in Directory.GetFiles(_buildDir, "*.h"))
+            // ── prepare ──────────────────────────────────────────────
+            var sPrepare = renderer.GetStage("prepare");
+            sPrepare.Status = StageStatus.Running;
+
+            if (Directory.Exists(_buildDir))
             {
-                var name = Path.GetFileName(f);
-                if (name != "switchapp.h" && name != "switchforms.h")
-                    File.Delete(f);
+                foreach (var f in Directory.GetFiles(_buildDir, "*.c")) File.Delete(f);
+                foreach (var f in Directory.GetFiles(_buildDir, "*.h"))
+                {
+                    var name = Path.GetFileName(f);
+                    if (name != "switchapp.h" && name != "switchforms.h") File.Delete(f);
+                }
             }
+            Directory.CreateDirectory(_buildDir);
+
+            var csprojFiles = Directory.GetFiles(_projectDir, "*.csproj");
+            if (csprojFiles.Length == 0)
+                throw new FileNotFoundException("Keine .csproj-Datei gefunden in: " + _projectDir);
+
+            Log.Info($"{_config.Name} v{_config.Version} by {_config.Author}");
+
+            var reader = new ProjectReader();
+            reader.Load(csprojFiles[0]);
+
+            if (reader.SourceFiles.Count == 0)
+                throw new InvalidOperationException("Keine .cs-Quelldateien gefunden.");
+
+            Log.Info($"{reader.SourceFiles.Count} source file(s) found");
+            RuntimeExporter.Export(_buildDir);
+
+            var switchformsCPath = Path.Combine(_buildDir, "switchforms.c");
+            WriteSwitchformsC(switchformsCPath);
+            var cFiles = new List<string> { switchformsCPath };
+
+            sPrepare.Progress = 100;
+            sPrepare.Status = StageStatus.Done;
+            sPrepare.Elapsed = $"{(DateTime.Now - started).TotalMilliseconds:F0}ms";
+
+            // ── fwd-decl ─────────────────────────────────────────────
+            var sFwd = renderer.GetStage("fwd-decl");
+            sFwd.Status = StageStatus.Running;
+
+            var switchFormsDir = Path.Combine(Path.GetTempPath(), "cs2sx_" + Path.GetFileName(_projectDir));
+            if (Directory.Exists(switchFormsDir)) Directory.Delete(switchFormsDir, recursive: true);
+            Directory.CreateDirectory(switchFormsDir);
+            RuntimeExporter.ExportSwitchForms(switchFormsDir);
+
+            var switchFormsFilesForFwd = Directory.GetFiles(switchFormsDir, "*.cs").ToList();
+            var appSourceFiles = reader.SourceFiles.ToList();
+            var allForFwd = switchFormsFilesForFwd.Concat(appSourceFiles).ToList();
+            var forwardPath = Path.Combine(_buildDir, "_forward.h");
+            WriteForwardDeclarations(allForFwd, forwardPath);
+
+            sFwd.Progress = 100;
+            sFwd.Status = StageStatus.Done;
+            sFwd.Elapsed = $"{(DateTime.Now - started).TotalMilliseconds:F0}ms";
+
+            // ── transpile ─────────────────────────────────────────────
+            var sTranspile = renderer.GetStage("transpile");
+            sTranspile.Status = StageStatus.Running;
+
+            var transpiledFiles = appSourceFiles
+                .Where(f => !s_switchFormsSkipTranspile.Contains(Path.GetFileName(f)))
+                .ToList();
+
+            var allHeaders = transpiledFiles
+                .Select(f => Path.GetFileNameWithoutExtension(f) + ".h")
+                .ToList();
+
+            for (int i = 0; i < transpiledFiles.Count; i++)
+            {
+                var csFile = transpiledFiles[i];
+                var baseName = Path.GetFileNameWithoutExtension(csFile);
+                sTranspile.Detail = $"{baseName}.cs";
+                sTranspile.Progress = (int)((i + 1) / (double)transpiledFiles.Count * 100);
+
+                Log.Info($"→ {baseName}.cs");
+
+                var source = File.ReadAllText(csFile);
+
+                var hTranspiler = new CSharpToC(CSharpToC.TranspileMode.HeaderOnly);
+                var hContent = WrapHeader(baseName,
+                    "#pragma once\n#include \"_forward.h\"\n\n"
+                    + hTranspiler.Transpile(source));
+                File.WriteAllText(Path.Combine(_buildDir, baseName + ".h"), hContent);
+
+                var allIncludes = string.Join("\n", allHeaders.Select(h => $"#include \"{h}\""));
+                var cTranspiler = new CSharpToC(CSharpToC.TranspileMode.Implementation);
+                var cContent = "#include <stdlib.h>\n"
+                                + allIncludes + "\n\n"
+                                + cTranspiler.Transpile(source);
+                var cPath = Path.Combine(_buildDir, baseName + ".c");
+                File.WriteAllText(cPath, cContent);
+                cFiles.Add(cPath);
+            }
+
+            sTranspile.Progress = 100;
+            sTranspile.Status = StageStatus.Done;
+            sTranspile.Elapsed = $"{(DateTime.Now - started).TotalMilliseconds:F0}ms";
+
+            // ── compile ───────────────────────────────────────────────
+            var sCompile = renderer.GetStage("compile");
+            sCompile.Status = StageStatus.Running;
+
+            var appClass = FindSwitchAppClass(appSourceFiles) ?? _config.MainClass;
+            var appHeaderFile = FindHeaderForClass(appSourceFiles, appClass) ?? (appClass + ".h");
+            var mainPath = EntryPointGenerator.Write(_buildDir, appClass, appHeaderFile, allHeaders);
+            cFiles.Add(mainPath);
+
+            foreach (var hFile in Directory.GetFiles(_projectDir, "*.h"))
+            {
+                var dest = Path.Combine(_buildDir, Path.GetFileName(hFile));
+                File.Copy(hFile, dest, overwrite: true);
+                Log.Info($"Custom header: {Path.GetFileName(hFile)}");
+            }
+
+            sCompile.Detail = $"{cFiles.Count} translation unit(s)";
+            var elfPath = Path.Combine(_buildDir, _config.Name + ".elf");
+            new CCompiler().Compile(cFiles, elfPath, _buildDir, _projectDir);
+
+            sCompile.Progress = 100;
+            sCompile.Status = StageStatus.Done;
+            sCompile.Elapsed = $"{(DateTime.Now - started).TotalMilliseconds:F0}ms";
+
+            // ── package ───────────────────────────────────────────────
+            var sPackage = renderer.GetStage("package");
+            sPackage.Status = StageStatus.Running;
+            sPackage.Detail = "nacp + nro";
+
+            var nacpPath = Path.Combine(_buildDir, _config.Name + ".nacp");
+            new NacpBuilder().Build(nacpPath, _config.Name, _config.Author, _config.Version);
+            sPackage.Progress = 50;
+
+            var nroPath = Path.Combine(_projectDir, _config.Name + ".nro");
+            var iconPath = _config.Icon != null ? Path.Combine(_projectDir, _config.Icon) : null;
+            if (iconPath == null)
+            {
+                Log.Warning("No icon found — using default");
+                warnings++;
+            }
+            new NroBuilder().Build(elfPath, nroPath, nacpPath, iconPath);
+
+            sPackage.Progress = 100;
+            sPackage.Status = StageStatus.Done;
+            sPackage.Detail = nroPath;
+            sPackage.Elapsed = $"{(DateTime.Now - started).TotalMilliseconds:F0}ms";
+
+            Log.Ok($"→ {nroPath}");
+
+            renderer.Complete(DateTime.Now - started, warnings, errors: 0);
         }
-        Directory.CreateDirectory(_buildDir);
-
-        var csprojFiles = Directory.GetFiles(_projectDir, "*.csproj");
-        if (csprojFiles.Length == 0)
-            throw new FileNotFoundException("Keine .csproj-Datei gefunden in: " + _projectDir);
-
-        Log("App: " + _config.Name + " by " + _config.Author + " v" + _config.Version);
-
-        var reader = new ProjectReader();
-        reader.Load(csprojFiles[0]);
-
-        if (reader.SourceFiles.Count == 0)
-            throw new InvalidOperationException("Keine .cs-Quelldateien gefunden.");
-
-        Log("Found " + reader.SourceFiles.Count + " source file(s)");
-
-        // Schritt 1: Runtime-Header exportieren
-        RuntimeExporter.Export(_buildDir);
-
-        // switchforms.c (definiert _cs2sx_strbuf)
-        var switchformsCPath = Path.Combine(_buildDir, "switchforms.c");
-        WriteSwitchformsC(switchformsCPath);
-        var cFiles = new List<string> { switchformsCPath };
-
-        // SwitchForms C#-Quelldateien für Forward-Declaration-Analyse exportieren
-        var switchFormsDir = Path.Combine(
-            Path.GetTempPath(),
-            "cs2sx_" + Path.GetFileName(_projectDir)
-        );
-        if (Directory.Exists(switchFormsDir))
-            Directory.Delete(switchFormsDir, recursive: true);
-        Directory.CreateDirectory(switchFormsDir);
-
-        RuntimeExporter.ExportSwitchForms(switchFormsDir);
-
-        // Alle SwitchForms-Dateien für Forward-Declarations
-        var switchFormsFilesForFwd = Directory.GetFiles(switchFormsDir, "*.cs").ToList();
-
-        // App-Quelldateien
-        var appSourceFiles = reader.SourceFiles.ToList();
-
-        // Forward-Declarations: SwitchForms (alle) + App-Dateien
-        var allForFwd = switchFormsFilesForFwd.Concat(appSourceFiles).ToList();
-        var forwardPath = Path.Combine(_buildDir, "_forward.h");
-        WriteForwardDeclarations(allForFwd, forwardPath);
-
-        // Nur App-Dateien transpilieren — SwitchForms-Implementierungen kommen aus switchforms.h
-        var transpiledFiles = appSourceFiles
-            .Where(f => !s_switchFormsSkipTranspile.Contains(Path.GetFileName(f)))
-            .ToList();
-
-        // allHeaders nur aus tatsächlich transpilierten Dateien
-        var allHeaders = transpiledFiles
-            .Select(f => Path.GetFileNameWithoutExtension(f) + ".h")
-            .ToList();
-
-        // Schritt 3: Transpilieren
-        Log("Transpiling...");
-
-        foreach (var csFile in transpiledFiles)
+        catch (Exception ex)
         {
-            var source = File.ReadAllText(csFile);
-            var baseName = Path.GetFileNameWithoutExtension(csFile);
-
-            Log("Transpiling " + baseName + ".cs...");
-
-            var hTranspiler = new CSharpToC(CSharpToC.TranspileMode.HeaderOnly);
-            var hContent = WrapHeader(baseName,
-                "#pragma once\n#include \"_forward.h\"\n\n"
-                + hTranspiler.Transpile(source));
-            File.WriteAllText(Path.Combine(_buildDir, baseName + ".h"), hContent);
-
-            var allIncludes = string.Join("\n", allHeaders.Select(h => $"#include \"{h}\""));
-            var cTranspiler = new CSharpToC(CSharpToC.TranspileMode.Implementation);
-            var cContent = "#include <stdlib.h>\n"
-                         + allIncludes + "\n\n"
-                         + cTranspiler.Transpile(source);
-            var cPath = Path.Combine(_buildDir, baseName + ".c");
-            File.WriteAllText(cPath, cContent);
-            cFiles.Add(cPath);
+            Log.Error(ex.Message);
+            foreach (var stage in new[] { "prepare", "fwd-decl", "transpile", "compile", "package" })
+            {
+                var s = renderer.GetStage(stage);
+                if (s.Status == StageStatus.Running)
+                {
+                    s.Status = StageStatus.Failed;
+                    break;
+                }
+            }
+            renderer.Complete(DateTime.Now - started, warnings, errors: 1);
+            throw;
         }
-
-        // Schritt 4: Entry-Point
-        var appClass = FindSwitchAppClass(appSourceFiles) ?? _config.MainClass;
-        var appHeaderFile = FindHeaderForClass(appSourceFiles, appClass) ?? (appClass + ".h");
-        var mainPath = EntryPointGenerator.Write(_buildDir, appClass, appHeaderFile, allHeaders);
-        cFiles.Add(mainPath);
-
-        // Schritt 5: Custom-Header aus Projektverzeichnis kopieren
-        foreach (var hFile in Directory.GetFiles(_projectDir, "*.h"))
+        finally
         {
-            var dest = Path.Combine(_buildDir, Path.GetFileName(hFile));
-            File.Copy(hFile, dest, overwrite: true);
-            Log("Custom header: " + Path.GetFileName(hFile));
+            Log.DetachRenderer();
         }
-
-        // Schritt 6: Kompilieren
-        Log("Compiling...");
-        var elfPath = Path.Combine(_buildDir, _config.Name + ".elf");
-        new CCompiler().Compile(cFiles, elfPath, _buildDir, _projectDir);
-
-        // Schritt 7: NACP
-        var nacpPath = Path.Combine(_buildDir, _config.Name + ".nacp");
-        new NacpBuilder().Build(nacpPath, _config.Name, _config.Author, _config.Version);
-
-        // Schritt 8: NRO
-        var nroPath = Path.Combine(_projectDir, _config.Name + ".nro");
-        var iconPath = _config.Icon != null ? Path.Combine(_projectDir, _config.Icon) : null;
-        new NroBuilder().Build(elfPath, nroPath, nacpPath, iconPath);
-
-        Log("Done! Output: " + nroPath);
     }
-
-    private static void Log(string msg) => Console.WriteLine("[CS2SX] " + msg);
 
     private static void WriteForwardDeclarations(IReadOnlyList<string> sourceFiles, string outputPath)
     {
         var sb = new StringBuilder();
         sb.AppendLine("#pragma once");
-
-        // System-Includes
         sb.AppendLine("#include <switch.h>");
         sb.AppendLine("#include <stdlib.h>");
         sb.AppendLine("#include <string.h>");
         sb.AppendLine("#include <stdio.h>");
         sb.AppendLine("#include <stdbool.h>");
         sb.AppendLine();
-
-        // Action-Typ
         sb.AppendLine("typedef void (*Action)(void*);");
         sb.AppendLine();
-
-        // SwitchForms-Typen VOR switchapp.h forward-declaren
         sb.AppendLine("typedef struct Control    Control;");
         sb.AppendLine("typedef struct Form       Form;");
         sb.AppendLine("typedef struct Label      Label;");
@@ -180,31 +234,21 @@ public sealed class BuildPipeline
         sb.AppendLine("typedef struct ProgressBar ProgressBar;");
         sb.AppendLine("typedef struct SwitchApp  SwitchApp;");
         sb.AppendLine();
-
-        // switchapp.h inkl. switchforms.h — jetzt sind alle Typen forward-declared
-        // switchforms.h definiert bereits ALLE List-Makros und ihre Instantiierungen
         sb.AppendLine("#include \"switchapp.h\"");
         sb.AppendLine();
-
-        // KEINE List-Makros oder Instantiierungen hier — switchforms.h hat sie bereits!
-
-        // _cs2sx_strbuf extern
         sb.AppendLine("extern char _cs2sx_strbuf[512];");
         sb.AppendLine();
 
-        // Forward-Declarations nur für App-eigene Klassen (nicht SwitchForms-Typen)
         var alreadyDeclared = new HashSet<string>(StringComparer.Ordinal)
-    {
-        "Control", "Form", "Label", "Button", "ProgressBar", "SwitchApp",
-    };
+        {
+            "Control", "Form", "Label", "Button", "ProgressBar", "SwitchApp",
+        };
 
         foreach (var csFile in sourceFiles)
         {
             var source = File.ReadAllText(csFile);
             var tree = Microsoft.CodeAnalysis.CSharp.CSharpSyntaxTree.ParseText(source);
-            foreach (var cls in tree.GetRoot()
-                .DescendantNodes()
-                .OfType<ClassDeclarationSyntax>())
+            foreach (var cls in tree.GetRoot().DescendantNodes().OfType<ClassDeclarationSyntax>())
             {
                 var typeName = cls.Identifier.Text;
                 if (alreadyDeclared.Add(typeName))
@@ -218,10 +262,7 @@ public sealed class BuildPipeline
     private static string WrapHeader(string baseName, string content)
     {
         var guard = "CS2SX_" + baseName.ToUpperInvariant() + "_H";
-        return "#ifndef " + guard + "\n"
-             + "#define " + guard + "\n\n"
-             + content + "\n\n"
-             + "#endif\n";
+        return "#ifndef " + guard + "\n#define " + guard + "\n\n" + content + "\n\n#endif\n";
     }
 
     private static string? FindSwitchAppClass(IReadOnlyList<string> sourceFiles)
@@ -230,14 +271,9 @@ public sealed class BuildPipeline
         {
             var source = File.ReadAllText(file);
             var tree = Microsoft.CodeAnalysis.CSharp.CSharpSyntaxTree.ParseText(source);
-            foreach (var cls in tree.GetRoot()
-                .DescendantNodes()
-                .OfType<ClassDeclarationSyntax>())
-            {
-                var baseType = cls.BaseList?.Types.FirstOrDefault()?.ToString().Trim();
-                if (baseType == "SwitchApp")
+            foreach (var cls in tree.GetRoot().DescendantNodes().OfType<ClassDeclarationSyntax>())
+                if (cls.BaseList?.Types.FirstOrDefault()?.ToString().Trim() == "SwitchApp")
                     return cls.Identifier.Text;
-            }
         }
         return null;
     }
@@ -245,17 +281,14 @@ public sealed class BuildPipeline
     private static string? FindHeaderForClass(IReadOnlyList<string> sourceFiles, string className)
     {
         foreach (var file in sourceFiles)
-        {
-            var source = File.ReadAllText(file);
-            if (source.Contains("class " + className))
+            if (File.ReadAllText(file).Contains("class " + className))
                 return Path.GetFileNameWithoutExtension(file) + ".h";
-        }
         return null;
     }
 
     private static void WriteSwitchformsC(string path)
     {
-        using var w = new StreamWriter(path, append: false, encoding: System.Text.Encoding.UTF8);
+        using var w = new StreamWriter(path, append: false, encoding: Encoding.UTF8);
         w.WriteLine("#include \"_forward.h\"");
         w.WriteLine();
         w.WriteLine("char _cs2sx_strbuf[512];");

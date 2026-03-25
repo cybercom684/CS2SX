@@ -4,12 +4,6 @@ using CS2SX.Core;
 
 namespace CS2SX.Transpiler.Writers;
 
-/// <summary>
-/// Transpiliert C#-Statements zu C-Code.
-/// Alle Statement-Typen sind hier zentralisiert.
-///
-/// Erweiterung: Neuen case im WriteStatement-Switch ergänzen.
-/// </summary>
 public sealed class StatementWriter
 {
     private readonly TranspilerContext _ctx;
@@ -20,8 +14,6 @@ public sealed class StatementWriter
         _ctx = ctx;
         _expr = expr;
     }
-
-    // ── Öffentliche API ───────────────────────────────────────────────────────
 
     public void Write(StatementSyntax stmt)
     {
@@ -48,8 +40,6 @@ public sealed class StatementWriter
         }
     }
 
-    // ── Statement-Writers ─────────────────────────────────────────────────────
-
     private void WriteReturn(ReturnStatementSyntax ret)
     {
         if (ret.Expression == null)
@@ -64,7 +54,6 @@ public sealed class StatementWriter
 
         foreach (var v in local.Declaration.Variables)
         {
-            // libnx-Struct als Stack-Variable: FsDir dir = {0};
             if (TypeRegistry.IsLibNxStruct(declType))
             {
                 var si = v.Initializer != null ? " = " + _expr.Write(v.Initializer.Value) : " = {0}";
@@ -73,7 +62,6 @@ public sealed class StatementWriter
                 continue;
             }
 
-            // string buf = new string(' ', N) → char buf[N]; memset(buf, 0, N);
             if ((declType is "string" or "var") &&
                 v.Initializer?.Value is ObjectCreationExpressionSyntax strNew &&
                 strNew.Type.ToString() == "string" &&
@@ -94,9 +82,24 @@ public sealed class StatementWriter
                 if (v.Initializer?.Value is ObjectCreationExpressionSyntax oc)
                 {
                     cType = oc.Type.ToString();
-                    // StringBuilder und List<T> geben Pointer zurück → immer *
-                    // Andere Objekte (Label, Button etc.) ebenfalls Pointer
                     isPtr = true;
+                }
+                else if (v.Initializer?.Value is InvocationExpressionSyntax inv)
+                {
+                    var methodName = inv.Expression.ToString();
+                    if (_ctx.MethodReturnTypes.TryGetValue(methodName, out var retType))
+                    {
+                        cType = retType;
+                        isPtr = TypeRegistry.NeedsPointerSuffix(retType)
+                             || TypeRegistry.IsStringBuilder(retType)
+                             || TypeRegistry.IsList(retType)
+                             || TypeRegistry.IsDictionary(retType);
+                    }
+                    else
+                    {
+                        cType = TypeInferrer.InferCSharpType(v.Initializer.Value, _ctx);
+                        isPtr = false;
+                    }
                 }
                 else
                 {
@@ -107,7 +110,6 @@ public sealed class StatementWriter
             else
             {
                 cType = TypeRegistry.MapType(declType);
-                // StringBuilder und List sind Pointer-Typen (New() gibt Pointer zurück)
                 isPtr = TypeRegistry.NeedsPointerSuffix(declType)
                      || TypeRegistry.IsStringBuilder(declType)
                      || TypeRegistry.IsList(declType)
@@ -198,7 +200,6 @@ public sealed class StatementWriter
         var varName = forEach.Identifier.Text;
         var idxVar = "_i_" + varName;
 
-        // Länge bestimmen
         string lenExpr;
         bool isString = false;
 
@@ -225,7 +226,6 @@ public sealed class StatementWriter
             lenExpr = colExpr + "_count";
         }
 
-        // Element-Typ bestimmen
         var rawElemType = forEach.Type.ToString().Trim();
 
         if (rawElemType == "var")
@@ -245,7 +245,6 @@ public sealed class StatementWriter
 
         var elemType = TypeRegistry.MapType(rawElemType);
 
-        // for-Schleife schreiben
         _ctx.WriteLine("for (int " + idxVar + " = 0; " + idxVar + " < (int)(" + lenExpr + "); " + idxVar + "++)");
         _ctx.WriteLine("{");
         _ctx.Indent();
@@ -338,8 +337,6 @@ public sealed class StatementWriter
             _ctx.WriteLine("/* throw: " + throwStmt.Expression + " */");
         _ctx.WriteLine("return;");
     }
-
-    // ── Block-Helper ──────────────────────────────────────────────────────────
 
     public void WriteBlock(StatementSyntax stmt)
     {

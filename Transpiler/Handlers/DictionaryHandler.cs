@@ -3,11 +3,6 @@ using CS2SX.Core;
 
 namespace CS2SX.Transpiler.Handlers;
 
-/// <summary>
-/// Behandelt Dictionary&lt;K,V&gt;-Methoden: Add, Remove, ContainsKey, TryGetValue, Clear.
-///
-/// Erweiterung: Neuen case in Handle() ergänzen.
-/// </summary>
 public sealed class DictionaryHandler : IInvocationHandler
 {
     private static readonly HashSet<string> s_methods = new(StringComparer.Ordinal)
@@ -54,12 +49,23 @@ public sealed class DictionaryHandler : IInvocationHandler
         var cVal = types.val == "string" ? "str" : TypeRegistry.MapType(types.val);
         var cDict = "Dict_" + cKey + "_" + cVal;
 
+        if (methodName == "TryGetValue" && args.Count >= 2)
+        {
+            // args[0] = key, args[1] = out variable (als Ausdruck)
+            var keyArg = args[0];
+            var outArg = args[1];
+            // Wir generieren einen ternären Ausdruck: (Dict_TryGetValue(d, key, &out) ? 1 : 0)
+            // Da wir nicht wissen, ob outArg ein einfacher Name ist, müssen wir & davor setzen.
+            // Falls es eine Property oder Feld ist, ist & nicht erlaubt, aber in C# ist out immer eine Variable.
+            var outPtr = "&" + outArg;
+            return cDict + "_TryGetValue(" + dictExpr + ", " + keyArg + ", " + outPtr + ")";
+        }
+
         return methodName switch
         {
             "Add" => cDict + "_Add(" + dictExpr + ", " + args[0] + ", " + args[1] + ")",
             "Remove" => cDict + "_Remove(" + dictExpr + ", " + args[0] + ")",
             "ContainsKey" => cDict + "_ContainsKey(" + dictExpr + ", " + args[0] + ")",
-            "TryGetValue" => cDict + "_TryGetValue(" + dictExpr + ", " + args[0] + ", " + args[1] + ")",
             "Clear" => cDict + "_Clear(" + dictExpr + ")",
             _ => dictExpr + "->" + methodName + "(" + string.Join(", ", args) + ")",
         };

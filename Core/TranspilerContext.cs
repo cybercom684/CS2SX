@@ -8,7 +8,10 @@ public sealed class TranspilerContext
 {
     // ── Output ────────────────────────────────────────────────────────────────
 
-    public StringWriter Out { get; }
+    public StringWriter Out
+    {
+        get;
+    }
 
     // ── Klassen-Kontext ───────────────────────────────────────────────────────
 
@@ -24,6 +27,17 @@ public sealed class TranspilerContext
     /// <summary>Felder der Basisklasse.</summary>
     public Dictionary<string, string> BaseFieldTypes { get; } = new(StringComparer.Ordinal);
 
+    // ── Methoden- und Property-Typen ───────────────────────────────────────────
+
+    /// <summary>Rückgabetypen der Methoden: Name → C#-Typ (für var‑Inferenz).</summary>
+    public Dictionary<string, string> MethodReturnTypes { get; } = new(StringComparer.Ordinal);
+
+    /// <summary>Typen der Properties: Name → C#-Typ.</summary>
+    public Dictionary<string, string> PropertyTypes { get; } = new(StringComparer.Ordinal);
+
+    /// <summary>Namen der in der aktuellen Klasse definierten Enums.</summary>
+    public HashSet<string> EnumMembers { get; } = new(StringComparer.Ordinal);
+
     // ── Methoden-Kontext ──────────────────────────────────────────────────────
 
     /// <summary>Lokale Variablen der aktuellen Methode: Name → C#-Typ.</summary>
@@ -35,12 +49,15 @@ public sealed class TranspilerContext
 
     public string Tab => new string(' ', _indent * 4);
 
-    public void Indent()  => _indent++;
-    public void Dedent()  => _indent--;
+    public void Indent() => _indent++;
+    public void Dedent() => _indent--;
 
     // ── Hilfszähler ───────────────────────────────────────────────────────────
 
-    public int TmpCounter { get; set; }
+    public int TmpCounter
+    {
+        get; set;
+    }
 
     // ── Konstruktor ───────────────────────────────────────────────────────────
 
@@ -52,7 +69,7 @@ public sealed class TranspilerContext
     // ── Convenience ──────────────────────────────────────────────────────────
 
     public void WriteLine(string line) => Out.WriteLine(Tab + line);
-    public void WriteRaw(string s)     => Out.Write(s);
+    public void WriteRaw(string s) => Out.Write(s);
 
     public void ClearMethodContext()
     {
@@ -62,10 +79,13 @@ public sealed class TranspilerContext
 
     public void ClearClassContext()
     {
-        CurrentClass    = string.Empty;
+        CurrentClass = string.Empty;
         CurrentBaseType = string.Empty;
         FieldTypes.Clear();
         BaseFieldTypes.Clear();
+        MethodReturnTypes.Clear();
+        PropertyTypes.Clear();
+        EnumMembers.Clear();
         ClearMethodContext();
     }
 
@@ -75,7 +95,7 @@ public sealed class TranspilerContext
     public string? LookupType(string name)
     {
         var trimmed = name.TrimStart('_');
-        if (LocalTypes.TryGetValue(name, out var lt))   return lt;
+        if (LocalTypes.TryGetValue(name, out var lt)) return lt;
         if (FieldTypes.TryGetValue(trimmed, out var ft)) return ft;
         return null;
     }

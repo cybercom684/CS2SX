@@ -3,33 +3,28 @@ using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using CS2SX.Core;
 using CS2SX.Transpiler.Writers;
+using CS2SX.Logging;
 
 namespace CS2SX.Transpiler;
 
-/// <summary>
-/// Haupt-Transpiler: Roslyn SyntaxWalker der C#-Klassen zu C-Structs/Funktionen transpiliert.
-///
-/// Diese Klasse ist jetzt ein dünner Orchestrator — die eigentliche Logik steckt in:
-/// - ExpressionWriter  (Ausdrücke)
-/// - StatementWriter   (Statements)
-/// - InvocationDispatcher + Handler (Methoden-Aufrufe)
-/// - TypeRegistry      (Typ-Mappings)
-/// </summary>
 public sealed class CSharpToC : CSharpSyntaxWalker
 {
-    public enum TranspileMode { HeaderOnly, Implementation }
+    public enum TranspileMode
+    {
+        HeaderOnly, Implementation
+    }
 
-    private readonly TranspileMode    _mode;
+    private readonly TranspileMode _mode;
     private readonly TranspilerContext _ctx;
-    private readonly ExpressionWriter  _exprWriter;
-    private readonly StatementWriter   _stmtWriter;
+    private readonly ExpressionWriter _exprWriter;
+    private readonly StatementWriter _stmtWriter;
 
     private const string SwitchAppBase = "SwitchApp";
 
     public CSharpToC(TranspileMode mode = TranspileMode.Implementation)
     {
-        _mode       = mode;
-        _ctx        = new TranspilerContext(new StringWriter());
+        _mode = mode;
+        _ctx = new TranspilerContext(new StringWriter());
         _exprWriter = new ExpressionWriter(_ctx);
         _stmtWriter = new StatementWriter(_ctx, _exprWriter);
     }
@@ -38,14 +33,21 @@ public sealed class CSharpToC : CSharpSyntaxWalker
 
     public string Transpile(string csharpSource)
     {
-        var tree  = CSharpSyntaxTree.ParseText(csharpSource);
+        var tree = CSharpSyntaxTree.ParseText(csharpSource);
         var diags = tree.GetDiagnostics()
             .Where(d => d.Severity == DiagnosticSeverity.Error)
             .ToList();
 
         if (diags.Count > 0)
+        {
             foreach (var d in diags)
+            {
+                var loc = d.Location.GetLineSpan();
+                var path = string.IsNullOrEmpty(loc.Path) ? "unknown" : loc.Path;
+                Log.Error($"CS{d.Id}: {d.GetMessage()} at {path}:{loc.StartLinePosition.Line}");
                 _ctx.Out.WriteLine("/* PARSE ERROR: " + d.GetMessage() + " */");
+            }
+        }
 
         Visit(tree.GetRoot());
         return _ctx.Out.ToString();
@@ -59,15 +61,36 @@ public sealed class CSharpToC : CSharpSyntaxWalker
     public override void VisitFileScopedNamespaceDeclaration(FileScopedNamespaceDeclarationSyntax node)
         => base.VisitFileScopedNamespaceDeclaration(node);
 
+    // ── Enum-Handling ─────────────────────────────────────────────────────────
+
+    public override void VisitEnumDeclaration(EnumDeclarationSyntax node)
+    {
+        if (_mode == TranspileMode.HeaderOnly)
+        {
+            _ctx.Out.WriteLine("enum " + node.Identifier.Text);
+            _ctx.Out.WriteLine("{");
+            _ctx.Indent();
+            foreach (var member in node.Members)
+            {
+                var name = member.Identifier.Text;
+                _ctx.Out.WriteLine(name + ",");
+                _ctx.EnumMembers.Add(name);
+            }
+            _ctx.Dedent();
+            _ctx.Out.WriteLine("};");
+            _ctx.Out.WriteLine();
+        }
+    }
+
     // ── Klassen-Handling ──────────────────────────────────────────────────────
 
     public override void VisitClassDeclaration(ClassDeclarationSyntax node)
     {
         _ctx.ClearClassContext();
-        _ctx.CurrentClass    = node.Identifier.Text;
+        _ctx.CurrentClass = node.Identifier.Text;
         _ctx.CurrentBaseType = node.BaseList?.Types.FirstOrDefault()?.ToString().Trim() ?? string.Empty;
 
-        var baseType         = _ctx.CurrentBaseType;
+        var baseType = _ctx.CurrentBaseType;
         var isSwitchAppChild = baseType == SwitchAppBase;
 
         // Basisklassen-Felder laden
@@ -118,15 +141,15 @@ public sealed class CSharpToC : CSharpSyntaxWalker
         // Felder
         foreach (var field in node.Members.OfType<FieldDeclarationSyntax>())
         {
-            var csType  = field.Declaration.Type.ToString().Trim();
-            var cType   = TypeRegistry.MapType(csType);
+            var csType = field.Declaration.Type.ToString().Trim();
+            var cType = TypeRegistry.MapType(csType);
             var needPtr = TypeRegistry.NeedsPointerSuffix(csType);
-            var ptr     = needPtr ? "*" : "";
+            var ptr = needPtr ? "*" : "";
 
             foreach (var v in field.Declaration.Variables)
             {
                 var fieldName = v.Identifier.Text.TrimStart('_');
-                var prefix    = TypeRegistry.HasNoPrefix(fieldName) ? "" : "f_";
+                var prefix = TypeRegistry.HasNoPrefix(fieldName) ? "" : "f_";
                 _ctx.FieldTypes[fieldName] = csType;
                 _ctx.WriteLine(cType + ptr + " " + prefix + fieldName + ";");
             }
@@ -143,14 +166,14 @@ public sealed class CSharpToC : CSharpSyntaxWalker
         foreach (var method in node.Members.OfType<MethodDeclarationSyntax>())
         {
             var isAbstract = method.Modifiers.Any(m => m.IsKind(SyntaxKind.AbstractKeyword));
-            var isVirtual  = method.Modifiers.Any(m => m.IsKind(SyntaxKind.VirtualKeyword));
+            var isVirtual = method.Modifiers.Any(m => m.IsKind(SyntaxKind.VirtualKeyword));
             if (!isAbstract && !isVirtual) continue;
 
             var returnType = TypeRegistry.MapType(method.ReturnType.ToString().Trim());
             var paramTypes = new List<string> { name + "*" };
             foreach (var p in method.ParameterList.Parameters)
             {
-                var pt   = TypeRegistry.MapType(p.Type!.ToString().Trim());
+                var pt = TypeRegistry.MapType(p.Type!.ToString().Trim());
                 var isRef = p.Modifiers.Any(m => m.IsKind(SyntaxKind.RefKeyword) || m.IsKind(SyntaxKind.OutKeyword));
                 paramTypes.Add(isRef ? pt + "*" : pt);
             }
@@ -186,7 +209,7 @@ public sealed class CSharpToC : CSharpSyntaxWalker
 
     private void WriteConstructor(ClassDeclarationSyntax node, bool isSwitchAppChild)
     {
-        var name     = node.Identifier.Text;
+        var name = node.Identifier.Text;
         var baseType = _ctx.CurrentBaseType;
 
         if (isSwitchAppChild)
@@ -224,7 +247,7 @@ public sealed class CSharpToC : CSharpSyntaxWalker
             {
                 if (v.Initializer == null) continue;
                 var fieldName = v.Identifier.Text.TrimStart('_');
-                var prefix    = TypeRegistry.HasNoPrefix(fieldName) ? "" : "f_";
+                var prefix = TypeRegistry.HasNoPrefix(fieldName) ? "" : "f_";
                 _ctx.WriteLine("self->" + prefix + fieldName + " = "
                     + _exprWriter.Write(v.Initializer.Value) + ";");
             }
@@ -248,7 +271,7 @@ public sealed class CSharpToC : CSharpSyntaxWalker
             {
                 if (v.Initializer == null) continue;
                 var fieldName = v.Identifier.Text.TrimStart('_');
-                var prefix    = TypeRegistry.HasNoPrefix(fieldName) ? "" : "f_";
+                var prefix = TypeRegistry.HasNoPrefix(fieldName) ? "" : "f_";
                 _ctx.WriteLine("self->" + prefix + fieldName + " = "
                     + _exprWriter.Write(v.Initializer.Value) + ";");
             }
@@ -257,7 +280,7 @@ public sealed class CSharpToC : CSharpSyntaxWalker
         foreach (var method in node.Members.OfType<MethodDeclarationSyntax>())
         {
             var isOverride = method.Modifiers.Any(m => m.IsKind(SyntaxKind.OverrideKeyword));
-            var isVirtual  = method.Modifiers.Any(m => m.IsKind(SyntaxKind.VirtualKeyword));
+            var isVirtual = method.Modifiers.Any(m => m.IsKind(SyntaxKind.VirtualKeyword));
             if (!isOverride && !isVirtual) continue;
 
             var returnType = TypeRegistry.MapType(method.ReturnType.ToString().Trim());
@@ -281,9 +304,9 @@ public sealed class CSharpToC : CSharpSyntaxWalker
     private void WriteMethodSignature(MethodDeclarationSyntax method, string className)
     {
         var isAbstract = method.Modifiers.Any(m => m.IsKind(SyntaxKind.AbstractKeyword));
-        var isStatic   = method.Modifiers.Any(m => m.IsKind(SyntaxKind.StaticKeyword));
+        var isStatic = method.Modifiers.Any(m => m.IsKind(SyntaxKind.StaticKeyword));
         var returnType = TypeRegistry.MapType(method.ReturnType.ToString().Trim());
-        var name       = className + "_" + method.Identifier.Text;
+        var name = className + "_" + method.Identifier.Text;
 
         var parameters = new List<string>();
         if (!isStatic) parameters.Add(className + "* self");
@@ -308,8 +331,11 @@ public sealed class CSharpToC : CSharpSyntaxWalker
 
     public override void VisitMethodDeclaration(MethodDeclarationSyntax node)
     {
+        // Rückgabetyp für var‑Inferenz speichern
+        _ctx.MethodReturnTypes[node.Identifier.Text] = node.ReturnType.ToString().Trim();
+
         var isAbstract = node.Modifiers.Any(m => m.IsKind(SyntaxKind.AbstractKeyword));
-        var isStatic   = node.Modifiers.Any(m => m.IsKind(SyntaxKind.StaticKeyword));
+        var isStatic = node.Modifiers.Any(m => m.IsKind(SyntaxKind.StaticKeyword));
         var returnType = TypeRegistry.MapType(node.ReturnType.ToString().Trim());
 
         var name = string.IsNullOrEmpty(_ctx.CurrentClass)
@@ -327,7 +353,7 @@ public sealed class CSharpToC : CSharpSyntaxWalker
         if (_mode == TranspileMode.HeaderOnly)
         {
             if (isAbstract) _ctx.Out.WriteLine("/* abstract: " + sig + " */");
-            else            _ctx.Out.WriteLine(sig + ";");
+            else _ctx.Out.WriteLine(sig + ";");
             return;
         }
 
@@ -347,6 +373,14 @@ public sealed class CSharpToC : CSharpSyntaxWalker
         _ctx.Dedent();
         _ctx.Out.WriteLine("}");
         _ctx.Out.WriteLine();
+    }
+
+    // ── Property-Handling ─────────────────────────────────────────────────────
+
+    public override void VisitPropertyDeclaration(PropertyDeclarationSyntax node)
+    {
+        _ctx.PropertyTypes[node.Identifier.Text] = node.Type.ToString().Trim();
+        base.VisitPropertyDeclaration(node);
     }
 
     // ── Utilities ─────────────────────────────────────────────────────────────
@@ -372,11 +406,11 @@ public sealed class CSharpToC : CSharpSyntaxWalker
         if (p.Type == null) return p.Identifier.Text;
 
         var csType = p.Type.ToString().Trim();
-        var cType  = TypeRegistry.MapType(csType);
+        var cType = TypeRegistry.MapType(csType);
         var isPrim = TypeRegistry.IsPrimitive(csType) || csType == "string";
-        var isRef  = p.Modifiers.Any(m =>
+        var isRef = p.Modifiers.Any(m =>
             m.IsKind(SyntaxKind.RefKeyword) || m.IsKind(SyntaxKind.OutKeyword));
-        var ptr    = (!isPrim || isRef) ? "*" : "";
+        var ptr = (!isPrim || isRef) ? "*" : "";
         return cType + ptr + " " + p.Identifier;
     }
 }

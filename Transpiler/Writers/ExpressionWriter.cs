@@ -6,12 +6,6 @@ using CS2SX.Transpiler.Handlers;
 
 namespace CS2SX.Transpiler.Writers;
 
-/// <summary>
-/// Transpiliert C#-Ausdrücke zu C-Code.
-/// Alle Expression-Typen sind hier zentralisiert.
-///
-/// Erweiterung: Neuen case im WriteExpression-Switch ergänzen.
-/// </summary>
 public sealed class ExpressionWriter
 {
     private readonly TranspilerContext _ctx;
@@ -22,8 +16,6 @@ public sealed class ExpressionWriter
         _ctx = ctx;
         _dispatcher = new InvocationDispatcher(ctx, Write);
     }
-
-    // ── Öffentliche API ───────────────────────────────────────────────────────
 
     public string Write(SyntaxNode? node)
     {
@@ -52,8 +44,6 @@ public sealed class ExpressionWriter
         };
     }
 
-    // ── Literale ──────────────────────────────────────────────────────────────
-
     private string WriteLiteral(LiteralExpressionSyntax lit)
     {
         if (lit.IsKind(SyntaxKind.NullLiteralExpression)) return "NULL";
@@ -66,7 +56,6 @@ public sealed class ExpressionWriter
         if (lit.Token.IsKind(SyntaxKind.CharacterLiteralToken))
             return "'" + StringEscaper.EscapeChar(lit.Token.ValueText) + "'";
 
-        // Zahlen: C#-Suffixe normalisieren
         var text = lit.Token.Text;
         if (text.EndsWith("f", StringComparison.OrdinalIgnoreCase) && !text.StartsWith("0x"))
             return text[..^1] + "f";
@@ -84,8 +73,6 @@ public sealed class ExpressionWriter
         return text;
     }
 
-    // ── Bezeichner ────────────────────────────────────────────────────────────
-
     private string WriteIdentifier(IdentifierNameSyntax id)
     {
         var name = id.Identifier.Text;
@@ -93,6 +80,9 @@ public sealed class ExpressionWriter
         // Enum-Mapping (NpadButton.A etc.)
         var mapped = TypeRegistry.MapEnum(name);
         if (mapped != name) return mapped;
+
+        // Eigene Enum-Member
+        if (_ctx.EnumMembers.Contains(name)) return name;
 
         // Globale CS2SX-Variablen nie als Felder behandeln
         if (name == "_cs2sx_strbuf") return "_cs2sx_strbuf";
@@ -112,15 +102,12 @@ public sealed class ExpressionWriter
         return name;
     }
 
-    // ── Binäre Ausdrücke ──────────────────────────────────────────────────────
-
     private string WriteBinary(BinaryExpressionSyntax bin)
     {
         var left = Write(bin.Left);
         var right = Write(bin.Right);
         var op = bin.OperatorToken.Text;
 
-        // String-Vergleich → strcmp
         if ((op == "==" || op == "!=") && IsStringExpr(bin.Left))
             return "strcmp(" + left + ", " + right + ") " + op + " 0";
 
@@ -130,36 +117,28 @@ public sealed class ExpressionWriter
         return left + " " + op + " " + right;
     }
 
-    // ── Member-Zugriff ────────────────────────────────────────────────────────
-
     private string WriteMemberAccess(MemberAccessExpressionSyntax mem)
     {
         var full = mem.ToString();
 
-        // Enum-Mapping (NpadButton.A etc.)
         var mapped = TypeRegistry.MapEnum(full);
         if (mapped != full) return mapped;
 
-        // LibNX-Namespace → letzter Bezeichner
         if (full.StartsWith("LibNX.", StringComparison.Ordinal))
             return mem.Name.Identifier.Text;
 
         var obj = Write(mem.Expression);
         var prop = mem.Name.Identifier.Text;
 
-        // string.Length → strlen(...)
         if (prop == "Length" && IsStringExpr(mem.Expression))
             return "strlen(" + obj + ")";
 
-        // List<T>.Count → ->count
         if (prop == "Count" && IsListExpr(mem.Expression))
             return obj + "->count";
 
-        // StringBuilder.Length → ->length
         if (prop == "Length" && IsStringBuilderExpr(mem.Expression))
             return obj + "->length";
 
-        // libnx Stack-Struct → Punkt-Zugriff
         var rawExpr = mem.Expression.ToString();
         var key = rawExpr.TrimStart('_');
         if ((_ctx.LocalTypes.TryGetValue(rawExpr, out var lt) && TypeRegistry.IsLibNxStruct(lt))
@@ -168,8 +147,6 @@ public sealed class ExpressionWriter
 
         return obj + "->" + prop;
     }
-
-    // ── Zuweisungen ───────────────────────────────────────────────────────────
 
     private string WriteAssignment(AssignmentExpressionSyntax assign)
     {
@@ -183,33 +160,26 @@ public sealed class ExpressionWriter
             var objRaw = mem.Expression.ToString();
             var objKey = objRaw.TrimStart('_');
 
-            // Struct-Zugriff: . statt ->
             bool isStruct = (_ctx.LocalTypes.TryGetValue(objRaw, out var lt) && TypeRegistry.IsLibNxStruct(lt))
                          || (_ctx.FieldTypes.TryGetValue(objKey, out var ft) && TypeRegistry.IsLibNxStruct(ft));
             var arrow = isStruct ? "." : "->";
 
-            // Text = ... → immer Label_SetText
             if (prop == "Text")
             {
-                // Ternary: label.Text = a ? "x" : "y"
                 if (assign.Right is ConditionalExpressionSyntax cond)
                     return "Label_SetText(" + obj + ", (" + Write(cond.Condition) + ") ? "
                          + Write(cond.WhenTrue) + " : " + Write(cond.WhenFalse) + ")";
 
-                // Interpolated string
                 if (assign.Right is InterpolatedStringExpressionSyntax interp)
                     return FormatStringBuilder.BuildLabelSetText(obj, interp, _ctx, Write);
 
-                // String-Literal
                 if (assign.Right is LiteralExpressionSyntax litStr
                     && litStr.Token.IsKind(SyntaxKind.StringLiteralToken))
                     return "Label_SetText(" + obj + ", \"" + StringEscaper.EscapeRaw(litStr.Token.ValueText) + "\")";
 
-                // Alles andere (Variable, sb.ToString(), etc.)
                 return "Label_SetText(" + obj + ", " + right + ")";
             }
 
-            // OnClick → Funktionszeiger
             if (prop == "OnClick")
             {
                 var methodName = assign.Right.ToString().Trim();
@@ -223,13 +193,10 @@ public sealed class ExpressionWriter
         return Write(assign.Left) + " " + op + " " + right;
     }
 
-    // ── Objekt-Erstellung ─────────────────────────────────────────────────────
-
     private string WriteObjectCreation(ObjectCreationExpressionSyntax obj)
     {
         var typeName = obj.Type.ToString();
 
-        // new StringBuilder(N) → StringBuilder_New(N)
         if (TypeRegistry.IsStringBuilder(typeName))
         {
             var cap = obj.ArgumentList?.Arguments.Count > 0
@@ -238,7 +205,6 @@ public sealed class ExpressionWriter
             return "StringBuilder_New(" + cap + ")";
         }
 
-        // new List<T>() → List_T_New()
         if (TypeRegistry.IsList(typeName))
         {
             var inner = TypeRegistry.GetListInnerType(typeName)!;
@@ -246,7 +212,6 @@ public sealed class ExpressionWriter
             return "List_" + cInner + "_New()";
         }
 
-        // new Dictionary<K,V>() → Dict_K_V_New()
         if (TypeRegistry.IsDictionary(typeName))
         {
             var types = TypeRegistry.GetDictionaryTypes(typeName)!.Value;
@@ -259,7 +224,6 @@ public sealed class ExpressionWriter
                        ?? Enumerable.Empty<string>();
         var creation = typeName + "_New(" + string.Join(", ", args) + ")";
 
-        // Object Initializer { X=5, Y=10 } → temp-Variable + Zuweisungen
         if (obj.Initializer?.Expressions.Count > 0)
         {
             var tmp = _ctx.NextTmp(typeName.ToLower());
@@ -280,8 +244,6 @@ public sealed class ExpressionWriter
         return creation;
     }
 
-    // ── Array-Erstellung ──────────────────────────────────────────────────────
-
     private string WriteArrayCreation(ArrayCreationExpressionSyntax arr)
     {
         var elemType = arr.Type.ElementType.ToString().Trim();
@@ -296,21 +258,15 @@ public sealed class ExpressionWriter
         return "(" + cType + "*)malloc(sizeof(" + cType + "))";
     }
 
-    // ── Invocation ────────────────────────────────────────────────────────────
-
     private string WriteInvocation(InvocationExpressionSyntax inv)
     {
-        // Dispatcher prüft alle Handler
         var result = _dispatcher.Dispatch(inv);
         if (result != null) return result;
 
-        // Fallback: direkter C-Funktionsaufruf
         var args = inv.ArgumentList.Arguments.Select(a => Write(a.Expression)).ToList();
         var calleeStr = inv.Expression.ToString();
         return calleeStr + "(" + string.Join(", ", args) + ")";
     }
-
-    // ── Sonstige Ausdrücke ────────────────────────────────────────────────────
 
     private string WriteConditional(ConditionalExpressionSyntax cond)
         => "(" + Write(cond.Condition) + " ? " + Write(cond.WhenTrue) + " : " + Write(cond.WhenFalse) + ")";
@@ -320,8 +276,6 @@ public sealed class ExpressionWriter
 
     private string WriteElementAccess(ElementAccessExpressionSyntax elem)
         => Write(elem.Expression) + "[" + Write(elem.ArgumentList.Arguments[0].Expression) + "]";
-
-    // ── Utilities ─────────────────────────────────────────────────────────────
 
     private bool IsStringExpr(SyntaxNode node)
     {
