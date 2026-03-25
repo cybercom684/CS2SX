@@ -77,25 +77,28 @@ public sealed class ExpressionWriter
     {
         var name = id.Identifier.Text;
 
-        // Enum-Mapping (NpadButton.A etc.)
         var mapped = TypeRegistry.MapEnum(name);
         if (mapped != name) return mapped;
 
-        // Eigene Enum-Member
         if (_ctx.EnumMembers.Contains(name)) return name;
 
-        // Globale CS2SX-Variablen nie als Felder behandeln
         if (name == "_cs2sx_strbuf") return "_cs2sx_strbuf";
 
-        // Feld-Zugriff: _counter → self->f_counter
+        // Static-Feld-Zugriff: _counter → ClassName_counter (globale Variable)
         if (_ctx.IsFieldAccess(name))
         {
             var trimmed = name.TrimStart('_');
+            // Prüfen ob es ein static-Feld ist (nicht in FieldTypes, weil static übersprungen)
+            // Static-Felder werden mit ClassName_ prefix referenziert
+            if (!_ctx.FieldTypes.ContainsKey(trimmed) && !string.IsNullOrEmpty(_ctx.CurrentClass))
+            {
+                // Könnte ein static-Feld sein — mit Klassenprefix ausgeben
+                return _ctx.CurrentClass + "_" + trimmed;
+            }
             var prefix = TypeRegistry.HasNoPrefix(trimmed) ? "" : "f_";
             return "self->" + prefix + trimmed;
         }
 
-        // Control-Felder (x, y, width, height etc.)
         if (TypeRegistry.ControlFields.Contains(name) && !string.IsNullOrEmpty(_ctx.CurrentClass))
             return "self->base." + name;
 
@@ -160,8 +163,13 @@ public sealed class ExpressionWriter
             var objRaw = mem.Expression.ToString();
             var objKey = objRaw.TrimStart('_');
 
-            bool isStruct = (_ctx.LocalTypes.TryGetValue(objRaw, out var lt) && TypeRegistry.IsLibNxStruct(lt))
-                         || (_ctx.FieldTypes.TryGetValue(objKey, out var ft) && TypeRegistry.IsLibNxStruct(ft));
+            string? lt = null;
+            string? ft = null;
+            _ctx.LocalTypes.TryGetValue(objRaw, out lt);
+            _ctx.FieldTypes.TryGetValue(objKey, out ft);
+
+            bool isStruct = (lt != null && TypeRegistry.IsLibNxStruct(lt))
+                         || (ft != null && TypeRegistry.IsLibNxStruct(ft));
             var arrow = isStruct ? "." : "->";
 
             if (prop == "Text")
@@ -174,7 +182,7 @@ public sealed class ExpressionWriter
                     return FormatStringBuilder.BuildLabelSetText(obj, interp, _ctx, Write);
 
                 if (assign.Right is LiteralExpressionSyntax litStr
-                    && litStr.Token.IsKind(SyntaxKind.StringLiteralToken))
+                    && litStr.Token.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.StringLiteralToken))
                     return "Label_SetText(" + obj + ", \"" + StringEscaper.EscapeRaw(litStr.Token.ValueText) + "\")";
 
                 return "Label_SetText(" + obj + ", " + right + ")";
@@ -188,6 +196,34 @@ public sealed class ExpressionWriter
 
             var cProp = TypeRegistry.MapProperty(prop);
             return obj + arrow + cProp + " " + op + " " + right;
+        }
+
+        if (assign.Left is ElementAccessExpressionSyntax elemLeft)
+        {
+            var obj = Write(elemLeft.Expression);
+            var key = Write(elemLeft.ArgumentList.Arguments[0].Expression);
+            var objRaw = elemLeft.Expression.ToString();
+            var objKey = objRaw.TrimStart('_');
+
+            string? lt = null;
+            string? ft = null;
+            _ctx.LocalTypes.TryGetValue(objRaw, out lt);
+            _ctx.FieldTypes.TryGetValue(objKey, out ft);
+
+            bool isDict = (lt != null && TypeRegistry.IsDictionary(lt))
+                       || (ft != null && TypeRegistry.IsDictionary(ft));
+            if (isDict)
+            {
+                var dictType = lt ?? ft!;
+                var types = TypeRegistry.GetDictionaryTypes(dictType)!.Value;
+                var cKey = types.key == "string" ? "str" : TypeRegistry.MapType(types.key);
+                var cVal = types.val == "string" ? "str" : TypeRegistry.MapType(types.val);
+                var dictFunc = "Dict_" + cKey + "_" + cVal;
+                // _Set prüft ob Key existiert und überschreibt — _Add würde Duplikate erzeugen
+                return dictFunc + "_Set(" + obj + ", " + key + ", " + right + ")";
+            }
+
+            return obj + "[" + key + "] = " + right;
         }
 
         return Write(assign.Left) + " " + op + " " + right;
@@ -226,18 +262,44 @@ public sealed class ExpressionWriter
 
         if (obj.Initializer?.Expressions.Count > 0)
         {
+            // Eindeutigen Temp-Namen erzeugen
             var tmp = _ctx.NextTmp(typeName.ToLower());
-            _ctx.Out.WriteLine(_ctx.Tab + typeName + "* " + tmp + " = " + creation + ";");
+
+            // Typ der temporären Variable
+            var cTypeName = TypeRegistry.MapType(typeName);
+            var needsPtr = TypeRegistry.NeedsPointerSuffix(typeName);
+            var ptrSuffix = needsPtr ? "*" : "*"; // Objekte sind immer Pointer nach _New()
+
+            // Deklaration + Zuweisung auf eigenem Statement ausgeben
+            _ctx.Out.WriteLine(_ctx.Tab + cTypeName + "* " + tmp + " = " + creation + ";");
+
             foreach (var expr in obj.Initializer.Expressions)
             {
                 if (expr is AssignmentExpressionSyntax asgn)
                 {
-                    var p = asgn.Left.ToString().Trim();
-                    var v = Write(asgn.Right);
-                    var cp = TypeRegistry.MapProperty(p);
-                    _ctx.Out.WriteLine(_ctx.Tab + tmp + "->" + cp + " = " + v + ";");
+                    var propName = asgn.Left.ToString().Trim();
+                    var propVal = Write(asgn.Right);
+
+                    // Spezialfall Text → Label_SetText
+                    if (propName == "Text")
+                    {
+                        _ctx.Out.WriteLine(_ctx.Tab + "Label_SetText(" + tmp + ", " + propVal + ");");
+                        continue;
+                    }
+                    // Spezialfall OnClick → Funktionszeiger
+                    if (propName == "OnClick")
+                    {
+                        _ctx.Out.WriteLine(_ctx.Tab + tmp + "->OnClick = (void(*)(void*))"
+                            + _ctx.CurrentClass + "_" + propVal.Trim() + ";");
+                        continue;
+                    }
+
+                    var cp = TypeRegistry.MapProperty(propName);
+                    _ctx.Out.WriteLine(_ctx.Tab + tmp + "->" + cp + " = " + propVal + ";");
                 }
             }
+
+            // tmp zurückgeben — der Aufrufer bekommt den Pointer
             return tmp;
         }
 
@@ -275,7 +337,45 @@ public sealed class ExpressionWriter
         => "(" + TypeRegistry.MapType(cast.Type.ToString().Trim()) + ")" + Write(cast.Expression);
 
     private string WriteElementAccess(ElementAccessExpressionSyntax elem)
-        => Write(elem.Expression) + "[" + Write(elem.ArgumentList.Arguments[0].Expression) + "]";
+    {
+        var objExpr = Write(elem.Expression);
+        var index = Write(elem.ArgumentList.Arguments[0].Expression);
+        var objRaw = elem.Expression.ToString();
+        var objKey = objRaw.TrimStart('_');
+
+        // Variablen vorab deklarieren
+        string? lt = null;
+        string? ft = null;
+        _ctx.LocalTypes.TryGetValue(objRaw, out lt);
+        _ctx.FieldTypes.TryGetValue(objKey, out ft);
+
+        // Prüfen, ob das Objekt ein Dictionary ist
+        bool isDict = (lt != null && TypeRegistry.IsDictionary(lt))
+                   || (ft != null && TypeRegistry.IsDictionary(ft));
+
+        if (isDict)
+        {
+            var dictType = lt ?? ft!;
+            var types = TypeRegistry.GetDictionaryTypes(dictType)!.Value;
+            var cKey = types.key == "string" ? "str" : TypeRegistry.MapType(types.key);
+            var cVal = types.val == "string" ? "str" : TypeRegistry.MapType(types.val);
+            var dictFunc = "Dict_" + cKey + "_" + cVal;
+            return "*" + dictFunc + "_Get(" + objExpr + ", " + index + ")";
+        }
+
+        bool isList = (lt != null && TypeRegistry.IsList(lt))
+                   || (ft != null && TypeRegistry.IsList(ft));
+        if (isList)
+        {
+            var listType = lt ?? ft!;
+            var inner = TypeRegistry.GetListInnerType(listType)!;
+            var cInner = inner == "string" ? "char" : TypeRegistry.MapType(inner);
+            return "List_" + cInner + "_Get(" + objExpr + ", " + index + ")";
+        }
+
+        // Fallback: normales Array
+        return objExpr + "[" + index + "]";
+    }
 
     private bool IsStringExpr(SyntaxNode node)
     {

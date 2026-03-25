@@ -52,6 +52,28 @@ public sealed class StatementWriter
     {
         var declType = local.Declaration.Type.ToString().Trim();
 
+        // params-Array (z.B. object[] args) → char*[] annähern oder überspringen
+        if (declType.EndsWith("[]") && local.Declaration.Variables.Count == 1)
+        {
+            var v = local.Declaration.Variables[0];
+            var innerType = declType[..^2].Trim();
+            var cInner = TypeRegistry.MapType(innerType);
+
+            if (v.Initializer?.Value is ImplicitArrayCreationExpressionSyntax implArr)
+            {
+                // new[] { a, b, c } → einzelne Variablen oder snprintf-Puffer
+                // Für string[] machen wir ein const char*[] auf dem Stack
+                var initExprs = implArr.Initializer.Expressions
+                    .Select(e => _expr.Write(e))
+                    .ToList();
+                var arrName = v.Identifier.Text;
+                _ctx.WriteLine("const char* " + arrName + "[] = { "
+                    + string.Join(", ", initExprs) + " };");
+                _ctx.LocalTypes[arrName] = declType;
+                return;
+            }
+        }
+
         foreach (var v in local.Declaration.Variables)
         {
             if (TypeRegistry.IsLibNxStruct(declType))
@@ -116,8 +138,23 @@ public sealed class StatementWriter
                      || TypeRegistry.IsDictionary(declType);
             }
 
+            if (string.IsNullOrWhiteSpace(cType)) cType = "int";
+
             var ptr = isPtr ? "*" : "";
-            var init = v.Initializer != null ? " = " + _expr.Write(v.Initializer.Value) : "";
+
+            string init;
+            if (v.Initializer != null)
+            {
+                init = " = " + _expr.Write(v.Initializer.Value);
+            }
+            else if (!isPtr && TypeRegistry.IsPrimitive(declType is "var" or "var?" ? cType : declType))
+            {
+                init = " = 0";
+            }
+            else
+            {
+                init = "";
+            }
 
             _ctx.WriteLine(cType + ptr + " " + v.Identifier + init + ";");
             _ctx.LocalTypes[v.Identifier.Text] = declType is "var" or "var?" ? cType : declType;

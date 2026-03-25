@@ -22,7 +22,7 @@ public sealed class DictionaryHandler : IInvocationHandler
     }
 
     public string Handle(InvocationExpressionSyntax inv, string calleeStr, List<string> args,
-        TranspilerContext ctx, Func<Microsoft.CodeAnalysis.SyntaxNode?, string> writeExpr)
+    TranspilerContext ctx, Func<Microsoft.CodeAnalysis.SyntaxNode?, string> writeExpr)
     {
         var mem = (MemberAccessExpressionSyntax)inv.Expression;
         var objStr = mem.Expression.ToString();
@@ -51,13 +51,13 @@ public sealed class DictionaryHandler : IInvocationHandler
 
         if (methodName == "TryGetValue" && args.Count >= 2)
         {
-            // args[0] = key, args[1] = out variable (als Ausdruck)
             var keyArg = args[0];
+            // args[1] kommt bereits mit "&" aus InvocationDispatcher.BuildArg —
+            // kein zweites "&" hinzufügen.
             var outArg = args[1];
-            // Wir generieren einen ternären Ausdruck: (Dict_TryGetValue(d, key, &out) ? 1 : 0)
-            // Da wir nicht wissen, ob outArg ein einfacher Name ist, müssen wir & davor setzen.
-            // Falls es eine Property oder Feld ist, ist & nicht erlaubt, aber in C# ist out immer eine Variable.
-            var outPtr = "&" + outArg;
+            // Falls BuildArg kein "&" angehängt hat (z.B. weil Typ unbekannt),
+            // sicherstellen dass genau ein "&" vorhanden ist.
+            var outPtr = outArg.StartsWith("&") ? outArg : "&" + outArg;
             return cDict + "_TryGetValue(" + dictExpr + ", " + keyArg + ", " + outPtr + ")";
         }
 

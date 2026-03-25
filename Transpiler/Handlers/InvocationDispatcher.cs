@@ -66,11 +66,12 @@ public sealed class InvocationDispatcher
     {
         var expr = _writeExpr(a.Expression);
 
-        if (!a.RefKindKeyword.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.RefKeyword)
-         && !a.RefKindKeyword.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.OutKeyword))
+        var isRef = a.RefKindKeyword.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.RefKeyword);
+        var isOut = a.RefKindKeyword.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.OutKeyword);
+
+        if (!isRef && !isOut)
             return expr;
 
-        // ref/out → Pointer-Übergabe mit &
         var argName = a.Expression.ToString();
 
         // char[]-Puffer verfällt zu Pointer — kein &
@@ -86,6 +87,8 @@ public sealed class InvocationDispatcher
         if (_ctx.FieldTypes.TryGetValue(fieldKey, out var ft) && ft == "string")
             return expr;
 
+        // out-Parameter für primitive Typen (int, float etc.) → &
+        // Der DictionaryHandler darf dann KEIN weiteres & hinzufügen.
         return "&" + expr;
     }
 }

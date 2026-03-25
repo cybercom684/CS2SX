@@ -3,19 +3,18 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdbool.h>
+
+extern char _cs2sx_strbuf[512];
 
 // ============================================================================
-// Globaler String-Buffer für snprintf-Zuweisungen (Text-Properties).
-//
-// WICHTIG: Nur für kurzlebige Zuweisungen gedacht (z.B. label->text = ...).
-// Der Zeiger wird sofort nach der Zuweisung genutzt; der nächste snprintf-
-// Aufruf überschreibt den Inhalt. Für dauerhaften Text statische Strings
-// oder eigene malloc-Puffer verwenden.
+// Action
 // ============================================================================
-extern char _cs2sx_strbuf[512];  // Definition in switchforms.c
+
+typedef void (*Action)(void*);
 
 // ============================================================================
-// Control (Basis aller UI-Elemente)
+// Control
 // ============================================================================
 
 #define FORM_MAX_CONTROLS 64
@@ -26,8 +25,8 @@ struct Control
     int   x, y, width, height;
     int   visible;
     int   focusable;
-    void* context;                                  // zeigt auf den SwitchApp-Context
-    void  (*Draw)(Control* self);
+    void* context;
+    void  (*Draw)  (Control* self);
     void  (*Update)(Control* self, u64 kDown, u64 kHeld);
 };
 
@@ -39,21 +38,21 @@ typedef struct Label Label;
 struct Label
 {
     Control base;
-    char    text[256];   // eigener Puffer — kein Pointer auf _cs2sx_strbuf
+    char    text[256];
 };
-
-static inline void Label_Draw(Control* self)
-{
-    if (!self || !self->visible) return;
-    Label* label = (Label*)self;
-    printf("\033[%d;%dH%s", self->y, self->x, label->text);
-}
 
 static inline void Label_SetText(Label* l, const char* s)
 {
     if (!l || !s) return;
     strncpy(l->text, s, sizeof(l->text) - 1);
     l->text[sizeof(l->text) - 1] = '\0';
+}
+
+static inline void Label_Draw(Control* self)
+{
+    if (!self || !self->visible) return;
+    Label* l = (Label*)self;
+    printf("\033[%d;%dH%s", self->y, self->x, l->text);
 }
 
 static inline Label* Label_New(const char* text)
@@ -84,20 +83,21 @@ struct Button
 static inline void Button_Draw(Control* self)
 {
     if (!self || !self->visible) return;
-    Button* btn = (Button*)self;
-    if (btn->focused)
-        printf("\033[%d;%dH> %s <", self->y, self->x, btn->text ? btn->text : "");
+    Button* b = (Button*)self;
+    const char* t = b->text ? b->text : "";
+    if (b->focused)
+        printf("\033[%d;%dH> %s <", self->y, self->x, t);
     else
-        printf("\033[%d;%dH  %s  ", self->y, self->x, btn->text ? btn->text : "");
+        printf("\033[%d;%dH  %s  ", self->y, self->x, t);
 }
 
 static inline void Button_Update(Control* self, u64 kDown, u64 kHeld)
 {
     (void)kHeld;
     if (!self) return;
-    Button* btn = (Button*)self;
-    if (btn->focused && (kDown & HidNpadButton_A))
-        if (btn->OnClick) btn->OnClick(self->context);
+    Button* b = (Button*)self;
+    if (b->focused && (kDown & HidNpadButton_A) && b->OnClick)
+        b->OnClick(self->context);
 }
 
 static inline Button* Button_New(const char* text)
@@ -121,7 +121,7 @@ typedef struct ProgressBar ProgressBar;
 struct ProgressBar
 {
     Control base;
-    int     value;      // 0–100
+    int     value;
     int     width_chars;
 };
 
@@ -148,26 +148,15 @@ static inline ProgressBar* ProgressBar_New(int width_chars)
     return pb;
 }
 
-
-
 // ============================================================================
-// StringBuilder — C#-kompatibler String-Builder
-//
-// Verwendung in C#:
-//   var sb = new StringBuilder(512);
-//   sb.Append("Hello");
-//   sb.Append(42);
-//   sb.AppendLine("World");
-//   string result = sb.ToString();
-//   sb.Clear();
-//   int len = sb.Length;
+// StringBuilder
 // ============================================================================
 
 typedef struct
 {
     char* buf;
-    int    length;
-    int    capacity;
+    int   length;
+    int   capacity;
 } StringBuilder;
 
 static inline StringBuilder* StringBuilder_New(int capacity)
@@ -193,10 +182,10 @@ static inline void StringBuilder_Free(StringBuilder* sb)
 static inline void StringBuilder__grow(StringBuilder* sb, int needed)
 {
     if (sb->length + needed + 1 <= sb->capacity) return;
-    int newCap = sb->capacity * 2;
-    while (newCap < sb->length + needed + 1) newCap *= 2;
-    sb->buf = (char*)realloc(sb->buf, newCap);
-    sb->capacity = newCap;
+    int cap = sb->capacity * 2;
+    while (cap < sb->length + needed + 1) cap *= 2;
+    sb->buf = (char*)realloc(sb->buf, cap);
+    sb->capacity = cap;
 }
 
 static inline void StringBuilder_AppendStr(StringBuilder* sb, const char* s)
@@ -208,9 +197,16 @@ static inline void StringBuilder_AppendStr(StringBuilder* sb, const char* s)
     sb->length += len;
 }
 
-static inline void StringBuilder_AppendInt(StringBuilder* sb, int val)
+static inline void StringBuilder_AppendChar(StringBuilder* sb, char c)
 {
     if (!sb) return;
+    StringBuilder__grow(sb, 1);
+    sb->buf[sb->length++] = c;
+    sb->buf[sb->length] = '\0';
+}
+
+static inline void StringBuilder_AppendInt(StringBuilder* sb, int val)
+{
     char tmp[32];
     snprintf(tmp, sizeof(tmp), "%d", val);
     StringBuilder_AppendStr(sb, tmp);
@@ -218,7 +214,6 @@ static inline void StringBuilder_AppendInt(StringBuilder* sb, int val)
 
 static inline void StringBuilder_AppendUInt(StringBuilder* sb, unsigned int val)
 {
-    if (!sb) return;
     char tmp[32];
     snprintf(tmp, sizeof(tmp), "%u", val);
     StringBuilder_AppendStr(sb, tmp);
@@ -226,18 +221,9 @@ static inline void StringBuilder_AppendUInt(StringBuilder* sb, unsigned int val)
 
 static inline void StringBuilder_AppendFloat(StringBuilder* sb, float val)
 {
-    if (!sb) return;
     char tmp[32];
     snprintf(tmp, sizeof(tmp), "%f", val);
     StringBuilder_AppendStr(sb, tmp);
-}
-
-static inline void StringBuilder_AppendChar(StringBuilder* sb, char c)
-{
-    if (!sb) return;
-    StringBuilder__grow(sb, 1);
-    sb->buf[sb->length++] = c;
-    sb->buf[sb->length] = '\0';
 }
 
 static inline void StringBuilder_AppendLine(StringBuilder* sb, const char* s)
@@ -259,134 +245,117 @@ static inline void StringBuilder_Clear(StringBuilder* sb)
     sb->length = 0;
 }
 
-// ToString() gibt den internen Puffer zurueck (kein malloc — Zeiger bleibt gueltig bis Clear/Free)
 static inline const char* StringBuilder_ToString(StringBuilder* sb)
 {
-    if (!sb) return "";
-    return sb->buf;
+    return sb ? sb->buf : "";
 }
 
-// int.ToString() / uint.ToString() Hilfsfunktionen
-// Schreiben in _cs2sx_strbuf — sofort verwenden!
+// ============================================================================
+// String helpers
+// ============================================================================
+
 static inline const char* Int_ToString(int val)
 {
-    extern char _cs2sx_strbuf[512];
     snprintf(_cs2sx_strbuf, 512, "%d", val);
     return _cs2sx_strbuf;
 }
 
 static inline const char* UInt_ToString(unsigned int val)
 {
-    extern char _cs2sx_strbuf[512];
     snprintf(_cs2sx_strbuf, 512, "%u", val);
     return _cs2sx_strbuf;
 }
 
 static inline const char* Float_ToString(float val)
 {
-    extern char _cs2sx_strbuf[512];
     snprintf(_cs2sx_strbuf, 512, "%f", val);
     return _cs2sx_strbuf;
 }
 
-// string.IsNullOrEmpty
 static inline int String_IsNullOrEmpty(const char* s)
 {
     return s == NULL || s[0] == '\0';
 }
 
-// string.Contains
 static inline int String_Contains(const char* haystack, const char* needle)
 {
     if (!haystack || !needle) return 0;
     return strstr(haystack, needle) != NULL;
 }
 
-// string.StartsWith
 static inline int String_StartsWith(const char* s, const char* prefix)
 {
     if (!s || !prefix) return 0;
     return strncmp(s, prefix, strlen(prefix)) == 0;
 }
 
-// string.EndsWith
 static inline int String_EndsWith(const char* s, const char* suffix)
 {
     if (!s || !suffix) return 0;
-    int sl = (int)strlen(s);
-    int fl = (int)strlen(suffix);
-    if (fl > sl) return 0;
-    return strcmp(s + sl - fl, suffix) == 0;
+    int sl = (int)strlen(s), fl = (int)strlen(suffix);
+    return fl <= sl && strcmp(s + sl - fl, suffix) == 0;
 }
 
-// string.Length → strlen (bereits via TypeMapper, aber zur Vollstaendigkeit)
 #define String_Length(s) ((int)strlen(s))
 
 // ============================================================================
-// List<T> — dynamische Liste fuer primitive Typen und Pointer
-//
-// Verwendung:
-//   CS2SX_LIST_DEFINE(int)       → erzeugt List_int mit Add/Get/Count/Clear/Free
-//   CS2SX_LIST_DEFINE_PTR(Label) → erzeugt List_Label fuer Pointer-Typen
-//
-// In C# verwendbar als:
-//   List<int> nums = new List<int>();
-//   List<string> names = new List<string>();
-//   List<Label> labels = new List<Label>();
+// List<T>
 // ============================================================================
 
 #define CS2SX_LIST_INITIAL_CAP 8
 
-#define CS2SX_LIST_DEFINE(T) \
-typedef struct { T* data; int count; int capacity; } List_##T; \
-static inline List_##T* List_##T##_New(void) { \
-    List_##T* l = (List_##T*)malloc(sizeof(List_##T)); \
-    if (!l) return NULL; \
-    l->data = (T*)malloc(CS2SX_LIST_INITIAL_CAP * sizeof(T)); \
-    l->count = 0; l->capacity = CS2SX_LIST_INITIAL_CAP; return l; } \
-static inline void List_##T##_Add(List_##T* l, T val) { \
-    if (!l) return; \
-    if (l->count >= l->capacity) { \
-        l->capacity *= 2; \
-        l->data = (T*)realloc(l->data, l->capacity * sizeof(T)); } \
-    l->data[l->count++] = val; } \
-static inline T List_##T##_Get(List_##T* l, int i) { return l->data[i]; } \
-static inline void List_##T##_Clear(List_##T* l) { if (l) l->count = 0; } \
-static inline void List_##T##_Free(List_##T* l) { if (l) { free(l->data); free(l); } } \
-static inline int List_##T##_Contains(List_##T* l, T val) { \
-    for (int _i = 0; _i < l->count; _i++) { if (l->data[_i] == val) return 1; } return 0; } \
-static inline void List_##T##_Remove(List_##T* l, int idx) { \
-    if (!l || idx < 0 || idx >= l->count) return; \
-    for (int _i = idx; _i < l->count - 1; _i++) l->data[_i] = l->data[_i+1]; \
-    l->count--; } \
-static inline void List_##T##_RemoveValue(List_##T* l, T val) { \
-    for (int _i = 0; _i < l->count; _i++) { if (l->data[_i] == val) { List_##T##_Remove(l, _i); return; } } }
+#define CS2SX_LIST_DEFINE(T)                                                                        \
+typedef struct { T* data; int count; int capacity; } List_##T;                                      \
+static inline List_##T* List_##T##_New(void) {                                                      \
+    List_##T* l = (List_##T*)malloc(sizeof(List_##T));                                              \
+    if (!l) return NULL;                                                                            \
+    l->data = (T*)malloc(CS2SX_LIST_INITIAL_CAP * sizeof(T));                                      \
+    l->count = 0; l->capacity = CS2SX_LIST_INITIAL_CAP; return l; }                                \
+static inline void List_##T##_Add(List_##T* l, T val) {                                            \
+    if (!l) return;                                                                                 \
+    if (l->count >= l->capacity) {                                                                  \
+        l->capacity *= 2;                                                                           \
+        l->data = (T*)realloc(l->data, l->capacity * sizeof(T)); }                                 \
+    l->data[l->count++] = val; }                                                                    \
+static inline T    List_##T##_Get(List_##T* l, int i) { return l->data[i]; }                       \
+static inline int  List_##T##_Count(List_##T* l)       { return l ? l->count : 0; }                \
+static inline void List_##T##_Clear(List_##T* l)       { if (l) l->count = 0; }                    \
+static inline void List_##T##_Free(List_##T* l)        { if (l) { free(l->data); free(l); } }      \
+static inline int  List_##T##_Contains(List_##T* l, T val) {                                       \
+    for (int _i = 0; _i < l->count; _i++) { if (l->data[_i] == val) return 1; } return 0; }       \
+static inline void List_##T##_Remove(List_##T* l, int idx) {                                       \
+    if (!l || idx < 0 || idx >= l->count) return;                                                  \
+    for (int _i = idx; _i < l->count - 1; _i++) l->data[_i] = l->data[_i + 1];                   \
+    l->count--; }                                                                                   \
+static inline void List_##T##_RemoveValue(List_##T* l, T val) {                                    \
+    for (int _i = 0; _i < l->count; _i++) {                                                        \
+        if (l->data[_i] == val) { List_##T##_Remove(l, _i); return; } } }
 
-// Pointer-Variante (fuer Label*, Button* etc.)
-#define CS2SX_LIST_DEFINE_PTR(T) \
-typedef struct { T** data; int count; int capacity; } List_##T; \
-static inline List_##T* List_##T##_New(void) { \
-    List_##T* l = (List_##T*)malloc(sizeof(List_##T)); \
-    if (!l) return NULL; \
-    l->data = (T**)malloc(CS2SX_LIST_INITIAL_CAP * sizeof(T*)); \
-    l->count = 0; l->capacity = CS2SX_LIST_INITIAL_CAP; return l; } \
-static inline void List_##T##_Add(List_##T* l, T* val) { \
-    if (!l) return; \
-    if (l->count >= l->capacity) { \
-        l->capacity *= 2; \
-        l->data = (T**)realloc(l->data, l->capacity * sizeof(T*)); } \
-    l->data[l->count++] = val; } \
-static inline T* List_##T##_Get(List_##T* l, int i) { return l->data[i]; } \
-static inline void List_##T##_Clear(List_##T* l) { if (l) l->count = 0; } \
-static inline void List_##T##_Free(List_##T* l) { if (l) { free(l->data); free(l); } } \
-static inline void List_##T##_Remove(List_##T* l, int idx) { \
-    if (!l || idx < 0 || idx >= l->count) return; \
-    for (int _i = idx; _i < l->count - 1; _i++) l->data[_i] = l->data[_i+1]; \
-    l->count--; } \
-static inline void List_##T##_RemoveValue(List_##T* l, T* val) { \
-    for (int _i = 0; _i < l->count; _i++) { if (l->data[_i] == val) { List_##T##_Remove(l, _i); return; } } }
+#define CS2SX_LIST_DEFINE_PTR(T)                                                                    \
+typedef struct { T** data; int count; int capacity; } List_##T;                                     \
+static inline List_##T* List_##T##_New(void) {                                                      \
+    List_##T* l = (List_##T*)malloc(sizeof(List_##T));                                              \
+    if (!l) return NULL;                                                                            \
+    l->data = (T**)malloc(CS2SX_LIST_INITIAL_CAP * sizeof(T*));                                    \
+    l->count = 0; l->capacity = CS2SX_LIST_INITIAL_CAP; return l; }                                \
+static inline void List_##T##_Add(List_##T* l, T* val) {                                           \
+    if (!l) return;                                                                                 \
+    if (l->count >= l->capacity) {                                                                  \
+        l->capacity *= 2;                                                                           \
+        l->data = (T**)realloc(l->data, l->capacity * sizeof(T*)); }                               \
+    l->data[l->count++] = val; }                                                                    \
+static inline T*   List_##T##_Get(List_##T* l, int i) { return l->data[i]; }                       \
+static inline int  List_##T##_Count(List_##T* l)       { return l ? l->count : 0; }                \
+static inline void List_##T##_Clear(List_##T* l)       { if (l) l->count = 0; }                    \
+static inline void List_##T##_Free(List_##T* l)        { if (l) { free(l->data); free(l); } }      \
+static inline void List_##T##_Remove(List_##T* l, int idx) {                                       \
+    if (!l || idx < 0 || idx >= l->count) return;                                                  \
+    for (int _i = idx; _i < l->count - 1; _i++) l->data[_i] = l->data[_i + 1];                   \
+    l->count--; }                                                                                   \
+static inline void List_##T##_RemoveValue(List_##T* l, T* val) {                                   \
+    for (int _i = 0; _i < l->count; _i++) {                                                        \
+        if (l->data[_i] == val) { List_##T##_Remove(l, _i); return; } } }
 
-// Vordefinierte Typen
 CS2SX_LIST_DEFINE(int)
 CS2SX_LIST_DEFINE(float)
 CS2SX_LIST_DEFINE(double)
@@ -396,16 +365,16 @@ CS2SX_LIST_DEFINE(u32)
 CS2SX_LIST_DEFINE(u64)
 CS2SX_LIST_DEFINE(s32)
 CS2SX_LIST_DEFINE(s64)
-// string = const char* Pointer-Liste
-// String-Liste: speichert const char* (String-Literale sind const)
-typedef struct { const char** data; int count; int capacity; } List_char;
-static inline List_char* List_char_New(void) {
-    List_char* l = (List_char*)malloc(sizeof(List_char));
+
+// List<string>
+typedef struct { const char** data; int count; int capacity; } List_str;
+static inline List_str* List_str_New(void) {
+    List_str* l = (List_str*)malloc(sizeof(List_str));
     if (!l) return NULL;
     l->data = (const char**)malloc(CS2SX_LIST_INITIAL_CAP * sizeof(const char*));
     l->count = 0; l->capacity = CS2SX_LIST_INITIAL_CAP; return l;
 }
-static inline void List_char_Add(List_char* l, const char* val) {
+static inline void        List_str_Add(List_str* l, const char* val) {
     if (!l) return;
     if (l->count >= l->capacity) {
         l->capacity *= 2;
@@ -413,87 +382,127 @@ static inline void List_char_Add(List_char* l, const char* val) {
     }
     l->data[l->count++] = val;
 }
-static inline const char* List_char_Get(List_char* l, int i) { return l->data[i]; }
-static inline void List_char_Clear(List_char* l) { if (l) l->count = 0; }
-static inline void List_char_Free(List_char* l) { if (l) { free(l->data); free(l); } }
-static inline void List_char_Remove(List_char* l, int idx) {
+static inline const char* List_str_Get(List_str* l, int i) { return l->data[i]; }
+static inline int         List_str_Count(List_str* l) { return l ? l->count : 0; }
+static inline void        List_str_Clear(List_str* l) { if (l) l->count = 0; }
+static inline void        List_str_Free(List_str* l) { if (l) { free(l->data); free(l); } }
+static inline void        List_str_Remove(List_str* l, int idx) {
     if (!l || idx < 0 || idx >= l->count) return;
     for (int _i = idx; _i < l->count - 1; _i++) l->data[_i] = l->data[_i + 1];
     l->count--;
 }
-static inline void List_char_RemoveValue(List_char* l, const char* val) {
-    \
-        for (int _i = 0; _i < l->count; _i++) { if (strcmp(l->data[_i], val) == 0) { List_char_Remove(l, _i); return; } } \
+static inline void List_str_RemoveValue(List_str* l, const char* val) {
+    for (int _i = 0; _i < l->count; _i++) {
+        if (strcmp(l->data[_i], val) == 0) { List_str_Remove(l, _i); return; }
+    }
+}
+static inline int List_str_Contains(List_str* l, const char* val) {
+    for (int _i = 0; _i < l->count; _i++) {
+        if (strcmp(l->data[_i], val) == 0) return 1;
+    }
+    return 0;
 }
 
-// =============================================================================
-// Dictionary<TKey, TValue> — einfacher Hash-Map-ähnlicher Key-Value-Speicher
-// =============================================================================
+// ============================================================================
+// Dictionary<TKey, TValue>
+// ============================================================================
 
-#define CS2SX_DICT_DEFINE(K, V) \
-typedef struct { K* keys; V* vals; int count; int capacity; } Dict_##K##_##V; \
-static inline Dict_##K##_##V* Dict_##K##_##V##_New(void) { \
-    Dict_##K##_##V* d = (Dict_##K##_##V*)malloc(sizeof(Dict_##K##_##V)); \
-    d->keys = (K*)malloc(8 * sizeof(K)); \
-    d->vals = (V*)malloc(8 * sizeof(V)); \
-    d->count = 0; d->capacity = 8; return d; } \
-static inline void Dict_##K##_##V##_Add(Dict_##K##_##V* d, K key, V val) { \
-    if (d->count >= d->capacity) { \
-        d->capacity *= 2; \
-        d->keys = (K*)realloc(d->keys, d->capacity * sizeof(K)); \
-        d->vals = (V*)realloc(d->vals, d->capacity * sizeof(V)); } \
-    d->keys[d->count] = key; d->vals[d->count] = val; d->count++; } \
-static inline int Dict_##K##_##V##_ContainsKey(Dict_##K##_##V* d, K key) { \
-    for (int _i = 0; _i < d->count; _i++) { if (d->keys[_i] == key) return 1; } return 0; } \
-static inline int Dict_##K##_##V##_TryGetValue(Dict_##K##_##V* d, K key, V* out_val) { \
-    for (int _i = 0; _i < d->count; _i++) { if (d->keys[_i] == key) { *out_val = d->vals[_i]; return 1; } } return 0; } \
-static inline void Dict_##K##_##V##_Remove(Dict_##K##_##V* d, K key) { \
-    for (int _i = 0; _i < d->count; _i++) { \
-        if (d->keys[_i] == key) { \
-            for (int _j = _i; _j < d->count-1; _j++) { d->keys[_j]=d->keys[_j+1]; d->vals[_j]=d->vals[_j+1]; } \
-            d->count--; return; } } } \
-static inline void Dict_##K##_##V##_Clear(Dict_##K##_##V* d) { if (d) d->count = 0; } \
-static inline void Dict_##K##_##V##_Free(Dict_##K##_##V* d) { if (d) { free(d->keys); free(d->vals); free(d); } }
+#define CS2SX_DICT_INITIAL_CAP 8
 
-#define CS2SX_DICT_DEFINE_STR_KEY(V) \
-typedef struct { const char** keys; V* vals; int count; int capacity; } Dict_str_##V; \
-static inline Dict_str_##V* Dict_str_##V##_New(void) { \
-    Dict_str_##V* d = (Dict_str_##V*)malloc(sizeof(Dict_str_##V)); \
-    d->keys = (const char**)malloc(8 * sizeof(const char*)); \
-    d->vals = (V*)malloc(8 * sizeof(V)); \
-    d->count = 0; d->capacity = 8; return d; } \
-static inline void Dict_str_##V##_Add(Dict_str_##V* d, const char* key, V val) { \
-    if (d->count >= d->capacity) { \
-        d->capacity *= 2; \
-        d->keys = (const char**)realloc(d->keys, d->capacity * sizeof(const char*)); \
-        d->vals = (V*)realloc(d->vals, d->capacity * sizeof(V)); } \
-    d->keys[d->count] = key; d->vals[d->count] = val; d->count++; } \
-static inline int Dict_str_##V##_ContainsKey(Dict_str_##V* d, const char* key) { \
-    for (int _i = 0; _i < d->count; _i++) { if (strcmp(d->keys[_i], key) == 0) return 1; } return 0; } \
-static inline int Dict_str_##V##_TryGetValue(Dict_str_##V* d, const char* key, V* out_val) { \
-    for (int _i = 0; _i < d->count; _i++) { if (strcmp(d->keys[_i], key) == 0) { *out_val = d->vals[_i]; return 1; } } return 0; } \
-static inline void Dict_str_##V##_Remove(Dict_str_##V* d, const char* key) { \
-    for (int _i = 0; _i < d->count; _i++) { \
-        if (strcmp(d->keys[_i], key) == 0) { \
-            for (int _j = _i; _j < d->count-1; _j++) { d->keys[_j]=d->keys[_j+1]; d->vals[_j]=d->vals[_j+1]; } \
-            d->count--; return; } } } \
-static inline void Dict_str_##V##_Clear(Dict_str_##V* d) { if (d) d->count = 0; } \
-static inline void Dict_str_##V##_Free(Dict_str_##V* d) { if (d) { free(d->keys); free(d->vals); free(d); } }
+#define CS2SX_DICT_DEFINE(K, V)                                                                         \
+typedef struct { K* keys; V* vals; int count; int capacity; } Dict_##K##_##V;                           \
+static inline Dict_##K##_##V* Dict_##K##_##V##_New(void) {                                             \
+    Dict_##K##_##V* d = (Dict_##K##_##V*)malloc(sizeof(Dict_##K##_##V));                               \
+    if (!d) return NULL;                                                                                \
+    d->keys = (K*)malloc(CS2SX_DICT_INITIAL_CAP * sizeof(K));                                          \
+    d->vals = (V*)malloc(CS2SX_DICT_INITIAL_CAP * sizeof(V));                                          \
+    d->count = 0; d->capacity = CS2SX_DICT_INITIAL_CAP; return d; }                                    \
+static inline void Dict_##K##_##V##_Add(Dict_##K##_##V* d, K key, V val) {                             \
+    if (!d) return;                                                                                     \
+    if (d->count >= d->capacity) {                                                                      \
+        d->capacity *= 2;                                                                               \
+        d->keys = (K*)realloc(d->keys, d->capacity * sizeof(K));                                        \
+        d->vals = (V*)realloc(d->vals, d->capacity * sizeof(V)); }                                      \
+    d->keys[d->count] = key; d->vals[d->count] = val; d->count++; }                                    \
+static inline int Dict_##K##_##V##_ContainsKey(Dict_##K##_##V* d, K key) {                             \
+    for (int _i = 0; _i < d->count; _i++) { if (d->keys[_i] == key) return 1; } return 0; }           \
+static inline int Dict_##K##_##V##_TryGetValue(Dict_##K##_##V* d, K key, V* out_val) {                 \
+    for (int _i = 0; _i < d->count; _i++) {                                                            \
+        if (d->keys[_i] == key) { *out_val = d->vals[_i]; return 1; } } return 0; }                    \
+static inline V Dict_##K##_##V##_Get(Dict_##K##_##V* d, K key) {                                       \
+    V _v; memset(&_v, 0, sizeof(V));                                                                    \
+    Dict_##K##_##V##_TryGetValue(d, key, &_v); return _v; }                                            \
+static inline void Dict_##K##_##V##_Set(Dict_##K##_##V* d, K key, V val) {                             \
+    for (int _i = 0; _i < d->count; _i++) {                                                            \
+        if (d->keys[_i] == key) { d->vals[_i] = val; return; } }                                       \
+    Dict_##K##_##V##_Add(d, key, val); }                                                                \
+static inline void Dict_##K##_##V##_Remove(Dict_##K##_##V* d, K key) {                                 \
+    for (int _i = 0; _i < d->count; _i++) {                                                            \
+        if (d->keys[_i] == key) {                                                                       \
+            for (int _j = _i; _j < d->count - 1; _j++) {                                               \
+                d->keys[_j] = d->keys[_j+1]; d->vals[_j] = d->vals[_j+1]; }                           \
+            d->count--; return; } } }                                                                   \
+static inline void Dict_##K##_##V##_Clear(Dict_##K##_##V* d) { if (d) d->count = 0; }                  \
+static inline void Dict_##K##_##V##_Free(Dict_##K##_##V* d)  {                                         \
+    if (d) { free(d->keys); free(d->vals); free(d); } }
 
-// Vordefinierte Dictionary-Typen
+#define CS2SX_DICT_DEFINE_STR_KEY(V)                                                                    \
+typedef struct { const char** keys; V* vals; int count; int capacity; } Dict_str_##V;                   \
+static inline Dict_str_##V* Dict_str_##V##_New(void) {                                                  \
+    Dict_str_##V* d = (Dict_str_##V*)malloc(sizeof(Dict_str_##V));                                      \
+    if (!d) return NULL;                                                                                \
+    d->keys = (const char**)malloc(CS2SX_DICT_INITIAL_CAP * sizeof(const char*));                      \
+    d->vals = (V*)malloc(CS2SX_DICT_INITIAL_CAP * sizeof(V));                                          \
+    d->count = 0; d->capacity = CS2SX_DICT_INITIAL_CAP; return d; }                                    \
+static inline void Dict_str_##V##_Add(Dict_str_##V* d, const char* key, V val) {                        \
+    if (!d) return;                                                                                     \
+    if (d->count >= d->capacity) {                                                                      \
+        d->capacity *= 2;                                                                               \
+        d->keys = (const char**)realloc(d->keys, d->capacity * sizeof(const char*));                    \
+        d->vals = (V*)realloc(d->vals, d->capacity * sizeof(V)); }                                      \
+    d->keys[d->count] = key; d->vals[d->count] = val; d->count++; }                                    \
+static inline int Dict_str_##V##_ContainsKey(Dict_str_##V* d, const char* key) {                        \
+    for (int _i = 0; _i < d->count; _i++) {                                                            \
+        if (strcmp(d->keys[_i], key) == 0) return 1; } return 0; }                                     \
+static inline int Dict_str_##V##_TryGetValue(Dict_str_##V* d, const char* key, V* out_val) {            \
+    for (int _i = 0; _i < d->count; _i++) {                                                            \
+        if (strcmp(d->keys[_i], key) == 0) { *out_val = d->vals[_i]; return 1; } } return 0; }         \
+static inline V Dict_str_##V##_Get(Dict_str_##V* d, const char* key) {                                  \
+    V _v; memset(&_v, 0, sizeof(V));                                                                    \
+    Dict_str_##V##_TryGetValue(d, key, &_v); return _v; }                                               \
+static inline void Dict_str_##V##_Set(Dict_str_##V* d, const char* key, V val) {                        \
+    for (int _i = 0; _i < d->count; _i++) {                                                            \
+        if (strcmp(d->keys[_i], key) == 0) { d->vals[_i] = val; return; } }                            \
+    Dict_str_##V##_Add(d, key, val); }                                                                  \
+static inline void Dict_str_##V##_Remove(Dict_str_##V* d, const char* key) {                            \
+    for (int _i = 0; _i < d->count; _i++) {                                                            \
+        if (strcmp(d->keys[_i], key) == 0) {                                                            \
+            for (int _j = _i; _j < d->count - 1; _j++) {                                               \
+                d->keys[_j] = d->keys[_j+1]; d->vals[_j] = d->vals[_j+1]; }                           \
+            d->count--; return; } } }                                                                   \
+static inline void Dict_str_##V##_Clear(Dict_str_##V* d) { if (d) d->count = 0; }                       \
+static inline void Dict_str_##V##_Free(Dict_str_##V* d)  {                                              \
+    if (d) { free(d->keys); free(d->vals); free(d); } }
+
 CS2SX_DICT_DEFINE(int, int)
+CS2SX_DICT_DEFINE(int, float)
 CS2SX_DICT_DEFINE_STR_KEY(int)
 CS2SX_DICT_DEFINE_STR_KEY(float)
-// Dictionary<string,string> — komplett manuell da 'str' kein C-Typ ist
-// Dictionary<string,string>
+CS2SX_DICT_DEFINE_STR_KEY(u8)
+CS2SX_DICT_DEFINE_STR_KEY(u32)
+CS2SX_DICT_DEFINE_STR_KEY(u64)
+
+// Dict<string, string>
 typedef struct { const char** keys; const char** vals; int count; int capacity; } Dict_str_str;
 static inline Dict_str_str* Dict_str_str_New(void) {
     Dict_str_str* d = (Dict_str_str*)malloc(sizeof(Dict_str_str));
-    d->keys = (const char**)malloc(8 * sizeof(const char*));
-    d->vals = (const char**)malloc(8 * sizeof(const char*));
-    d->count = 0; d->capacity = 8; return d;
+    if (!d) return NULL;
+    d->keys = (const char**)malloc(CS2SX_DICT_INITIAL_CAP * sizeof(const char*));
+    d->vals = (const char**)malloc(CS2SX_DICT_INITIAL_CAP * sizeof(const char*));
+    d->count = 0; d->capacity = CS2SX_DICT_INITIAL_CAP; return d;
 }
 static inline void Dict_str_str_Add(Dict_str_str* d, const char* key, const char* val) {
+    if (!d) return;
     if (d->count >= d->capacity) {
         d->capacity *= 2;
         d->keys = (const char**)realloc(d->keys, d->capacity * sizeof(const char*));
@@ -505,18 +514,34 @@ static inline int Dict_str_str_ContainsKey(Dict_str_str* d, const char* key) {
     for (int _i = 0; _i < d->count; _i++) { if (strcmp(d->keys[_i], key) == 0) return 1; } return 0;
 }
 static inline int Dict_str_str_TryGetValue(Dict_str_str* d, const char* key, const char** out_val) {
-    for (int _i = 0; _i < d->count; _i++) { if (strcmp(d->keys[_i], key) == 0) { *out_val = d->vals[_i]; return 1; } } return 0;
+    for (int _i = 0; _i < d->count; _i++) {
+        if (strcmp(d->keys[_i], key) == 0) { *out_val = d->vals[_i]; return 1; }
+    } return 0;
+}
+static inline const char* Dict_str_str_Get(Dict_str_str* d, const char* key) {
+    const char* v = NULL;
+    Dict_str_str_TryGetValue(d, key, &v);
+    return v;
+}
+static inline void Dict_str_str_Set(Dict_str_str* d, const char* key, const char* val) {
+    for (int _i = 0; _i < d->count; _i++) {
+        if (strcmp(d->keys[_i], key) == 0) { d->vals[_i] = val; return; }
+    }
+    Dict_str_str_Add(d, key, val);
 }
 static inline void Dict_str_str_Remove(Dict_str_str* d, const char* key) {
     for (int _i = 0; _i < d->count; _i++) {
         if (strcmp(d->keys[_i], key) == 0) {
-            for (int _j = _i; _j < d->count - 1; _j++) { d->keys[_j] = d->keys[_j + 1]; d->vals[_j] = d->vals[_j + 1]; }
+            for (int _j = _i; _j < d->count - 1; _j++) {
+                d->keys[_j] = d->keys[_j + 1]; d->vals[_j] = d->vals[_j + 1];
+            }
             d->count--; return;
         }
     }
 }
 static inline void Dict_str_str_Clear(Dict_str_str* d) { if (d) d->count = 0; }
 static inline void Dict_str_str_Free(Dict_str_str* d) { if (d) { free(d->keys); free(d->vals); free(d); } }
+
 // ============================================================================
 // Form
 // ============================================================================
@@ -526,69 +551,43 @@ struct Form
 {
     Control* controls[FORM_MAX_CONTROLS];
     int      count;
-    int      focusedIndex;  // Index des aktuell fokussierten Controls (-1 = keiner)
+    int      focusedIndex;
 };
 
-static inline void Form_Add(Form* form, Control* control)
+static inline void Form_Add(Form* form, Control* ctrl)
 {
-    if (!form || !control) return;
-    if (form->count >= FORM_MAX_CONTROLS) return;
-    form->controls[form->count++] = control;
+    if (!form || !ctrl || form->count >= FORM_MAX_CONTROLS) return;
+    form->controls[form->count++] = ctrl;
 }
 
-// Gibt den Index des aktuell fokussierten, fokussierbaren Controls zurück (-1 wenn keiner).
-static inline int Form_GetFocusedIndex(const Form* form)
+static inline void Form_InitFocus(Form* form)
 {
-    if (!form) return -1;
+    if (!form) return;
     for (int i = 0; i < form->count; i++)
     {
         if (!form->controls[i]->focusable) continue;
-        Button* btn = (Button*)form->controls[i];
-        if (btn->focused) return i;
+        ((Button*)form->controls[i])->focused = 1;
+        form->focusedIndex = i;
+        return;
     }
-    return -1;
 }
 
-// Verschiebt den Fokus um `direction` (+1 = vorwärts, -1 = rückwärts).
 static inline void Form_MoveFocus(Form* form, int direction)
 {
     if (!form || form->count == 0) return;
-
-    // Aktuellen Fokus finden und entfernen
     int current = -1;
     for (int i = 0; i < form->count; i++)
     {
         if (!form->controls[i]->focusable) continue;
-        Button* btn = (Button*)form->controls[i];
-        if (btn->focused)
-        {
-            btn->focused = 0;
-            current = i;
-            break;
-        }
+        Button* b = (Button*)form->controls[i];
+        if (b->focused) { b->focused = 0; current = i; break; }
     }
-
-    // Ersten fokussierbaren Control finden, wenn noch keiner gewählt war
-    if (current == -1)
-    {
-        for (int i = 0; i < form->count; i++)
-        {
-            if (form->controls[i]->focusable)
-            {
-                ((Button*)form->controls[i])->focused = 1;
-                form->focusedIndex = i;
-                return;
-            }
-        }
-        return;  // kein fokussierbares Control vorhanden
-    }
-
-    // Nächsten fokussierbaren Control in `direction` suchen
+    if (current == -1) { Form_InitFocus(form); return; }
     int next = current;
-    for (int tries = 0; tries < form->count; tries++)
+    for (int t = 0; t < form->count; t++)
     {
         next += direction;
-        if (next < 0)           next = form->count - 1;
+        if (next < 0)            next = form->count - 1;
         if (next >= form->count) next = 0;
         if (form->controls[next]->focusable)
         {
@@ -597,24 +596,8 @@ static inline void Form_MoveFocus(Form* form, int direction)
             return;
         }
     }
-    // Fallback: ursprünglichen Fokus wiederherstellen
     if (current >= 0 && form->controls[current]->focusable)
         ((Button*)form->controls[current])->focused = 1;
-}
-
-// Setzt initialen Fokus auf den ersten fokussierbaren Control.
-static inline void Form_InitFocus(Form* form)
-{
-    if (!form) return;
-    for (int i = 0; i < form->count; i++)
-    {
-        if (form->controls[i]->focusable)
-        {
-            ((Button*)form->controls[i])->focused = 1;
-            form->focusedIndex = i;
-            return;
-        }
-    }
 }
 
 static inline void Form_DrawAll(Form* form)
@@ -622,38 +605,40 @@ static inline void Form_DrawAll(Form* form)
     if (!form) return;
     for (int i = 0; i < form->count; i++)
     {
-        Control* ctrl = form->controls[i];
-        if (ctrl && ctrl->visible && ctrl->Draw)
-            ctrl->Draw(ctrl);
+        Control* c = form->controls[i];
+        if (c && c->visible && c->Draw) c->Draw(c);
     }
 }
 
 static inline void Form_UpdateAll(Form* form, u64 kDown, u64 kHeld)
 {
     if (!form) return;
-
-    // Navigation
     if (kDown & HidNpadButton_Down) Form_MoveFocus(form, 1);
     if (kDown & HidNpadButton_Up)   Form_MoveFocus(form, -1);
-
-    // Controls aktualisieren
     for (int i = 0; i < form->count; i++)
     {
-        Control* ctrl = form->controls[i];
-        if (ctrl && ctrl->visible && ctrl->Update)
-            ctrl->Update(ctrl, kDown, kHeld);
+        Control* c = form->controls[i];
+        if (c && c->visible && c->Update) c->Update(c, kDown, kHeld);
     }
 }
 
-// Gibt alle Controls frei.
 static inline void Form_Free(Form* form)
 {
     if (!form) return;
-    for (int i = 0; i < form->count; i++)
-    {
-        free(form->controls[i]);
-        form->controls[i] = NULL;
-    }
+    for (int i = 0; i < form->count; i++) { free(form->controls[i]); form->controls[i] = NULL; }
     form->count = 0;
     form->focusedIndex = -1;
 }
+
+// ============================================================================
+// SwitchApp
+// ============================================================================
+
+//typedef struct SwitchApp SwitchApp;
+//struct SwitchApp
+//{
+//    void (*OnInit)  (SwitchApp* self);
+//    void (*OnUpdate)(SwitchApp* self, u64 kDown, u64 kHeld);
+//    void (*OnDraw)  (SwitchApp* self);
+//    void (*OnExit)  (SwitchApp* self);
+//};

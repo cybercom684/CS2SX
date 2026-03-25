@@ -15,7 +15,6 @@ public class ProjectCreator
         Directory.CreateDirectory(projectDir);
         Console.WriteLine($"[CS2SX] Creating project '{appName}'...");
 
-        // .csproj
         File.WriteAllText(Path.Combine(projectDir, $"{appName}.csproj"), $"""
             <Project Sdk="Microsoft.NET.Sdk">
               <PropertyGroup>
@@ -26,7 +25,6 @@ public class ProjectCreator
             </Project>
             """);
 
-        // cs2sx.json
         File.WriteAllText(Path.Combine(projectDir, "cs2sx.json"), $$"""
             {
                 "name": "{{appName}}",
@@ -36,7 +34,6 @@ public class ProjectCreator
             }
             """);
 
-        // Program.cs
         File.WriteAllText(Path.Combine(projectDir, "Program.cs"), $$"""
             public class {{appName}}App : SwitchApp
             {
@@ -52,10 +49,25 @@ public class ProjectCreator
             }
             """);
 
-        // Stubs kopieren via RuntimeExporter
-        RuntimeExporter.ExportStubs(projectDir);
+        var stubsExported = ExportStubsSafe(projectDir);
+        if (!stubsExported)
+            Console.Error.WriteLine("[CS2SX] Warnung: Stubs konnten nicht exportiert werden.");
 
         Console.WriteLine($"[CS2SX] Done! Project created at: {projectDir}");
         Console.WriteLine($"[CS2SX] Build with: cs2sx build {appName}/{appName}.csproj");
+    }
+
+    private static bool ExportStubsSafe(string projectDir)
+    {
+        try
+        {
+            RuntimeExporter.ExportStubs(projectDir);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[CS2SX] ExportStubs-Fehler: {ex.Message}");
+            return false;
+        }
     }
 }

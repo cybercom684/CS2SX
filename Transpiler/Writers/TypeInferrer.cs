@@ -46,9 +46,23 @@ public static class TypeInferrer
             case MemberAccessExpressionSyntax mem:
                 {
                     var prop = mem.Name.Identifier.Text;
-                    var objKey = mem.Expression.ToString().TrimStart('_');
+                    var objRaw = mem.Expression.ToString();
+                    var objKey = objRaw.TrimStart('_');
+
+                    // .Count und .Length sind immer int
+                    if (prop is "Count" or "Length" or "count" or "length")
+                        return "int";
+
+                    // Typ des Objekts nachschlagen
+                    string? objType = null;
+                    ctx.LocalTypes.TryGetValue(objRaw, out objType);
+                    if (objType == null) ctx.FieldTypes.TryGetValue(objKey, out objType);
+
+                    // List<T>.Count → int, aber T selbst zurückgeben wenn Index-Zugriff
+                    if (objType != null && TypeRegistry.IsList(objType))
+                        return "int";
+
                     if (ctx.FieldTypes.TryGetValue(objKey, out var ft)) return ft;
-                    if (prop is "Count" or "Length") return "int";
                     return "int";
                 }
 
@@ -69,21 +83,23 @@ public static class TypeInferrer
                 return "int";
         }
     }
-
     /// <summary>
     /// Gibt den printf Format-Specifier für einen Ausdruck zurück.
     /// </summary>
-    public static string FormatSpecifier(Microsoft.CodeAnalysis.SyntaxNode? expr, TranspilerContext ctx)
+    public static string FormatSpecifier(
+    Microsoft.CodeAnalysis.SyntaxNode? expr, TranspilerContext ctx)
     {
-        // Direkter Check für .Count und .Length → immer %d
-        if (expr is MemberAccessExpressionSyntax mem2)
+        if (expr is MemberAccessExpressionSyntax mem)
         {
-            var prop = mem2.Name.Identifier.Text;
+            var prop = mem.Name.Identifier.Text;
             if (prop is "Count" or "Length" or "count" or "length")
                 return "%d";
         }
 
         var csType = InferCSharpType(expr, ctx);
+
+        // InferCSharpType gibt bereits gemappte C-Typen zurück für primitive
+        // aber für string-Typen den C#-Namen
         var cType = TypeRegistry.MapType(csType);
         return TypeRegistry.FormatSpecifier(cType);
     }

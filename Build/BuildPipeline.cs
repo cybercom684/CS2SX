@@ -123,17 +123,22 @@ public sealed class BuildPipeline
 
                 var source = File.ReadAllText(csFile);
 
+                // Header generieren
                 var hTranspiler = new CSharpToC(CSharpToC.TranspileMode.HeaderOnly);
                 var hContent = WrapHeader(baseName,
-                    "#pragma once\n#include \"_forward.h\"\n\n"
+                    "#include \"_forward.h\"\n\n"
                     + hTranspiler.Transpile(source));
                 File.WriteAllText(Path.Combine(_buildDir, baseName + ".h"), hContent);
 
-                var allIncludes = string.Join("\n", allHeaders.Select(h => $"#include \"{h}\""));
+                // Implementation: alle Headers includen damit Typen bekannt sind,
+                // aber jede .c bekommt alle .h — Redefinition wird durch #pragma once verhindert
+                var allIncludes = string.Join("\n",
+                    allHeaders.Select(h => $"#include \"{h}\""));
+
                 var cTranspiler = new CSharpToC(CSharpToC.TranspileMode.Implementation);
                 var cContent = "#include <stdlib.h>\n"
-                                + allIncludes + "\n\n"
-                                + cTranspiler.Transpile(source);
+                             + allIncludes + "\n\n"
+                             + cTranspiler.Transpile(source);
                 var cPath = Path.Combine(_buildDir, baseName + ".c");
                 File.WriteAllText(cPath, cContent);
                 cFiles.Add(cPath);
@@ -262,7 +267,11 @@ public sealed class BuildPipeline
     private static string WrapHeader(string baseName, string content)
     {
         var guard = "CS2SX_" + baseName.ToUpperInvariant() + "_H";
-        return "#ifndef " + guard + "\n#define " + guard + "\n\n" + content + "\n\n#endif\n";
+        return "#pragma once\n"
+             + "#ifndef " + guard + "\n"
+             + "#define " + guard + "\n\n"
+             + content
+             + "\n\n#endif\n";
     }
 
     private static string? FindSwitchAppClass(IReadOnlyList<string> sourceFiles)
