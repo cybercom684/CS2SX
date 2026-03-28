@@ -225,8 +225,9 @@ public static class TypeRegistry
         // List<T> → List_T*
         if (csType.StartsWith("List<") && csType.EndsWith(">"))
         {
-            var inner  = csType[5..^1].Trim();
-            var cInner = inner == "string" ? "char" : MapType(inner);
+            var inner = csType[5..^1].Trim();
+            // string → str (nicht char!) für List_str
+            var cInner = inner == "string" ? "str" : MapType(inner);
             return "List_" + cInner + "*";
         }
 

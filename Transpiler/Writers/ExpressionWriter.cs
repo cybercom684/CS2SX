@@ -23,10 +23,9 @@ public sealed class ExpressionWriter
 
         return node switch
         {
-            // ?? muss VOR dem allgemeinen BinaryExpressionSyntax stehen
             BinaryExpressionSyntax coalesce
                 when coalesce.IsKind(SyntaxKind.CoalesceExpression)
-                                                                   => WriteCoalesce(coalesce),
+                                                               => WriteCoalesce(coalesce),
             BinaryExpressionSyntax bin => WriteBinary(bin),
             LiteralExpressionSyntax lit => WriteLiteral(lit),
             IdentifierNameSyntax id => WriteIdentifier(id),
@@ -103,7 +102,6 @@ public sealed class ExpressionWriter
 
     private string WriteBinary(BinaryExpressionSyntax bin)
     {
-        // ?? wird über den Write-switch bereits abgefangen — hier nur normales Binary
         var left = Write(bin.Left);
         var right = Write(bin.Right);
         var op = bin.OperatorToken.Text;
@@ -119,29 +117,16 @@ public sealed class ExpressionWriter
 
     // ── ?? Null-Coalescing ────────────────────────────────────────────────
 
-    /// <summary>
-    /// a ?? b  →  ((a) != NULL ? (a) : (b))
-    ///
-    /// Für string-Typen: ((a) != NULL ? (a) : (b))
-    /// Für primitive (int, float etc.): linker Operand direkt — kein Pointer,
-    /// also gibt ?? für primitive keinen Sinn. Wir geben trotzdem den
-    /// linken Wert zurück mit einem Kommentar.
-    /// </summary>
     private string WriteCoalesce(BinaryExpressionSyntax coalesce)
     {
         var left = Write(coalesce.Left);
         var right = Write(coalesce.Right);
-
         var leftType = TypeInferrer.InferCSharpType(coalesce.Left, _ctx);
         var isPrim = TypeRegistry.IsPrimitive(leftType) && leftType != "string";
 
-        if (isPrim)
-        {
-            // Primitiver Typ kann nicht null sein — ?? gibt immer den linken Wert zurück
-            return left;
-        }
+        // Primitive können nicht null sein — ?? gibt immer den linken Wert zurück
+        if (isPrim) return left;
 
-        // Pointer-Typen: NULL-Check
         return "(" + left + " != NULL ? " + left + " : " + right + ")";
     }
 
@@ -152,10 +137,6 @@ public sealed class ExpressionWriter
         var op = assign.OperatorToken.Text;
         var right = Write(assign.Right);
 
-        // ??= — Null-Coalescing-Zuweisung
-        // x ??= expr  →  if (x == NULL) x = expr
-        // Als Ausdruck nicht direkt darstellbar in C — wir emittieren ein if-Statement
-        // und geben den Variablennamen zurück.
         if (op == "??=")
             return WriteNullCoalescingAssignment(assign, right);
 
@@ -168,24 +149,16 @@ public sealed class ExpressionWriter
         return Write(assign.Left) + " " + op + " " + right;
     }
 
-    /// <summary>
-    /// x ??= new Foo()
-    /// →  if (x == NULL) { x = new Foo(); }
-    /// Emittiert ein if-Statement und gibt x zurück.
-    /// </summary>
     private string WriteNullCoalescingAssignment(
         AssignmentExpressionSyntax assign, string right)
     {
         var target = Write(assign.Left);
-
-        // if-Statement davor emittieren
         _ctx.Out.WriteLine(_ctx.Tab + "if (" + target + " == NULL)");
         _ctx.Out.WriteLine(_ctx.Tab + "{");
         _ctx.Out.WriteLine(_ctx.Tab + "    " + target + " = " + right + ";");
         _ctx.Out.WriteLine(_ctx.Tab + "}");
-
-        // Als Ausdruck den Zielnamen zurückgeben (wird in der aufrufenden Stmt ignoriert)
-        return target;
+        // Leerer Rückgabewert — WriteExprStmt überspringt leere Ausdrücke
+        return "";
     }
 
     private string WriteMemberAssignment(AssignmentExpressionSyntax assign,
@@ -248,8 +221,7 @@ public sealed class ExpressionWriter
             var types = TypeRegistry.GetDictionaryTypes(dictType)!.Value;
             var cKey = types.key == "string" ? "str" : TypeRegistry.MapType(types.key);
             var cVal = types.val == "string" ? "str" : TypeRegistry.MapType(types.val);
-            var dictFunc = "Dict_" + cKey + "_" + cVal;
-            return dictFunc + "_Set(" + obj + ", " + key + ", " + right + ")";
+            return "Dict_" + cKey + "_" + cVal + "_Set(" + obj + ", " + key + ", " + right + ")";
         }
 
         return obj + "[" + key + "] = " + right;
@@ -308,7 +280,8 @@ public sealed class ExpressionWriter
         if (TypeRegistry.IsList(typeName))
         {
             var inner = TypeRegistry.GetListInnerType(typeName)!;
-            var cInner = inner == "string" ? "char" : TypeRegistry.MapType(inner);
+            // string → "str" für List_str_New, nicht "char"
+            var cInner = inner == "string" ? "str" : TypeRegistry.MapType(inner);
             return "List_" + cInner + "_New()";
         }
 
@@ -421,8 +394,7 @@ public sealed class ExpressionWriter
             var types = TypeRegistry.GetDictionaryTypes(dictType)!.Value;
             var cKey = types.key == "string" ? "str" : TypeRegistry.MapType(types.key);
             var cVal = types.val == "string" ? "str" : TypeRegistry.MapType(types.val);
-            var dictFunc = "Dict_" + cKey + "_" + cVal;
-            return "*" + dictFunc + "_Get(" + objExpr + ", " + index + ")";
+            return "*Dict_" + cKey + "_" + cVal + "_Get(" + objExpr + ", " + index + ")";
         }
 
         bool isList = (lt != null && TypeRegistry.IsList(lt))
@@ -431,7 +403,8 @@ public sealed class ExpressionWriter
         {
             var listType = lt ?? ft!;
             var inner = TypeRegistry.GetListInnerType(listType)!;
-            var cInner = inner == "string" ? "char" : TypeRegistry.MapType(inner);
+            // string → "str" für List_str_Get
+            var cInner = inner == "string" ? "str" : TypeRegistry.MapType(inner);
             return "List_" + cInner + "_Get(" + objExpr + ", " + index + ")";
         }
 
