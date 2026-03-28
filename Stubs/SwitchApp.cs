@@ -117,3 +117,13 @@ namespace CS2SX.Switch
                                EnumerateFiles(string path) => System.Array.Empty<string>();
     }
 }
+
+// Parse-Stubs — werden vom Transpiler zu CS2SX_Int_Parse etc. übersetzt
+
+public static class IntParser
+{
+    // Stubs damit der C#-Compiler int.Parse akzeptiert —
+    // int und float sind Schlüsselwörter und können keine statischen Methoden haben,
+    // daher sind diese Stubs nur für die Transpiler-Erkennung nötig.
+    // Der Transpiler erkennt "int.Parse" direkt als calleeStr.
+}

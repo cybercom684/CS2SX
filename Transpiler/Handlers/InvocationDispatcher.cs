@@ -20,6 +20,7 @@ public sealed class InvocationDispatcher
         new ConsoleHandler(),
         new MathHandler(),
         new FileHandler(),
+        new ParseHandler(),
         new StringBuilderHandler(),
         new ListHandler(),
         new DictionaryHandler(),

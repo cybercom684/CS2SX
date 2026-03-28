@@ -29,19 +29,20 @@ dotnet tool update --global --add-source ./bin/Release CS2SX
 
 ## Verwendung
 
-### Neues Projekt erstellen
-
 ```bash
+# Neues Projekt erstellen
 cs2sx new MeinProjekt
-```
 
-### Projekt bauen
-
-```bash
+# Projekt bauen
 cs2sx build MeinProjekt
+
+# LibNX-Stubs generieren (optional)
+cs2sx genstubs <libnx-include> <output>
 ```
 
-Die fertige `.nro`-Datei liegt danach im Projektverzeichnis.
+Die fertige `.nro`-Datei liegt danach im Projektverzeichnis und kann direkt auf die Switch SD-Karte kopiert werden.
+
+> Der Build ist **inkrementell** — nur geänderte `.cs`-Dateien werden neu transpiliert. Unveränderte Dateien werden übersprungen.
 
 ---
 
@@ -121,6 +122,25 @@ public class MyApp : SwitchApp
 | `IsNullOrEmpty`, `IsNullOrWhiteSpace` | ✅ |
 | String-Interpolation `$"..."` | ✅ |
 
+### Parsing
+
+| Methode | Status |
+|---|---|
+| `int.Parse(s)` | ✅ |
+| `int.TryParse(s, out val)` | ✅ |
+| `float.Parse(s)` | ✅ |
+| `float.TryParse(s, out val)` | ✅ |
+
+```csharp
+int val = int.Parse("42");
+
+int result = 0;
+if (int.TryParse(someString, out result))
+{
+    // result enthält den geparsten Wert
+}
+```
+
 ### File I/O (SD-Karte)
 
 Namespace: `using CS2SX.Switch;`
@@ -140,8 +160,6 @@ Alle Pfade müssen absolut sein und mit `/switch/` beginnen.
 | `Directory.Delete(path)` | ✅ | Verzeichnis löschen |
 | `Directory.GetFiles(path)` | ✅ | Dateien auflisten, gibt `List<string>` zurück |
 
-**Beispiel — Save/Load:**
-
 ```csharp
 using CS2SX.Switch;
 
@@ -150,22 +168,20 @@ Directory.CreateDirectory("/switch/MeinSpiel");
 
 // Speichern
 File.WriteAllText("/switch/MeinSpiel/save.txt", "42;1337");
-File.AppendAllText("/switch/MeinSpiel/log.txt", "Saved");
+File.AppendAllText("/switch/MeinSpiel/log.txt", "Saved\n");
 
 // Laden
 if (File.Exists("/switch/MeinSpiel/save.txt"))
 {
     string content = File.ReadAllText("/switch/MeinSpiel/save.txt");
     List<string> parts = content.Split(";");
-    // parts[0] = "42", parts[1] = "1337"
+    int val = int.Parse(parts[0]);   // 42
 }
 
 // Dateien auflisten
 List<string> files = Directory.GetFiles("/switch/MeinSpiel");
 foreach (string f in files)
-{
     Console.WriteLine(f);
-}
 ```
 
 ### Kontrollfluss
@@ -216,7 +232,7 @@ foreach (string f in files)
 | `is`-Pattern-Matching |
 | `interface` |
 | `Console.ReadLine` / Keyboard-Input |
-| `int.Parse` / `int.TryParse` |
+| Grafische Oberfläche (nur Console/ANSI) |
 
 ---
 
@@ -274,6 +290,34 @@ Form.Add(_meter);
 
 ---
 
+## Projektstruktur
+
+Ein CS2SX-Projekt besteht aus:
+
+```
+MeinProjekt/
+├── MeinProjekt.csproj
+├── cs2sx.json              — Projektkonfiguration
+├── Program.cs              — Haupt-App (eine Klasse pro Datei!)
+├── MeineKlasse.cs          — weitere Klassen
+├── cs2sx_out/              — generierter C-Code (nicht manuell bearbeiten)
+└── MeinProjekt.nro         — fertige Switch-Homebrew-Datei
+```
+
+`cs2sx.json`:
+
+```json
+{
+    "name": "MeinProjekt",
+    "author": "Dein Name",
+    "version": "1.0.0",
+    "mainClass": "MyApp",
+    "icon": "icon.jpg"
+}
+```
+
+---
+
 ## Architektur
 
 ```
@@ -292,6 +336,7 @@ CS2SX/
 │   │   ├── FormHandler.cs
 │   │   ├── GraphicsHandler.cs
 │   │   ├── FileHandler.cs      — File.* und Directory.*
+│   │   ├── ParseHandler.cs     — int.Parse, float.TryParse, …
 │   │   ├── ListHandler.cs
 │   │   ├── DictionaryHandler.cs
 │   │   ├── StringBuilderHandler.cs
@@ -313,7 +358,7 @@ CS2SX/
 │   ├── CSharpToC.cs            — dünner Orchestrator
 │   └── TypeMapper.cs           — Backward-Compatibility-Shim
 ├── Build/
-│   ├── BuildPipeline.cs
+│   ├── BuildPipeline.cs        — inkrementeller Build
 │   ├── CCompiler.cs
 │   ├── EntryPointGenerator.cs
 │   ├── NacpBuilder.cs
@@ -322,7 +367,7 @@ CS2SX/
 │   ├── ProjectCreator.cs
 │   └── ProjectReader.cs
 └── Runtime/
-    ├── switchforms.h           — UI-Controls, Collections, String-Utils, File I/O
+    ├── switchforms.h           — UI-Controls, Collections, String-Utils, File I/O, Parsing
     └── switchapp.h             — SwitchApp-Loop, Framebuffer
 ```
 
@@ -346,13 +391,11 @@ public sealed class MeinHandler : InvocationHandlerBase
 }
 ```
 
-2. In `InvocationDispatcher.cs` eintragen:
+2. In `InvocationDispatcher.cs` eintragen — kein weiterer Code muss angefasst werden:
 
 ```csharp
 new MeinHandler(),
 ```
-
-Kein bestehender Code muss angefasst werden.
 
 ### Neuen Typ hinzufügen
 

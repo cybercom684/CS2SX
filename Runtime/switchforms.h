@@ -518,6 +518,87 @@ static inline int String_EqualsIgnoreCase(const char* a, const char* b)
 #define String_Length(s) ((int)strlen(s))
 
 // ============================================================================
+// Int / Float Parsing
+// ============================================================================
+
+/// Parst einen Integer aus einem String.
+/// Gibt 0 zurück wenn der String kein gültiger Integer ist.
+static inline int CS2SX_Int_Parse(const char* s)
+{
+    if (!s || s[0] == '\0') return 0;
+    int result = 0;
+    int sign = 1;
+    int i = 0;
+
+    if (s[0] == '-') { sign = -1; i = 1; }
+    else if (s[0] == '+') { i = 1; }
+
+    for (; s[i] != '\0'; i++)
+    {
+        if (s[i] < '0' || s[i] > '9') return 0;
+        result = result * 10 + (s[i] - '0');
+    }
+    return result * sign;
+}
+
+/// Versucht einen Integer zu parsen.
+/// Gibt 1 bei Erfolg zurück und setzt *out_val, sonst 0.
+static inline int CS2SX_Int_TryParse(const char* s, int* out_val)
+{
+    if (!s || s[0] == '\0') return 0;
+    int i = 0;
+    if (s[0] == '-' || s[0] == '+') i = 1;
+    if (s[i] == '\0') return 0;
+    for (int j = i; s[j] != '\0'; j++)
+        if (s[j] < '0' || s[j] > '9') return 0;
+    *out_val = CS2SX_Int_Parse(s);
+    return 1;
+}
+
+/// Parst einen Float aus einem String.
+static inline float CS2SX_Float_Parse(const char* s)
+{
+    if (!s || s[0] == '\0') return 0.0f;
+    float result = 0.0f;
+    float sign = 1.0f;
+    int   i = 0;
+
+    if (s[0] == '-') { sign = -1.0f; i = 1; }
+    else if (s[0] == '+') { i = 1; }
+
+    // Vorkomma
+    for (; s[i] != '\0' && s[i] != '.'; i++)
+    {
+        if (s[i] < '0' || s[i] > '9') return 0.0f;
+        result = result * 10.0f + (float)(s[i] - '0');
+    }
+
+    // Nachkomma
+    if (s[i] == '.')
+    {
+        i++;
+        float factor = 0.1f;
+        for (; s[i] != '\0'; i++)
+        {
+            if (s[i] < '0' || s[i] > '9') break;
+            result += (float)(s[i] - '0') * factor;
+            factor *= 0.1f;
+        }
+    }
+
+    return result * sign;
+}
+
+/// Versucht einen Float zu parsen.
+/// Gibt 1 bei Erfolg zurück und setzt *out_val, sonst 0.
+static inline int CS2SX_Float_TryParse(const char* s, float* out_val)
+{
+    if (!s || s[0] == '\0') return 0;
+    *out_val = CS2SX_Float_Parse(s);
+    return 1;
+}
+
+// ============================================================================
 // List<T>
 // ============================================================================
 
