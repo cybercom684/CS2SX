@@ -15,6 +15,9 @@ public sealed class TranspilerContext
 
     // ── Klassen-Kontext ───────────────────────────────────────────────────────
 
+    /// <summary>Name der aktuellen jmp_buf‑Variable für Exception‑Handling (oder null).</summary>
+    public string? CurrentJumpBuf { get; set; }
+    
     /// <summary>Name der aktuell transpilierten Klasse.</summary>
     public string CurrentClass { get; set; } = string.Empty;
 

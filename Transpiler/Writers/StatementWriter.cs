@@ -31,13 +31,65 @@ public sealed class StatementWriter
             case BreakStatementSyntax: _ctx.WriteLine("break;"); break;
             case ContinueStatementSyntax: _ctx.WriteLine("continue;"); break;
             case SwitchStatementSyntax sw: WriteSwitch(sw); break;
-            case TryStatementSyntax tryStmt: WriteTryCatch(tryStmt); break;
-            case ThrowStatementSyntax throwStmt: WriteThrow(throwStmt); break;
+            case TryStatementSyntax tryStmt:
+                WriteTryCatch(tryStmt);
+                break;
+            case ThrowStatementSyntax throwStmt:
+                WriteThrow(throwStmt);
+                break;
             case EmptyStatementSyntax: break;
+            case UsingStatementSyntax usingStmt:
+                WriteUsing(usingStmt);
+                break;
             default:
                 _ctx.WriteLine("/* UNSUPPORTED: " + stmt.GetType().Name + " */");
                 break;
         }
+    }
+
+    private void WriteUsing(UsingStatementSyntax usingStmt)
+    {
+        _ctx.WriteLine("{");
+        _ctx.Indent();
+
+        // Nur die erste Ressource unterstützen (bei using (var a = ..., b = ...) wird nur a behandelt)
+        if (usingStmt.Declaration != null)
+        {
+            foreach (var varDecl in usingStmt.Declaration.Variables)
+            {
+                string typeName = usingStmt.Declaration.Type.ToString();
+                string varName = varDecl.Identifier.Text;
+                string init = varDecl.Initializer != null
+                    ? _expr.Write(varDecl.Initializer.Value)
+                    : "";
+
+                // Bestimmen, ob es sich um einen Werttyp handelt (libnx‑Struct oder primitiv)
+                bool isValueType = TypeRegistry.IsLibNxStruct(typeName) || TypeRegistry.IsPrimitive(typeName);
+                string cType = TypeRegistry.MapType(typeName);
+                string ptr = isValueType ? "" : "*";
+
+                _ctx.WriteLine(cType + ptr + " " + varName + " = " + init + ";");
+
+                // Body
+                Write(usingStmt.Statement);
+
+                // Dispose‑Aufruf – nur wenn der Typ die Methode besitzt
+                if (TypeRegistry.IsDisposable(typeName))
+                {
+                    string disposeCall = isValueType ? varName + ".Dispose()" : varName + "->Dispose()";
+                    _ctx.WriteLine("if (" + varName + ") " + disposeCall + ";");
+                }
+            }
+        }
+        else if (usingStmt.Expression != null)
+        {
+            // Fallback: Ausdruck ohne Variable (selten) – ignorieren
+            _ctx.WriteLine("/* using expression not supported */");
+            Write(usingStmt.Statement);
+        }
+
+        _ctx.Dedent();
+        _ctx.WriteLine("}");
     }
 
     private void WriteReturn(ReturnStatementSyntax ret)
@@ -343,36 +395,49 @@ public sealed class StatementWriter
 
     private void WriteTryCatch(TryStatementSyntax tryStmt)
     {
-        _ctx.WriteLine("/* try */");
+        // Eindeutiger Name für die jmp_buf‑Variable
+        string jmpBufName = "_ex_buf_" + _ctx.NextTmp();
+        _ctx.CurrentJumpBuf = jmpBufName;
+
+        _ctx.WriteLine("jmp_buf " + jmpBufName + ";");
+        _ctx.WriteLine("int _ex_val = setjmp(" + jmpBufName + ");");
+        _ctx.WriteLine("if (_ex_val == 0)");
         _ctx.WriteLine("{");
         _ctx.Indent();
-        foreach (var s in tryStmt.Block.Statements) Write(s);
+        foreach (var stmt in tryStmt.Block.Statements)
+            Write(stmt);
         _ctx.Dedent();
         _ctx.WriteLine("}");
 
-        foreach (var c in tryStmt.Catches)
+        // Nur den ersten catch‑Block unterstützen (mehrere wären möglich, aber für den Anfang reicht)
+        if (tryStmt.Catches.Count > 0)
         {
-            var t = c.Declaration?.Type.ToString() ?? "Exception";
-            var n = c.Declaration?.Identifier.Text ?? "";
-            _ctx.WriteLine("/* catch (" + t + " " + n + ") - ignored in C */");
-        }
-
-        if (tryStmt.Finally != null)
-        {
-            _ctx.WriteLine("/* finally */");
+            _ctx.WriteLine("else");
             _ctx.WriteLine("{");
             _ctx.Indent();
-            foreach (var s in tryStmt.Finally.Block.Statements) Write(s);
+            var catchClause = tryStmt.Catches[0];
+            // Parameter (z.B. Exception e) ignorieren
+            foreach (var stmt in catchClause.Block.Statements)
+                Write(stmt);
             _ctx.Dedent();
             _ctx.WriteLine("}");
         }
+
+        _ctx.CurrentJumpBuf = null;
     }
 
     private void WriteThrow(ThrowStatementSyntax throwStmt)
     {
-        if (throwStmt.Expression != null)
-            _ctx.WriteLine("/* throw: " + throwStmt.Expression + " */");
-        _ctx.WriteLine("return;");
+        if (_ctx.CurrentJumpBuf != null)
+        {
+            _ctx.WriteLine("longjmp(" + _ctx.CurrentJumpBuf + ", 1);");
+            _ctx.WriteLine("return;");
+        }
+        else
+        {
+            _ctx.WriteLine("/* throw ignored (no try/catch) */");
+            _ctx.WriteLine("return;");
+        }
     }
 
     public void WriteBlock(StatementSyntax stmt)

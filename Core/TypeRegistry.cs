@@ -199,6 +199,14 @@ public static class TypeRegistry
         ["null"]  = "NULL",
     };
 
+    private static readonly HashSet<string> s_disposableTypes = new(StringComparer.Ordinal)
+    {
+        "Texture",   // später hinzugefügt
+        // Weitere Klassen mit Dispose‑Methode hier eintragen
+    };
+
+    public static bool IsDisposable(string csType) => s_disposableTypes.Contains(csType);
+
     // ── Öffentliche API ───────────────────────────────────────────────────────
 
     /// <summary>C#-Typ → C-Typ. Unbekannte Typen werden unverändert zurückgegeben.</summary>

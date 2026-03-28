@@ -1,45 +1,112 @@
 #pragma once
 #include <switch.h>
+#include <switch/display/framebuffer.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include "switchforms.h"
 
 // ============================================================================
-// SwitchApp
-//
-// Basis-Struct f¸r alle Switch-Homebrew-Apps, die mit CS2SX transpiliert wurden.
-// Subklassen werden von CSharpToC automatisch als:
-//
-//   typedef struct MyApp MyApp;
-//   struct MyApp { SwitchApp base; ... };
-//   void MyApp_Init(MyApp* self);
-//   void MyApp_OnInit(MyApp* self);
-//   void MyApp_OnFrame(MyApp* self);
-//   void MyApp_OnExit(MyApp* self);
-//
-// generiert. Der Entry-Point (main.c) ruft:
-//
-//   MyApp app;
-//   memset(&app, 0, sizeof(MyApp));
-//   MyApp_Init(&app);
-//   SwitchApp_Run((SwitchApp*)&app);
-//
+// Texture (muss vor den Graphics‚ÄëFunktionen definiert sein)
+// ============================================================================
+
+typedef struct Texture Texture;
+struct Texture {
+    int width;
+    int height;
+    uint32_t* pixels;
+};
+
+static inline Texture* Texture_New(int width, int height, uint32_t* pixels) {
+    Texture* t = (Texture*)malloc(sizeof(Texture));
+    if (!t) return NULL;
+    t->width = width;
+    t->height = height;
+    t->pixels = (uint32_t*)malloc(width * height * sizeof(uint32_t));
+    if (pixels) memcpy(t->pixels, pixels, width * height * sizeof(uint32_t));
+    else memset(t->pixels, 0, width * height * sizeof(uint32_t));
+    return t;
+}
+
+static inline void Texture_Dispose(Texture* t) {
+    if (t) {
+        free(t->pixels);
+        free(t);
+    }
+}
+
+// ============================================================================
+// Grafik √ºber libnx Framebuffer (korrigierte API)
+// ============================================================================
+
+static Framebuffer g_fb;
+static uint32_t* g_fb_addr = NULL;
+static uint32_t g_fb_stride;
+static int g_fb_width, g_fb_height;
+
+static inline void Graphics_Init(int width, int height) {
+    NWindow* win = nwindowGetDefault();
+    if (!win) return;
+    framebufferCreate(&g_fb, win, width, height, PIXEL_FORMAT_RGBA_8888, 2);
+    g_fb_width = width;
+    g_fb_height = height;
+    g_fb_stride = width; // wird sp√§ter durch framebufferBegin √ºberschrieben
+}
+
+static inline void Graphics_BeginFrame(void) {
+    g_fb_addr = framebufferBegin(&g_fb, &g_fb_stride);
+    if (!g_fb_addr) return;
+    // Optional: Bildschirm l√∂schen (schwarz)
+    for (int i = 0; i < g_fb_width * g_fb_height; i++) g_fb_addr[i] = 0;
+}
+
+static inline void Graphics_DrawRect(int x, int y, int w, int h, uint32_t color) {
+    if (!g_fb_addr) return;
+    for (int i = 0; i < h; i++) {
+        int row = y + i;
+        if (row < 0 || row >= g_fb_height) continue;
+        for (int j = 0; j < w; j++) {
+            int col = x + j;
+            if (col < 0 || col >= g_fb_width) continue;
+            g_fb_addr[row * g_fb_stride + col] = color;
+        }
+    }
+}
+
+static inline void Graphics_DrawTexture(Texture* tex, int x, int y) {
+    if (!tex || !tex->pixels || !g_fb_addr) return;
+    for (int i = 0; i < tex->height; i++) {
+        int row = y + i;
+        if (row < 0 || row >= g_fb_height) continue;
+        for (int j = 0; j < tex->width; j++) {
+            int col = x + j;
+            if (col < 0 || col >= g_fb_width) continue;
+            g_fb_addr[row * g_fb_stride + col] = tex->pixels[i * tex->width + j];
+        }
+    }
+}
+
+static inline void Graphics_EndFrame(void) {
+    framebufferEnd(&g_fb);
+    g_fb_addr = NULL;
+}
+
+// ============================================================================
+// SwitchApp (jetzt nach den Grafik-Funktionen)
 // ============================================================================
 
 typedef struct SwitchApp SwitchApp;
 struct SwitchApp
 {
     Form form;
-    u64  kDown;   // in diesem Frame neu gedr¸ckte Tasten
-    u64  kHeld;   // aktuell gehaltene Tasten
+    u64  kDown;
+    u64  kHeld;
 
     void (*OnInit) (SwitchApp* self);
     void (*OnFrame)(SwitchApp* self);
     void (*OnExit) (SwitchApp* self);
 };
 
-// F¸gt einen Control zur internen Form hinzu und setzt dessen Context.
 static inline void SwitchApp_Add(SwitchApp* self, Control* control)
 {
     if (!self || !control) return;
@@ -47,7 +114,6 @@ static inline void SwitchApp_Add(SwitchApp* self, Control* control)
     Form_Add(&self->form, control);
 }
 
-// Haupt-Loop der App. Gibt erst zur¸ck, wenn + gedr¸ckt wird oder appletMainLoop() false liefert.
 static inline void SwitchApp_Run(SwitchApp* self)
 {
     if (!self) return;
@@ -61,7 +127,6 @@ static inline void SwitchApp_Run(SwitchApp* self)
     if (self->OnInit)
     {
         self->OnInit(self);
-        // Nach OnInit Fokus setzen, damit das erste fokussierbare Element aktiv ist
         Form_InitFocus(&self->form);
     }
 
@@ -72,8 +137,9 @@ static inline void SwitchApp_Run(SwitchApp* self)
         self->kHeld = padGetButtons(&pad);
 
         consoleClear();
-        // Explizit den gesamten Bildschirm leeren (ANSI: cursor home + erase display)
         printf("\033[H\033[2J");
+
+        Graphics_BeginFrame();
 
         Form_UpdateAll(&self->form, self->kDown, self->kHeld);
 
@@ -81,6 +147,8 @@ static inline void SwitchApp_Run(SwitchApp* self)
             self->OnFrame(self);
 
         Form_DrawAll(&self->form);
+
+        Graphics_EndFrame();
 
         consoleUpdate(NULL);
 

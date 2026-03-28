@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdbool.h>
+#include <ctype.h>
 
 extern char _cs2sx_strbuf[512];
 
@@ -250,6 +251,52 @@ static inline const char* StringBuilder_ToString(StringBuilder* sb)
     return sb ? sb->buf : "";
 }
 
+static inline int StringBuilder_IndexOf(StringBuilder* sb, const char* sub)
+{
+    if (!sb || !sub) return -1;
+    const char* p = strstr(sb->buf, sub);
+    return p ? (int)(p - sb->buf) : -1;
+}
+
+static inline void StringBuilder_Insert(StringBuilder* sb, int index, const char* s)
+{
+    if (!sb || !s || index < 0 || index > sb->length) return;
+    int len = (int)strlen(s);
+    StringBuilder__grow(sb, len);
+    memmove(sb->buf + index + len, sb->buf + index, sb->length - index + 1);
+    memcpy(sb->buf + index, s, len);
+    sb->length += len;
+}
+
+static inline void StringBuilder_Replace(StringBuilder* sb, const char* from, const char* to)
+{
+    if (!sb || !from || !to) return;
+    char tmp[1024];
+    int fromlen = (int)strlen(from);
+    int tolen = (int)strlen(to);
+    int out = 0;
+    char* s = sb->buf;
+    while (*s && out < 1022)
+    {
+        if (strncmp(s, from, fromlen) == 0)
+        {
+            int copy = tolen;
+            if (out + copy > 1022) copy = 1022 - out;
+            memcpy(tmp + out, to, copy);
+            out += copy;
+            s += fromlen;
+        }
+        else
+        {
+            tmp[out++] = *s++;
+        }
+    }
+    tmp[out] = '\0';
+    sb->length = out;
+    StringBuilder__grow(sb, out + 1);
+    memcpy(sb->buf, tmp, out + 1);
+}
+
 // ============================================================================
 // String helpers
 // ============================================================================
@@ -296,6 +343,178 @@ static inline int String_EndsWith(const char* s, const char* suffix)
     return fl <= sl && strcmp(s + sl - fl, suffix) == 0;
 }
 
+static inline const char* String_Trim(const char* s)
+{
+    if (!s) return "";
+    while (*s == ' ' || *s == '\t' || *s == '\r' || *s == '\n') s++;
+    static char _trim_buf[512];
+    int len = (int)strlen(s);
+    while (len > 0 && (s[len - 1] == ' ' || s[len - 1] == '\t'
+        || s[len - 1] == '\r' || s[len - 1] == '\n'))
+        len--;
+    if (len >= 512) len = 511;
+    memcpy(_trim_buf, s, len);
+    _trim_buf[len] = '\0';
+    return _trim_buf;
+}
+
+static inline const char* String_TrimStart(const char* s)
+{
+    if (!s) return "";
+    while (*s == ' ' || *s == '\t') s++;
+    return s;
+}
+
+static inline const char* String_TrimEnd(const char* s)
+{
+    if (!s) return "";
+    static char _trimend_buf[512];
+    int len = (int)strlen(s);
+    while (len > 0 && (s[len - 1] == ' ' || s[len - 1] == '\t')) len--;
+    if (len >= 512) len = 511;
+    memcpy(_trimend_buf, s, len);
+    _trimend_buf[len] = '\0';
+    return _trimend_buf;
+}
+
+static inline const char* String_ToUpper(const char* s)
+{
+    if (!s) return "";
+    static char _upper_buf[512];
+    int i = 0;
+    for (; s[i] && i < 511; i++)
+        _upper_buf[i] = (char)toupper((unsigned char)s[i]);
+    _upper_buf[i] = '\0';
+    return _upper_buf;
+}
+
+static inline const char* String_ToLower(const char* s)
+{
+    if (!s) return "";
+    static char _lower_buf[512];
+    int i = 0;
+    for (; s[i] && i < 511; i++)
+        _lower_buf[i] = (char)tolower((unsigned char)s[i]);
+    _lower_buf[i] = '\0';
+    return _lower_buf;
+}
+
+static inline const char* String_Substring(const char* s, int start, int length)
+{
+    if (!s) return "";
+    static char _sub_buf[512];
+    int slen = (int)strlen(s);
+    if (start < 0) start = 0;
+    if (start >= slen) { _sub_buf[0] = '\0'; return _sub_buf; }
+    if (length < 0 || start + length > slen) length = slen - start;
+    if (length >= 512) length = 511;
+    memcpy(_sub_buf, s + start, length);
+    _sub_buf[length] = '\0';
+    return _sub_buf;
+}
+
+static inline const char* String_SubstringFrom(const char* s, int start)
+{
+    if (!s) return "";
+    int slen = (int)strlen(s);
+    if (start < 0) start = 0;
+    if (start >= slen) return "";
+    return s + start;
+}
+
+static inline int String_IndexOf(const char* s, const char* sub)
+{
+    if (!s || !sub) return -1;
+    const char* p = strstr(s, sub);
+    return p ? (int)(p - s) : -1;
+}
+
+static inline int String_IndexOfChar(const char* s, char c)
+{
+    if (!s) return -1;
+    const char* p = strchr(s, c);
+    return p ? (int)(p - s) : -1;
+}
+
+static inline int String_LastIndexOf(const char* s, const char* sub)
+{
+    if (!s || !sub) return -1;
+    int sublen = (int)strlen(sub);
+    int slen = (int)strlen(s);
+    for (int i = slen - sublen; i >= 0; i--)
+        if (strncmp(s + i, sub, sublen) == 0) return i;
+    return -1;
+}
+
+static inline const char* String_Replace(const char* s, const char* from, const char* to)
+{
+    if (!s || !from || !to) return s ? s : "";
+    static char _rep_buf[512];
+    int fromlen = (int)strlen(from);
+    int tolen = (int)strlen(to);
+    int out = 0;
+    while (*s && out < 510)
+    {
+        if (strncmp(s, from, fromlen) == 0)
+        {
+            int copy = tolen;
+            if (out + copy > 510) copy = 510 - out;
+            memcpy(_rep_buf + out, to, copy);
+            out += copy;
+            s += fromlen;
+        }
+        else { _rep_buf[out++] = *s++; }
+    }
+    _rep_buf[out] = '\0';
+    return _rep_buf;
+}
+
+static inline const char* String_PadLeft(const char* s, int totalWidth, char padChar)
+{
+    if (!s) s = "";
+    static char _pad_buf[512];
+    int len = (int)strlen(s);
+    int pad = totalWidth - len;
+    if (pad < 0) pad = 0;
+    if (pad + len >= 512) pad = 511 - len;
+    memset(_pad_buf, padChar, pad);
+    memcpy(_pad_buf + pad, s, len);
+    _pad_buf[pad + len] = '\0';
+    return _pad_buf;
+}
+
+static inline const char* String_PadRight(const char* s, int totalWidth, char padChar)
+{
+    if (!s) s = "";
+    static char _padr_buf[512];
+    int len = (int)strlen(s);
+    int pad = totalWidth - len;
+    if (pad < 0) pad = 0;
+    if (len >= 512) len = 511;
+    memcpy(_padr_buf, s, len);
+    if (len + pad >= 512) pad = 511 - len;
+    memset(_padr_buf + len, padChar, pad);
+    _padr_buf[len + pad] = '\0';
+    return _padr_buf;
+}
+
+static inline int String_CompareTo(const char* a, const char* b)
+{
+    if (!a || !b) return 0;
+    return strcmp(a, b);
+}
+
+static inline int String_EqualsIgnoreCase(const char* a, const char* b)
+{
+    if (!a || !b) return 0;
+    while (*a && *b)
+    {
+        if (tolower((unsigned char)*a) != tolower((unsigned char)*b)) return 0;
+        a++; b++;
+    }
+    return *a == '\0' && *b == '\0';
+}
+
 #define String_Length(s) ((int)strlen(s))
 
 // ============================================================================
@@ -331,31 +550,6 @@ static inline void List_##T##_RemoveValue(List_##T* l, T val) {                 
     for (int _i = 0; _i < l->count; _i++) {                                                        \
         if (l->data[_i] == val) { List_##T##_Remove(l, _i); return; } } }
 
-#define CS2SX_LIST_DEFINE_PTR(T)                                                                    \
-typedef struct { T** data; int count; int capacity; } List_##T;                                     \
-static inline List_##T* List_##T##_New(void) {                                                      \
-    List_##T* l = (List_##T*)malloc(sizeof(List_##T));                                              \
-    if (!l) return NULL;                                                                            \
-    l->data = (T**)malloc(CS2SX_LIST_INITIAL_CAP * sizeof(T*));                                    \
-    l->count = 0; l->capacity = CS2SX_LIST_INITIAL_CAP; return l; }                                \
-static inline void List_##T##_Add(List_##T* l, T* val) {                                           \
-    if (!l) return;                                                                                 \
-    if (l->count >= l->capacity) {                                                                  \
-        l->capacity *= 2;                                                                           \
-        l->data = (T**)realloc(l->data, l->capacity * sizeof(T*)); }                               \
-    l->data[l->count++] = val; }                                                                    \
-static inline T*   List_##T##_Get(List_##T* l, int i) { return l->data[i]; }                       \
-static inline int  List_##T##_Count(List_##T* l)       { return l ? l->count : 0; }                \
-static inline void List_##T##_Clear(List_##T* l)       { if (l) l->count = 0; }                    \
-static inline void List_##T##_Free(List_##T* l)        { if (l) { free(l->data); free(l); } }      \
-static inline void List_##T##_Remove(List_##T* l, int idx) {                                       \
-    if (!l || idx < 0 || idx >= l->count) return;                                                  \
-    for (int _i = idx; _i < l->count - 1; _i++) l->data[_i] = l->data[_i + 1];                   \
-    l->count--; }                                                                                   \
-static inline void List_##T##_RemoveValue(List_##T* l, T* val) {                                   \
-    for (int _i = 0; _i < l->count; _i++) {                                                        \
-        if (l->data[_i] == val) { List_##T##_Remove(l, _i); return; } } }
-
 CS2SX_LIST_DEFINE(int)
 CS2SX_LIST_DEFINE(float)
 CS2SX_LIST_DEFINE(double)
@@ -366,17 +560,23 @@ CS2SX_LIST_DEFINE(u64)
 CS2SX_LIST_DEFINE(s32)
 CS2SX_LIST_DEFINE(s64)
 
-// List<string>
+// ── List<string> ─────────────────────────────────────────────────────────────
+
 typedef struct { const char** data; int count; int capacity; } List_str;
-static inline List_str* List_str_New(void) {
+
+static inline List_str* List_str_New(void)
+{
     List_str* l = (List_str*)malloc(sizeof(List_str));
     if (!l) return NULL;
     l->data = (const char**)malloc(CS2SX_LIST_INITIAL_CAP * sizeof(const char*));
-    l->count = 0; l->capacity = CS2SX_LIST_INITIAL_CAP; return l;
+    l->count = 0; l->capacity = CS2SX_LIST_INITIAL_CAP;
+    return l;
 }
-static inline void        List_str_Add(List_str* l, const char* val) {
+static inline void        List_str_Add(List_str* l, const char* val)
+{
     if (!l) return;
-    if (l->count >= l->capacity) {
+    if (l->count >= l->capacity)
+    {
         l->capacity *= 2;
         l->data = (const char**)realloc(l->data, l->capacity * sizeof(const char*));
     }
@@ -386,21 +586,69 @@ static inline const char* List_str_Get(List_str* l, int i) { return l->data[i]; 
 static inline int         List_str_Count(List_str* l) { return l ? l->count : 0; }
 static inline void        List_str_Clear(List_str* l) { if (l) l->count = 0; }
 static inline void        List_str_Free(List_str* l) { if (l) { free(l->data); free(l); } }
-static inline void        List_str_Remove(List_str* l, int idx) {
+static inline void        List_str_Remove(List_str* l, int idx)
+{
     if (!l || idx < 0 || idx >= l->count) return;
     for (int _i = idx; _i < l->count - 1; _i++) l->data[_i] = l->data[_i + 1];
     l->count--;
 }
-static inline void List_str_RemoveValue(List_str* l, const char* val) {
-    for (int _i = 0; _i < l->count; _i++) {
+static inline void List_str_RemoveValue(List_str* l, const char* val)
+{
+    for (int _i = 0; _i < l->count; _i++)
         if (strcmp(l->data[_i], val) == 0) { List_str_Remove(l, _i); return; }
-    }
 }
-static inline int List_str_Contains(List_str* l, const char* val) {
-    for (int _i = 0; _i < l->count; _i++) {
+static inline int List_str_Contains(List_str* l, const char* val)
+{
+    for (int _i = 0; _i < l->count; _i++)
         if (strcmp(l->data[_i], val) == 0) return 1;
-    }
     return 0;
+}
+
+// ── String_Join / String_Split ────────────────────────────────────────────────
+
+static inline const char* String_Join(const char* sep, List_str* list)
+{
+    if (!list || list->count == 0) return "";
+    static char _join_buf[1024];
+    int out = 0;
+    int seplen = sep ? (int)strlen(sep) : 0;
+    for (int i = 0; i < list->count && out < 1022; i++)
+    {
+        if (i > 0 && sep)
+        {
+            int copy = seplen;
+            if (out + copy > 1022) copy = 1022 - out;
+            memcpy(_join_buf + out, sep, copy);
+            out += copy;
+        }
+        const char* item = list->data[i];
+        int         itemlen = item ? (int)strlen(item) : 0;
+        if (out + itemlen > 1022) itemlen = 1022 - out;
+        if (item) memcpy(_join_buf + out, item, itemlen);
+        out += itemlen;
+    }
+    _join_buf[out] = '\0';
+    return _join_buf;
+}
+
+static inline List_str* String_Split(const char* s, const char* sep)
+{
+    List_str* result = List_str_New();
+    if (!s || !sep || !result) return result;
+    static char _split_src[512];
+    strncpy(_split_src, s, 511);
+    _split_src[511] = '\0';
+    int   seplen = (int)strlen(sep);
+    char* cur = _split_src;
+    while (*cur)
+    {
+        char* found = strstr(cur, sep);
+        if (!found) { List_str_Add(result, cur); break; }
+        *found = '\0';
+        List_str_Add(result, cur);
+        cur = found + seplen;
+    }
+    return result;
 }
 
 // ============================================================================
@@ -519,9 +767,7 @@ static inline int Dict_str_str_TryGetValue(Dict_str_str* d, const char* key, con
     } return 0;
 }
 static inline const char* Dict_str_str_Get(Dict_str_str* d, const char* key) {
-    const char* v = NULL;
-    Dict_str_str_TryGetValue(d, key, &v);
-    return v;
+    const char* v = NULL; Dict_str_str_TryGetValue(d, key, &v); return v;
 }
 static inline void Dict_str_str_Set(Dict_str_str* d, const char* key, const char* val) {
     for (int _i = 0; _i < d->count; _i++) {
@@ -540,7 +786,9 @@ static inline void Dict_str_str_Remove(Dict_str_str* d, const char* key) {
     }
 }
 static inline void Dict_str_str_Clear(Dict_str_str* d) { if (d) d->count = 0; }
-static inline void Dict_str_str_Free(Dict_str_str* d) { if (d) { free(d->keys); free(d->vals); free(d); } }
+static inline void Dict_str_str_Free(Dict_str_str* d) {
+    if (d) { free(d->keys); free(d->vals); free(d); }
+}
 
 // ============================================================================
 // Form
@@ -629,16 +877,3 @@ static inline void Form_Free(Form* form)
     form->count = 0;
     form->focusedIndex = -1;
 }
-
-// ============================================================================
-// SwitchApp
-// ============================================================================
-
-//typedef struct SwitchApp SwitchApp;
-//struct SwitchApp
-//{
-//    void (*OnInit)  (SwitchApp* self);
-//    void (*OnUpdate)(SwitchApp* self, u64 kDown, u64 kHeld);
-//    void (*OnDraw)  (SwitchApp* self);
-//    void (*OnExit)  (SwitchApp* self);
-//};

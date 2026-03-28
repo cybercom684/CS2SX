@@ -3,6 +3,7 @@ using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using CS2SX.Core;
 using CS2SX.Transpiler.Writers;
+using CS2SX.Transpiler.Strategies;
 using CS2SX.Logging;
 
 namespace CS2SX.Transpiler;
@@ -21,15 +22,25 @@ public sealed class CSharpToC : CSharpSyntaxWalker
 
     private const string SwitchAppBase = "SwitchApp";
 
+    // ── Konstruktor-Strategien ─────────────────────────────────────────────
+    private readonly IConstructorStrategy[] _constructorStrategies;
+
     public CSharpToC(TranspileMode mode = TranspileMode.Implementation)
     {
         _mode = mode;
         _ctx = new TranspilerContext(new StringWriter());
         _exprWriter = new ExpressionWriter(_ctx);
         _stmtWriter = new StatementWriter(_ctx, _exprWriter);
+
+        _constructorStrategies = new IConstructorStrategy[]
+        {
+            new SwitchAppConstructorStrategy(),
+            new ControlSubclassConstructorStrategy(),
+            new DefaultConstructorStrategy(),
+        };
     }
 
-    // ── Öffentliche API ───────────────────────────────────────────────────────
+    // ── Öffentliche API ───────────────────────────────────────────────────
 
     public string Transpile(string csharpSource)
     {
@@ -39,21 +50,14 @@ public sealed class CSharpToC : CSharpSyntaxWalker
             .ToList();
 
         if (diags.Count > 0)
-        {
             foreach (var d in diags)
-            {
-                var loc = d.Location.GetLineSpan();
-                var path = string.IsNullOrEmpty(loc.Path) ? "unknown" : loc.Path;
-                Log.Error($"CS{d.Id}: {d.GetMessage()} at {path}:{loc.StartLinePosition.Line}");
-                _ctx.Out.WriteLine("/* PARSE ERROR: " + d.GetMessage() + " */");
-            }
-        }
+                Log.Error($"CS{d.Id}: {d.GetMessage()}");
 
         Visit(tree.GetRoot());
         return _ctx.Out.ToString();
     }
 
-    // ── Namespace-Handling ────────────────────────────────────────────────────
+    // ── Namespace ─────────────────────────────────────────────────────────
 
     public override void VisitNamespaceDeclaration(NamespaceDeclarationSyntax node)
         => base.VisitNamespaceDeclaration(node);
@@ -61,37 +65,30 @@ public sealed class CSharpToC : CSharpSyntaxWalker
     public override void VisitFileScopedNamespaceDeclaration(FileScopedNamespaceDeclarationSyntax node)
         => base.VisitFileScopedNamespaceDeclaration(node);
 
-    // ── Enum-Handling ─────────────────────────────────────────────────────────
+    // ── Enum ──────────────────────────────────────────────────────────────
 
     public override void VisitEnumDeclaration(EnumDeclarationSyntax node)
     {
-        if (_mode == TranspileMode.HeaderOnly)
-        {
-            _ctx.Out.WriteLine("enum " + node.Identifier.Text);
-            _ctx.Out.WriteLine("{");
-            _ctx.Indent();
-            foreach (var member in node.Members)
-            {
-                var name = member.Identifier.Text;
-                _ctx.EnumMembers.Add(name);
+        if (_mode != TranspileMode.HeaderOnly) return;
 
-                if (member.EqualsValue != null)
-                {
-                    var val = _exprWriter.Write(member.EqualsValue.Value);
-                    _ctx.Out.WriteLine(name + " = " + val + ",");
-                }
-                else
-                {
-                    _ctx.Out.WriteLine(name + ",");
-                }
-            }
-            _ctx.Dedent();
-            _ctx.Out.WriteLine("};");
-            _ctx.Out.WriteLine();
+        _ctx.Out.WriteLine("enum " + node.Identifier.Text);
+        _ctx.Out.WriteLine("{");
+        _ctx.Indent();
+        foreach (var member in node.Members)
+        {
+            var name = member.Identifier.Text;
+            _ctx.EnumMembers.Add(name);
+            if (member.EqualsValue != null)
+                _ctx.Out.WriteLine(name + " = " + _exprWriter.Write(member.EqualsValue.Value) + ",");
+            else
+                _ctx.Out.WriteLine(name + ",");
         }
+        _ctx.Dedent();
+        _ctx.Out.WriteLine("};");
+        _ctx.Out.WriteLine();
     }
 
-    // ── Klassen-Handling ──────────────────────────────────────────────────────
+    // ── Klassen ───────────────────────────────────────────────────────────
 
     public override void VisitClassDeclaration(ClassDeclarationSyntax node)
     {
@@ -106,8 +103,6 @@ public sealed class CSharpToC : CSharpSyntaxWalker
         if (!string.IsNullOrEmpty(baseType) && baseType != SwitchAppBase)
             LoadBaseFields(baseType);
 
-        // FieldTypes immer befüllen — wird in beiden Modi gebraucht
-        // (im Header-Modus für korrekte Typ-Auflösung in Expressions)
         CollectFieldTypes(node);
 
         if (_mode == TranspileMode.HeaderOnly)
@@ -117,28 +112,27 @@ public sealed class CSharpToC : CSharpSyntaxWalker
         }
         else
         {
-            WriteConstructor(node, isSwitchAppChild);
+            WriteConstructor(node);
             WriteMethodBodies(node);
         }
 
         _ctx.ClearClassContext();
     }
 
-    // ── Field-Type-Sammlung ───────────────────────────────────────────────────
+    // ── Field-Type-Sammlung ───────────────────────────────────────────────
 
     private void CollectFieldTypes(ClassDeclarationSyntax node)
     {
         foreach (var field in node.Members.OfType<FieldDeclarationSyntax>())
         {
             if (field.Modifiers.Any(m => m.IsKind(SyntaxKind.StaticKeyword))) continue;
-
             var csType = field.Declaration.Type.ToString().Trim();
             foreach (var v in field.Declaration.Variables)
                 _ctx.FieldTypes[v.Identifier.Text.TrimStart('_')] = csType;
         }
     }
 
-    // ── Struct-Definition (Header) ────────────────────────────────────────────
+    // ── Struct-Definition (Header) ────────────────────────────────────────
 
     private void WriteStructDefinition(ClassDeclarationSyntax node, string? baseType)
     {
@@ -148,29 +142,33 @@ public sealed class CSharpToC : CSharpSyntaxWalker
         _ctx.Out.WriteLine("{");
         _ctx.Indent();
 
-        // Basisklasse einbetten
         if (!string.IsNullOrEmpty(baseType))
         {
-            // Alle Control-Subklassen embedden Control als erstes Feld
-            // damit der Cast (Control*)self funktioniert
             var embedType = baseType is "Label" or "Button" or "ProgressBar"
                 ? "Control"
                 : baseType;
             _ctx.WriteLine(embedType + " base;");
         }
 
+        WriteInstanceFieldDeclarations(node);
+        WritePropertyDeclarations(node);
+        WriteVirtualMethodPointers(node, name);
+
+        _ctx.Dedent();
+        _ctx.Out.WriteLine("};");
+        _ctx.Out.WriteLine();
+
+        WriteStaticFieldExterns(node, name);
+    }
+
+    private void WriteInstanceFieldDeclarations(ClassDeclarationSyntax node)
+    {
         foreach (var field in node.Members.OfType<FieldDeclarationSyntax>())
         {
             if (field.Modifiers.Any(m => m.IsKind(SyntaxKind.StaticKeyword))) continue;
 
             var csType = field.Declaration.Type.ToString().Trim();
             var cType = TypeRegistry.MapType(csType);
-
-            // * anhängen wenn:
-            // - NeedsPointerSuffix (eigene Klassen-Typen)
-            // - StringBuilder (MapType gibt keinen * zurück)
-            // - Control-Typen (Label, Button etc. — MapType gibt keinen * zurück)
-            // NICHT für List<T>/Dict<K,V> — MapType gibt bereits * zurück
             var needPtr = TypeRegistry.NeedsPointerSuffix(csType)
                        || TypeRegistry.IsStringBuilder(csType)
                        || TypeRegistry.IsControlType(csType);
@@ -184,14 +182,20 @@ public sealed class CSharpToC : CSharpSyntaxWalker
                 _ctx.WriteLine(cType + ptr + " " + prefix + fieldName + ";");
             }
         }
+    }
 
+    private void WritePropertyDeclarations(ClassDeclarationSyntax node)
+    {
         foreach (var prop in node.Members.OfType<PropertyDeclarationSyntax>())
         {
             if (prop.Modifiers.Any(m => m.IsKind(SyntaxKind.StaticKeyword))) continue;
             var cType = TypeRegistry.MapType(prop.Type.ToString().Trim());
             _ctx.WriteLine(cType + " f_" + prop.Identifier + ";");
         }
+    }
 
+    private void WriteVirtualMethodPointers(ClassDeclarationSyntax node, string name)
+    {
         foreach (var method in node.Members.OfType<MethodDeclarationSyntax>())
         {
             var isAbstract = method.Modifiers.Any(m => m.IsKind(SyntaxKind.AbstractKeyword));
@@ -210,22 +214,45 @@ public sealed class CSharpToC : CSharpSyntaxWalker
             _ctx.WriteLine(returnType + " (*" + method.Identifier.Text + ")("
                          + string.Join(", ", paramTypes) + ");");
         }
+    }
 
-        _ctx.Dedent();
-        _ctx.Out.WriteLine("};");
-        _ctx.Out.WriteLine();
+    // ── Static-Felder ─────────────────────────────────────────────────────
 
-        // Static-Felder
+    /// <summary>
+    /// Schreibt globale C-Variablen-Definitionen für static-Felder.
+    /// Wird von allen drei Konstruktor-Strategien verwendet.
+    /// </summary>
+    internal void WriteStaticFieldDefinitions(ClassDeclarationSyntax node, string name)
+    {
         foreach (var field in node.Members.OfType<FieldDeclarationSyntax>())
         {
             if (!field.Modifiers.Any(m => m.IsKind(SyntaxKind.StaticKeyword))) continue;
 
             var csType = field.Declaration.Type.ToString().Trim();
             var cType = TypeRegistry.MapType(csType);
-            var needPtr = TypeRegistry.NeedsPointerSuffix(csType)
-                       || TypeRegistry.IsStringBuilder(csType)
-                       || TypeRegistry.IsControlType(csType);
+            var needPtr = NeedsPtr(csType);
             var ptr = needPtr ? "*" : "";
+
+            foreach (var v in field.Declaration.Variables)
+            {
+                var fieldName = v.Identifier.Text.TrimStart('_');
+                var init = v.Initializer != null
+                    ? " = " + _exprWriter.Write(v.Initializer.Value)
+                    : "";
+                _ctx.Out.WriteLine(cType + ptr + " " + name + "_" + fieldName + init + ";");
+            }
+        }
+    }
+
+    private void WriteStaticFieldExterns(ClassDeclarationSyntax node, string name)
+    {
+        foreach (var field in node.Members.OfType<FieldDeclarationSyntax>())
+        {
+            if (!field.Modifiers.Any(m => m.IsKind(SyntaxKind.StaticKeyword))) continue;
+
+            var csType = field.Declaration.Type.ToString().Trim();
+            var cType = TypeRegistry.MapType(csType);
+            var ptr = NeedsPtr(csType) ? "*" : "";
 
             foreach (var v in field.Declaration.Variables)
             {
@@ -235,20 +262,50 @@ public sealed class CSharpToC : CSharpSyntaxWalker
         }
     }
 
-    // ── Funktions-Signaturen (Header) ─────────────────────────────────────────
+    // ── Feld-Initializer (shared) ─────────────────────────────────────────
+
+    /// <summary>
+    /// Schreibt Initialisierungen für alle nicht-statischen Felder mit Initializer.
+    /// Wird von allen Konstruktor-Strategien verwendet.
+    /// </summary>
+    internal void WriteInstanceFieldInitializers(ClassDeclarationSyntax node)
+    {
+        foreach (var field in node.Members.OfType<FieldDeclarationSyntax>())
+        {
+            if (field.Modifiers.Any(m => m.IsKind(SyntaxKind.StaticKeyword))) continue;
+
+            foreach (var v in field.Declaration.Variables)
+            {
+                if (v.Initializer == null) continue;
+                var fieldName = v.Identifier.Text.TrimStart('_');
+                var prefix = TypeRegistry.HasNoPrefix(fieldName) ? "" : "f_";
+                _ctx.WriteLine("self->" + prefix + fieldName + " = "
+                    + _exprWriter.Write(v.Initializer.Value) + ";");
+            }
+        }
+    }
+
+    // ── Konstruktor ───────────────────────────────────────────────────────
+
+    private void WriteConstructor(ClassDeclarationSyntax node)
+    {
+        var name = node.Identifier.Text;
+        var baseType = _ctx.CurrentBaseType;
+
+        var strategy = _constructorStrategies.First(s => s.Matches(node, baseType));
+        strategy.Write(node, name, baseType, _ctx, _exprWriter, this);
+    }
+
+    // ── Funktions-Signaturen (Header) ─────────────────────────────────────
 
     private void WriteFunctionSignatures(ClassDeclarationSyntax node, bool isSwitchAppChild)
     {
         var name = node.Identifier.Text;
         var baseType = _ctx.CurrentBaseType;
-
-        var isControlChild = baseType is "Control" or "Label" or "Button" or "ProgressBar";
+        var isControlChild = IsControlSubclass(baseType);
 
         if (isSwitchAppChild)
             _ctx.Out.WriteLine("void " + name + "_Init(" + name + "* self);");
-        else if (isControlChild)
-            // Controls werden mit malloc allokiert wie andere Heap-Objekte
-            _ctx.Out.WriteLine(name + "* " + name + "_New();");
         else
             _ctx.Out.WriteLine(name + "* " + name + "_New();");
 
@@ -258,266 +315,7 @@ public sealed class CSharpToC : CSharpSyntaxWalker
         _ctx.Out.WriteLine();
     }
 
-    // ── Konstruktor (Implementation) ──────────────────────────────────────────
-
-    private void WriteConstructor(ClassDeclarationSyntax node, bool isSwitchAppChild)
-    {
-        var name = node.Identifier.Text;
-        var baseType = _ctx.CurrentBaseType;
-
-        var isControlChild = baseType is "Control" or "Label" or "Button" or "ProgressBar";
-
-        if (isSwitchAppChild)
-            WriteInitConstructor(node, name, baseType);
-        else if (isControlChild)
-            WriteControlConstructor(node, name, baseType);
-        else
-            WriteNewConstructor(node, name);
-    }
-
-    private void WriteControlConstructor(ClassDeclarationSyntax node, string name, string baseType)
-    {
-        // Static-Felder → globale C-Variablen-Definitionen
-        foreach (var field in node.Members.OfType<FieldDeclarationSyntax>())
-        {
-            if (!field.Modifiers.Any(m => m.IsKind(SyntaxKind.StaticKeyword))) continue;
-
-            var csType = field.Declaration.Type.ToString().Trim();
-            var cType = TypeRegistry.MapType(csType);
-            var needPtr = TypeRegistry.NeedsPointerSuffix(csType)
-                       || TypeRegistry.IsStringBuilder(csType)
-                       || TypeRegistry.IsList(csType)
-                       || TypeRegistry.IsDictionary(csType);
-            var ptr = needPtr ? "*" : "";
-
-            foreach (var v in field.Declaration.Variables)
-            {
-                var fieldName = v.Identifier.Text.TrimStart('_');
-                var init = v.Initializer != null
-                    ? " = " + _exprWriter.Write(v.Initializer.Value)
-                    : "";
-                _ctx.Out.WriteLine(cType + ptr + " " + name + "_" + fieldName + init + ";");
-            }
-        }
-
-        _ctx.Out.WriteLine(name + "* " + name + "_New()");
-        _ctx.Out.WriteLine("{");
-        _ctx.Indent();
-
-        _ctx.WriteLine(name + "* self = (" + name + "*)malloc(sizeof(" + name + "));");
-        _ctx.WriteLine("if (!self) return NULL;");
-        _ctx.WriteLine("memset(self, 0, sizeof(" + name + "));");
-
-        // Basis-Control Defaults
-        _ctx.WriteLine("((Control*)self)->visible = 1;");
-        _ctx.WriteLine("((Control*)self)->focusable = 0;");
-
-        // Draw/Update Funktionszeiger verdrahten
-        foreach (var method in node.Members.OfType<MethodDeclarationSyntax>())
-        {
-            var methodName = method.Identifier.Text;
-            var isOverride = method.Modifiers.Any(m => m.IsKind(SyntaxKind.OverrideKeyword));
-            if (!isOverride) continue;
-
-            if (methodName == "Draw")
-                _ctx.WriteLine("((Control*)self)->Draw = (void(*)(Control*))"
-                    + name + "_Draw;");
-
-            if (methodName == "Update")
-            {
-                _ctx.WriteLine("((Control*)self)->Update = (void(*)(Control*, u64, u64))"
-                    + name + "_Update;");
-                // Hat Update → ist fokussierbar
-                _ctx.WriteLine("((Control*)self)->focusable = 1;");
-            }
-        }
-
-        // Feld-Initializer
-        foreach (var field in node.Members.OfType<FieldDeclarationSyntax>())
-        {
-            if (field.Modifiers.Any(m => m.IsKind(SyntaxKind.StaticKeyword))) continue;
-
-            foreach (var v in field.Declaration.Variables)
-            {
-                if (v.Initializer == null) continue;
-                var fieldName = v.Identifier.Text.TrimStart('_');
-                var prefix = TypeRegistry.HasNoPrefix(fieldName) ? "" : "f_";
-                _ctx.WriteLine("self->" + prefix + fieldName + " = "
-                    + _exprWriter.Write(v.Initializer.Value) + ";");
-            }
-        }
-
-        _ctx.WriteLine("return self;");
-        _ctx.Dedent();
-        _ctx.Out.WriteLine("}");
-        _ctx.Out.WriteLine();
-    }
-
-    private void WriteInitConstructor(ClassDeclarationSyntax node, string name, string baseType)
-    {
-        // Static-Felder → globale C-Variablen-Definitionen
-        foreach (var field in node.Members.OfType<FieldDeclarationSyntax>())
-        {
-            if (!field.Modifiers.Any(m => m.IsKind(SyntaxKind.StaticKeyword))) continue;
-
-            var csType = field.Declaration.Type.ToString().Trim();
-            var cType = TypeRegistry.MapType(csType);
-            var needPtr = TypeRegistry.NeedsPointerSuffix(csType)
-                       || TypeRegistry.IsStringBuilder(csType)
-                       || TypeRegistry.IsList(csType)
-                       || TypeRegistry.IsDictionary(csType);
-            var ptr = needPtr ? "*" : "";
-
-            foreach (var v in field.Declaration.Variables)
-            {
-                var fieldName = v.Identifier.Text.TrimStart('_');
-                var init = v.Initializer != null
-                    ? " = " + _exprWriter.Write(v.Initializer.Value)
-                    : "";
-                _ctx.Out.WriteLine(cType + ptr + " " + name + "_" + fieldName + init + ";");
-            }
-        }
-
-        _ctx.Out.WriteLine("void " + name + "_Init(" + name + "* self)");
-        _ctx.Out.WriteLine("{");
-        _ctx.Indent();
-
-        // Basis-Init
-        if (!string.IsNullOrEmpty(baseType) && baseType != SwitchAppBase)
-        {
-            // Control-Subklassen: memset + Basis-Felder setzen
-            if (baseType is "Control" or "Label" or "Button" or "ProgressBar")
-            {
-                _ctx.WriteLine("memset(self, 0, sizeof(" + name + "));");
-                _ctx.WriteLine("((Control*)self)->visible = 1;");
-            }
-            else
-            {
-                _ctx.WriteLine(baseType + "_Init((" + baseType + "*)self);");
-            }
-        }
-
-        // SwitchApp Lifecycle-Funktionszeiger verdrahten
-        if (baseType == SwitchAppBase)
-        {
-            foreach (var method in node.Members.OfType<MethodDeclarationSyntax>())
-            {
-                var methodName = method.Identifier.Text;
-                var isOverride = method.Modifiers.Any(m => m.IsKind(SyntaxKind.OverrideKeyword));
-                var isAbstract = method.Modifiers.Any(m => m.IsKind(SyntaxKind.AbstractKeyword));
-                if (!isOverride && !isAbstract) continue;
-
-                if (methodName is "OnInit" or "OnFrame" or "OnExit")
-                    _ctx.WriteLine("((SwitchApp*)self)->" + methodName
-                        + " = (void(*)(SwitchApp*))" + name + "_" + methodName + ";");
-            }
-        }
-
-        // Control-Subklassen: Draw/Update Funktionszeiger verdrahten
-        if (baseType is "Control" or "Label" or "Button" or "ProgressBar")
-        {
-            foreach (var method in node.Members.OfType<MethodDeclarationSyntax>())
-            {
-                var methodName = method.Identifier.Text;
-                var isOverride = method.Modifiers.Any(m => m.IsKind(SyntaxKind.OverrideKeyword));
-                if (!isOverride) continue;
-
-                if (methodName == "Draw")
-                    _ctx.WriteLine("((Control*)self)->Draw = (void(*)(Control*))"
-                        + name + "_Draw;");
-
-                if (methodName == "Update")
-                    _ctx.WriteLine("((Control*)self)->Update = (void(*)(Control*, u64, u64))"
-                        + name + "_Update;");
-            }
-        }
-
-        // Feld-Initializer
-        foreach (var field in node.Members.OfType<FieldDeclarationSyntax>())
-        {
-            if (field.Modifiers.Any(m => m.IsKind(SyntaxKind.StaticKeyword))) continue;
-
-            foreach (var v in field.Declaration.Variables)
-            {
-                if (v.Initializer == null) continue;
-                var fieldName = v.Identifier.Text.TrimStart('_');
-                var prefix = TypeRegistry.HasNoPrefix(fieldName) ? "" : "f_";
-                _ctx.WriteLine("self->" + prefix + fieldName + " = "
-                    + _exprWriter.Write(v.Initializer.Value) + ";");
-            }
-        }
-
-        _ctx.Dedent();
-        _ctx.Out.WriteLine("}");
-        _ctx.Out.WriteLine();
-    }
-
-    private void WriteNewConstructor(ClassDeclarationSyntax node, string name)
-    {
-        // Static-Felder → globale C-Variablen-Definitionen (nicht im Konstruktor)
-        foreach (var field in node.Members.OfType<FieldDeclarationSyntax>())
-        {
-            if (!field.Modifiers.Any(m => m.IsKind(SyntaxKind.StaticKeyword))) continue;
-
-            var csType = field.Declaration.Type.ToString().Trim();
-            var cType = TypeRegistry.MapType(csType);
-            var needPtr = TypeRegistry.NeedsPointerSuffix(csType);
-            var ptr = needPtr ? "*" : "";
-
-            foreach (var v in field.Declaration.Variables)
-            {
-                var fieldName = v.Identifier.Text.TrimStart('_');
-                var init = v.Initializer != null
-                    ? " = " + _exprWriter.Write(v.Initializer.Value)
-                    : "";
-                _ctx.Out.WriteLine(cType + ptr + " " + name + "_" + fieldName + init + ";");
-            }
-        }
-
-        _ctx.Out.WriteLine(name + "* " + name + "_New()");
-        _ctx.Out.WriteLine("{");
-        _ctx.Indent();
-        _ctx.WriteLine(name + "* self = (" + name + "*)malloc(sizeof(" + name + "));");
-        _ctx.WriteLine("memset(self, 0, sizeof(" + name + "));");
-
-        foreach (var field in node.Members.OfType<FieldDeclarationSyntax>())
-        {
-            // Static-Felder nicht im Konstruktor initialisieren
-            if (field.Modifiers.Any(m => m.IsKind(SyntaxKind.StaticKeyword))) continue;
-
-            foreach (var v in field.Declaration.Variables)
-            {
-                if (v.Initializer == null) continue;
-                var fieldName = v.Identifier.Text.TrimStart('_');
-                var prefix = TypeRegistry.HasNoPrefix(fieldName) ? "" : "f_";
-                _ctx.WriteLine("self->" + prefix + fieldName + " = "
-                    + _exprWriter.Write(v.Initializer.Value) + ";");
-            }
-        }
-
-        foreach (var method in node.Members.OfType<MethodDeclarationSyntax>())
-        {
-            var isOverride = method.Modifiers.Any(m => m.IsKind(SyntaxKind.OverrideKeyword));
-            var isVirtual = method.Modifiers.Any(m => m.IsKind(SyntaxKind.VirtualKeyword));
-            if (!isOverride && !isVirtual) continue;
-
-            var returnType = TypeRegistry.MapType(method.ReturnType.ToString().Trim());
-            var paramTypes = new List<string> { name + "*" };
-            foreach (var p in method.ParameterList.Parameters)
-                paramTypes.Add(TypeRegistry.MapType(p.Type!.ToString().Trim()));
-
-            var castSig = returnType + "(*)(" + string.Join(", ", paramTypes) + ")";
-            _ctx.WriteLine("self->base." + method.Identifier.Text
-                + " = (" + castSig + ")" + name + "_" + method.Identifier.Text + ";");
-        }
-
-        _ctx.WriteLine("return self;");
-        _ctx.Dedent();
-        _ctx.Out.WriteLine("}");
-        _ctx.Out.WriteLine();
-    }
-
-    // ── Methoden-Signaturen ───────────────────────────────────────────────────
+    // ── Methoden-Signaturen ───────────────────────────────────────────────
 
     private void WriteMethodSignature(MethodDeclarationSyntax method, string className)
     {
@@ -533,13 +331,11 @@ public sealed class CSharpToC : CSharpSyntaxWalker
 
         var sig = returnType + " " + name + "(" + string.Join(", ", parameters) + ")";
 
-        if (isAbstract)
-            _ctx.Out.WriteLine("/* abstract: " + sig + " */");
-        else
-            _ctx.Out.WriteLine(sig + ";");
+        if (isAbstract) _ctx.Out.WriteLine("/* abstract: " + sig + " */");
+        else _ctx.Out.WriteLine(sig + ";");
     }
 
-    // ── Methoden-Bodies ───────────────────────────────────────────────────────
+    // ── Methoden-Bodies ───────────────────────────────────────────────────
 
     private void WriteMethodBodies(ClassDeclarationSyntax node)
     {
@@ -560,7 +356,6 @@ public sealed class CSharpToC : CSharpSyntaxWalker
             : _ctx.CurrentClass + "_" + node.Identifier.Text;
 
         var parameters = new List<string>();
-        // Static-Methoden bekommen kein self
         if (!string.IsNullOrEmpty(_ctx.CurrentClass) && !isStatic)
             parameters.Add(_ctx.CurrentClass + "* self");
         foreach (var p in node.ParameterList.Parameters)
@@ -593,7 +388,7 @@ public sealed class CSharpToC : CSharpSyntaxWalker
         _ctx.Out.WriteLine();
     }
 
-    // ── Property-Handling ─────────────────────────────────────────────────────
+    // ── Property ─────────────────────────────────────────────────────────
 
     public override void VisitPropertyDeclaration(PropertyDeclarationSyntax node)
     {
@@ -601,15 +396,13 @@ public sealed class CSharpToC : CSharpSyntaxWalker
         base.VisitPropertyDeclaration(node);
     }
 
-    // ── Utilities ─────────────────────────────────────────────────────────────
+    // ── Utilities ─────────────────────────────────────────────────────────
 
-    private void LoadBaseFields(string baseType)
+    internal void LoadBaseFields(string baseType)
     {
         if (baseType is "Control" or "Label" or "Button" or "ProgressBar")
-        {
             foreach (var f in TypeRegistry.ControlFields)
                 _ctx.BaseFieldTypes[f] = "int";
-        }
 
         if (baseType is "Button")
         {
@@ -617,12 +410,7 @@ public sealed class CSharpToC : CSharpSyntaxWalker
             _ctx.BaseFieldTypes["OnClick"] = "Action";
             _ctx.BaseFieldTypes["text"] = "string";
         }
-
-        if (baseType is "Label")
-        {
-            _ctx.BaseFieldTypes["text"] = "string";
-        }
-
+        if (baseType is "Label") _ctx.BaseFieldTypes["text"] = "string";
         if (baseType is "ProgressBar")
         {
             _ctx.BaseFieldTypes["value"] = "int";
@@ -630,7 +418,17 @@ public sealed class CSharpToC : CSharpSyntaxWalker
         }
     }
 
-    private static string BuildParamDecl(ParameterSyntax p)
+    internal static bool IsControlSubclass(string baseType) =>
+        baseType is "Control" or "Label" or "Button" or "ProgressBar";
+
+    internal static bool NeedsPtr(string csType) =>
+        TypeRegistry.NeedsPointerSuffix(csType)
+     || TypeRegistry.IsStringBuilder(csType)
+     || TypeRegistry.IsList(csType)
+     || TypeRegistry.IsDictionary(csType)
+     || TypeRegistry.IsControlType(csType);
+
+    internal static string BuildParamDecl(ParameterSyntax p)
     {
         if (p.Type == null) return p.Identifier.Text;
 
