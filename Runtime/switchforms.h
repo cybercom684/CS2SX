@@ -791,6 +791,214 @@ static inline void Dict_str_str_Free(Dict_str_str* d) {
 }
 
 // ============================================================================
+// File I/O (SD-Karte via libnx FsFile API)
+// ============================================================================
+
+// Maximale Puffergröße für ReadAllText
+#define CS2SX_FILE_BUF_SIZE 8192
+
+static inline int CS2SX_File_Exists(const char* path)
+{
+    FsFileSystem fs;
+    if (R_FAILED(fsOpenSdCardFileSystem(&fs))) return 0;
+
+    FsFile f;
+    int exists = R_SUCCEEDED(fsFsOpenFile(&fs, path, FsOpenMode_Read, &f));
+    if (exists) fsFileClose(&f);
+    fsFsClose(&fs);
+    return exists;
+}
+
+static inline int CS2SX_Dir_Exists(const char* path)
+{
+    FsFileSystem fs;
+    if (R_FAILED(fsOpenSdCardFileSystem(&fs))) return 0;
+
+    FsDir d;
+    int exists = R_SUCCEEDED(fsFsOpenDirectory(&fs, path, FsDirOpenMode_ReadDirs, &d));
+    if (exists) fsDirClose(&d);
+    fsFsClose(&fs);
+    return exists;
+}
+
+static inline int CS2SX_Dir_Create(const char* path)
+{
+    FsFileSystem fs;
+    if (R_FAILED(fsOpenSdCardFileSystem(&fs))) return 0;
+
+    Result rc = fsFsCreateDirectory(&fs, path);
+    fsFsClose(&fs);
+    return R_SUCCEEDED(rc);
+}
+
+/// Liest eine Datei von der SD-Karte in einen statischen Puffer.
+/// Gibt einen Pointer auf den Puffer zurück, oder "" bei Fehler.
+static inline const char* CS2SX_File_ReadAllText(const char* path)
+{
+    static char _file_buf[CS2SX_FILE_BUF_SIZE];
+    _file_buf[0] = '\0';
+
+    FsFileSystem fs;
+    if (R_FAILED(fsOpenSdCardFileSystem(&fs))) return _file_buf;
+
+    FsFile f;
+    if (R_FAILED(fsFsOpenFile(&fs, path, FsOpenMode_Read, &f)))
+    {
+        fsFsClose(&fs);
+        return _file_buf;
+    }
+
+    s64 size = 0;
+    fsFileGetSize(&f, &size);
+    if (size <= 0 || size >= CS2SX_FILE_BUF_SIZE)
+    {
+        fsFileClose(&f);
+        fsFsClose(&fs);
+        return _file_buf;
+    }
+
+    u64 bytesRead = 0;
+    fsFileRead(&f, 0, _file_buf, (u64)size, FsReadOption_None, &bytesRead);
+    _file_buf[bytesRead] = '\0';
+
+    fsFileClose(&f);
+    fsFsClose(&fs);
+    return _file_buf;
+}
+
+/// Schreibt einen String in eine Datei auf der SD-Karte.
+/// Gibt 1 bei Erfolg zurück, 0 bei Fehler.
+static inline int CS2SX_File_WriteAllText(const char* path, const char* content)
+{
+    if (!content) return 0;
+
+    FsFileSystem fs;
+    if (R_FAILED(fsOpenSdCardFileSystem(&fs))) return 0;
+
+    // Datei löschen falls vorhanden, dann neu erstellen
+    fsFsDeleteFile(&fs, path);
+
+    u64 size = (u64)strlen(content);
+    if (R_FAILED(fsFsCreateFile(&fs, path, size, 0)))
+    {
+        fsFsClose(&fs);
+        return 0;
+    }
+
+    FsFile f;
+    if (R_FAILED(fsFsOpenFile(&fs, path, FsOpenMode_Write, &f)))
+    {
+        fsFsClose(&fs);
+        return 0;
+    }
+
+    Result rc = fsFileWrite(&f, 0, content, size, FsWriteOption_Flush);
+    fsFileClose(&f);
+    fsFsClose(&fs);
+    return R_SUCCEEDED(rc);
+}
+
+/// Hängt einen String an eine bestehende Datei an.
+static inline int CS2SX_File_AppendAllText(const char* path, const char* content)
+{
+    if (!content) return 0;
+
+    FsFileSystem fs;
+    if (R_FAILED(fsOpenSdCardFileSystem(&fs))) return 0;
+
+    // Datei öffnen oder neu erstellen
+    u64 appendSize = (u64)strlen(content);
+    FsFile f;
+
+    if (R_FAILED(fsFsOpenFile(&fs, path, FsOpenMode_Write | FsOpenMode_Append, &f)))
+    {
+        fsFsCreateFile(&fs, path, 0, 0);
+        if (R_FAILED(fsFsOpenFile(&fs, path, FsOpenMode_Write | FsOpenMode_Append, &f)))
+        {
+            fsFsClose(&fs);
+            return 0;
+        }
+    }
+
+    s64 currentSize = 0;
+    fsFileGetSize(&f, &currentSize);
+    Result rc = fsFileWrite(&f, (u64)currentSize, content, appendSize, FsWriteOption_Flush);
+
+    fsFileClose(&f);
+    fsFsClose(&fs);
+    return R_SUCCEEDED(rc);
+}
+
+/// Löscht eine Datei von der SD-Karte.
+static inline int CS2SX_File_Delete(const char* path)
+{
+    FsFileSystem fs;
+    if (R_FAILED(fsOpenSdCardFileSystem(&fs))) return 0;
+    Result rc = fsFsDeleteFile(&fs, path);
+    fsFsClose(&fs);
+    return R_SUCCEEDED(rc);
+}
+
+
+static inline int CS2SX_File_Copy(const char* src, const char* dst)
+{
+    const char* content = CS2SX_File_ReadAllText(src);
+    if (!content || content[0] == '\0') return 0;
+    return CS2SX_File_WriteAllText(dst, content);
+}
+
+static inline int CS2SX_Dir_Delete(const char* path)
+{
+    FsFileSystem fs;
+    if (R_FAILED(fsOpenSdCardFileSystem(&fs))) return 0;
+    Result rc = fsFsDeleteDirectory(&fs, path);
+    fsFsClose(&fs);
+    return R_SUCCEEDED(rc);
+}
+
+static inline const char* CS2SX_Dir_GetCurrent(void)
+{
+    return "/switch";
+}
+
+// GetFiles gibt einen statischen Buffer mit newline-getrennten Pfaden zurück.
+// Auf der Switch sind die Möglichkeiten begrenzt — gibt den ersten Eintrag zurück.
+static inline List_str* CS2SX_Dir_GetFiles(const char* path, const char* pattern)
+{
+    List_str* result = List_str_New();
+    if (!result) return result;
+
+    FsFileSystem fs;
+    if (R_FAILED(fsOpenSdCardFileSystem(&fs))) return result;
+
+    FsDir d;
+    if (R_FAILED(fsFsOpenDirectory(&fs, path, FsDirOpenMode_ReadFiles, &d)))
+    {
+        fsFsClose(&fs);
+        return result;
+    }
+
+    static FsDirectoryEntry _dir_entries[64];
+    static char _dir_paths[64][256];
+    s64 count = 0;
+    fsDirRead(&d, &count, 64, _dir_entries);
+
+    // pathLen entfernt — (void)pattern um unused-warning zu unterdrücken
+    (void)pattern;
+
+    for (int i = 0; i < (int)count && i < 64; i++)
+    {
+        snprintf(_dir_paths[i], 255, "%s/%s", path, _dir_entries[i].name);
+        List_str_Add(result, _dir_paths[i]);
+    }
+
+    fsDirClose(&d);
+    fsFsClose(&fs);
+    return result;
+}
+
+
+// ============================================================================
 // Form
 // ============================================================================
 

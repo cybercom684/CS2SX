@@ -373,6 +373,15 @@ public sealed class CSharpToC : CSharpSyntaxWalker
         if (isAbstract) return;
 
         _ctx.ClearMethodContext();
+
+
+        // Parameter in LocalTypes registrieren damit Typ-Inferenz greift
+        foreach (var p in node.ParameterList.Parameters)
+        {
+            if (p.Type != null)
+                _ctx.LocalTypes[p.Identifier.Text] = p.Type.ToString().Trim();
+        }
+
         _ctx.Out.WriteLine(sig);
         _ctx.Out.WriteLine("{");
         _ctx.Indent();

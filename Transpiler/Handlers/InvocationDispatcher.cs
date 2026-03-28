@@ -19,6 +19,7 @@ public sealed class InvocationDispatcher
         new FormHandler(),
         new ConsoleHandler(),
         new MathHandler(),
+        new FileHandler(),
         new StringBuilderHandler(),
         new ListHandler(),
         new DictionaryHandler(),
