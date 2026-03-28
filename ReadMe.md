@@ -48,6 +48,8 @@ Die fertige `.nro`-Datei liegt danach im Projektverzeichnis.
 ## Beispiel-App
 
 ```csharp
+using CS2SX.Switch;
+
 public class MyApp : SwitchApp
 {
     private Label _label;
@@ -57,6 +59,9 @@ public class MyApp : SwitchApp
     public override void OnInit()
     {
         _values ??= new List<int>();
+
+        if (!Directory.Exists("/switch/MeinProjekt"))
+            Directory.CreateDirectory("/switch/MeinProjekt");
 
         _label = new Label("Hello from C#!");
         _label.X = 5;
@@ -78,6 +83,8 @@ public class MyApp : SwitchApp
     {
         _values.Add(_values.Count);
         _label.Text = $"Pressed {_values.Count} times!";
+        File.WriteAllText("/switch/MeinProjekt/save.txt",
+            _values.Count.ToString());
     }
 }
 ```
@@ -114,6 +121,53 @@ public class MyApp : SwitchApp
 | `IsNullOrEmpty`, `IsNullOrWhiteSpace` | ✅ |
 | String-Interpolation `$"..."` | ✅ |
 
+### File I/O (SD-Karte)
+
+Namespace: `using CS2SX.Switch;`
+
+Alle Pfade müssen absolut sein und mit `/switch/` beginnen.
+
+| Methode | Status | Beschreibung |
+|---|---|---|
+| `File.ReadAllText(path)` | ✅ | Datei lesen, gibt `string` zurück |
+| `File.WriteAllText(path, content)` | ✅ | Datei schreiben (überschreibt) |
+| `File.AppendAllText(path, content)` | ✅ | An Datei anhängen |
+| `File.Exists(path)` | ✅ | Prüft ob Datei existiert |
+| `File.Delete(path)` | ✅ | Datei löschen |
+| `File.Copy(src, dst)` | ✅ | Datei kopieren |
+| `Directory.Exists(path)` | ✅ | Prüft ob Verzeichnis existiert |
+| `Directory.CreateDirectory(path)` | ✅ | Verzeichnis anlegen |
+| `Directory.Delete(path)` | ✅ | Verzeichnis löschen |
+| `Directory.GetFiles(path)` | ✅ | Dateien auflisten, gibt `List<string>` zurück |
+
+**Beispiel — Save/Load:**
+
+```csharp
+using CS2SX.Switch;
+
+// Verzeichnis sicherstellen
+Directory.CreateDirectory("/switch/MeinSpiel");
+
+// Speichern
+File.WriteAllText("/switch/MeinSpiel/save.txt", "42;1337");
+File.AppendAllText("/switch/MeinSpiel/log.txt", "Saved");
+
+// Laden
+if (File.Exists("/switch/MeinSpiel/save.txt"))
+{
+    string content = File.ReadAllText("/switch/MeinSpiel/save.txt");
+    List<string> parts = content.Split(";");
+    // parts[0] = "42", parts[1] = "1337"
+}
+
+// Dateien auflisten
+List<string> files = Directory.GetFiles("/switch/MeinSpiel");
+foreach (string f in files)
+{
+    Console.WriteLine(f);
+}
+```
+
 ### Kontrollfluss
 
 | Feature | Status |
@@ -138,7 +192,6 @@ public class MyApp : SwitchApp
 | Enums mit Werten | ✅ | |
 | `interface` | ❌ | |
 | Generics | ❌ | |
-| `abstract class` (außer SwitchApp) | ❌ | |
 
 ### UI & Input
 
@@ -163,7 +216,7 @@ public class MyApp : SwitchApp
 | `is`-Pattern-Matching |
 | `interface` |
 | `Console.ReadLine` / Keyboard-Input |
-| File I/O |
+| `int.Parse` / `int.TryParse` |
 
 ---
 
@@ -180,9 +233,9 @@ public class ValueMeter : Control
     private int _maxValue;
     private int _width;
 
-    public void SetValue(int v)   { _value    = v; }
+    public void SetValue(int v)            { _value    = v; }
     public void SetRange(int min, int max) { _minValue = min; _maxValue = max; }
-    public void SetWidth(int w)   { _width    = w; }
+    public void SetWidth(int w)            { _width    = w; }
 
     public override void Draw()
     {
@@ -231,13 +284,14 @@ CS2SX/
 ├── Transpiler/
 │   ├── Handlers/               — pluggable Methoden-Aufruf-Handler
 │   │   ├── IInvocationHandler.cs
-│   │   ├── InvocationHandlerBase.cs  — gemeinsame Hilfsmethoden (ArgAt, TryResolveList, …)
+│   │   ├── InvocationHandlerBase.cs  — ArgAt, TryResolveList, DictFuncPrefix, …
 │   │   ├── InvocationDispatcher.cs
 │   │   ├── LibNxHandler.cs
 │   │   ├── InputHandler.cs
 │   │   ├── ConsoleHandler.cs
 │   │   ├── FormHandler.cs
 │   │   ├── GraphicsHandler.cs
+│   │   ├── FileHandler.cs      — File.* und Directory.*
 │   │   ├── ListHandler.cs
 │   │   ├── DictionaryHandler.cs
 │   │   ├── StringBuilderHandler.cs
@@ -268,7 +322,7 @@ CS2SX/
 │   ├── ProjectCreator.cs
 │   └── ProjectReader.cs
 └── Runtime/
-    ├── switchforms.h           — UI-Controls, List<T>, Dictionary<K,V>, StringBuilder, String-Utils
+    ├── switchforms.h           — UI-Controls, Collections, String-Utils, File I/O
     └── switchapp.h             — SwitchApp-Loop, Framebuffer
 ```
 
