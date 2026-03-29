@@ -34,7 +34,7 @@ dotnet tool update --global --add-source ./bin/Release CS2SX
 cs2sx new MeinProjekt
 
 # Projekt bauen
-cs2sx build MeinProjekt
+cs2sx build MeinProjekt/MeinProjekt.csproj
 
 # LibNX-Stubs generieren (optional)
 cs2sx genstubs <libnx-include> <output>
@@ -46,11 +46,11 @@ Die fertige `.nro`-Datei liegt danach im Projektverzeichnis und kann direkt auf 
 
 ---
 
-## Beispiel-App
+## Beispiel-Apps
+
+### Console-App (Text-UI)
 
 ```csharp
-using CS2SX.Switch;
-
 public class MyApp : SwitchApp
 {
     private Label _label;
@@ -90,7 +90,33 @@ public class MyApp : SwitchApp
 }
 ```
 
-> Wichtig: **eine Klasse pro `.cs`-Datei**. Der Transpiler verarbeitet jede Datei separat.
+### Grafik-App (Framebuffer)
+
+```csharp
+public class MyApp : SwitchApp
+{
+    public override void OnInit()
+    {
+        // Grafik-Modus aktivieren (1280x720)
+        Graphics.Init(1280, 720);
+    }
+
+    public override void OnFrame()
+    {
+        Graphics.FillScreen(Color.Black);
+        Graphics.DrawText(100, 100, "Hello Switch!", Color.White, 2);
+        Graphics.FillRect(100, 200, 200, 50, Color.Blue);
+        Graphics.DrawRect(100, 200, 200, 50, Color.White);
+        Graphics.DrawLine(0, 0, 400, 400, Color.Red);
+        Graphics.FillCircle(640, 360, 80, Color.Green);
+        Graphics.DrawCircle(640, 360, 80, Color.White);
+    }
+}
+```
+
+> **Wichtig:** Wird `Graphics.Init()` in `OnInit()` aufgerufen, wechselt CS2SX automatisch in den Framebuffer-Modus. Ohne `Graphics.Init()` läuft die App im Console/ANSI-Modus.
+
+> **Wichtig:** **Eine Klasse pro `.cs`-Datei.** Der Transpiler verarbeitet jede Datei separat.
 
 ---
 
@@ -141,15 +167,45 @@ if (int.TryParse(someString, out result))
 }
 ```
 
-### File I/O (SD-Karte)
+### Grafik (Framebuffer)
 
-Namespace: `using CS2SX.Switch;`
+Aktivierung: `Graphics.Init(1280, 720)` in `OnInit()` aufrufen.
+
+| Methode | Status | Beschreibung |
+|---|---|---|
+| `Graphics.Init(w, h)` | ✅ | Framebuffer-Modus aktivieren |
+| `Graphics.FillScreen(color)` | ✅ | Bildschirm füllen |
+| `Graphics.SetPixel(x, y, color)` | ✅ | Einzelnen Pixel setzen |
+| `Graphics.DrawRect(x, y, w, h, color)` | ✅ | Rechteck-Outline |
+| `Graphics.FillRect(x, y, w, h, color)` | ✅ | Gefülltes Rechteck |
+| `Graphics.DrawLine(x0, y0, x1, y1, color)` | ✅ | Linie (Bresenham) |
+| `Graphics.DrawCircle(cx, cy, r, color)` | ✅ | Kreis-Outline (Midpoint) |
+| `Graphics.FillCircle(cx, cy, r, color)` | ✅ | Gefüllter Kreis |
+| `Graphics.DrawText(x, y, text, color, scale)` | ✅ | Text (8x8 Bitmap-Font) |
+| `Graphics.DrawChar(x, y, c, color, scale)` | ✅ | Einzelnes Zeichen |
+| `Graphics.MeasureTextWidth(text, scale)` | ✅ | Text-Breite in Pixeln |
+| `Graphics.MeasureTextHeight(scale)` | ✅ | Text-Höhe in Pixeln |
+| `Graphics.DrawTexture(tex, x, y)` | ✅ | Texture rendern |
+
+### Farb-Konstanten
+
+```csharp
+Color.Black   Color.White   Color.Red     Color.Green
+Color.Blue    Color.Yellow  Color.Cyan    Color.Magenta
+Color.Gray    Color.Orange
+
+// Eigene Farben
+uint myColor = Color.RGB(255, 128, 0);
+uint myColorA = Color.RGBA(255, 128, 0, 200);
+```
+
+### File I/O (SD-Karte)
 
 Alle Pfade müssen absolut sein und mit `/switch/` beginnen.
 
 | Methode | Status | Beschreibung |
 |---|---|---|
-| `File.ReadAllText(path)` | ✅ | Datei lesen, gibt `string` zurück |
+| `File.ReadAllText(path)` | ✅ | Datei lesen |
 | `File.WriteAllText(path, content)` | ✅ | Datei schreiben (überschreibt) |
 | `File.AppendAllText(path, content)` | ✅ | An Datei anhängen |
 | `File.Exists(path)` | ✅ | Prüft ob Datei existiert |
@@ -158,30 +214,19 @@ Alle Pfade müssen absolut sein und mit `/switch/` beginnen.
 | `Directory.Exists(path)` | ✅ | Prüft ob Verzeichnis existiert |
 | `Directory.CreateDirectory(path)` | ✅ | Verzeichnis anlegen |
 | `Directory.Delete(path)` | ✅ | Verzeichnis löschen |
-| `Directory.GetFiles(path)` | ✅ | Dateien auflisten, gibt `List<string>` zurück |
+| `Directory.GetFiles(path)` | ✅ | Dateien auflisten → `List<string>` |
 
 ```csharp
-using CS2SX.Switch;
-
-// Verzeichnis sicherstellen
 Directory.CreateDirectory("/switch/MeinSpiel");
 
-// Speichern
 File.WriteAllText("/switch/MeinSpiel/save.txt", "42;1337");
-File.AppendAllText("/switch/MeinSpiel/log.txt", "Saved\n");
 
-// Laden
 if (File.Exists("/switch/MeinSpiel/save.txt"))
 {
     string content = File.ReadAllText("/switch/MeinSpiel/save.txt");
     List<string> parts = content.Split(";");
-    int val = int.Parse(parts[0]);   // 42
+    int val = int.Parse(parts[0]);
 }
-
-// Dateien auflisten
-List<string> files = Directory.GetFiles("/switch/MeinSpiel");
-foreach (string f in files)
-    Console.WriteLine(f);
 ```
 
 ### Kontrollfluss
@@ -209,7 +254,7 @@ foreach (string f in files)
 | `interface` | ❌ | |
 | Generics | ❌ | |
 
-### UI & Input
+### UI & Input (Console-Modus)
 
 | Feature | Status |
 |---|---|
@@ -231,8 +276,21 @@ foreach (string f in files)
 | Tuple-Return / Dekonstruktion |
 | `is`-Pattern-Matching |
 | `interface` |
+| Generics |
 | `Console.ReadLine` / Keyboard-Input |
-| Grafische Oberfläche (nur Console/ANSI) |
+
+---
+
+## Render-Modi
+
+CS2SX unterstützt zwei exklusive Render-Modi:
+
+| Modus | Aktivierung | Beschreibung |
+|---|---|---|
+| **Console** | Standard (kein `Graphics.Init`) | ANSI-Terminal, `Label`, `Button`, `ProgressBar` |
+| **Framebuffer** | `Graphics.Init(1280, 720)` in `OnInit()` | Direktes Pixel-Rendering, 1280×720 RGBA8888 |
+
+Im Framebuffer-Modus sind Console-Controls (`Label`, `Button`) nicht sichtbar — der gesamte Output läuft über `Graphics.*`.
 
 ---
 
@@ -292,8 +350,6 @@ Form.Add(_meter);
 
 ## Projektstruktur
 
-Ein CS2SX-Projekt besteht aus:
-
 ```
 MeinProjekt/
 ├── MeinProjekt.csproj
@@ -328,15 +384,16 @@ CS2SX/
 ├── Transpiler/
 │   ├── Handlers/               — pluggable Methoden-Aufruf-Handler
 │   │   ├── IInvocationHandler.cs
-│   │   ├── InvocationHandlerBase.cs  — ArgAt, TryResolveList, DictFuncPrefix, …
+│   │   ├── InvocationHandlerBase.cs
 │   │   ├── InvocationDispatcher.cs
 │   │   ├── LibNxHandler.cs
 │   │   ├── InputHandler.cs
 │   │   ├── ConsoleHandler.cs
 │   │   ├── FormHandler.cs
 │   │   ├── GraphicsHandler.cs
-│   │   ├── FileHandler.cs      — File.* und Directory.*
-│   │   ├── ParseHandler.cs     — int.Parse, float.TryParse, …
+│   │   ├── ColorHandler.cs
+│   │   ├── FileHandler.cs
+│   │   ├── ParseHandler.cs
 │   │   ├── ListHandler.cs
 │   │   ├── DictionaryHandler.cs
 │   │   ├── StringBuilderHandler.cs
@@ -355,8 +412,8 @@ CS2SX/
 │   │   ├── FormatStringBuilder.cs
 │   │   ├── StringEscaper.cs
 │   │   └── TypeInferrer.cs
-│   ├── CSharpToC.cs            — dünner Orchestrator
-│   └── TypeMapper.cs           — Backward-Compatibility-Shim
+│   ├── CSharpToC.cs
+│   └── TypeMapper.cs
 ├── Build/
 │   ├── BuildPipeline.cs        — inkrementeller Build
 │   ├── CCompiler.cs
@@ -367,8 +424,9 @@ CS2SX/
 │   ├── ProjectCreator.cs
 │   └── ProjectReader.cs
 └── Runtime/
-    ├── switchforms.h           — UI-Controls, Collections, String-Utils, File I/O, Parsing
-    └── switchapp.h             — SwitchApp-Loop, Framebuffer
+    ├── switchforms.h           — UI-Controls, Collections, String-Utils, File I/O
+    ├── switchforms.c           — globale Variablendefinitionen (g_fb_addr, etc.)
+    └── switchapp.h             — SwitchApp-Loop, Framebuffer, Graphics-API
 ```
 
 ### Neuen Feature-Handler hinzufügen
@@ -391,7 +449,7 @@ public sealed class MeinHandler : InvocationHandlerBase
 }
 ```
 
-2. In `InvocationDispatcher.cs` eintragen — kein weiterer Code muss angefasst werden:
+2. In `InvocationDispatcher.cs` eintragen:
 
 ```csharp
 new MeinHandler(),
@@ -400,6 +458,16 @@ new MeinHandler(),
 ### Neuen Typ hinzufügen
 
 Eintrag in `Core/TypeRegistry.cs` in der entsprechenden Kategorie ergänzen — `s_primitives`, `s_controlTypes` oder `s_libNxStructs`.
+
+---
+
+## Bekannte Einschränkungen
+
+- **Ein `SwitchApp`-Subtyp pro Projekt** — der Einstiegspunkt wird automatisch erkannt
+- **Keine verschachtelten Klassen** — jede Klasse in einer eigenen `.cs`-Datei
+- **`string`-Puffer begrenzt** — interne statische Puffer sind 512 Bytes, Dateipuffer 8192 Bytes
+- **Bitmap-Font 8x8** — `Graphics.DrawText` nutzt einen eingebauten 8×8-Pixel-Font ohne Anti-Aliasing
+- **Kein Heap-GC** — allokierte Objekte (`*_New()`) müssen manuell freigegeben werden wenn nötig
 
 ---
 

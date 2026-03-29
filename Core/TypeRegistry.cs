@@ -197,6 +197,18 @@ public static class TypeRegistry
         ["true"]  = "1",
         ["false"] = "0",
         ["null"]  = "NULL",
+
+        // Color-Konstanten
+        ["Color.Black"] = "COLOR_BLACK",
+        ["Color.White"] = "COLOR_WHITE",
+        ["Color.Red"] = "COLOR_RED",
+        ["Color.Green"] = "COLOR_GREEN",
+        ["Color.Blue"] = "COLOR_BLUE",
+        ["Color.Yellow"] = "COLOR_YELLOW",
+        ["Color.Cyan"] = "COLOR_CYAN",
+        ["Color.Magenta"] = "COLOR_MAGENTA",
+        ["Color.Gray"] = "COLOR_GRAY",
+        ["Color.Orange"] = "COLOR_ORANGE",
     };
 
     private static readonly HashSet<string> s_disposableTypes = new(StringComparer.Ordinal)

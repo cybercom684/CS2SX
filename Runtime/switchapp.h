@@ -1,98 +1,32 @@
 #pragma once
 #include <switch.h>
-#include <switch/display/framebuffer.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include "switchforms.h"
 
 // ============================================================================
-// Texture (muss vor den Graphics‑Funktionen definiert sein)
+// Farb-Hilfsmakros (RGBA8888)
 // ============================================================================
 
-typedef struct Texture Texture;
-struct Texture {
-    int width;
-    int height;
-    uint32_t* pixels;
-};
+#define CS2SX_RGBA(r,g,b,a) (((u32)(a) << 24) | ((u32)(b) << 16) | ((u32)(g) << 8) | (u32)(r))
+#define CS2SX_RGB(r,g,b)    CS2SX_RGBA(r,g,b,255)
 
-static inline Texture* Texture_New(int width, int height, uint32_t* pixels) {
-    Texture* t = (Texture*)malloc(sizeof(Texture));
-    if (!t) return NULL;
-    t->width = width;
-    t->height = height;
-    t->pixels = (uint32_t*)malloc(width * height * sizeof(uint32_t));
-    if (pixels) memcpy(t->pixels, pixels, width * height * sizeof(uint32_t));
-    else memset(t->pixels, 0, width * height * sizeof(uint32_t));
-    return t;
-}
-
-static inline void Texture_Dispose(Texture* t) {
-    if (t) {
-        free(t->pixels);
-        free(t);
-    }
-}
+#define COLOR_BLACK   CS2SX_RGB(0,   0,   0  )
+#define COLOR_WHITE   CS2SX_RGB(255, 255, 255)
+#define COLOR_RED     CS2SX_RGB(255, 0,   0  )
+#define COLOR_GREEN   CS2SX_RGB(0,   200, 0  )
+#define COLOR_BLUE    CS2SX_RGB(0,   0,   255)
+#define COLOR_YELLOW  CS2SX_RGB(255, 255, 0  )
+#define COLOR_CYAN    CS2SX_RGB(0,   255, 255)
+#define COLOR_MAGENTA CS2SX_RGB(255, 0,   255)
+#define COLOR_GRAY    CS2SX_RGB(128, 128, 128)
+#define COLOR_DGRAY   CS2SX_RGB(64,  64,  64 )
+#define COLOR_LGRAY   CS2SX_RGB(192, 192, 192)
+#define COLOR_ORANGE  CS2SX_RGB(255, 165, 0  )
 
 // ============================================================================
-// Grafik über libnx Framebuffer (korrigierte API)
-// ============================================================================
-
-static Framebuffer g_fb;
-static uint32_t* g_fb_addr = NULL;
-static uint32_t g_fb_stride;
-static int g_fb_width, g_fb_height;
-
-static inline void Graphics_Init(int width, int height) {
-    NWindow* win = nwindowGetDefault();
-    if (!win) return;
-    framebufferCreate(&g_fb, win, width, height, PIXEL_FORMAT_RGBA_8888, 2);
-    g_fb_width = width;
-    g_fb_height = height;
-    g_fb_stride = width; // wird später durch framebufferBegin überschrieben
-}
-
-static inline void Graphics_BeginFrame(void) {
-    g_fb_addr = framebufferBegin(&g_fb, &g_fb_stride);
-    if (!g_fb_addr) return;
-    // Optional: Bildschirm löschen (schwarz)
-    for (int i = 0; i < g_fb_width * g_fb_height; i++) g_fb_addr[i] = 0;
-}
-
-static inline void Graphics_DrawRect(int x, int y, int w, int h, uint32_t color) {
-    if (!g_fb_addr) return;
-    for (int i = 0; i < h; i++) {
-        int row = y + i;
-        if (row < 0 || row >= g_fb_height) continue;
-        for (int j = 0; j < w; j++) {
-            int col = x + j;
-            if (col < 0 || col >= g_fb_width) continue;
-            g_fb_addr[row * g_fb_stride + col] = color;
-        }
-    }
-}
-
-static inline void Graphics_DrawTexture(Texture* tex, int x, int y) {
-    if (!tex || !tex->pixels || !g_fb_addr) return;
-    for (int i = 0; i < tex->height; i++) {
-        int row = y + i;
-        if (row < 0 || row >= g_fb_height) continue;
-        for (int j = 0; j < tex->width; j++) {
-            int col = x + j;
-            if (col < 0 || col >= g_fb_width) continue;
-            g_fb_addr[row * g_fb_stride + col] = tex->pixels[i * tex->width + j];
-        }
-    }
-}
-
-static inline void Graphics_EndFrame(void) {
-    framebufferEnd(&g_fb);
-    g_fb_addr = NULL;
-}
-
-// ============================================================================
-// SwitchApp (jetzt nach den Grafik-Funktionen)
+// SwitchApp
 // ============================================================================
 
 typedef struct SwitchApp SwitchApp;
@@ -114,19 +48,328 @@ static inline void SwitchApp_Add(SwitchApp* self, Control* control)
     Form_Add(&self->form, control);
 }
 
+// ============================================================================
+// Bitmap Font 8x8 (ASCII 32-127, CP437)
+// ============================================================================
+
+static const u8 cs2sx_font8x8[96][8] = {
+    {0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00}, // ' '
+    {0x18,0x3C,0x3C,0x18,0x18,0x00,0x18,0x00}, // '!'
+    {0x36,0x36,0x00,0x00,0x00,0x00,0x00,0x00}, // '"'
+    {0x36,0x36,0x7F,0x36,0x7F,0x36,0x36,0x00}, // '#'
+    {0x0C,0x3E,0x03,0x1E,0x30,0x1F,0x0C,0x00}, // '$'
+    {0x00,0x63,0x33,0x18,0x0C,0x66,0x63,0x00}, // '%'
+    {0x1C,0x36,0x1C,0x6E,0x3B,0x33,0x6E,0x00}, // '&'
+    {0x06,0x06,0x03,0x00,0x00,0x00,0x00,0x00}, // '''
+    {0x18,0x0C,0x06,0x06,0x06,0x0C,0x18,0x00}, // '('
+    {0x06,0x0C,0x18,0x18,0x18,0x0C,0x06,0x00}, // ')'
+    {0x00,0x66,0x3C,0xFF,0x3C,0x66,0x00,0x00}, // '*'
+    {0x00,0x0C,0x0C,0x3F,0x0C,0x0C,0x00,0x00}, // '+'
+    {0x00,0x00,0x00,0x00,0x00,0x0C,0x0C,0x06}, // ','
+    {0x00,0x00,0x00,0x3F,0x00,0x00,0x00,0x00}, // '-'
+    {0x00,0x00,0x00,0x00,0x00,0x0C,0x0C,0x00}, // '.'
+    {0x60,0x30,0x18,0x0C,0x06,0x03,0x01,0x00}, // '/'
+    {0x3E,0x63,0x73,0x7B,0x6F,0x67,0x3E,0x00}, // '0'
+    {0x0C,0x0E,0x0C,0x0C,0x0C,0x0C,0x3F,0x00}, // '1'
+    {0x1E,0x33,0x30,0x1C,0x06,0x33,0x3F,0x00}, // '2'
+    {0x1E,0x33,0x30,0x1C,0x30,0x33,0x1E,0x00}, // '3'
+    {0x38,0x3C,0x36,0x33,0x7F,0x30,0x78,0x00}, // '4'
+    {0x3F,0x03,0x1F,0x30,0x30,0x33,0x1E,0x00}, // '5'
+    {0x1C,0x06,0x03,0x1F,0x33,0x33,0x1E,0x00}, // '6'
+    {0x3F,0x33,0x30,0x18,0x0C,0x0C,0x0C,0x00}, // '7'
+    {0x1E,0x33,0x33,0x1E,0x33,0x33,0x1E,0x00}, // '8'
+    {0x1E,0x33,0x33,0x3E,0x30,0x18,0x0E,0x00}, // '9'
+    {0x00,0x0C,0x0C,0x00,0x00,0x0C,0x0C,0x00}, // ':'
+    {0x00,0x0C,0x0C,0x00,0x00,0x0C,0x0C,0x06}, // ';'
+    {0x18,0x0C,0x06,0x03,0x06,0x0C,0x18,0x00}, // '<'
+    {0x00,0x00,0x3F,0x00,0x00,0x3F,0x00,0x00}, // '='
+    {0x06,0x0C,0x18,0x30,0x18,0x0C,0x06,0x00}, // '>'
+    {0x1E,0x33,0x30,0x18,0x0C,0x00,0x0C,0x00}, // '?'
+    {0x3E,0x63,0x7B,0x7B,0x7B,0x03,0x1E,0x00}, // '@'
+    {0x0C,0x1E,0x33,0x33,0x3F,0x33,0x33,0x00}, // 'A'
+    {0x3F,0x66,0x66,0x3E,0x66,0x66,0x3F,0x00}, // 'B'
+    {0x3C,0x66,0x03,0x03,0x03,0x66,0x3C,0x00}, // 'C'
+    {0x1F,0x36,0x66,0x66,0x66,0x36,0x1F,0x00}, // 'D'
+    {0x7F,0x46,0x16,0x1E,0x16,0x46,0x7F,0x00}, // 'E'
+    {0x7F,0x46,0x16,0x1E,0x16,0x06,0x0F,0x00}, // 'F'
+    {0x3C,0x66,0x03,0x03,0x73,0x66,0x7C,0x00}, // 'G'
+    {0x33,0x33,0x33,0x3F,0x33,0x33,0x33,0x00}, // 'H'
+    {0x1E,0x0C,0x0C,0x0C,0x0C,0x0C,0x1E,0x00}, // 'I'
+    {0x78,0x30,0x30,0x30,0x33,0x33,0x1E,0x00}, // 'J'
+    {0x67,0x66,0x36,0x1E,0x36,0x66,0x67,0x00}, // 'K'
+    {0x0F,0x06,0x06,0x06,0x46,0x66,0x7F,0x00}, // 'L'
+    {0x63,0x77,0x7F,0x7F,0x6B,0x63,0x63,0x00}, // 'M'
+    {0x63,0x67,0x6F,0x7B,0x73,0x63,0x63,0x00}, // 'N'
+    {0x1C,0x36,0x63,0x63,0x63,0x36,0x1C,0x00}, // 'O'
+    {0x3F,0x66,0x66,0x3E,0x06,0x06,0x0F,0x00}, // 'P'
+    {0x1E,0x33,0x33,0x33,0x3B,0x1E,0x38,0x00}, // 'Q'
+    {0x3F,0x66,0x66,0x3E,0x36,0x66,0x67,0x00}, // 'R'
+    {0x1E,0x33,0x07,0x0E,0x38,0x33,0x1E,0x00}, // 'S'
+    {0x3F,0x2D,0x0C,0x0C,0x0C,0x0C,0x1E,0x00}, // 'T'
+    {0x33,0x33,0x33,0x33,0x33,0x33,0x3F,0x00}, // 'U'
+    {0x33,0x33,0x33,0x33,0x33,0x1E,0x0C,0x00}, // 'V'
+    {0x63,0x63,0x63,0x6B,0x7F,0x77,0x63,0x00}, // 'W'
+    {0x63,0x63,0x36,0x1C,0x1C,0x36,0x63,0x00}, // 'X'
+    {0x33,0x33,0x33,0x1E,0x0C,0x0C,0x1E,0x00}, // 'Y'
+    {0x7F,0x63,0x31,0x18,0x4C,0x66,0x7F,0x00}, // 'Z'
+    {0x1E,0x06,0x06,0x06,0x06,0x06,0x1E,0x00}, // '['
+    {0x03,0x06,0x0C,0x18,0x30,0x60,0x40,0x00}, // '\'
+    {0x1E,0x18,0x18,0x18,0x18,0x18,0x1E,0x00}, // ']'
+    {0x08,0x1C,0x36,0x63,0x00,0x00,0x00,0x00}, // '^'
+    {0x00,0x00,0x00,0x00,0x00,0x00,0x00,0xFF}, // '_'
+    {0x0C,0x0C,0x18,0x00,0x00,0x00,0x00,0x00}, // '`'
+    {0x00,0x00,0x1E,0x30,0x3E,0x33,0x6E,0x00}, // 'a'
+    {0x07,0x06,0x06,0x3E,0x66,0x66,0x3B,0x00}, // 'b'
+    {0x00,0x00,0x1E,0x33,0x03,0x33,0x1E,0x00}, // 'c'
+    {0x38,0x30,0x30,0x3E,0x33,0x33,0x6E,0x00}, // 'd'
+    {0x00,0x00,0x1E,0x33,0x3F,0x03,0x1E,0x00}, // 'e'
+    {0x1C,0x36,0x06,0x0F,0x06,0x06,0x0F,0x00}, // 'f'
+    {0x00,0x00,0x6E,0x33,0x33,0x3E,0x30,0x1F}, // 'g'
+    {0x07,0x06,0x36,0x6E,0x66,0x66,0x67,0x00}, // 'h'
+    {0x0C,0x00,0x0E,0x0C,0x0C,0x0C,0x1E,0x00}, // 'i'
+    {0x30,0x00,0x30,0x30,0x30,0x33,0x33,0x1E}, // 'j'
+    {0x07,0x06,0x66,0x36,0x1E,0x36,0x67,0x00}, // 'k'
+    {0x0E,0x0C,0x0C,0x0C,0x0C,0x0C,0x1E,0x00}, // 'l'
+    {0x00,0x00,0x33,0x7F,0x7F,0x6B,0x63,0x00}, // 'm'
+    {0x00,0x00,0x1F,0x33,0x33,0x33,0x33,0x00}, // 'n'
+    {0x00,0x00,0x1E,0x33,0x33,0x33,0x1E,0x00}, // 'o'
+    {0x00,0x00,0x3B,0x66,0x66,0x3E,0x06,0x0F}, // 'p'
+    {0x00,0x00,0x6E,0x33,0x33,0x3E,0x30,0x78}, // 'q'
+    {0x00,0x00,0x3B,0x6E,0x66,0x06,0x0F,0x00}, // 'r'
+    {0x00,0x00,0x3E,0x03,0x1E,0x30,0x1F,0x00}, // 's'
+    {0x08,0x0C,0x3E,0x0C,0x0C,0x2C,0x18,0x00}, // 't'
+    {0x00,0x00,0x33,0x33,0x33,0x33,0x6E,0x00}, // 'u'
+    {0x00,0x00,0x33,0x33,0x33,0x1E,0x0C,0x00}, // 'v'
+    {0x00,0x00,0x63,0x6B,0x7F,0x7F,0x36,0x00}, // 'w'
+    {0x00,0x00,0x63,0x36,0x1C,0x36,0x63,0x00}, // 'x'
+    {0x00,0x00,0x33,0x33,0x33,0x3E,0x30,0x1F}, // 'y'
+    {0x00,0x00,0x3F,0x19,0x0C,0x26,0x3F,0x00}, // 'z'
+    {0x38,0x0C,0x0C,0x07,0x0C,0x0C,0x38,0x00}, // '{'
+    {0x18,0x18,0x18,0x00,0x18,0x18,0x18,0x00}, // '|'
+    {0x07,0x0C,0x0C,0x38,0x0C,0x0C,0x07,0x00}, // '}'
+    {0x6E,0x3B,0x00,0x00,0x00,0x00,0x00,0x00}, // '~'
+    {0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF}, // DEL
+};
+
+// ============================================================================
+// Texture
+// ============================================================================
+
+typedef struct Texture Texture;
+struct Texture {
+    int  width;
+    int  height;
+    u32* pixels;
+};
+
+static inline Texture* Texture_New(int width, int height, u32* pixels)
+{
+    Texture* t = (Texture*)malloc(sizeof(Texture));
+    if (!t) return NULL;
+    t->width = width;
+    t->height = height;
+    t->pixels = (u32*)malloc(width * height * sizeof(u32));
+    if (!t->pixels) { free(t); return NULL; }
+    if (pixels) memcpy(t->pixels, pixels, width * height * sizeof(u32));
+    else        memset(t->pixels, 0, width * height * sizeof(u32));
+    return t;
+}
+
+static inline void Texture_Dispose(Texture* t)
+{
+    if (!t) return;
+    free(t->pixels);
+    free(t);
+}
+
+// ============================================================================
+// Framebuffer State — definiert in switchforms.c
+// ============================================================================
+
+extern Framebuffer g_fb;
+extern u32* g_fb_addr;
+extern int         g_fb_width;
+extern int         g_fb_height;
+extern int         g_gfx_init;
+
+// ============================================================================
+// Graphics_Init
+// ============================================================================
+
+static inline void Graphics_Init(int width, int height)
+{
+    if (g_gfx_init) return;
+    g_fb_width = width;
+    g_fb_height = height;
+    g_gfx_init = 1;
+}
+
+static inline void Graphics_SetPixel(int x, int y, u32 color)
+{
+    if (!g_fb_addr) return;
+    if (x < 0 || x >= g_fb_width || y < 0 || y >= g_fb_height) return;
+    g_fb_addr[y * g_fb_width + x] = color;
+}
+
+static inline void Graphics_FillScreen(u32 color)
+{
+    if (!g_fb_addr) return;
+    int total = g_fb_width * g_fb_height;
+    for (int i = 0; i < total; i++)
+        g_fb_addr[i] = color;
+}
+
+static inline void Graphics_DrawRect(int x, int y, int w, int h, u32 color)
+{
+    if (!g_fb_addr) return;
+    for (int i = x; i < x + w; i++)
+    {
+        Graphics_SetPixel(i, y, color);
+        Graphics_SetPixel(i, y + h - 1, color);
+    }
+    for (int i = y; i < y + h; i++)
+    {
+        Graphics_SetPixel(x, i, color);
+        Graphics_SetPixel(x + w - 1, i, color);
+    }
+}
+
+static inline void Graphics_FillRect(int x, int y, int w, int h, u32 color)
+{
+    if (!g_fb_addr) return;
+    for (int row = y; row < y + h; row++)
+        for (int col = x; col < x + w; col++)
+            Graphics_SetPixel(col, row, color);
+}
+
+static inline void Graphics_DrawLine(int x0, int y0, int x1, int y1, u32 color)
+{
+    if (!g_fb_addr) return;
+    int dx = abs(x1 - x0);
+    int dy = -abs(y1 - y0);
+    int sx = x0 < x1 ? 1 : -1;
+    int sy = y0 < y1 ? 1 : -1;
+    int err = dx + dy;
+    while (1)
+    {
+        Graphics_SetPixel(x0, y0, color);
+        if (x0 == x1 && y0 == y1) break;
+        int e2 = 2 * err;
+        if (e2 >= dy) { err += dy; x0 += sx; }
+        if (e2 <= dx) { err += dx; y0 += sy; }
+    }
+}
+
+static inline void Graphics_DrawCircle(int cx, int cy, int r, u32 color)
+{
+    if (!g_fb_addr) return;
+    int x = 0, y = r, d = 3 - 2 * r;
+    while (x <= y)
+    {
+        Graphics_SetPixel(cx + x, cy + y, color);
+        Graphics_SetPixel(cx - x, cy + y, color);
+        Graphics_SetPixel(cx + x, cy - y, color);
+        Graphics_SetPixel(cx - x, cy - y, color);
+        Graphics_SetPixel(cx + y, cy + x, color);
+        Graphics_SetPixel(cx - y, cy + x, color);
+        Graphics_SetPixel(cx + y, cy - x, color);
+        Graphics_SetPixel(cx - y, cy - x, color);
+        if (d < 0) d += 4 * x + 6;
+        else { d += 4 * (x - y) + 10; y--; }
+        x++;
+    }
+}
+
+static inline void Graphics_FillCircle(int cx, int cy, int r, u32 color)
+{
+    if (!g_fb_addr) return;
+    for (int dy = -r; dy <= r; dy++)
+        for (int dx = -r; dx <= r; dx++)
+            if (dx * dx + dy * dy <= r * r)
+                Graphics_SetPixel(cx + dx, cy + dy, color);
+}
+
+static inline void Graphics_DrawChar(int x, int y, char c, u32 color, int scale)
+{
+    if (!g_fb_addr) return;
+    if (c < 32 || c > 127) c = '?';
+    const u8* glyph = cs2sx_font8x8[(int)(c - 32)];
+    for (int row = 0; row < 8; row++)
+        for (int col = 0; col < 8; col++)
+            if (glyph[row] & (1 << (7 - col)))
+                Graphics_FillRect(x + (7 - col) * scale, y + row * scale, scale, scale, color);
+}
+
+static inline void Graphics_DrawText(int x, int y, const char* text, u32 color, int scale)
+{
+    if (!g_fb_addr || !text) return;
+    int ox = x;
+    for (int i = 0; text[i] != '\0'; i++)
+    {
+        if (text[i] == '\n') { y += 8 * scale + 2; x = ox; continue; }
+        Graphics_DrawChar(x, y, text[i], color, scale);
+        x += 8 * scale + 1;
+    }
+}
+
+static inline void Graphics_DrawTexture(Texture* tex, int x, int y)
+{
+    if (!tex || !tex->pixels || !g_fb_addr) return;
+    for (int row = 0; row < tex->height; row++)
+    {
+        int py = y + row;
+        if (py < 0 || py >= g_fb_height) continue;
+        for (int col = 0; col < tex->width; col++)
+        {
+            int px = x + col;
+            if (px < 0 || px >= g_fb_width) continue;
+            u32 c = tex->pixels[row * tex->width + col];
+            if ((c >> 24) > 0)
+                g_fb_addr[py * g_fb_width + px] = c;
+        }
+    }
+}
+
+static inline int Graphics_MeasureTextWidth(const char* text, int scale)
+{
+    if (!text) return 0;
+    int len = 0;
+    for (int i = 0; text[i] != '\0'; i++) len++;
+    return len * (8 * scale + 1);
+}
+
+static inline int Graphics_MeasureTextHeight(int scale)
+{
+    return 8 * scale;
+}
+
+// ============================================================================
+// SwitchApp_Run
+// ============================================================================
+
 static inline void SwitchApp_Run(SwitchApp* self)
 {
     if (!self) return;
-
-    consoleInit(NULL);
 
     PadState pad;
     padConfigureInput(1, HidNpadStyleSet_NpadStandard);
     padInitializeDefault(&pad);
 
+    NWindow* win = nwindowGetDefault();
+    framebufferCreate(&g_fb, win,
+        (u32)g_fb_width, (u32)g_fb_height,
+        PIXEL_FORMAT_RGBA_8888, 2);
+    framebufferMakeLinear(&g_fb);
+
     if (self->OnInit)
-    {
         self->OnInit(self);
+
+    int use_gfx = g_gfx_init;
+
+    if (!use_gfx)
+    {
+        framebufferClose(&g_fb);
+        consoleInit(NULL);
         Form_InitFocus(&self->form);
     }
 
@@ -136,21 +379,40 @@ static inline void SwitchApp_Run(SwitchApp* self)
         self->kDown = padGetButtonsDown(&pad);
         self->kHeld = padGetButtons(&pad);
 
-        consoleClear();
-        printf("\033[H\033[2J");
+        if (use_gfx)
+        {
+            u8* fb_raw = framebufferBegin(&g_fb, NULL);
+            if (!fb_raw) continue;
 
-        Graphics_BeginFrame();
+            g_fb_addr = (u32*)fb_raw;
 
-        Form_UpdateAll(&self->form, self->kDown, self->kHeld);
+            int total = g_fb_width * g_fb_height;
+            for (int i = 0; i < total; i++)
+                g_fb_addr[i] = COLOR_BLACK;
 
-        if (self->OnFrame)
-            self->OnFrame(self);
+            Form_UpdateAll(&self->form, self->kDown, self->kHeld);
 
-        Form_DrawAll(&self->form);
+            if (self->OnFrame)
+                self->OnFrame(self);
 
-        Graphics_EndFrame();
+            Form_DrawAll(&self->form);
 
-        consoleUpdate(NULL);
+            framebufferEnd(&g_fb);
+            g_fb_addr = NULL;
+        }
+        else
+        {
+            consoleClear();
+            printf("\033[H\033[2J");
+
+            Form_UpdateAll(&self->form, self->kDown, self->kHeld);
+
+            if (self->OnFrame)
+                self->OnFrame(self);
+
+            Form_DrawAll(&self->form);
+            consoleUpdate(NULL);
+        }
 
         if (self->kDown & HidNpadButton_Plus)
             break;
@@ -160,5 +422,9 @@ static inline void SwitchApp_Run(SwitchApp* self)
         self->OnExit(self);
 
     Form_Free(&self->form);
-    consoleExit(NULL);
+
+    if (use_gfx)
+        framebufferClose(&g_fb);
+    else
+        consoleExit(NULL);
 }

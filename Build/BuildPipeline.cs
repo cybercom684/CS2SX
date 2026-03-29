@@ -360,6 +360,11 @@ public sealed class BuildPipeline
         using var w = new StreamWriter(path, append: false, encoding: Encoding.UTF8);
         w.WriteLine("#include \"_forward.h\"");
         w.WriteLine();
-        w.WriteLine("char _cs2sx_strbuf[512];");
+        w.WriteLine("char        _cs2sx_strbuf[512];");
+        w.WriteLine("Framebuffer g_fb;");
+        w.WriteLine("u32*        g_fb_addr   = NULL;");
+        w.WriteLine("int         g_fb_width  = 1280;");
+        w.WriteLine("int         g_fb_height = 720;");
+        w.WriteLine("int         g_gfx_init  = 0;");
     }
 }

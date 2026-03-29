@@ -21,6 +21,7 @@ public sealed class InvocationDispatcher
         new MathHandler(),
         new FileHandler(),
         new ParseHandler(),
+        new ColorHandler(),
         new StringBuilderHandler(),
         new ListHandler(),
         new DictionaryHandler(),
