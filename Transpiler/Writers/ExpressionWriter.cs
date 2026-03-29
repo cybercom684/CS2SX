@@ -83,6 +83,9 @@ public sealed class ExpressionWriter
         if (_ctx.EnumMembers.Contains(name)) return name;
         if (name == "_cs2sx_strbuf") return "_cs2sx_strbuf";
 
+        // Lokale Variable hat Vorrang vor ControlFields
+        if (_ctx.LocalTypes.ContainsKey(name)) return name;
+
         if (_ctx.IsFieldAccess(name))
         {
             var trimmed = name.TrimStart('_');
