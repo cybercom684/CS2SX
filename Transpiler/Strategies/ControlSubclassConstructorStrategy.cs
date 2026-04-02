@@ -30,7 +30,6 @@ public sealed class ControlSubclassConstructorStrategy : IConstructorStrategy
         ctx.WriteLine("((Control*)self)->visible = 1;");
         ctx.WriteLine("((Control*)self)->focusable = 0;");
 
-        // Draw/Update Funktionszeiger verdrahten
         foreach (var method in node.Members.OfType<MethodDeclarationSyntax>())
         {
             var methodName = method.Identifier.Text;

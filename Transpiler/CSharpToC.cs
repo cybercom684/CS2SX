@@ -19,10 +19,10 @@ public sealed class CSharpToC : CSharpSyntaxWalker
     private readonly TranspilerContext _ctx;
     private readonly ExpressionWriter _exprWriter;
     private readonly StatementWriter _stmtWriter;
+    private string _sourceFilePath = string.Empty;
 
     private const string SwitchAppBase = "SwitchApp";
 
-    // ── Konstruktor-Strategien ─────────────────────────────────────────────
     private readonly IConstructorStrategy[] _constructorStrategies;
 
     public CSharpToC(TranspileMode mode = TranspileMode.Implementation)
@@ -42,8 +42,11 @@ public sealed class CSharpToC : CSharpSyntaxWalker
 
     // ── Öffentliche API ───────────────────────────────────────────────────
 
-    public string Transpile(string csharpSource)
+    public string Transpile(string csharpSource, string? filePath = null)
     {
+        _sourceFilePath = filePath ?? string.Empty;
+        _ctx.CurrentFile = System.IO.Path.GetFileName(_sourceFilePath);
+
         var tree = CSharpSyntaxTree.ParseText(csharpSource);
         var diags = tree.GetDiagnostics()
             .Where(d => d.Severity == DiagnosticSeverity.Error)
@@ -51,7 +54,11 @@ public sealed class CSharpToC : CSharpSyntaxWalker
 
         if (diags.Count > 0)
             foreach (var d in diags)
-                Log.Error($"CS{d.Id}: {d.GetMessage()}");
+            {
+                var lineSpan = d.Location.GetLineSpan();
+                var line = lineSpan.StartLinePosition.Line + 1;
+                Log.Error($"{_ctx.CurrentFile}({line}): CS{d.Id}: {d.GetMessage()}");
+            }
 
         Visit(tree.GetRoot());
         return _ctx.Out.ToString();
@@ -97,6 +104,9 @@ public sealed class CSharpToC : CSharpSyntaxWalker
         _ctx.CurrentBaseType = node.BaseList?.Types.FirstOrDefault()?.ToString().Trim()
                                ?? string.Empty;
 
+        var lineSpan = node.GetLocation().GetLineSpan();
+        _ctx.CurrentLine = lineSpan.StartLinePosition.Line + 1;
+
         var baseType = _ctx.CurrentBaseType;
         var isSwitchAppChild = baseType == SwitchAppBase;
 
@@ -107,13 +117,34 @@ public sealed class CSharpToC : CSharpSyntaxWalker
 
         if (_mode == TranspileMode.HeaderOnly)
         {
+            // VTable-Struct für Klassen mit virtual/abstract Methoden
+            if (VTableBuilder.HasVirtualMethods(node))
+                VTableBuilder.WriteVTableStruct(node, node.Identifier.Text, _ctx.Out);
+
             WriteStructDefinition(node, baseType);
             WriteFunctionSignatures(node, isSwitchAppChild);
+
+            // Property-Signaturen für Properties mit explizitem Body
+            foreach (var prop in node.Members.OfType<PropertyDeclarationSyntax>())
+                if (!PropertyWriter.IsAutoProperty(prop))
+                    PropertyWriter.WriteSignatures(prop, node.Identifier.Text, _ctx.Out);
         }
         else
         {
             WriteConstructor(node);
             WriteMethodBodies(node);
+
+            // Property-Implementierungen
+            foreach (var prop in node.Members.OfType<PropertyDeclarationSyntax>())
+                if (!PropertyWriter.IsAutoProperty(prop))
+                    PropertyWriter.WriteImplementations(prop, node.Identifier.Text, _ctx, _exprWriter, _stmtWriter);
+
+            // VTable-Instanz für abgeleitete Klassen
+            if (!string.IsNullOrEmpty(baseType) && baseType != SwitchAppBase
+                && !IsControlSubclass(baseType))
+            {
+                VTableBuilder.WriteVTableInstance(node, node.Identifier.Text, baseType, _ctx.Out);
+            }
         }
 
         _ctx.ClearClassContext();
@@ -130,6 +161,14 @@ public sealed class CSharpToC : CSharpSyntaxWalker
             foreach (var v in field.Declaration.Variables)
                 _ctx.FieldTypes[v.Identifier.Text.TrimStart('_')] = csType;
         }
+
+        foreach (var prop in node.Members.OfType<PropertyDeclarationSyntax>())
+        {
+            if (prop.Modifiers.Any(m => m.IsKind(SyntaxKind.StaticKeyword))) continue;
+            var csType = prop.Type.ToString().Trim();
+            _ctx.PropertyTypes[prop.Identifier.Text] = csType;
+            _ctx.FieldTypes[prop.Identifier.Text] = csType;
+        }
     }
 
     // ── Struct-Definition (Header) ────────────────────────────────────────
@@ -141,6 +180,13 @@ public sealed class CSharpToC : CSharpSyntaxWalker
         _ctx.Out.WriteLine("struct " + name);
         _ctx.Out.WriteLine("{");
         _ctx.Indent();
+
+        // VTable-Zeiger als erstes Feld wenn Basisklasse virtual-Methoden hat
+        if (!string.IsNullOrEmpty(baseType) && baseType != SwitchAppBase
+            && !IsControlSubclass(baseType))
+        {
+            _ctx.WriteLine(baseType + "_vtable* vtable;");
+        }
 
         if (!string.IsNullOrEmpty(baseType))
         {
@@ -171,7 +217,8 @@ public sealed class CSharpToC : CSharpSyntaxWalker
             var cType = TypeRegistry.MapType(csType);
             var needPtr = TypeRegistry.NeedsPointerSuffix(csType)
                        || TypeRegistry.IsStringBuilder(csType)
-                       || TypeRegistry.IsControlType(csType);
+                       || TypeRegistry.IsControlType(csType)
+                       || NullableHandler.IsNullable(csType);
             var ptr = needPtr ? "*" : "";
 
             foreach (var v in field.Declaration.Variables)
@@ -179,7 +226,18 @@ public sealed class CSharpToC : CSharpSyntaxWalker
                 var fieldName = v.Identifier.Text.TrimStart('_');
                 var prefix = TypeRegistry.HasNoPrefix(fieldName) ? "" : "f_";
                 _ctx.FieldTypes[fieldName] = csType;
-                _ctx.WriteLine(cType + ptr + " " + prefix + fieldName + ";");
+
+                // Nullable: inneren Typ verwenden
+                if (NullableHandler.IsNullable(csType))
+                {
+                    var inner = NullableHandler.GetInnerType(csType);
+                    var innerC = TypeRegistry.MapType(inner);
+                    _ctx.WriteLine(innerC + "* " + prefix + fieldName + ";");
+                }
+                else
+                {
+                    _ctx.WriteLine(cType + ptr + " " + prefix + fieldName + ";");
+                }
             }
         }
     }
@@ -189,6 +247,11 @@ public sealed class CSharpToC : CSharpSyntaxWalker
         foreach (var prop in node.Members.OfType<PropertyDeclarationSyntax>())
         {
             if (prop.Modifiers.Any(m => m.IsKind(SyntaxKind.StaticKeyword))) continue;
+
+            // Auto-Properties bekommen ein Backing-Feld im Struct
+            // Explizite Properties bekommen Getter/Setter-Funktionen (keine Felder)
+            if (!PropertyWriter.IsAutoProperty(prop)) continue;
+
             var cType = TypeRegistry.MapType(prop.Type.ToString().Trim());
             _ctx.WriteLine(cType + " f_" + prop.Identifier + ";");
         }
@@ -218,10 +281,6 @@ public sealed class CSharpToC : CSharpSyntaxWalker
 
     // ── Static-Felder ─────────────────────────────────────────────────────
 
-    /// <summary>
-    /// Schreibt globale C-Variablen-Definitionen für static-Felder.
-    /// Wird von allen drei Konstruktor-Strategien verwendet.
-    /// </summary>
     internal void WriteStaticFieldDefinitions(ClassDeclarationSyntax node, string name)
     {
         foreach (var field in node.Members.OfType<FieldDeclarationSyntax>())
@@ -262,12 +321,8 @@ public sealed class CSharpToC : CSharpSyntaxWalker
         }
     }
 
-    // ── Feld-Initializer (shared) ─────────────────────────────────────────
+    // ── Feld-Initializer ─────────────────────────────────────────────────
 
-    /// <summary>
-    /// Schreibt Initialisierungen für alle nicht-statischen Felder mit Initializer.
-    /// Wird von allen Konstruktor-Strategien verwendet.
-    /// </summary>
     internal void WriteInstanceFieldInitializers(ClassDeclarationSyntax node)
     {
         foreach (var field in node.Members.OfType<FieldDeclarationSyntax>())
@@ -301,8 +356,6 @@ public sealed class CSharpToC : CSharpSyntaxWalker
     private void WriteFunctionSignatures(ClassDeclarationSyntax node, bool isSwitchAppChild)
     {
         var name = node.Identifier.Text;
-        var baseType = _ctx.CurrentBaseType;
-        var isControlChild = IsControlSubclass(baseType);
 
         if (isSwitchAppChild)
             _ctx.Out.WriteLine("void " + name + "_Init(" + name + "* self);");
@@ -345,6 +398,9 @@ public sealed class CSharpToC : CSharpSyntaxWalker
 
     public override void VisitMethodDeclaration(MethodDeclarationSyntax node)
     {
+        var lineSpan = node.GetLocation().GetLineSpan();
+        _ctx.CurrentLine = lineSpan.StartLinePosition.Line + 1;
+
         _ctx.MethodReturnTypes[node.Identifier.Text] = node.ReturnType.ToString().Trim();
 
         var isAbstract = node.Modifiers.Any(m => m.IsKind(SyntaxKind.AbstractKeyword));
@@ -374,8 +430,6 @@ public sealed class CSharpToC : CSharpSyntaxWalker
 
         _ctx.ClearMethodContext();
 
-
-        // Parameter in LocalTypes registrieren damit Typ-Inferenz greift
         foreach (var p in node.ParameterList.Parameters)
         {
             if (p.Type != null)
@@ -402,6 +456,7 @@ public sealed class CSharpToC : CSharpSyntaxWalker
     public override void VisitPropertyDeclaration(PropertyDeclarationSyntax node)
     {
         _ctx.PropertyTypes[node.Identifier.Text] = node.Type.ToString().Trim();
+        _ctx.FieldTypes[node.Identifier.Text] = node.Type.ToString().Trim();
         base.VisitPropertyDeclaration(node);
     }
 
@@ -435,13 +490,23 @@ public sealed class CSharpToC : CSharpSyntaxWalker
      || TypeRegistry.IsStringBuilder(csType)
      || TypeRegistry.IsList(csType)
      || TypeRegistry.IsDictionary(csType)
-     || TypeRegistry.IsControlType(csType);
+     || TypeRegistry.IsControlType(csType)
+     || NullableHandler.IsNullable(csType);
 
     internal static string BuildParamDecl(ParameterSyntax p)
     {
         if (p.Type == null) return p.Identifier.Text;
 
         var csType = p.Type.ToString().Trim();
+
+        // Nullable-Parameter: T? → T*
+        if (NullableHandler.IsNullable(csType))
+        {
+            var inner = NullableHandler.GetInnerType(csType);
+            var cInner = TypeRegistry.MapType(inner);
+            return cInner + "* " + p.Identifier;
+        }
+
         var cType = TypeRegistry.MapType(csType);
         var isPrim = TypeRegistry.IsPrimitive(csType) || csType == "string";
         var isRef = p.Modifiers.Any(m =>

@@ -1,6 +1,7 @@
+using CS2SX.Core;
+using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
-using CS2SX.Core;
 
 namespace CS2SX.Transpiler.Writers;
 
@@ -58,7 +59,6 @@ public sealed class StatementWriter
     private void WriteExprStmt(ExpressionStatementSyntax expr)
     {
         var result = _expr.Write(expr.Expression);
-        // Leerer Ausdruck (z.B. von ??=) → kein Statement ausgeben
         if (!string.IsNullOrEmpty(result))
             _ctx.WriteLine(result + ";");
     }
@@ -98,6 +98,13 @@ public sealed class StatementWriter
                 continue;
             }
 
+            // Nullable-Typ: T? x = null → T* x = NULL; T? x = val → static T _tmp; T* x = &_tmp;
+            if (NullableHandler.IsNullable(declType))
+            {
+                WriteNullableLocal(v, declType);
+                continue;
+            }
+
             // char-Puffer: string x = new string('\0', 256)
             if (declType is "string" or "var"
                 && v.Initializer?.Value is ObjectCreationExpressionSyntax strNew
@@ -111,10 +118,9 @@ public sealed class StatementWriter
                 continue;
             }
 
-            // ── Split-Sonderfall: immer zuerst prüfen ─────────────────────
-            // Unabhängig von declType — var oder List<string>
+            // Split / GetFiles Sonderfall
             if (v.Initializer?.Value is InvocationExpressionSyntax splitInv
-                && IsSplitCall(splitInv))
+                && IsListStrCall(splitInv))
             {
                 var initVal = _expr.Write(v.Initializer.Value);
                 _ctx.WriteLine("List_str* " + v.Identifier + " = " + initVal + ";");
@@ -137,6 +143,29 @@ public sealed class StatementWriter
         }
     }
 
+    private void WriteNullableLocal(VariableDeclaratorSyntax v, string declType)
+    {
+        var inner = NullableHandler.GetInnerType(declType);
+        var innerC = TypeRegistry.MapType(inner);
+        var varName = v.Identifier.Text;
+
+        if (v.Initializer == null
+            || v.Initializer.Value is LiteralExpressionSyntax lit
+               && lit.IsKind(SyntaxKind.NullLiteralExpression))
+        {
+            _ctx.WriteLine(innerC + "* " + varName + " = NULL;");
+        }
+        else
+        {
+            var initVal = _expr.Write(v.Initializer.Value);
+            var tmpName = "_nval_" + varName;
+            _ctx.WriteLine(innerC + " " + tmpName + " = " + initVal + ";");
+            _ctx.WriteLine(innerC + "* " + varName + " = &" + tmpName + ";");
+        }
+
+        _ctx.LocalTypes[varName] = declType;
+    }
+
     private (string cType, bool isPtr) InferLocalType(
         string declType, VariableDeclaratorSyntax v)
     {
@@ -153,38 +182,37 @@ public sealed class StatementWriter
 
     private (string cType, bool isPtr) InferVarType(VariableDeclaratorSyntax v)
     {
-        // new T() → T*
         if (v.Initializer?.Value is ObjectCreationExpressionSyntax oc)
             return (oc.Type.ToString(), true);
 
         if (v.Initializer?.Value is InvocationExpressionSyntax inv)
         {
-            // String.Split / .Split() → List_str* — ZUERST prüfen
-            // isPtr = false weil "List_str" noch kein * hat und wir es einmal anhängen
             if (IsSplitCall(inv))
                 return ("List_str", true);
 
             var calleeStr = inv.Expression.ToString();
 
-            // String.Format / String.Concat → const char*
+            if (calleeStr is "Directory.GetFiles"
+                          or "CS2SX_Dir_GetFiles"
+                          or "String_Split"
+                          or "string.Split"
+                          or "String.Split")
+                return ("List_str", true);
+
             if (calleeStr is "string.Format" or "String.Format"
                            or "string.Concat" or "String.Concat")
                 return ("const char", true);
 
-            // Bekannter Rückgabetyp aus MethodReturnTypes
             if (_ctx.MethodReturnTypes.TryGetValue(calleeStr, out var retType))
             {
                 var cMapped = TypeRegistry.MapType(retType);
-                // Wenn MapType bereits * enthält (List_T*, Dict_K_V*) → isPtr false
                 var isPtr = !cMapped.EndsWith("*")
                            && (TypeRegistry.NeedsPointerSuffix(retType)
                             || TypeRegistry.IsStringBuilder(retType));
                 return (cMapped.TrimEnd('*'), isPtr);
             }
 
-            // Fallback — TypeInferrer gibt manchmal "List_str*" zurück
             var inferred = TypeInferrer.InferCSharpType(v.Initializer!.Value, _ctx);
-            // Wenn bereits * im Typ → isPtr false, * trimmen
             if (inferred.EndsWith("*"))
                 return (inferred.TrimEnd('*'), true);
             return (inferred, false);
@@ -196,18 +224,17 @@ public sealed class StatementWriter
         return (ct, false);
     }
 
-    private static bool IsSplitCall(InvocationExpressionSyntax inv)
+    private static bool IsSplitCall(InvocationExpressionSyntax inv) =>
+       IsListStrCall(inv);
+
+    private static bool IsListStrCall(InvocationExpressionSyntax inv)
     {
         var calleeStr = inv.Expression.ToString();
-
-        // string.Split("sep") oder String.Split(...)
         if (calleeStr is "string.Split" or "String.Split") return true;
-
-        // "someString".Split(",") oder variable.Split(",")
+        if (calleeStr is "Directory.GetFiles") return true;
         if (inv.Expression is MemberAccessExpressionSyntax m
             && m.Name.Identifier.Text == "Split")
             return true;
-
         return false;
     }
 
@@ -224,12 +251,18 @@ public sealed class StatementWriter
         return "";
     }
 
- 
-
     // ── If ────────────────────────────────────────────────────────────────
 
     private void WriteIf(IfStatementSyntax ifStmt)
     {
+        // is-Pattern in if-Bedingung: if (obj is Dog d) { ... }
+        // → Binding-Variable nach der Bedingung deklarieren
+        if (ifStmt.Condition is IsPatternExpressionSyntax isPattern)
+        {
+            WriteIfWithIsPattern(ifStmt, isPattern);
+            return;
+        }
+
         _ctx.WriteLine("if (" + _expr.Write(ifStmt.Condition) + ")");
         WriteBlockOrStmt(ifStmt.Statement);
 
@@ -247,10 +280,79 @@ public sealed class StatementWriter
         }
     }
 
+    private void WriteIfWithIsPattern(IfStatementSyntax ifStmt, IsPatternExpressionSyntax isPattern)
+    {
+        var cond = _expr.Write(isPattern);
+        _ctx.WriteLine("if (" + cond + ")");
+        _ctx.WriteLine("{");
+        _ctx.Indent();
+
+        // Binding-Variable innerhalb des Blocks deklarieren
+        if (isPattern.Pattern is DeclarationPatternSyntax dp
+            && dp.Designation is SingleVariableDesignationSyntax desig)
+        {
+            var typeName = dp.Type.ToString().Trim();
+            var cType = TypeRegistry.MapType(typeName);
+            var subject = _expr.Write(isPattern.Expression);
+            _ctx.WriteLine(cType + "* " + desig.Identifier.Text
+                         + " = (" + cType + "*)" + subject + ";");
+            _ctx.LocalTypes[desig.Identifier.Text] = typeName;
+        }
+
+        if (ifStmt.Statement is BlockSyntax block)
+            foreach (var s in block.Statements) Write(s);
+        else
+            Write(ifStmt.Statement);
+
+        _ctx.Dedent();
+        _ctx.WriteLine("}");
+
+        if (ifStmt.Else == null) return;
+
+        if (ifStmt.Else.Statement is IfStatementSyntax nested)
+        {
+            _ctx.Out.Write(_ctx.Tab + "else ");
+            WriteIfInline(nested);
+        }
+        else
+        {
+            _ctx.WriteLine("else");
+            WriteBlockOrStmt(ifStmt.Else.Statement);
+        }
+    }
+
     private void WriteIfInline(IfStatementSyntax ifStmt)
     {
-        _ctx.Out.WriteLine("if (" + _expr.Write(ifStmt.Condition) + ")");
-        WriteBlockOrStmt(ifStmt.Statement);
+        if (ifStmt.Condition is IsPatternExpressionSyntax isPattern)
+        {
+            _ctx.Out.WriteLine("if (" + _expr.Write(isPattern) + ")");
+            _ctx.WriteLine("{");
+            _ctx.Indent();
+
+            if (isPattern.Pattern is DeclarationPatternSyntax dp
+                && dp.Designation is SingleVariableDesignationSyntax desig)
+            {
+                var typeName = dp.Type.ToString().Trim();
+                var cType = TypeRegistry.MapType(typeName);
+                var subject = _expr.Write(isPattern.Expression);
+                _ctx.WriteLine(cType + "* " + desig.Identifier.Text
+                             + " = (" + cType + "*)" + subject + ";");
+                _ctx.LocalTypes[desig.Identifier.Text] = typeName;
+            }
+
+            if (ifStmt.Statement is BlockSyntax blk)
+                foreach (var s in blk.Statements) Write(s);
+            else
+                Write(ifStmt.Statement);
+
+            _ctx.Dedent();
+            _ctx.WriteLine("}");
+        }
+        else
+        {
+            _ctx.Out.WriteLine("if (" + _expr.Write(ifStmt.Condition) + ")");
+            WriteBlockOrStmt(ifStmt.Statement);
+        }
 
         if (ifStmt.Else == null) return;
 
@@ -367,7 +469,6 @@ public sealed class StatementWriter
 
         if (inner == "string")
         {
-            // List<string> → const char* via List_str_Get
             _ctx.WriteLine("const char* " + varName
                          + " = List_str_Get(" + colExpr + ", " + idxVar + ");");
             return;
@@ -402,6 +503,13 @@ public sealed class StatementWriter
 
     private void WriteSwitch(SwitchStatementSyntax sw)
     {
+        // Pattern-Switch (Arm hat DeclarationPattern/TypePattern) → if-else-Kette
+        if (sw.Sections.Any(s => s.Labels.OfType<CasePatternSwitchLabelSyntax>().Any()))
+        {
+            WritePatternSwitch(sw);
+            return;
+        }
+
         _ctx.WriteLine("switch (" + _expr.Write(sw.Expression) + ")");
         _ctx.WriteLine("{");
         _ctx.Indent();
@@ -422,6 +530,80 @@ public sealed class StatementWriter
 
         _ctx.Dedent();
         _ctx.WriteLine("}");
+    }
+
+    /// <summary>
+    /// Pattern-basierten switch-Statement als if-else-Kette ausgeben.
+    /// switch (x) { case Dog d: ... break; default: ... }
+    /// → if (Dog_Is(x)) { Dog* d = (Dog*)x; ... } else { ... }
+    /// </summary>
+    private void WritePatternSwitch(SwitchStatementSyntax sw)
+    {
+        var subject = _expr.Write(sw.Expression);
+        bool first = true;
+
+        foreach (var section in sw.Sections)
+        {
+            foreach (var label in section.Labels)
+            {
+                if (label is DefaultSwitchLabelSyntax)
+                {
+                    _ctx.WriteLine("else");
+                    _ctx.WriteLine("{");
+                    _ctx.Indent();
+                    foreach (var s in section.Statements.Where(s => s is not BreakStatementSyntax))
+                        Write(s);
+                    _ctx.Dedent();
+                    _ctx.WriteLine("}");
+                    continue;
+                }
+
+                if (label is CaseSwitchLabelSyntax caseLabel)
+                {
+                    var kw = first ? "if" : "else if";
+                    _ctx.WriteLine(kw + " (" + subject + " == " + _expr.Write(caseLabel.Value) + ")");
+                    _ctx.WriteLine("{");
+                    _ctx.Indent();
+                    foreach (var s in section.Statements.Where(s => s is not BreakStatementSyntax))
+                        Write(s);
+                    _ctx.Dedent();
+                    _ctx.WriteLine("}");
+                    first = false;
+                    continue;
+                }
+
+                if (label is CasePatternSwitchLabelSyntax patternLabel)
+                {
+                    var cond = PatternMatchingWriter.WritePattern(
+                        patternLabel.Pattern, subject, _ctx, _expr.Write);
+                    if (patternLabel.WhenClause != null)
+                        cond = "(" + cond + " && " + _expr.Write(patternLabel.WhenClause.Condition) + ")";
+
+                    var kw = first ? "if" : "else if";
+                    _ctx.WriteLine(kw + " (" + cond + ")");
+                    _ctx.WriteLine("{");
+                    _ctx.Indent();
+
+                    // Binding-Variable deklarieren wenn DeclarationPattern
+                    if (patternLabel.Pattern is DeclarationPatternSyntax dp
+                        && dp.Designation is SingleVariableDesignationSyntax desig)
+                    {
+                        var typeName = dp.Type.ToString().Trim();
+                        var cType = TypeRegistry.MapType(typeName);
+                        _ctx.WriteLine(cType + "* " + desig.Identifier.Text
+                                     + " = (" + cType + "*)" + subject + ";");
+                        _ctx.LocalTypes[desig.Identifier.Text] = typeName;
+                    }
+
+                    foreach (var s in section.Statements.Where(s => s is not BreakStatementSyntax))
+                        Write(s);
+
+                    _ctx.Dedent();
+                    _ctx.WriteLine("}");
+                    first = false;
+                }
+            }
+        }
     }
 
     // ── Try/Catch ─────────────────────────────────────────────────────────
@@ -498,8 +680,8 @@ public sealed class StatementWriter
                 if (TypeRegistry.IsDisposable(typeName))
                 {
                     var disposeCall = isValueType
-                        ? varName + ".Dispose()"
-                        : varName + "->Dispose()";
+                        ? typeName + "_Dispose(&" + varName + ")"
+                        : typeName + "_Dispose(" + varName + ")";
                     _ctx.WriteLine("if (" + varName + ") " + disposeCall + ";");
                 }
             }

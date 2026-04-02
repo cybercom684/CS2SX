@@ -23,6 +23,7 @@ public sealed class ExpressionWriter
 
         return node switch
         {
+            // Null-coalescing vor generellem BinaryExpression prüfen
             BinaryExpressionSyntax coalesce
                 when coalesce.IsKind(SyntaxKind.CoalesceExpression)
                                                                => WriteCoalesce(coalesce),
@@ -43,6 +44,16 @@ public sealed class ExpressionWriter
             ElementAccessExpressionSyntax elem => WriteElementAccess(elem),
             DefaultExpressionSyntax => "NULL",
             ThisExpressionSyntax => "self",
+
+            // Switch-Ausdruck (C# 8+)
+            SwitchExpressionSyntax switchExpr => PatternMatchingWriter.WriteSwitchExpression(switchExpr, _ctx, Write),
+
+            // is-Pattern-Ausdruck
+            IsPatternExpressionSyntax isPattern => PatternMatchingWriter.WriteIsPattern(isPattern, _ctx, Write),
+
+            // Conditional access: x?.Member
+            ConditionalAccessExpressionSyntax condAccess => WriteConditionalAccess(condAccess),
+
             _ => node.ToString(),
         };
     }
@@ -83,7 +94,6 @@ public sealed class ExpressionWriter
         if (_ctx.EnumMembers.Contains(name)) return name;
         if (name == "_cs2sx_strbuf") return "_cs2sx_strbuf";
 
-        // Lokale Variable hat Vorrang vor ControlFields
         if (_ctx.LocalTypes.ContainsKey(name)) return name;
 
         if (_ctx.IsFieldAccess(name))
@@ -125,12 +135,46 @@ public sealed class ExpressionWriter
         var left = Write(coalesce.Left);
         var right = Write(coalesce.Right);
         var leftType = TypeInferrer.InferCSharpType(coalesce.Left, _ctx);
-        var isPrim = TypeRegistry.IsPrimitive(leftType) && leftType != "string";
 
-        // Primitive können nicht null sein — ?? gibt immer den linken Wert zurück
+        // Nullable<T>: x ?? default → (x != NULL ? *x : default)
+        if (NullableHandler.IsNullable(leftType))
+        {
+            var innerType = NullableHandler.GetInnerType(leftType);
+            var isValueType = TypeRegistry.IsPrimitive(innerType);
+            return NullableHandler.WriteNullCoalescing(left, right, isValueType);
+        }
+
+        var isPrim = TypeRegistry.IsPrimitive(leftType) && leftType != "string";
         if (isPrim) return left;
 
         return "(" + left + " != NULL ? " + left + " : " + right + ")";
+    }
+
+    // ── Conditional Access: x?.Member ────────────────────────────────────
+
+    private string WriteConditionalAccess(ConditionalAccessExpressionSyntax condAccess)
+    {
+        var receiver = Write(condAccess.Expression);
+
+        // WhenNotNull kann MemberBindingExpression oder InvocationExpression sein
+        string accessExpr;
+        if (condAccess.WhenNotNull is MemberBindingExpressionSyntax memberBinding)
+        {
+            accessExpr = receiver + "->" + memberBinding.Name.Identifier.Text;
+        }
+        else if (condAccess.WhenNotNull is InvocationExpressionSyntax inv
+            && inv.Expression is MemberBindingExpressionSyntax invMember)
+        {
+            var args = inv.ArgumentList.Arguments.Select(a => Write(a.Expression));
+            accessExpr = receiver + "->" + invMember.Name.Identifier.Text
+                       + "(" + string.Join(", ", args) + ")";
+        }
+        else
+        {
+            accessExpr = receiver + "->(" + Write(condAccess.WhenNotNull) + ")";
+        }
+
+        return NullableHandler.WriteNullConditional(receiver, accessExpr);
     }
 
     // ── Zuweisungen ───────────────────────────────────────────────────────
@@ -160,7 +204,6 @@ public sealed class ExpressionWriter
         _ctx.Out.WriteLine(_ctx.Tab + "{");
         _ctx.Out.WriteLine(_ctx.Tab + "    " + target + " = " + right + ";");
         _ctx.Out.WriteLine(_ctx.Tab + "}");
-        // Leerer Rückgabewert — WriteExprStmt überspringt leere Ausdrücke
         return "";
     }
 
@@ -198,6 +241,18 @@ public sealed class ExpressionWriter
         {
             var methodName = assign.Right.ToString().Trim();
             return obj + "->OnClick = (void(*)(void*))" + _ctx.CurrentClass + "_" + methodName;
+        }
+
+        // Nullable-Feld-Zuweisung: x.value = 5 → x = &(int){5} oder Pointer-Trick
+        var fieldType = lt ?? ft;
+        if (fieldType != null && NullableHandler.IsNullable(fieldType) && right != "NULL")
+        {
+            // Temporäre Variable als Workaround für Nullable-Zuweisung
+            var tmp = _ctx.NextTmp("nval");
+            var inner = NullableHandler.GetInnerType(fieldType);
+            var innerC = TypeRegistry.MapType(inner);
+            _ctx.Out.WriteLine(_ctx.Tab + "static " + innerC + " " + tmp + " = " + right + ";");
+            return obj + arrow + "f_" + objKey + " = &" + tmp;
         }
 
         var cProp = TypeRegistry.MapProperty(prop);
@@ -257,6 +312,14 @@ public sealed class ExpressionWriter
         if (prop == "Length" && IsStringBuilderExpr(mem.Expression))
             return obj + "->length";
 
+        // Nullable.HasValue → (x != NULL)
+        if (prop == "HasValue" && IsNullableExpr(mem.Expression))
+            return NullableHandler.WriteHasValue(obj);
+
+        // Nullable.Value → (*x)
+        if (prop == "Value" && IsNullableExpr(mem.Expression))
+            return NullableHandler.WriteGetValue(obj);
+
         var rawExpr = mem.Expression.ToString();
         var key = rawExpr.TrimStart('_');
         if ((_ctx.LocalTypes.TryGetValue(rawExpr, out var lt) && TypeRegistry.IsLibNxStruct(lt))
@@ -283,7 +346,6 @@ public sealed class ExpressionWriter
         if (TypeRegistry.IsList(typeName))
         {
             var inner = TypeRegistry.GetListInnerType(typeName)!;
-            // string → "str" für List_str_New, nicht "char"
             var cInner = inner == "string" ? "str" : TypeRegistry.MapType(inner);
             return "List_" + cInner + "_New()";
         }
@@ -406,7 +468,6 @@ public sealed class ExpressionWriter
         {
             var listType = lt ?? ft!;
             var inner = TypeRegistry.GetListInnerType(listType)!;
-            // string → "str" für List_str_Get
             var cInner = inner == "string" ? "str" : TypeRegistry.MapType(inner);
             return "List_" + cInner + "_Get(" + objExpr + ", " + index + ")";
         }
@@ -443,5 +504,14 @@ public sealed class ExpressionWriter
         var key = raw.TrimStart('_');
         return (_ctx.LocalTypes.TryGetValue(raw, out var lt) && TypeRegistry.IsStringBuilder(lt))
             || (_ctx.FieldTypes.TryGetValue(key, out var ft) && TypeRegistry.IsStringBuilder(ft));
+    }
+
+    private bool IsNullableExpr(SyntaxNode node)
+    {
+        var raw = node.ToString();
+        var key = raw.TrimStart('_');
+        if (_ctx.LocalTypes.TryGetValue(raw, out var lt)) return NullableHandler.IsNullable(lt);
+        if (_ctx.FieldTypes.TryGetValue(key, out var ft)) return NullableHandler.IsNullable(ft);
+        return false;
     }
 }

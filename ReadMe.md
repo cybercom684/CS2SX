@@ -129,10 +129,21 @@ public class MyApp : SwitchApp
 | `string` | ✅ | als `const char*` |
 | `int`, `float`, `bool`, `char` | ✅ | direkt gemappt |
 | `u8`, `u16`, `u32`, `u64` | ✅ | libnx-Typen |
+| `T?` Nullable-Typen | ✅ | `HasValue`, `Value`, `??`, `?.` |
 | `List<T>` | ✅ | `Add`, `Remove`, `Clear`, `Contains`, Index-Zugriff |
 | `List<string>` | ✅ | `foreach`, `string.Join`, `string.Split` |
 | `Dictionary<K,V>` | ✅ | `Add`, `Remove`, `ContainsKey`, `TryGetValue`, Indexer |
 | `StringBuilder` | ✅ | `Append`, `AppendLine`, `Clear`, `ToString`, `Insert`, `Replace`, `IndexOf` |
+
+### Nullable-Typen
+
+```csharp
+int? x = null;          // → int* x = NULL;
+int? x = 5;             // → int* x = &(int){5};
+bool hasVal = x.HasValue;  // → (x != NULL)
+int val = x.Value;         // → (*x)
+int v = x ?? 0;            // → (x != NULL ? *x : 0)
+```
 
 ### String-Methoden
 
@@ -187,6 +198,17 @@ Aktivierung: `Graphics.Init(1280, 720)` in `OnInit()` aufrufen.
 | `Graphics.MeasureTextHeight(scale)` | ✅ | Text-Höhe in Pixeln |
 | `Graphics.DrawTexture(tex, x, y)` | ✅ | Texture rendern |
 
+### Texture & IDisposable
+
+`Texture` implementiert `IDisposable`. Das `using`-Statement wird unterstützt und ruft automatisch `Dispose()` am Ende des Blocks auf:
+
+```csharp
+using (Texture tex = new Texture(64, 64, pixels))
+{
+    Graphics.DrawTexture(tex, 100, 100);
+} // → Texture_Dispose(tex) wird automatisch aufgerufen
+```
+
 ### Farb-Konstanten
 
 ```csharp
@@ -234,12 +256,80 @@ if (File.Exists("/switch/MeinSpiel/save.txt"))
 | Feature | Status |
 |---|---|
 | `if`, `else if`, `else` | ✅ |
-| `for`, `foreach`, `while`, `do` | ✅ |
-| `switch` | ✅ |
+| `for`, `foreach`, `while`, `do...while` | ✅ |
+| `switch` (Wert und Pattern) | ✅ |
 | `break`, `continue`, `return` | ✅ |
 | `try` / `catch` | ✅ (via `setjmp`) |
+| `using` (mit `IDisposable`) | ✅ |
 | `??` Null-Coalescing | ✅ |
 | `??=` Null-Coalescing-Zuweisung | ✅ |
+
+### Pattern Matching
+
+CS2SX unterstützt grundlegendes Pattern Matching:
+
+```csharp
+// is-Pattern mit Typ und Binding-Variable
+if (obj is Dog d)
+{
+    d.Bark(); // d ist automatisch als Dog* deklariert
+}
+
+// switch-Expression
+string label = value switch
+{
+    0 => "zero",
+    1 => "one",
+    _ => "other",
+};
+
+// Relational Pattern
+string category = score switch
+{
+    >= 90 => "A",
+    >= 70 => "B",
+    _     => "C",
+};
+
+// not null Pattern
+if (x is not null) { ... }
+```
+
+| Pattern | Status |
+|---|---|
+| Konstant (`case 1:`, `1 =>`) | ✅ |
+| Discard (`_`) | ✅ |
+| `is`-Pattern mit Binding (`obj is Dog d`) | ✅ |
+| Relational (`>= 5`, `< 10`) | ✅ |
+| `not null` / `is null` | ✅ |
+| `and` / `or` Pattern | ✅ |
+| `when`-Klausel | ✅ |
+
+### Properties
+
+Auto-Properties werden zu Struct-Feldern. Properties mit explizitem Body werden zu Getter/Setter-Funktionen:
+
+```csharp
+// Auto-Property → einfaches Struct-Feld
+public int Speed { get; set; }
+
+// Expliziter Body → Player_get_Speed() / Player_set_Speed()
+public int Speed
+{
+    get => _speed * 2;
+    set => _speed = value / 2;
+}
+```
+
+### Lambda-Ausdrücke
+
+Lambdas werden automatisch zu statischen C-Funktionen geliftet. Captures werden als Capture-Struct realisiert:
+
+```csharp
+_button.OnClick = () => DoSomething();
+
+Action<int> handler = x => Console.WriteLine($"Value: {x}");
+```
 
 ### Klassen & OOP
 
@@ -247,9 +337,11 @@ if (File.Exists("/switch/MeinSpiel/save.txt"))
 |---|---|---|
 | Klassen mit Feldern und Methoden | ✅ | → C-Structs |
 | Vererbung (einzeln) | ✅ | `SwitchApp`, `Control` als Basis |
-| `static`-Felder und -Methoden | ✅ | → globale C-Variablen |
-| `override` | ✅ | → Funktionszeiger |
+| `abstract`-Klassen mit `abstract`-Methoden | ✅ | → vtable-Infrastruktur |
+| `virtual` / `override` | ✅ | → vtable-Funktionszeiger |
 | Eigene Controls (erbt von `Control`) | ✅ | `Draw()` + `Update()` |
+| `static`-Felder und -Methoden | ✅ | → globale C-Variablen |
+| `IDisposable` / `using` | ✅ | → `Dispose()`-Aufruf am Blockende |
 | Enums mit Werten | ✅ | |
 | `interface` | ❌ | |
 | Generics | ❌ | |
@@ -274,7 +366,7 @@ if (File.Exists("/switch/MeinSpiel/save.txt"))
 | LINQ |
 | `params`-Parameter (nur teilweise) |
 | Tuple-Return / Dekonstruktion |
-| `is`-Pattern-Matching |
+| Typ-Pattern ohne Binding (`obj is Dog`) als alleinige Bedingung (benötigt `Dog_Is()`-Hilfsfunktion) |
 | `interface` |
 | Generics |
 | `Console.ReadLine` / Keyboard-Input |
@@ -348,6 +440,39 @@ Form.Add(_meter);
 
 ---
 
+## Vererbung & virtuelle Methoden
+
+CS2SX generiert eine vtable-Infrastruktur für Klassen mit `virtual` oder `abstract` Methoden:
+
+```csharp
+// Animal.cs
+public abstract class Animal
+{
+    private int _health;
+
+    public abstract void Speak();
+
+    public virtual void Update()
+    {
+        _health++;
+    }
+}
+
+// Dog.cs
+public class Dog : Animal
+{
+    public override void Speak()
+    {
+        Console.WriteLine("Woof!");
+    }
+}
+```
+
+Virtuelle Aufrufe werden automatisch über vtable-Zeiger aufgelöst:
+`animal.Speak()` → `animal->vtable->Speak(animal)`
+
+---
+
 ## Projektstruktur
 
 ```
@@ -411,8 +536,12 @@ CS2SX/
 │   │   ├── StatementWriter.cs
 │   │   ├── FormatStringBuilder.cs
 │   │   ├── StringEscaper.cs
-│   │   └── TypeInferrer.cs
+│   │   ├── TypeInferrer.cs
+│   │   └── NullableAndPatternWriter.cs — Nullable + Pattern Matching
 │   ├── CSharpToC.cs
+│   ├── LambdaLifter.cs         — Lambda → statische C-Funktion
+│   ├── PropertyWriter.cs       — Property-Getter/Setter → C-Funktionen
+│   ├── VTableBuilder.cs        — vtable für virtual/abstract
 │   └── TypeMapper.cs
 ├── Build/
 │   ├── BuildPipeline.cs        — inkrementeller Build
@@ -468,6 +597,8 @@ Eintrag in `Core/TypeRegistry.cs` in der entsprechenden Kategorie ergänzen — 
 - **`string`-Puffer begrenzt** — interne statische Puffer sind 512 Bytes, Dateipuffer 8192 Bytes
 - **Bitmap-Font 8x8** — `Graphics.DrawText` nutzt einen eingebauten 8×8-Pixel-Font ohne Anti-Aliasing
 - **Kein Heap-GC** — allokierte Objekte (`*_New()`) müssen manuell freigegeben werden wenn nötig
+- **Lambda-Captures** — nur Werttypen und primitive Captures werden zuverlässig unterstützt
+- **`is`-Typ-Pattern** — erfordert eine `TypeName_Is()`-Hilfsfunktion in der Runtime für den jeweiligen Typ
 
 ---
 

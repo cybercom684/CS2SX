@@ -1,4 +1,4 @@
-using CS2SX.Core;
+﻿using CS2SX.Core;
 using CS2SX.Transpiler.Writers;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
@@ -72,7 +72,7 @@ public sealed class StringMethodHandler : InvocationHandlerBase
                 => HandleStringFormat(inv, ctx, writeExpr),
 
             "string.Concat" or "String.Concat"
-                => HandleStringConcat(args),
+                => HandleStringConcat(args, ctx),
 
             "string.Join" or "String.Join"
                 => "String_Join(" + ArgAt(args, 0) + ", " + ArgAt(args, 1) + ")",
@@ -142,6 +142,13 @@ public sealed class StringMethodHandler : InvocationHandlerBase
             && lit.Token.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.CharacterLiteralToken);
     }
 
+    /// <summary>
+    /// string.Format("template {0} {1}", a, b)
+    /// → lokalen Puffer allokieren, snprintf, Puffer zurückgeben.
+    ///
+    /// Vorher: hardcoded _cs2sx_strbuf (globaler Überschreibe-Bug)
+    /// Jetzt:  ctx.NextStringBuf() → _sbN pro Aufruf
+    /// </summary>
     private static string HandleStringFormat(InvocationExpressionSyntax inv,
         TranspilerContext ctx, Func<SyntaxNode?, string> writeExpr)
     {
@@ -161,20 +168,29 @@ public sealed class StringMethodHandler : InvocationHandlerBase
         var fmt = BuildFormatString(template, formatArgs, ctx);
         var argStr = string.Join(", ", formatArgs.Select(a => writeExpr(a.Expression)));
 
+        // Lokalen Puffer allokieren statt _cs2sx_strbuf
+        var buf = ctx.NextStringBuf();
         ctx.Out.WriteLine(ctx.Tab
-            + "snprintf(_cs2sx_strbuf, sizeof(_cs2sx_strbuf), \""
+            + "snprintf(" + buf + ", sizeof(" + buf + "), \""
             + fmt + "\", " + argStr + ");");
 
-        return "_cs2sx_strbuf";
+        return buf;
     }
 
-    private static string HandleStringConcat(List<string> args)
+    /// <summary>
+    /// string.Concat(a, b, c) → lokaler snprintf-Puffer
+    /// </summary>
+    private static string HandleStringConcat(List<string> args, TranspilerContext ctx)
     {
         if (args.Count == 0) return "\"\"";
         if (args.Count == 1) return args[0];
+
         var fmt = string.Concat(Enumerable.Repeat("%s", args.Count));
-        return "snprintf(_cs2sx_strbuf, sizeof(_cs2sx_strbuf), \""
-             + fmt + "\", " + string.Join(", ", args) + "), _cs2sx_strbuf";
+        var buf = ctx.NextStringBuf();
+        ctx.Out.WriteLine(ctx.Tab
+            + "snprintf(" + buf + ", sizeof(" + buf + "), \""
+            + fmt + "\", " + string.Join(", ", args) + ");");
+        return buf;
     }
 
     private static string BuildFormatString(string template,

@@ -26,7 +26,8 @@ public sealed class SwitchAppConstructorStrategy : IConstructorStrategy
         ctx.Out.WriteLine("{");
         ctx.Indent();
 
-        // Lifecycle-Funktionszeiger verdrahten
+        ctx.WriteLine("if (!self) return;");
+
         foreach (var method in node.Members.OfType<MethodDeclarationSyntax>())
         {
             var methodName = method.Identifier.Text;

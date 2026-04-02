@@ -9,6 +9,7 @@ namespace CS2SX.Transpiler.Strategies;
 /// <summary>
 /// Konstruktor-Strategie für normale Klassen (keine SwitchApp, kein Control).
 /// Generiert eine _New-Funktion mit malloc + Feld-Initialisierung.
+/// Setzt zusätzlich vtable-Zeiger wenn die Basisklasse virtuelle Methoden hat.
 /// </summary>
 public sealed class DefaultConstructorStrategy : IConstructorStrategy
 {
@@ -24,16 +25,29 @@ public sealed class DefaultConstructorStrategy : IConstructorStrategy
         ctx.Indent();
 
         ctx.WriteLine(name + "* self = (" + name + "*)malloc(sizeof(" + name + "));");
+        ctx.WriteLine("if (!self) return NULL;");
         ctx.WriteLine("memset(self, 0, sizeof(" + name + "));");
+
+        // VTable-Zeiger setzen wenn Basisklasse existiert
+        if (!string.IsNullOrEmpty(baseType) && baseType != "SwitchApp"
+            && !CSharpToC.IsControlSubclass(baseType))
+        {
+            ctx.WriteLine("self->vtable = &" + name + "_vtable_instance;");
+        }
 
         transpiler.WriteInstanceFieldInitializers(node);
 
-        // Virtual/Override Funktionszeiger verdrahten
+        // Override-Funktionszeiger für eigene virtual/override Methoden verdrahten
+        // (für Klassen ohne explizite Basisklasse, die eigene virtual-Methoden haben)
         foreach (var method in node.Members.OfType<MethodDeclarationSyntax>())
         {
             var isOverride = method.Modifiers.Any(m => m.IsKind(SyntaxKind.OverrideKeyword));
             var isVirtual = method.Modifiers.Any(m => m.IsKind(SyntaxKind.VirtualKeyword));
             if (!isOverride && !isVirtual) continue;
+
+            // Nur für Inline-Funktionszeiger im Struct (nicht VTable-basiert)
+            if (!string.IsNullOrEmpty(baseType) && !CSharpToC.IsControlSubclass(baseType))
+                continue; // VTable übernimmt das
 
             var returnType = TypeRegistry.MapType(method.ReturnType.ToString().Trim());
             var paramTypes = new List<string> { name + "*" };
