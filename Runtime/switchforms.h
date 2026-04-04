@@ -1060,17 +1060,19 @@ static inline List_str* CS2SX_Dir_GetFiles(const char* path, const char* pattern
         return result;
     }
 
+    // FIX: Puffer von 256 auf 512 erweitert
     static FsDirectoryEntry _dir_entries[64];
-    static char _dir_paths[64][256];
+    static char _dir_paths[64][512];
     s64 count = 0;
     fsDirRead(&d, &count, 64, _dir_entries);
 
-    // pathLen entfernt — (void)pattern um unused-warning zu unterdrücken
     (void)pattern;
 
     for (int i = 0; i < (int)count && i < 64; i++)
     {
-        snprintf(_dir_paths[i], 255, "%s/%s", path, _dir_entries[i].name);
+        // FIX: sizeof(_dir_paths[i]) statt hartkodierten 255
+        snprintf(_dir_paths[i], sizeof(_dir_paths[i]), "%s/%s",
+            path, _dir_entries[i].name);
         List_str_Add(result, _dir_paths[i]);
     }
 

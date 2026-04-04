@@ -29,12 +29,15 @@ public sealed class FileHandler : InvocationHandlerBase
             ["Directory.Delete"] = "CS2SX_Dir_Delete",
             ["Directory.GetFiles"] = "CS2SX_Dir_GetFiles",
             ["Directory.GetCurrentDirectory"] = "CS2SX_Dir_GetCurrent",
+            ["Directory.GetDirectories"] = "CS2SX_Dir_GetDirectories",
+            ["Directory.GetEntries"] = "CS2SX_Dir_GetEntries",
 
             ["CS2SX.Switch.Directory.Exists"] = "CS2SX_Dir_Exists",
             ["CS2SX.Switch.Directory.CreateDirectory"] = "CS2SX_Dir_Create",
             ["CS2SX.Switch.Directory.Delete"] = "CS2SX_Dir_Delete",
             ["CS2SX.Switch.Directory.GetFiles"] = "CS2SX_Dir_GetFiles",
             ["CS2SX.Switch.Directory.GetCurrentDirectory"] = "CS2SX_Dir_GetCurrent",
+
         };
 
     public override bool TryHandle(InvocationExpressionSyntax inv, string calleeStr,

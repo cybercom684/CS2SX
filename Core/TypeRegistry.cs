@@ -58,6 +58,9 @@ public static class TypeRegistry
         ["HidTouchScreenState"] = "HidTouchScreenState",
         ["AccountUid"]          = "AccountUid",
         ["PsmChargerType"]      = "PsmChargerType",
+        ["StickPos"] = "CS2SX_StickPos",
+        ["TouchState"] = "CS2SX_TouchState",
+        ["BatteryInfo"] = "CS2SX_BatteryInfo",
     };
 
     // ── SwitchForms Control-Typen (Pointer, kein primitiver Wert) ────────────
@@ -80,6 +83,7 @@ public static class TypeRegistry
     {
         "FsDir", "FsFile", "FsFileSystem", "FsDirectoryEntry",
         "PadState", "HidTouchScreenState", "AccountUid", "PsmChargerType",
+        "CS2SX_StickPos", "CS2SX_TouchState", "CS2SX_BatteryInfo",
     };
 
     // ── Pointer-Typen (werden mit * deklariert, aber kein extra * nötig) ──────

@@ -5,29 +5,16 @@ using Microsoft.CodeAnalysis.CSharp.Syntax;
 
 namespace CS2SX.Transpiler.Writers;
 
-/// <summary>
-/// Leitet den C#-Typ eines Ausdrucks her.
-///
-/// Strategie (in Priorität):
-///   1. Roslyn SemanticModel (exakt, wenn verfügbar)
-///   2. Lokaler Context (LocalTypes, FieldTypes, PropertyTypes)
-///   3. Syntaktische Heuristiken (Fallback)
-/// </summary>
 public static class TypeInferrer
 {
-    /// <summary>
-    /// Gibt den C#-Typ des Ausdrucks zurück.
-    /// </summary>
     public static string InferCSharpType(SyntaxNode? expr, TranspilerContext ctx)
     {
         if (expr == null) return "int";
 
-        // ── 1. SemanticModel (beste Qualität) ─────────────────────────────
         var semantic = ctx.GetSemanticType(expr);
         if (semantic != null && semantic != "object" && semantic != "?")
             return semantic;
 
-        // ── 2. Syntaktischer Fallback ──────────────────────────────────────
         return InferSyntactic(expr, ctx);
     }
 
@@ -88,19 +75,17 @@ public static class TypeInferrer
         }
     }
 
-    // ── Literal ────────────────────────────────────────────────────────────
-
     private static string InferLiteral(LiteralExpressionSyntax lit)
     {
-        if (lit.Token.Value is int)    return "int";
-        if (lit.Token.Value is uint)   return "uint";
-        if (lit.Token.Value is long)   return "long";
-        if (lit.Token.Value is ulong)  return "ulong";
-        if (lit.Token.Value is float)  return "float";
+        if (lit.Token.Value is int) return "int";
+        if (lit.Token.Value is uint) return "uint";
+        if (lit.Token.Value is long) return "long";
+        if (lit.Token.Value is ulong) return "ulong";
+        if (lit.Token.Value is float) return "float";
         if (lit.Token.Value is double) return "double";
-        if (lit.Token.Value is char)   return "char";
+        if (lit.Token.Value is char) return "char";
         if (lit.Token.Value is string) return "string";
-        if (lit.Token.Value is bool)   return "bool";
+        if (lit.Token.Value is bool) return "bool";
 
         var text = lit.Token.Text;
         if (text.EndsWith("f", StringComparison.OrdinalIgnoreCase) && text.Contains('.'))
@@ -118,8 +103,6 @@ public static class TypeInferrer
         return "int";
     }
 
-    // ── Identifier ─────────────────────────────────────────────────────────
-
     private static string InferIdentifier(string name, TranspilerContext ctx)
     {
         if (ctx.LocalTypes.TryGetValue(name, out var lt)) return lt;
@@ -131,8 +114,6 @@ public static class TypeInferrer
 
         return "int";
     }
-
-    // ── MemberAccess ───────────────────────────────────────────────────────
 
     private static string InferMemberAccess(MemberAccessExpressionSyntax mem, TranspilerContext ctx)
     {
@@ -163,8 +144,6 @@ public static class TypeInferrer
         return "int";
     }
 
-    // ── Invocation ─────────────────────────────────────────────────────────
-
     private static string InferInvocation(InvocationExpressionSyntax inv, TranspilerContext ctx)
     {
         var callee = inv.Expression.ToString();
@@ -174,10 +153,10 @@ public static class TypeInferrer
 
         if (callee is "string.Format" or "String.Format"
                    or "string.Concat" or "String.Concat"
-                   or "string.Join"   or "String.Join")
+                   or "string.Join" or "String.Join")
             return "string";
 
-        if (callee is "string.IsNullOrEmpty"     or "String.IsNullOrEmpty"
+        if (callee is "string.IsNullOrEmpty" or "String.IsNullOrEmpty"
                    or "string.IsNullOrWhiteSpace" or "String.IsNullOrWhiteSpace")
             return "bool";
 
@@ -185,6 +164,33 @@ public static class TypeInferrer
             return "int";
         if (callee is "float.Parse" or "Single.Parse" or "CS2SX_Float_Parse")
             return "float";
+
+        // String-Methoden die immer string zurückgeben
+        if (callee is "string.Substring" or "String.Substring"
+                   or "string.Replace" or "String.Replace"
+                   or "string.Trim" or "String.Trim"
+                   or "string.ToUpper" or "String.ToUpper"
+                   or "string.ToLower" or "String.ToLower")
+            return "string";
+
+        // ── Fix: Extension Input-Methoden ─────────────────────────────────────
+        // CS2SX_TouchState und CS2SX_StickPos sind LibNx-Structs (Stack-Allokation, kein Pointer).
+        // Ohne diese Einträge wird der Rückgabewert als "int" inferiert, was zu
+        // touch->x[i] statt touch.x[i] führt (Struct braucht ".", kein "->").
+
+        if (callee is "Input.GetTouch" or "CS2SX_Input_GetTouch")
+            return "TouchState";      // → CS2SX_TouchState in TypeRegistry
+
+        if (callee is "Input.GetStickLeft" or "_cs2sx_get_stick_left"
+                   or "CS2SX_Input_GetStickLeft")
+            return "StickPos";        // → CS2SX_StickPos in TypeRegistry
+
+        if (callee is "Input.GetStickRight" or "_cs2sx_get_stick_right"
+                   or "CS2SX_Input_GetStickRight")
+            return "StickPos";
+
+        if (callee is "System.GetBattery" or "CS2SX_GetBattery")
+            return "BatteryInfo";     // → CS2SX_BatteryInfo in TypeRegistry
 
         if (inv.Expression is IdentifierNameSyntax idName
             && ctx.MethodReturnTypes.TryGetValue(idName.Identifier.Text, out var rt))
@@ -200,8 +206,6 @@ public static class TypeInferrer
 
         return "int";
     }
-
-    // ── Binary ─────────────────────────────────────────────────────────────
 
     private static string InferBinary(BinaryExpressionSyntax bin, TranspilerContext ctx)
     {
@@ -220,24 +224,22 @@ public static class TypeInferrer
             var lt = InferSyntactic(bin.Left, ctx);
             var rt = InferSyntactic(bin.Right, ctx);
             if (lt == "string" || rt == "string") return "string";
-            if (lt == "float"  || rt == "float")  return "float";
-            if (lt == "double" || rt == "double")  return "double";
+            if (lt == "float" || rt == "float") return "float";
+            if (lt == "double" || rt == "double") return "double";
             return lt;
         }
 
-        var leftType  = InferSyntactic(bin.Left, ctx);
+        var leftType = InferSyntactic(bin.Left, ctx);
         var rightType = InferSyntactic(bin.Right, ctx);
 
         if (leftType == "double" || rightType == "double") return "double";
-        if (leftType == "float"  || rightType == "float")  return "float";
-        if (leftType == "ulong"  || rightType == "ulong")  return "ulong";
-        if (leftType == "long"   || rightType == "long")   return "long";
-        if (leftType == "uint"   || rightType == "uint")   return "uint";
+        if (leftType == "float" || rightType == "float") return "float";
+        if (leftType == "ulong" || rightType == "ulong") return "ulong";
+        if (leftType == "long" || rightType == "long") return "long";
+        if (leftType == "uint" || rightType == "uint") return "uint";
 
         return leftType;
     }
-
-    // ── ElementAccess ──────────────────────────────────────────────────────
 
     private static string InferElementAccess(ElementAccessExpressionSyntax elem, TranspilerContext ctx)
     {
@@ -258,17 +260,17 @@ public static class TypeInferrer
 
             if (objType.EndsWith("[]"))
                 return objType[..^2];
+
+            if (objType == "string") return "char";
+
+            // Fix: Array-Felder von LibNx-Structs (z.B. TouchState.x[i] → int)
+            if (objType is "TouchState") return "int";
+            if (objType is "StickPos") return "int";
         }
 
         return "int";
     }
 
-    // ── Format-Specifier ───────────────────────────────────────────────────
-
-    /// <summary>
-    /// Gibt den printf Format-Specifier für einen Ausdruck zurück.
-    /// Nutzt SemanticModel wenn verfügbar.
-    /// </summary>
     public static string FormatSpecifier(SyntaxNode? expr, TranspilerContext ctx)
     {
         if (expr is MemberAccessExpressionSyntax memSpec)

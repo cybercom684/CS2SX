@@ -69,8 +69,8 @@ public sealed class BuildPipeline
             WriteSwitchformsC(switchformsCPath);
 
             sPrepare.Progress = 100;
-            sPrepare.Status   = StageStatus.Done;
-            sPrepare.Elapsed  = $"{(DateTime.Now - started).TotalMilliseconds:F0}ms";
+            sPrepare.Status = StageStatus.Done;
+            sPrepare.Elapsed = $"{(DateTime.Now - started).TotalMilliseconds:F0}ms";
 
             // ── fwd-decl ──────────────────────────────────────────────────
             var sFwd = renderer.GetStage("fwd-decl");
@@ -84,14 +84,14 @@ public sealed class BuildPipeline
             RuntimeExporter.ExportSwitchForms(switchFormsDir);
 
             var switchFormsFilesForFwd = Directory.GetFiles(switchFormsDir, "*.cs").ToList();
-            var appSourceFiles         = reader.SourceFiles.ToList();
-            var allForFwd              = switchFormsFilesForFwd.Concat(appSourceFiles).ToList();
-            var forwardPath            = Path.Combine(_buildDir, "_forward.h");
+            var appSourceFiles = reader.SourceFiles.ToList();
+            var allForFwd = switchFormsFilesForFwd.Concat(appSourceFiles).ToList();
+            var forwardPath = Path.Combine(_buildDir, "_forward.h");
             WriteForwardDeclarations(allForFwd, forwardPath);
 
             sFwd.Progress = 100;
-            sFwd.Status   = StageStatus.Done;
-            sFwd.Elapsed  = $"{(DateTime.Now - started).TotalMilliseconds:F0}ms";
+            sFwd.Status = StageStatus.Done;
+            sFwd.Elapsed = $"{(DateTime.Now - started).TotalMilliseconds:F0}ms";
 
             // ── semantic ──────────────────────────────────────────────────
             var sSemantic = renderer.GetStage("semantic");
@@ -102,15 +102,14 @@ public sealed class BuildPipeline
                 .Where(f => !s_switchFormsSkipTranspile.Contains(Path.GetFileName(f)))
                 .ToList();
 
-            // SemanticModelBuilder einmalig für alle Projektdateien erstellen
             var semanticBuilder = new SemanticModelBuilder(transpiledFiles);
 
             Log.Info($"SemanticModel: {transpiledFiles.Count} file(s) analysed");
 
             sSemantic.Progress = 100;
-            sSemantic.Status   = StageStatus.Done;
-            sSemantic.Detail   = $"{transpiledFiles.Count} file(s)";
-            sSemantic.Elapsed  = $"{(DateTime.Now - started).TotalMilliseconds:F0}ms";
+            sSemantic.Status = StageStatus.Done;
+            sSemantic.Detail = $"{transpiledFiles.Count} file(s)";
+            sSemantic.Elapsed = $"{(DateTime.Now - started).TotalMilliseconds:F0}ms";
 
             // ── transpile (incremental) ───────────────────────────────────
             var sTranspile = renderer.GetStage("transpile");
@@ -123,13 +122,13 @@ public sealed class BuildPipeline
             var cFiles = new List<string> { switchformsCPath };
 
             int transpiled = 0;
-            int skipped    = 0;
+            int skipped = 0;
 
             for (int i = 0; i < transpiledFiles.Count; i++)
             {
-                var csFile   = transpiledFiles[i];
+                var csFile = transpiledFiles[i];
                 var baseName = Path.GetFileNameWithoutExtension(csFile);
-                sTranspile.Detail   = $"{baseName}.cs";
+                sTranspile.Detail = $"{baseName}.cs";
                 sTranspile.Progress = (int)((i + 1) / (double)transpiledFiles.Count * 100);
 
                 var hPath = Path.Combine(_buildDir, baseName + ".h");
@@ -146,18 +145,14 @@ public sealed class BuildPipeline
                 Log.Info($"→ {baseName}.cs");
 
                 var source = File.ReadAllText(csFile);
-
-                // SemanticModel für diese Datei
                 var semanticModel = semanticBuilder.GetModel(csFile);
 
-                // Header generieren
                 var hTranspiler = new CSharpToC(CSharpToC.TranspileMode.HeaderOnly);
                 var hContent = WrapHeader(baseName,
                     "#include \"_forward.h\"\n\n"
                     + hTranspiler.Transpile(source, csFile, semanticModel));
                 File.WriteAllText(hPath, hContent);
 
-                // Implementation generieren
                 var allIncludes = string.Join("\n",
                     allHeaders.Select(h => $"#include \"{h}\""));
 
@@ -175,14 +170,14 @@ public sealed class BuildPipeline
                 : $"all {skipped} unchanged";
 
             sTranspile.Progress = 100;
-            sTranspile.Status   = StageStatus.Done;
-            sTranspile.Elapsed  = $"{(DateTime.Now - started).TotalMilliseconds:F0}ms";
+            sTranspile.Status = StageStatus.Done;
+            sTranspile.Elapsed = $"{(DateTime.Now - started).TotalMilliseconds:F0}ms";
 
             // ── compile ───────────────────────────────────────────────────
             var sCompile = renderer.GetStage("compile");
             sCompile.Status = StageStatus.Running;
 
-            var appClass      = FindSwitchAppClass(appSourceFiles) ?? _config.MainClass;
+            var appClass = FindSwitchAppClass(appSourceFiles) ?? _config.MainClass;
             var appHeaderFile = FindHeaderForClass(appSourceFiles, appClass)
                               ?? (appClass + ".h");
             var mainPath = EntryPointGenerator.Write(
@@ -201,8 +196,8 @@ public sealed class BuildPipeline
             new CCompiler().Compile(cFiles, elfPath, _buildDir, _projectDir);
 
             sCompile.Progress = 100;
-            sCompile.Status   = StageStatus.Done;
-            sCompile.Elapsed  = $"{(DateTime.Now - started).TotalMilliseconds:F0}ms";
+            sCompile.Status = StageStatus.Done;
+            sCompile.Elapsed = $"{(DateTime.Now - started).TotalMilliseconds:F0}ms";
 
             // ── package ───────────────────────────────────────────────────
             var sPackage = renderer.GetStage("package");
@@ -213,7 +208,7 @@ public sealed class BuildPipeline
             new NacpBuilder().Build(nacpPath, _config.Name, _config.Author, _config.Version);
             sPackage.Progress = 50;
 
-            var nroPath  = Path.Combine(_projectDir, _config.Name + ".nro");
+            var nroPath = Path.Combine(_projectDir, _config.Name + ".nro");
             var iconPath = _config.Icon != null
                 ? Path.Combine(_projectDir, _config.Icon)
                 : null;
@@ -225,9 +220,9 @@ public sealed class BuildPipeline
             new NroBuilder().Build(elfPath, nroPath, nacpPath, iconPath);
 
             sPackage.Progress = 100;
-            sPackage.Status   = StageStatus.Done;
-            sPackage.Detail   = nroPath;
-            sPackage.Elapsed  = $"{(DateTime.Now - started).TotalMilliseconds:F0}ms";
+            sPackage.Status = StageStatus.Done;
+            sPackage.Detail = nroPath;
+            sPackage.Elapsed = $"{(DateTime.Now - started).TotalMilliseconds:F0}ms";
 
             Log.Ok($"→ {nroPath}");
             renderer.Complete(DateTime.Now - started, warnings, errors: 0);
@@ -253,36 +248,23 @@ public sealed class BuildPipeline
         }
     }
 
-    // ── Incremental Build ─────────────────────────────────────────────────
-
     private bool IsUpToDate(string csFile, string hPath, string cPath)
     {
         if (!File.Exists(hPath) || !File.Exists(cPath)) return false;
-
         var csTime = File.GetLastWriteTimeUtc(csFile);
-        var hTime  = File.GetLastWriteTimeUtc(hPath);
-        var cTime  = File.GetLastWriteTimeUtc(cPath);
-
+        var hTime = File.GetLastWriteTimeUtc(hPath);
+        var cTime = File.GetLastWriteTimeUtc(cPath);
         if (hTime < csTime || cTime < csTime) return false;
-
         var switchformsH = Path.Combine(_buildDir, "switchforms.h");
-        if (File.Exists(switchformsH))
-        {
-            var sfTime = File.GetLastWriteTimeUtc(switchformsH);
-            if (hTime < sfTime || cTime < sfTime) return false;
-        }
-
+        if (File.Exists(switchformsH) && (File.GetLastWriteTimeUtc(switchformsH) > hTime
+                                       || File.GetLastWriteTimeUtc(switchformsH) > cTime))
+            return false;
         var forwardH = Path.Combine(_buildDir, "_forward.h");
-        if (File.Exists(forwardH))
-        {
-            var fwdTime = File.GetLastWriteTimeUtc(forwardH);
-            if (hTime < fwdTime || cTime < fwdTime) return false;
-        }
-
+        if (File.Exists(forwardH) && (File.GetLastWriteTimeUtc(forwardH) > hTime
+                                   || File.GetLastWriteTimeUtc(forwardH) > cTime))
+            return false;
         return true;
     }
-
-    // ── Hilfsmethoden ─────────────────────────────────────────────────────
 
     private static void WriteForwardDeclarations(
         IReadOnlyList<string> sourceFiles, string outputPath)
@@ -304,6 +286,11 @@ public sealed class BuildPipeline
         sb.AppendLine("typedef struct ProgressBar ProgressBar;");
         sb.AppendLine("typedef struct SwitchApp  SwitchApp;");
         sb.AppendLine();
+        // Fix 1: Kein #include "switchapp_ext.h" — existiert nicht als separate Datei.
+        //        Inhalt ist direkt in switchapp.h inline gemerged.
+        // Fix 2: Kein explizites "extern PadState g_cs2sx_pad" —
+        //        diese Deklaration liegt in switchapp.h vor SwitchApp_Run.
+        //        switchapp.h wird durch dieses #include bereits eingebunden.
         sb.AppendLine("#include \"switchapp.h\"");
         sb.AppendLine();
         sb.AppendLine("extern char _cs2sx_strbuf[512];");
@@ -317,7 +304,7 @@ public sealed class BuildPipeline
         foreach (var csFile in sourceFiles)
         {
             var source = File.ReadAllText(csFile);
-            var tree   = Microsoft.CodeAnalysis.CSharp.CSharpSyntaxTree.ParseText(source);
+            var tree = Microsoft.CodeAnalysis.CSharp.CSharpSyntaxTree.ParseText(source);
             foreach (var cls in tree.GetRoot()
                 .DescendantNodes().OfType<ClassDeclarationSyntax>())
             {
@@ -345,7 +332,7 @@ public sealed class BuildPipeline
         foreach (var file in sourceFiles)
         {
             var source = File.ReadAllText(file);
-            var tree   = Microsoft.CodeAnalysis.CSharp.CSharpSyntaxTree.ParseText(source);
+            var tree = Microsoft.CodeAnalysis.CSharp.CSharpSyntaxTree.ParseText(source);
             foreach (var cls in tree.GetRoot()
                 .DescendantNodes().OfType<ClassDeclarationSyntax>())
                 if (cls.BaseList?.Types.FirstOrDefault()?.ToString().Trim() == "SwitchApp")
@@ -374,5 +361,6 @@ public sealed class BuildPipeline
         w.WriteLine("int         g_fb_width  = 1280;");
         w.WriteLine("int         g_fb_height = 720;");
         w.WriteLine("int         g_gfx_init  = 0;");
+        w.WriteLine("PadState    g_cs2sx_pad;");
     }
 }

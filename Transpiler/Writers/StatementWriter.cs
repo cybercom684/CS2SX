@@ -16,8 +16,6 @@ public sealed class StatementWriter
         _expr = expr;
     }
 
-    // ── Dispatch ──────────────────────────────────────────────────────────
-
     public void Write(StatementSyntax stmt)
     {
         switch (stmt)
@@ -44,8 +42,6 @@ public sealed class StatementWriter
         }
     }
 
-    // ── Return ────────────────────────────────────────────────────────────
-
     private void WriteReturn(ReturnStatementSyntax ret)
     {
         if (ret.Expression == null)
@@ -54,16 +50,12 @@ public sealed class StatementWriter
             _ctx.WriteLine("return " + _expr.Write(ret.Expression) + ";");
     }
 
-    // ── Expression Statement ──────────────────────────────────────────────
-
     private void WriteExprStmt(ExpressionStatementSyntax expr)
     {
         var result = _expr.Write(expr.Expression);
         if (!string.IsNullOrEmpty(result))
             _ctx.WriteLine(result + ";");
     }
-
-    // ── Lokale Variablen ──────────────────────────────────────────────────
 
     private void WriteLocal(LocalDeclarationStatementSyntax local)
     {
@@ -87,7 +79,7 @@ public sealed class StatementWriter
 
         foreach (var v in local.Declaration.Variables)
         {
-            // libnx-Structs auf dem Stack
+            // LibNx Stack-Structs (FsDir, PadState, CS2SX_TouchState, etc.)
             if (TypeRegistry.IsLibNxStruct(declType))
             {
                 var si = v.Initializer != null
@@ -98,14 +90,12 @@ public sealed class StatementWriter
                 continue;
             }
 
-            // Nullable-Typ: T? x = null → T* x = NULL; T? x = val → static T _tmp; T* x = &_tmp;
             if (NullableHandler.IsNullable(declType))
             {
                 WriteNullableLocal(v, declType);
                 continue;
             }
 
-            // char-Puffer: string x = new string('\0', 256)
             if (declType is "string" or "var"
                 && v.Initializer?.Value is ObjectCreationExpressionSyntax strNew
                 && strNew.Type.ToString() == "string"
@@ -118,7 +108,6 @@ public sealed class StatementWriter
                 continue;
             }
 
-            // Split / GetFiles Sonderfall
             if (v.Initializer?.Value is InvocationExpressionSyntax splitInv
                 && IsListStrCall(splitInv))
             {
@@ -128,20 +117,42 @@ public sealed class StatementWriter
                 continue;
             }
 
-            var (cType, isPtr) = InferLocalType(declType, v);
-            if (string.IsNullOrWhiteSpace(cType)) cType = "int";
+            // Fix: CS2SX Extension-Structs als explizit deklarierte Typen behandeln
+            // TouchState touch = Input.GetTouch() → CS2SX_TouchState touch = ...;
+            if (IsExtensionStructType(declType))
+            {
+                var cType = TypeRegistry.MapType(declType);
+                var initStr = v.Initializer != null
+                    ? " = " + _expr.Write(v.Initializer.Value)
+                    : " = {0}";
+                _ctx.WriteLine(cType + " " + v.Identifier + initStr + ";");
+                _ctx.LocalTypes[v.Identifier.Text] = declType;
+                continue;
+            }
+
+            var (cTypeFinal, isPtr) = InferLocalType(declType, v);
+            if (string.IsNullOrWhiteSpace(cTypeFinal)) cTypeFinal = "int";
 
             var ptr = isPtr ? "*" : "";
-            var init = BuildLocalInit(v, isPtr, declType, cType);
+            var init = BuildLocalInit(v, isPtr, declType, cTypeFinal);
 
-            _ctx.WriteLine(cType + ptr + " " + v.Identifier + init + ";");
+            _ctx.WriteLine(cTypeFinal + ptr + " " + v.Identifier + init + ";");
 
-            var registeredType = cType == "List_str"
+            var registeredType = cTypeFinal == "List_str"
                 ? "List<string>"
-                : (declType is "var" or "var?" ? cType : declType);
+                : (declType is "var" or "var?" ? cTypeFinal : declType);
             _ctx.LocalTypes[v.Identifier.Text] = registeredType;
         }
     }
+
+    /// <summary>
+    /// True für CS2SX Extension-Structs die als Wert (nicht Pointer) auf dem Stack liegen.
+    /// TouchState, StickPos, BatteryInfo sind TypeRegistry.IsLibNxStruct() — aber nur unter
+    /// ihrem C-Namen (CS2SX_TouchState). Die C#-Namen (TouchState, StickPos) müssen hier
+    /// ebenfalls abgefangen werden.
+    /// </summary>
+    private static bool IsExtensionStructType(string csType) =>
+        csType is "TouchState" or "StickPos" or "BatteryInfo";
 
     private void WriteNullableLocal(VariableDeclaratorSyntax v, string declType)
     {
@@ -203,29 +214,70 @@ public sealed class StatementWriter
                            or "string.Concat" or "String.Concat")
                 return ("const char", true);
 
+            // Fix: Extension Input-Structs — Stack-Allokation (kein Pointer)
+            // var touch = Input.GetTouch()   → CS2SX_TouchState touch = ...;
+            // var stickL = Input.GetStickLeft() → CS2SX_StickPos stickL = ...;
+            if (calleeStr is "Input.GetTouch" or "CS2SX_Input_GetTouch")
+                return ("CS2SX_TouchState", false);
+
+            if (calleeStr is "Input.GetStickLeft" or "_cs2sx_get_stick_left"
+                           or "CS2SX_Input_GetStickLeft")
+                return ("CS2SX_StickPos", false);
+
+            if (calleeStr is "Input.GetStickRight" or "_cs2sx_get_stick_right"
+                           or "CS2SX_Input_GetStickRight")
+                return ("CS2SX_StickPos", false);
+
+            if (calleeStr is "System.GetBattery" or "CS2SX_GetBattery")
+                return ("CS2SX_BatteryInfo", false);
+
             if (_ctx.MethodReturnTypes.TryGetValue(calleeStr, out var retType))
             {
-                var cMapped = TypeRegistry.MapType(retType);
-                var isPtr = !cMapped.EndsWith("*")
-                           && (TypeRegistry.NeedsPointerSuffix(retType)
-                            || TypeRegistry.IsStringBuilder(retType));
-                return (cMapped.TrimEnd('*'), isPtr);
+                var needsPtr = TypeRegistry.NeedsPointerSuffix(retType)
+                            || TypeRegistry.IsStringBuilder(retType)
+                            || TypeRegistry.IsList(retType)
+                            || TypeRegistry.IsDictionary(retType)
+                            || TypeRegistry.IsControlType(retType);
+
+                var cMapped = TypeRegistry.MapType(retType).TrimEnd('*');
+                return (cMapped, needsPtr);
             }
 
             var inferred = TypeInferrer.InferCSharpType(v.Initializer!.Value, _ctx);
+
+            // Fix: Extension-Structs die TypeInferrer jetzt kennt
+            if (inferred is "TouchState") return ("CS2SX_TouchState", false);
+            if (inferred is "StickPos") return ("CS2SX_StickPos", false);
+            if (inferred is "BatteryInfo") return ("CS2SX_BatteryInfo", false);
+
+            if (TypeRegistry.IsList(inferred) || TypeRegistry.IsDictionary(inferred)
+                || TypeRegistry.IsStringBuilder(inferred))
+            {
+                return (TypeRegistry.MapType(inferred).TrimEnd('*'), true);
+            }
+
             if (inferred.EndsWith("*"))
                 return (inferred.TrimEnd('*'), true);
             return (inferred, false);
         }
 
         var ct = TypeInferrer.InferCSharpType(v.Initializer?.Value, _ctx);
+
+        if (ct is "TouchState") return ("CS2SX_TouchState", false);
+        if (ct is "StickPos") return ("CS2SX_StickPos", false);
+        if (ct is "BatteryInfo") return ("CS2SX_BatteryInfo", false);
+
+        if (TypeRegistry.IsList(ct) || TypeRegistry.IsDictionary(ct)
+            || TypeRegistry.IsStringBuilder(ct))
+            return (TypeRegistry.MapType(ct).TrimEnd('*'), true);
+
         if (ct.EndsWith("*"))
             return (ct.TrimEnd('*'), true);
         return (ct, false);
     }
 
     private static bool IsSplitCall(InvocationExpressionSyntax inv) =>
-       IsListStrCall(inv);
+        IsListStrCall(inv);
 
     private static bool IsListStrCall(InvocationExpressionSyntax inv)
     {
@@ -251,12 +303,10 @@ public sealed class StatementWriter
         return "";
     }
 
-    // ── If ────────────────────────────────────────────────────────────────
+    // ── If ────────────────────────────────────────────────────────────────────
 
     private void WriteIf(IfStatementSyntax ifStmt)
     {
-        // is-Pattern in if-Bedingung: if (obj is Dog d) { ... }
-        // → Binding-Variable nach der Bedingung deklarieren
         if (ifStmt.Condition is IsPatternExpressionSyntax isPattern)
         {
             WriteIfWithIsPattern(ifStmt, isPattern);
@@ -280,14 +330,14 @@ public sealed class StatementWriter
         }
     }
 
-    private void WriteIfWithIsPattern(IfStatementSyntax ifStmt, IsPatternExpressionSyntax isPattern)
+    private void WriteIfWithIsPattern(IfStatementSyntax ifStmt,
+        IsPatternExpressionSyntax isPattern)
     {
         var cond = _expr.Write(isPattern);
         _ctx.WriteLine("if (" + cond + ")");
         _ctx.WriteLine("{");
         _ctx.Indent();
 
-        // Binding-Variable innerhalb des Blocks deklarieren
         if (isPattern.Pattern is DeclarationPatternSyntax dp
             && dp.Designation is SingleVariableDesignationSyntax desig)
         {
@@ -368,7 +418,7 @@ public sealed class StatementWriter
         }
     }
 
-    // ── For ───────────────────────────────────────────────────────────────
+    // ── For ───────────────────────────────────────────────────────────────────
 
     private void WriteFor(ForStatementSyntax forStmt)
     {
@@ -397,7 +447,7 @@ public sealed class StatementWriter
         WriteBlockOrStmt(forStmt.Statement);
     }
 
-    // ── ForEach ───────────────────────────────────────────────────────────
+    // ── ForEach ───────────────────────────────────────────────────────────────
 
     private void WriteForEach(ForEachStatementSyntax forEach)
     {
@@ -482,15 +532,11 @@ public sealed class StatementWriter
                      + " = " + listFunc + "(" + colExpr + ", " + idxVar + ");");
     }
 
-    // ── While ─────────────────────────────────────────────────────────────
-
     private void WriteWhile(WhileStatementSyntax whileStmt)
     {
         _ctx.WriteLine("while (" + _expr.Write(whileStmt.Condition) + ")");
         WriteBlockOrStmt(whileStmt.Statement);
     }
-
-    // ── Do ────────────────────────────────────────────────────────────────
 
     private void WriteDo(DoStatementSyntax doStmt)
     {
@@ -499,11 +545,8 @@ public sealed class StatementWriter
         _ctx.WriteLine("while (" + _expr.Write(doStmt.Condition) + ");");
     }
 
-    // ── Switch ────────────────────────────────────────────────────────────
-
     private void WriteSwitch(SwitchStatementSyntax sw)
     {
-        // Pattern-Switch (Arm hat DeclarationPattern/TypePattern) → if-else-Kette
         if (sw.Sections.Any(s => s.Labels.OfType<CasePatternSwitchLabelSyntax>().Any()))
         {
             WritePatternSwitch(sw);
@@ -532,11 +575,6 @@ public sealed class StatementWriter
         _ctx.WriteLine("}");
     }
 
-    /// <summary>
-    /// Pattern-basierten switch-Statement als if-else-Kette ausgeben.
-    /// switch (x) { case Dog d: ... break; default: ... }
-    /// → if (Dog_Is(x)) { Dog* d = (Dog*)x; ... } else { ... }
-    /// </summary>
     private void WritePatternSwitch(SwitchStatementSyntax sw)
     {
         var subject = _expr.Write(sw.Expression);
@@ -584,7 +622,6 @@ public sealed class StatementWriter
                     _ctx.WriteLine("{");
                     _ctx.Indent();
 
-                    // Binding-Variable deklarieren wenn DeclarationPattern
                     if (patternLabel.Pattern is DeclarationPatternSyntax dp
                         && dp.Designation is SingleVariableDesignationSyntax desig)
                     {
@@ -605,8 +642,6 @@ public sealed class StatementWriter
             }
         }
     }
-
-    // ── Try/Catch ─────────────────────────────────────────────────────────
 
     private void WriteTryCatch(TryStatementSyntax tryStmt)
     {
@@ -637,8 +672,6 @@ public sealed class StatementWriter
         _ctx.CurrentJumpBuf = null;
     }
 
-    // ── Throw ─────────────────────────────────────────────────────────────
-
     private void WriteThrow(ThrowStatementSyntax throwStmt)
     {
         if (_ctx.CurrentJumpBuf != null)
@@ -652,8 +685,6 @@ public sealed class StatementWriter
             _ctx.WriteLine("return;");
         }
     }
-
-    // ── Using ─────────────────────────────────────────────────────────────
 
     private void WriteUsing(UsingStatementSyntax usingStmt)
     {
@@ -695,8 +726,6 @@ public sealed class StatementWriter
         _ctx.Dedent();
         _ctx.WriteLine("}");
     }
-
-    // ── Block-Hilfsmethoden ───────────────────────────────────────────────
 
     public void WriteBlockOrStmt(StatementSyntax stmt)
     {

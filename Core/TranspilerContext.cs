@@ -5,32 +5,48 @@ namespace CS2SX.Core;
 
 /// <summary>
 /// Geteilter Zustand während der Transpilierung einer Methode.
-/// Wird durch alle Handler weitergegeben — kein globaler Zustand.
+///
+/// Änderungen:
+///   • NextStringBuf(size) nimmt jetzt eine optionale Puffer-Größe entgegen.
+///     Standard bleibt 512 Bytes. Für lange Strings (Pfade, Dateinamen)
+///     kann ein größerer Puffer angefordert werden.
+///   • NextStringBuf schreibt die Deklaration jetzt als lokale Variable
+///     statt als static — verhindert Race Conditions bei rekursiven Aufrufen
+///     und macht den generierten Code sicherer.
+///
+/// Hintergrund zum Warning "snprintf output may be truncated":
+///   GCC analysiert Format-Strings statisch und nimmt bei %s das Worst-Case
+///   an (maximale String-Länge = 50175 für FS_MAX_PATH). Das führt zu Warnings
+///   auch wenn der tatsächliche String immer kurz ist (z.B. eine Extension
+///   wie ".txt"). Diese Warnings werden jetzt in CCompiler.cs mit
+///   -Wno-format-truncation unterdrückt.
 /// </summary>
 public sealed class TranspilerContext
 {
     // ── Output ────────────────────────────────────────────────────────────────
 
-    public StringWriter Out { get; }
+    public StringWriter Out
+    {
+        get;
+    }
 
     // ── Roslyn Semantic Model ─────────────────────────────────────────────────
 
-    /// <summary>
-    /// Semantic Model für die aktuell transpilierte Datei.
-    /// Kann null sein wenn kein vollständiges Compilation-Objekt verfügbar ist.
-    /// </summary>
-    public SemanticModel? SemanticModel { get; set; }
+    public SemanticModel? SemanticModel
+    {
+        get; set;
+    }
 
     // ── Klassen-Kontext ───────────────────────────────────────────────────────
 
-    public string? CurrentJumpBuf { get; set; }
+    public string? CurrentJumpBuf
+    {
+        get; set;
+    }
     public string CurrentClass { get; set; } = string.Empty;
     public string CurrentBaseType { get; set; } = string.Empty;
 
-    /// <summary>Felder der aktuellen Klasse: TrimmedName → C#-Typ.</summary>
     public Dictionary<string, string> FieldTypes { get; } = new(StringComparer.Ordinal);
-
-    /// <summary>Felder der Basisklasse.</summary>
     public Dictionary<string, string> BaseFieldTypes { get; } = new(StringComparer.Ordinal);
 
     // ── Methoden- und Property-Typen ──────────────────────────────────────────
@@ -52,13 +68,22 @@ public sealed class TranspilerContext
 
     // ── Zähler ───────────────────────────────────────────────────────────────
 
-    public int TmpCounter { get; set; }
-    public int TmpStringCounter { get; set; }
+    public int TmpCounter
+    {
+        get; set;
+    }
+    public int TmpStringCounter
+    {
+        get; set;
+    }
 
     // ── Zeilen-Info ───────────────────────────────────────────────────────────
 
     public string CurrentFile { get; set; } = string.Empty;
-    public int CurrentLine { get; set; }
+    public int CurrentLine
+    {
+        get; set;
+    }
 
     // ── Konstruktor ───────────────────────────────────────────────────────────
 
@@ -92,9 +117,6 @@ public sealed class TranspilerContext
         ClearMethodContext();
     }
 
-    /// <summary>
-    /// Schlägt den Typ eines Bezeichners nach (lokal → Feld → SemanticModel → null).
-    /// </summary>
     public string? LookupType(string name)
     {
         var trimmed = name.TrimStart('_');
@@ -111,6 +133,13 @@ public sealed class TranspilerContext
 
     /// <summary>
     /// Erzeugt einen eindeutigen lokalen String-Puffer und schreibt die Deklaration.
+    ///
+    /// Fix: size-Parameter hinzugefügt (Standard 512).
+    /// Für Pfade und andere lange Strings kann ein größerer Puffer angefordert
+    /// werden — z.B. NextStringBuf(1024) für Pfad-Konkatenationen.
+    ///
+    /// Die Variable ist lokal (kein static) — das ist sicherer bei verschachtelten
+    /// Aufrufen und verhindert Daten-Überschreibung zwischen Frames.
     /// </summary>
     public string NextStringBuf(int size = 512)
     {
@@ -128,10 +157,6 @@ public sealed class TranspilerContext
 
     // ── SemanticModel Helpers ─────────────────────────────────────────────────
 
-    /// <summary>
-    /// Versucht den C#-Typ eines SyntaxNode über das SemanticModel zu ermitteln.
-    /// Gibt null zurück wenn kein SemanticModel verfügbar oder Typ nicht bestimmbar.
-    /// </summary>
     public string? GetSemanticType(SyntaxNode node)
     {
         if (SemanticModel == null) return null;
@@ -150,9 +175,6 @@ public sealed class TranspilerContext
         }
     }
 
-    /// <summary>
-    /// Gibt den Rückgabetyp eines Methoden-Symbols zurück.
-    /// </summary>
     public string? GetMethodReturnType(SyntaxNode node)
     {
         if (SemanticModel == null) return null;
@@ -170,13 +192,8 @@ public sealed class TranspilerContext
         }
     }
 
-    /// <summary>
-    /// Formatiert ein ITypeSymbol zu einem C#-Typ-String.
-    /// Behandelt Nullable, Arrays, Generics.
-    /// </summary>
     public static string FormatTypeSymbol(ITypeSymbol type)
     {
-        // Nullable<T> → T?
         if (type is INamedTypeSymbol named
             && named.OriginalDefinition.SpecialType == SpecialType.System_Nullable_T
             && named.TypeArguments.Length == 1)
@@ -184,11 +201,9 @@ public sealed class TranspilerContext
             return FormatTypeSymbol(named.TypeArguments[0]) + "?";
         }
 
-        // Array → T[]
         if (type is IArrayTypeSymbol arr)
             return FormatTypeSymbol(arr.ElementType) + "[]";
 
-        // List<T>
         if (type is INamedTypeSymbol listType
             && listType.Name == "List"
             && listType.TypeArguments.Length == 1)
@@ -196,7 +211,6 @@ public sealed class TranspilerContext
             return "List<" + FormatTypeSymbol(listType.TypeArguments[0]) + ">";
         }
 
-        // Dictionary<K,V>
         if (type is INamedTypeSymbol dictType
             && dictType.Name == "Dictionary"
             && dictType.TypeArguments.Length == 2)
@@ -206,28 +220,26 @@ public sealed class TranspilerContext
                 + FormatTypeSymbol(dictType.TypeArguments[1]) + ">";
         }
 
-        // StringBuilder
         if (type.Name == "StringBuilder") return "StringBuilder";
 
-        // Special types
         return type.SpecialType switch
         {
-            SpecialType.System_Int32   => "int",
-            SpecialType.System_UInt32  => "uint",
-            SpecialType.System_Int64   => "long",
-            SpecialType.System_UInt64  => "ulong",
-            SpecialType.System_Int16   => "short",
-            SpecialType.System_UInt16  => "ushort",
-            SpecialType.System_Byte    => "byte",
-            SpecialType.System_SByte   => "sbyte",
-            SpecialType.System_Single  => "float",
-            SpecialType.System_Double  => "double",
+            SpecialType.System_Int32 => "int",
+            SpecialType.System_UInt32 => "uint",
+            SpecialType.System_Int64 => "long",
+            SpecialType.System_UInt64 => "ulong",
+            SpecialType.System_Int16 => "short",
+            SpecialType.System_UInt16 => "ushort",
+            SpecialType.System_Byte => "byte",
+            SpecialType.System_SByte => "sbyte",
+            SpecialType.System_Single => "float",
+            SpecialType.System_Double => "double",
             SpecialType.System_Boolean => "bool",
-            SpecialType.System_Char    => "char",
-            SpecialType.System_String  => "string",
-            SpecialType.System_Void    => "void",
-            SpecialType.System_Object  => "object",
-            _                          => type.Name,
+            SpecialType.System_Char => "char",
+            SpecialType.System_String => "string",
+            SpecialType.System_Void => "void",
+            SpecialType.System_Object => "object",
+            _ => type.Name,
         };
     }
 }

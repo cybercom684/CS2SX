@@ -97,7 +97,6 @@ public class MyApp : SwitchApp
 {
     public override void OnInit()
     {
-        // Grafik-Modus aktivieren (1280x720)
         Graphics.Init(1280, 720);
     }
 
@@ -106,10 +105,14 @@ public class MyApp : SwitchApp
         Graphics.FillScreen(Color.Black);
         Graphics.DrawText(100, 100, "Hello Switch!", Color.White, 2);
         Graphics.FillRect(100, 200, 200, 50, Color.Blue);
-        Graphics.DrawRect(100, 200, 200, 50, Color.White);
         Graphics.DrawLine(0, 0, 400, 400, Color.Red);
         Graphics.FillCircle(640, 360, 80, Color.Green);
-        Graphics.DrawCircle(640, 360, 80, Color.White);
+
+        // Neue Primitiven
+        Graphics.FillTriangle(200, 100, 300, 300, 100, 300, Color.RGB(255, 128, 0));
+        Graphics.FillEllipse(640, 360, 120, 60, Color.RGB(80, 200, 120));
+        Graphics.FillRoundedRect(50, 50, 300, 150, 20, Color.RGB(60, 60, 180));
+        Graphics.DrawTextShadow(100, 400, "Shadow!", Color.White, Color.RGB(0,0,0), 2);
     }
 }
 ```
@@ -134,12 +137,15 @@ public class MyApp : SwitchApp
 | `List<string>` | ✅ | `foreach`, `string.Join`, `string.Split` |
 | `Dictionary<K,V>` | ✅ | `Add`, `Remove`, `ContainsKey`, `TryGetValue`, Indexer |
 | `StringBuilder` | ✅ | `Append`, `AppendLine`, `Clear`, `ToString`, `Insert`, `Replace`, `IndexOf` |
+| `StickPos` | ✅ | Analog-Stick-Position (`x`, `y`) |
+| `TouchState` | ✅ | Touch-Screen-Zustand (`count`, `x[]`, `y[]`) |
+| `BatteryInfo` | ✅ | Akkustand (`percent`, `charging`, `connected`) |
 
 ### Nullable-Typen
 
 ```csharp
-int? x = null;          // → int* x = NULL;
-int? x = 5;             // → int* x = &(int){5};
+int? x = null;             // → int* x = NULL;
+int? x = 5;                // → int* x = &(int){5};
 bool hasVal = x.HasValue;  // → (x != NULL)
 int val = x.Value;         // → (*x)
 int v = x ?? 0;            // → (x != NULL ? *x : 0)
@@ -178,35 +184,58 @@ if (int.TryParse(someString, out result))
 }
 ```
 
-### Grafik (Framebuffer)
+---
+
+## Grafik (Framebuffer)
 
 Aktivierung: `Graphics.Init(1280, 720)` in `OnInit()` aufrufen.
 
-| Methode | Status | Beschreibung |
-|---|---|---|
-| `Graphics.Init(w, h)` | ✅ | Framebuffer-Modus aktivieren |
-| `Graphics.FillScreen(color)` | ✅ | Bildschirm füllen |
-| `Graphics.SetPixel(x, y, color)` | ✅ | Einzelnen Pixel setzen |
-| `Graphics.DrawRect(x, y, w, h, color)` | ✅ | Rechteck-Outline |
-| `Graphics.FillRect(x, y, w, h, color)` | ✅ | Gefülltes Rechteck |
-| `Graphics.DrawLine(x0, y0, x1, y1, color)` | ✅ | Linie (Bresenham) |
-| `Graphics.DrawCircle(cx, cy, r, color)` | ✅ | Kreis-Outline (Midpoint) |
-| `Graphics.FillCircle(cx, cy, r, color)` | ✅ | Gefüllter Kreis |
-| `Graphics.DrawText(x, y, text, color, scale)` | ✅ | Text (8x8 Bitmap-Font) |
-| `Graphics.DrawChar(x, y, c, color, scale)` | ✅ | Einzelnes Zeichen |
-| `Graphics.MeasureTextWidth(text, scale)` | ✅ | Text-Breite in Pixeln |
-| `Graphics.MeasureTextHeight(scale)` | ✅ | Text-Höhe in Pixeln |
-| `Graphics.DrawTexture(tex, x, y)` | ✅ | Texture rendern |
+### Basis-Primitiven
 
-### Texture & IDisposable
+| Methode | Beschreibung |
+|---|---|
+| `Graphics.Init(w, h)` | Framebuffer-Modus aktivieren |
+| `Graphics.FillScreen(color)` | Bildschirm füllen |
+| `Graphics.SetPixel(x, y, color)` | Einzelnen Pixel setzen |
+| `Graphics.DrawRect(x, y, w, h, color)` | Rechteck-Outline |
+| `Graphics.FillRect(x, y, w, h, color)` | Gefülltes Rechteck |
+| `Graphics.DrawLine(x0, y0, x1, y1, color)` | Linie (Bresenham) |
+| `Graphics.DrawCircle(cx, cy, r, color)` | Kreis-Outline |
+| `Graphics.FillCircle(cx, cy, r, color)` | Gefüllter Kreis |
+| `Graphics.DrawText(x, y, text, color, scale)` | Text (8×8 Bitmap-Font) |
+| `Graphics.DrawChar(x, y, c, color, scale)` | Einzelnes Zeichen |
+| `Graphics.MeasureTextWidth(text, scale)` | Text-Breite in Pixeln |
+| `Graphics.MeasureTextHeight(scale)` | Text-Höhe in Pixeln |
+| `Graphics.DrawTexture(tex, x, y)` | Texture rendern |
 
-`Texture` implementiert `IDisposable`. Das `using`-Statement wird unterstützt und ruft automatisch `Dispose()` am Ende des Blocks auf:
+### Erweiterte Primitiven
+
+| Methode | Beschreibung |
+|---|---|
+| `Graphics.DrawTriangle(x0,y0, x1,y1, x2,y2, color)` | Dreieck-Outline |
+| `Graphics.FillTriangle(x0,y0, x1,y1, x2,y2, color)` | Gefülltes Dreieck (Scanline-Fill) |
+| `Graphics.DrawEllipse(cx, cy, rx, ry, color)` | Ellipse-Outline |
+| `Graphics.FillEllipse(cx, cy, rx, ry, color)` | Gefüllte Ellipse |
+| `Graphics.DrawRoundedRect(x, y, w, h, r, color)` | Rechteck mit abgerundeten Ecken |
+| `Graphics.FillRoundedRect(x, y, w, h, r, color)` | Gefülltes abgerundetes Rechteck |
+| `Graphics.DrawGrid(x, y, w, h, cellW, cellH, color)` | Gitter zeichnen |
+| `Graphics.DrawTextShadow(x, y, text, color, shadow, scale)` | Text mit 1px-Schatten |
+
+### Alpha-Blending
+
+| Methode | Beschreibung |
+|---|---|
+| `Graphics.SetPixelAlpha(x, y, color, alpha)` | Pixel mit Alpha (0=transparent, 255=deckend) |
+| `Graphics.FillRectAlpha(x, y, w, h, color, alpha)` | Rechteck mit Alpha |
+| `Graphics.DrawTextAlpha(x, y, text, color, scale, alpha)` | Text mit Alpha |
 
 ```csharp
-using (Texture tex = new Texture(64, 64, pixels))
-{
-    Graphics.DrawTexture(tex, 100, 100);
-} // → Texture_Dispose(tex) wird automatisch aufgerufen
+// Halbtransparentes Overlay
+Graphics.FillRectAlpha(0, 0, 1280, 720, Color.RGB(0, 0, 0), 128);
+
+// Text mit Schatten für bessere Lesbarkeit
+Graphics.DrawTextShadow(100, 100, "Score: 42",
+    Color.White, Color.RGB(0, 0, 0), 2);
 ```
 
 ### Farb-Konstanten
@@ -217,41 +246,147 @@ Color.Blue    Color.Yellow  Color.Cyan    Color.Magenta
 Color.Gray    Color.Orange
 
 // Eigene Farben
-uint myColor = Color.RGB(255, 128, 0);
+uint myColor  = Color.RGB(255, 128, 0);
 uint myColorA = Color.RGBA(255, 128, 0, 200);
 ```
 
-### File I/O (SD-Karte)
-
-Alle Pfade müssen absolut sein und mit `/switch/` beginnen.
-
-| Methode | Status | Beschreibung |
-|---|---|---|
-| `File.ReadAllText(path)` | ✅ | Datei lesen |
-| `File.WriteAllText(path, content)` | ✅ | Datei schreiben (überschreibt) |
-| `File.AppendAllText(path, content)` | ✅ | An Datei anhängen |
-| `File.Exists(path)` | ✅ | Prüft ob Datei existiert |
-| `File.Delete(path)` | ✅ | Datei löschen |
-| `File.Copy(src, dst)` | ✅ | Datei kopieren |
-| `Directory.Exists(path)` | ✅ | Prüft ob Verzeichnis existiert |
-| `Directory.CreateDirectory(path)` | ✅ | Verzeichnis anlegen |
-| `Directory.Delete(path)` | ✅ | Verzeichnis löschen |
-| `Directory.GetFiles(path)` | ✅ | Dateien auflisten → `List<string>` |
+### Texture & IDisposable
 
 ```csharp
-Directory.CreateDirectory("/switch/MeinSpiel");
-
-File.WriteAllText("/switch/MeinSpiel/save.txt", "42;1337");
-
-if (File.Exists("/switch/MeinSpiel/save.txt"))
+using (Texture tex = new Texture(64, 64, pixels))
 {
-    string content = File.ReadAllText("/switch/MeinSpiel/save.txt");
-    List<string> parts = content.Split(";");
-    int val = int.Parse(parts[0]);
+    Graphics.DrawTexture(tex, 100, 100);
+} // → Texture_Dispose(tex) wird automatisch aufgerufen
+```
+
+---
+
+## Input
+
+### Buttons
+
+```csharp
+public override void OnFrame()
+{
+    if (Input.IsDown(NpadButton.A))   { /* einmalig beim Drücken */ }
+    if (Input.IsHeld(NpadButton.ZR))  { /* solange gehalten      */ }
+    if (Input.IsUp(NpadButton.B))     { /* einmalig beim Loslassen */ }
 }
 ```
 
-### Kontrollfluss
+Verfügbare Buttons: `A`, `B`, `X`, `Y`, `L`, `R`, `ZL`, `ZR`, `Plus`, `Minus`, `Up`, `Down`, `Left`, `Right`, `StickL`, `StickR` sowie alle `StickL/RUp/Down/Left/Right`-Richtungen.
+
+### Analog-Sticks
+
+```csharp
+StickPos left  = Input.GetStickLeft();   // x/y: -32767..+32767
+StickPos right = Input.GetStickRight();
+
+if (left.x > 5000)
+    Console.WriteLine("Stick rechts");
+
+// Normierter Wert 0..100 (Betrag, Deadzone bereits herausgefiltert)
+// int norm = CS2SX_StickNorm(left.x < 0 ? -left.x : left.x);
+```
+
+> **Deadzone:** Werte innerhalb von ±3000 werden automatisch auf 0 gesetzt.
+
+> **Achsen:** X negativ = links, positiv = rechts. Y positiv = oben, negativ = unten.
+
+### Touch-Screen
+
+```csharp
+TouchState touch = Input.GetTouch();
+
+if (touch.count > 0)
+{
+    int x = touch.x[0];   // 0..1280
+    int y = touch.y[0];   // 0..720
+    Graphics.FillCircle(x, y, 20, Color.Red);
+}
+
+// Bis zu 10 simultane Berührungspunkte
+for (int i = 0; i < touch.count && i < 10; i++)
+{
+    Graphics.FillCircle(touch.x[i], touch.y[i], 15, Color.Green);
+}
+```
+
+---
+
+## System
+
+### Akkustand
+
+```csharp
+BatteryInfo battery = System.GetBattery();
+
+Graphics.DrawText(10, 10,
+    $"Akku: {battery.percent}%  Lädt: {battery.charging}",
+    Color.White, 1);
+```
+
+| Feld | Typ | Beschreibung |
+|---|---|---|
+| `percent` | `int` | Ladezustand 0–100 |
+| `charging` | `bool` | `true` wenn geladen wird |
+| `connected` | `bool` | `true` wenn Ladegerät angesteckt |
+
+> `System.GetBattery()` ruft intern `psmInitialize()` auf — kein manuelles Init nötig.
+
+---
+
+## File I/O (SD-Karte)
+
+Alle Pfade müssen absolut sein und mit `/switch/` beginnen.
+
+### Dateien
+
+| Methode | Beschreibung |
+|---|---|
+| `File.ReadAllText(path)` | Datei lesen (max. 8192 Bytes) |
+| `File.WriteAllText(path, content)` | Datei schreiben (überschreibt) |
+| `File.AppendAllText(path, content)` | An Datei anhängen |
+| `File.Exists(path)` | Prüft ob Datei existiert |
+| `File.Delete(path)` | Datei löschen |
+| `File.Copy(src, dst)` | Datei kopieren |
+
+### Verzeichnisse
+
+| Methode | Beschreibung |
+|---|---|
+| `Directory.Exists(path)` | Prüft ob Verzeichnis existiert |
+| `Directory.CreateDirectory(path)` | Verzeichnis anlegen |
+| `Directory.Delete(path)` | Verzeichnis löschen |
+| `Directory.GetFiles(path, pattern)` | Dateien auflisten → `List<string>` |
+| `Directory.GetDirectories(path)` | Unterverzeichnisse auflisten → `List<string>` |
+| `Directory.GetEntries(path)` | Dateien + Verzeichnisse → `List<string>` |
+
+### Pfad-Hilfsmethoden
+
+| Methode | Beispiel | Ergebnis |
+|---|---|---|
+| `Path.GetFileName(path)` | `"/switch/app.nro"` | `"app.nro"` |
+| `Path.GetExtension(path)` | `"/switch/app.nro"` | `".nro"` |
+| `Path.GetDirectoryName(path)` | `"/switch/app.nro"` | `"/switch"` |
+| `Path.Combine(a, b)` | `"/switch"`, `"save.txt"` | `"/switch/save.txt"` |
+| `Path.IsDirectory(path)` | `"/switch/mydir"` | `true` |
+
+```csharp
+List<string> dirs = Directory.GetDirectories("/switch");
+for (int i = 0; i < dirs.Count; i++)
+{
+    string name = Path.GetFileName(dirs[i]);
+    Graphics.DrawText(20, 100 + i * 20, name, Color.White, 1);
+}
+
+string savePath = Path.Combine("/switch/MeinSpiel", "save.dat");
+File.WriteAllText(savePath, "42");
+```
+
+---
+
+## Kontrollfluss
 
 | Feature | Status |
 |---|---|
@@ -264,15 +399,15 @@ if (File.Exists("/switch/MeinSpiel/save.txt"))
 | `??` Null-Coalescing | ✅ |
 | `??=` Null-Coalescing-Zuweisung | ✅ |
 
-### Pattern Matching
+---
 
-CS2SX unterstützt grundlegendes Pattern Matching:
+## Pattern Matching
 
 ```csharp
 // is-Pattern mit Typ und Binding-Variable
 if (obj is Dog d)
 {
-    d.Bark(); // d ist automatisch als Dog* deklariert
+    d.Bark();
 }
 
 // switch-Expression
@@ -291,7 +426,6 @@ string category = score switch
     _     => "C",
 };
 
-// not null Pattern
 if (x is not null) { ... }
 ```
 
@@ -305,9 +439,9 @@ if (x is not null) { ... }
 | `and` / `or` Pattern | ✅ |
 | `when`-Klausel | ✅ |
 
-### Properties
+---
 
-Auto-Properties werden zu Struct-Feldern. Properties mit explizitem Body werden zu Getter/Setter-Funktionen:
+## Properties
 
 ```csharp
 // Auto-Property → einfaches Struct-Feld
@@ -321,9 +455,9 @@ public int Speed
 }
 ```
 
-### Lambda-Ausdrücke
+---
 
-Lambdas werden automatisch zu statischen C-Funktionen geliftet. Captures werden als Capture-Struct realisiert:
+## Lambda-Ausdrücke
 
 ```csharp
 _button.OnClick = () => DoSomething();
@@ -331,13 +465,17 @@ _button.OnClick = () => DoSomething();
 Action<int> handler = x => Console.WriteLine($"Value: {x}");
 ```
 
-### Klassen & OOP
+Lambdas werden automatisch zu statischen C-Funktionen geliftet. Captures werden als Capture-Struct realisiert.
+
+---
+
+## Klassen & OOP
 
 | Feature | Status | Hinweis |
 |---|---|---|
 | Klassen mit Feldern und Methoden | ✅ | → C-Structs |
 | Vererbung (einzeln) | ✅ | `SwitchApp`, `Control` als Basis |
-| `abstract`-Klassen mit `abstract`-Methoden | ✅ | → vtable-Infrastruktur |
+| `abstract`-Klassen | ✅ | → vtable-Infrastruktur |
 | `virtual` / `override` | ✅ | → vtable-Funktionszeiger |
 | Eigene Controls (erbt von `Control`) | ✅ | `Draw()` + `Update()` |
 | `static`-Felder und -Methoden | ✅ | → globale C-Variablen |
@@ -346,116 +484,15 @@ Action<int> handler = x => Console.WriteLine($"Value: {x}");
 | `interface` | ❌ | |
 | Generics | ❌ | |
 
-### UI & Input (Console-Modus)
-
-| Feature | Status |
-|---|---|
-| `Label`, `Button`, `ProgressBar` | ✅ |
-| Eigene Controls (erbt von `Control`) | ✅ |
-| DPad-Navigation zwischen Buttons | ✅ |
-| `Input.IsDown`, `IsHeld`, `IsUp` | ✅ |
-| Alle `NpadButton`-Werte | ✅ |
-| LibNX-Funktionsaufrufe direkt | ✅ |
-| libnx Structs als Stack-Variable (`PadState` etc.) | ✅ |
-
-### Nicht unterstützt
-
-| Feature |
-|---|
-| `async` / `await` |
-| LINQ |
-| `params`-Parameter (nur teilweise) |
-| Tuple-Return / Dekonstruktion |
-| Typ-Pattern ohne Binding (`obj is Dog`) als alleinige Bedingung (benötigt `Dog_Is()`-Hilfsfunktion) |
-| `interface` |
-| Generics |
-| `Console.ReadLine` / Keyboard-Input |
-
----
-
-## Render-Modi
-
-CS2SX unterstützt zwei exklusive Render-Modi:
-
-| Modus | Aktivierung | Beschreibung |
-|---|---|---|
-| **Console** | Standard (kein `Graphics.Init`) | ANSI-Terminal, `Label`, `Button`, `ProgressBar` |
-| **Framebuffer** | `Graphics.Init(1280, 720)` in `OnInit()` | Direktes Pixel-Rendering, 1280×720 RGBA8888 |
-
-Im Framebuffer-Modus sind Console-Controls (`Label`, `Button`) nicht sichtbar — der gesamte Output läuft über `Graphics.*`.
-
----
-
-## Eigene Controls schreiben
-
-Klassen die von `Control` erben bekommen automatisch `Draw()` und `Update()` als Funktionszeiger verdrahtet:
-
-```csharp
-// ValueMeter.cs
-public class ValueMeter : Control
-{
-    private int _value;
-    private int _minValue;
-    private int _maxValue;
-    private int _width;
-
-    public void SetValue(int v)            { _value    = v; }
-    public void SetRange(int min, int max) { _minValue = min; _maxValue = max; }
-    public void SetWidth(int w)            { _width    = w; }
-
-    public override void Draw()
-    {
-        int px = base.X;
-        int py = base.Y;
-        Console.Write(string.Format("\x1b[{0};{1}H", py, px));
-
-        int half   = _width / 2;
-        int filled = _maxValue > 0 ? (_value * half) / _maxValue : 0;
-
-        if (_value < 0)
-        {
-            int abs = -filled;
-            Console.Write(string.Format("<{0}|{1}>", abs, half - abs));
-            return;
-        }
-        Console.Write(string.Format("<{0}|{1}>", half, filled));
-    }
-
-    public override void Update(ulong kDown, ulong kHeld)
-    {
-    }
-}
-```
-
-Nutzung:
-
-```csharp
-_meter = new ValueMeter();
-_meter.X = 14;
-_meter.Y = 4;
-_meter.SetRange(-10, 10);
-_meter.SetWidth(20);
-Form.Add(_meter);
-```
-
----
-
-## Vererbung & virtuelle Methoden
-
-CS2SX generiert eine vtable-Infrastruktur für Klassen mit `virtual` oder `abstract` Methoden:
+### Vererbung & virtuelle Methoden
 
 ```csharp
 // Animal.cs
 public abstract class Animal
 {
     private int _health;
-
     public abstract void Speak();
-
-    public virtual void Update()
-    {
-        _health++;
-    }
+    public virtual void Update() { _health++; }
 }
 
 // Dog.cs
@@ -468,8 +505,55 @@ public class Dog : Animal
 }
 ```
 
-Virtuelle Aufrufe werden automatisch über vtable-Zeiger aufgelöst:
-`animal.Speak()` → `animal->vtable->Speak(animal)`
+Virtuelle Aufrufe: `animal.Speak()` → `animal->vtable->Speak(animal)`
+
+### Eigene Controls
+
+```csharp
+// ValueMeter.cs
+public class ValueMeter : Control
+{
+    private int _value;
+    private int _maxValue;
+    private int _width;
+
+    public void SetValue(int v)  { _value    = v; }
+    public void SetMax(int max)  { _maxValue = max; }
+    public void SetWidth(int w)  { _width    = w; }
+
+    public override void Draw()
+    {
+        int filled = _maxValue > 0 ? (_value * _width) / _maxValue : 0;
+        Console.Write(string.Format("\x1b[{0};{1}H[", base.Y, base.X));
+        for (int i = 0; i < _width; i++)
+            Console.Write(i < filled ? "#" : "-");
+        Console.Write("]");
+    }
+
+    public override void Update(ulong kDown, ulong kHeld) { }
+}
+```
+
+```csharp
+// Nutzung in OnInit()
+_meter = new ValueMeter();
+_meter.X = 14;
+_meter.Y = 4;
+_meter.SetMax(100);
+_meter.SetWidth(20);
+Form.Add(_meter);
+```
+
+---
+
+## Render-Modi
+
+| Modus | Aktivierung | Beschreibung |
+|---|---|---|
+| **Console** | Standard (kein `Graphics.Init`) | ANSI-Terminal, `Label`, `Button`, `ProgressBar` |
+| **Framebuffer** | `Graphics.Init(1280, 720)` in `OnInit()` | Direktes Pixel-Rendering, 1280×720 RGBA8888 |
+
+Im Framebuffer-Modus sind Console-Controls nicht sichtbar — der gesamte Output läuft über `Graphics.*`.
 
 ---
 
@@ -513,11 +597,16 @@ CS2SX/
 │   │   ├── InvocationDispatcher.cs
 │   │   ├── LibNxHandler.cs
 │   │   ├── InputHandler.cs
+│   │   ├── InputExtHandler.cs       — Sticks, Touch
 │   │   ├── ConsoleHandler.cs
 │   │   ├── FormHandler.cs
 │   │   ├── GraphicsHandler.cs
+│   │   ├── GraphicsExtHandler.cs    — neue Primitiven, Alpha
 │   │   ├── ColorHandler.cs
 │   │   ├── FileHandler.cs
+│   │   ├── DirectoryExtHandler.cs   — GetDirectories, GetEntries
+│   │   ├── PathHandler.cs           — Path.GetFileName, Combine etc.
+│   │   ├── SystemExtHandler.cs      — System.GetBattery
 │   │   ├── ParseHandler.cs
 │   │   ├── ListHandler.cs
 │   │   ├── DictionaryHandler.cs
@@ -526,7 +615,7 @@ CS2SX/
 │   │   ├── FieldMethodHandler.cs
 │   │   ├── OwnMethodHandler.cs
 │   │   └── MathHandler.cs
-│   ├── Strategies/             — Konstruktor-Generierung
+│   ├── Strategies/
 │   │   ├── IConstructorStrategy.cs
 │   │   ├── SwitchAppConstructorStrategy.cs
 │   │   ├── ControlSubclassConstructorStrategy.cs
@@ -537,14 +626,14 @@ CS2SX/
 │   │   ├── FormatStringBuilder.cs
 │   │   ├── StringEscaper.cs
 │   │   ├── TypeInferrer.cs
-│   │   └── NullableAndPatternWriter.cs — Nullable + Pattern Matching
+│   │   └── NullableAndPatternWriter.cs
 │   ├── CSharpToC.cs
-│   ├── LambdaLifter.cs         — Lambda → statische C-Funktion
-│   ├── PropertyWriter.cs       — Property-Getter/Setter → C-Funktionen
-│   ├── VTableBuilder.cs        — vtable für virtual/abstract
+│   ├── LambdaLifter.cs
+│   ├── PropertyWriter.cs
+│   ├── VTableBuilder.cs
 │   └── TypeMapper.cs
 ├── Build/
-│   ├── BuildPipeline.cs        — inkrementeller Build
+│   ├── BuildPipeline.cs
 │   ├── CCompiler.cs
 │   ├── EntryPointGenerator.cs
 │   ├── NacpBuilder.cs
@@ -553,16 +642,15 @@ CS2SX/
 │   ├── ProjectCreator.cs
 │   └── ProjectReader.cs
 └── Runtime/
-    ├── switchforms.h           — UI-Controls, Collections, String-Utils, File I/O
-    ├── switchforms.c           — globale Variablendefinitionen (g_fb_addr, etc.)
-    └── switchapp.h             — SwitchApp-Loop, Framebuffer, Graphics-API
+    ├── switchforms.h    — UI-Controls, Collections, String-Utils, File I/O
+    ├── switchforms.c    — globale Variablendefinitionen
+    └── switchapp.h      — SwitchApp-Loop, Framebuffer, Graphics, Input, System
 ```
 
 ### Neuen Feature-Handler hinzufügen
 
-1. Neue Datei `Transpiler/Handlers/MeinHandler.cs` anlegen:
-
 ```csharp
+// 1. Transpiler/Handlers/MeinHandler.cs anlegen
 public sealed class MeinHandler : InvocationHandlerBase
 {
     public override bool TryHandle(InvocationExpressionSyntax inv, string calleeStr,
@@ -576,11 +664,8 @@ public sealed class MeinHandler : InvocationHandlerBase
         return true;
     }
 }
-```
 
-2. In `InvocationDispatcher.cs` eintragen:
-
-```csharp
+// 2. In InvocationDispatcher.cs eintragen
 new MeinHandler(),
 ```
 
@@ -588,17 +673,35 @@ new MeinHandler(),
 
 Eintrag in `Core/TypeRegistry.cs` in der entsprechenden Kategorie ergänzen — `s_primitives`, `s_controlTypes` oder `s_libNxStructs`.
 
+Für Struct-Rückgabetypen (Stack-Allokation, kein Pointer) zusätzlich in `TypeInferrer.cs` → `InferInvocation()` eintragen.
+
 ---
 
 ## Bekannte Einschränkungen
 
 - **Ein `SwitchApp`-Subtyp pro Projekt** — der Einstiegspunkt wird automatisch erkannt
-- **Keine verschachtelten Klassen** — jede Klasse in einer eigenen `.cs`-Datei
-- **`string`-Puffer begrenzt** — interne statische Puffer sind 512 Bytes, Dateipuffer 8192 Bytes
-- **Bitmap-Font 8x8** — `Graphics.DrawText` nutzt einen eingebauten 8×8-Pixel-Font ohne Anti-Aliasing
-- **Kein Heap-GC** — allokierte Objekte (`*_New()`) müssen manuell freigegeben werden wenn nötig
-- **Lambda-Captures** — nur Werttypen und primitive Captures werden zuverlässig unterstützt
-- **`is`-Typ-Pattern** — erfordert eine `TypeName_Is()`-Hilfsfunktion in der Runtime für den jeweiligen Typ
+- **Eine Klasse pro `.cs`-Datei** — keine verschachtelten Klassen
+- **`string`-Puffer 512 Bytes** — interne String-Puffer; Dateipuffer 8192 Bytes
+- **Bitmap-Font 8×8** — `Graphics.DrawText` nutzt einen eingebauten Font ohne Anti-Aliasing
+- **Kein Heap-GC** — allokierte Objekte (`*_New()`) müssen manuell freigegeben werden
+- **Lambda-Captures** — nur Werttypen und primitive Captures zuverlässig unterstützt
+- **`is`-Typ-Pattern** — erfordert `TypeName_Is()`-Hilfsfunktion in der Runtime
+- **Char-Literale in Vergleichen** — `s[i] == '\n'` funktioniert; für komplexe Fälle `int`-Konstanten nutzen (`int nl = 10;`)
+- **Statische String-Puffer** — `String_Trim`, `String_ToUpper` etc. nutzen statische interne Puffer; verschachtelte Aufrufe wie `String_Trim(String_ToUpper(s))` können sich gegenseitig überschreiben
+
+---
+
+## Nicht unterstützt
+
+| Feature |
+|---|
+| `async` / `await` |
+| LINQ |
+| `params`-Parameter (nur teilweise) |
+| Tuple-Return / Dekonstruktion |
+| `interface` |
+| Generics |
+| `Console.ReadLine` / Keyboard-Input |
 
 ---
 

@@ -35,7 +35,7 @@ public sealed class ExpressionWriter
             AssignmentExpressionSyntax assign => WriteAssignment(assign),
             MemberAccessExpressionSyntax mem => WriteMemberAccess(mem),
             InvocationExpressionSyntax inv => WriteInvocation(inv),
-            InterpolatedStringExpressionSyntax interp => FormatStringBuilder.BuildPrintf(interp, false, _ctx, Write),
+            InterpolatedStringExpressionSyntax interp => FormatStringBuilder.BuildToBuffer(interp, _ctx, Write),
             ArrayCreationExpressionSyntax arr => WriteArrayCreation(arr),
             ObjectCreationExpressionSyntax obj => WriteObjectCreation(obj),
             ParenthesizedExpressionSyntax par => "(" + Write(par.Expression) + ")",
@@ -322,8 +322,8 @@ public sealed class ExpressionWriter
 
         var rawExpr = mem.Expression.ToString();
         var key = rawExpr.TrimStart('_');
-        if ((_ctx.LocalTypes.TryGetValue(rawExpr, out var lt) && TypeRegistry.IsLibNxStruct(lt))
-         || (_ctx.FieldTypes.TryGetValue(key, out var ft) && TypeRegistry.IsLibNxStruct(ft)))
+        if ((_ctx.LocalTypes.TryGetValue(rawExpr, out var lt) && IsStructType(lt))
+ || (_ctx.FieldTypes.TryGetValue(key, out var ft) && IsStructType(ft)))
             return obj + "." + prop;
 
         return obj + "->" + prop;
@@ -414,6 +414,11 @@ public sealed class ExpressionWriter
     }
 
     // ── Sonstiges ─────────────────────────────────────────────────────────
+
+    private static bool IsStructType(string csType) =>
+    TypeRegistry.IsLibNxStruct(csType)
+    || TypeRegistry.IsLibNxStruct(TypeRegistry.MapType(csType).TrimEnd('*'))
+    || csType is "TouchState" or "StickPos" or "BatteryInfo";
 
     private string WriteInvocation(InvocationExpressionSyntax inv)
     {

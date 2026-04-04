@@ -28,6 +28,11 @@ public sealed class InvocationDispatcher
         new StringMethodHandler(),
         new FieldMethodHandler(),
         new GraphicsHandler(),
+        new GraphicsExtHandler(),   // NEU: DrawTriangle, FillEllipse, RoundedRect, Alpha
+        new InputExtHandler(),      // NEU: GetStickLeft, GetStickRight, GetTouch
+        new DirectoryExtHandler(),  // NEU: GetDirectories, GetEntries
+        new PathHandler(),          // NEU: Path.GetFileName, GetExtension, Combine
+        new SystemExtHandler(),     // NEU: System.GetBattery
         new OwnMethodHandler(),
     };
 
