@@ -1,36 +1,30 @@
+using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
+
 namespace CS2SX.Core;
 
 /// <summary>
 /// Geteilter Zustand während der Transpilierung einer Methode.
 /// Wird durch alle Handler weitergegeben — kein globaler Zustand.
-///
-/// Änderungen gegenüber der alten Version:
-///   • TmpStringCounter: pro-Statement eindeutige String-Puffer statt
-///     globalem _cs2sx_strbuf — verhindert Überschreiben bei verschachtelten Aufrufen
-///   • CurrentLine / CurrentFile: für Fehlermeldungen mit Zeilennummern
-///   • NextStringBuf(): erzeugt lokale char[]-Variablen im C-Output
 /// </summary>
 public sealed class TranspilerContext
 {
     // ── Output ────────────────────────────────────────────────────────────────
 
-    public StringWriter Out
-    {
-        get;
-    }
+    public StringWriter Out { get; }
+
+    // ── Roslyn Semantic Model ─────────────────────────────────────────────────
+
+    /// <summary>
+    /// Semantic Model für die aktuell transpilierte Datei.
+    /// Kann null sein wenn kein vollständiges Compilation-Objekt verfügbar ist.
+    /// </summary>
+    public SemanticModel? SemanticModel { get; set; }
 
     // ── Klassen-Kontext ───────────────────────────────────────────────────────
 
-    /// <summary>Name der aktuellen jmp_buf Variable für Exception-Handling.</summary>
-    public string? CurrentJumpBuf
-    {
-        get; set;
-    }
-
-    /// <summary>Name der aktuell transpilierten Klasse.</summary>
+    public string? CurrentJumpBuf { get; set; }
     public string CurrentClass { get; set; } = string.Empty;
-
-    /// <summary>Basisklasse der aktuell transpilierten Klasse.</summary>
     public string CurrentBaseType { get; set; } = string.Empty;
 
     /// <summary>Felder der aktuellen Klasse: TrimmedName → C#-Typ.</summary>
@@ -41,57 +35,30 @@ public sealed class TranspilerContext
 
     // ── Methoden- und Property-Typen ──────────────────────────────────────────
 
-    /// <summary>Rückgabetypen der Methoden: Name → C#-Typ.</summary>
     public Dictionary<string, string> MethodReturnTypes { get; } = new(StringComparer.Ordinal);
-
-    /// <summary>Typen der Properties: Name → C#-Typ.</summary>
     public Dictionary<string, string> PropertyTypes { get; } = new(StringComparer.Ordinal);
-
-    /// <summary>Namen der in der aktuellen Klasse definierten Enums.</summary>
     public HashSet<string> EnumMembers { get; } = new(StringComparer.Ordinal);
 
     // ── Methoden-Kontext ──────────────────────────────────────────────────────
 
-    /// <summary>Lokale Variablen der aktuellen Methode: Name → C#-Typ.</summary>
     public Dictionary<string, string> LocalTypes { get; } = new(StringComparer.Ordinal);
 
     // ── Indentierung ──────────────────────────────────────────────────────────
 
     private int _indent;
-
     public string Tab => new string(' ', _indent * 4);
-
     public void Indent() => _indent++;
     public void Dedent() => _indent--;
 
     // ── Zähler ───────────────────────────────────────────────────────────────
 
-    /// <summary>Allgemeiner Zähler für temporäre Variablen.</summary>
-    public int TmpCounter
-    {
-        get; set;
-    }
+    public int TmpCounter { get; set; }
+    public int TmpStringCounter { get; set; }
 
-    /// <summary>
-    /// Zähler für temporäre String-Puffer innerhalb einer Methode.
-    /// Jeder Aufruf von NextStringBuf() erzeugt einen eindeutigen Namen
-    /// wie _sb0, _sb1 etc. — verhindert globale Buffer-Kollisionen.
-    /// </summary>
-    public int TmpStringCounter
-    {
-        get; set;
-    }
+    // ── Zeilen-Info ───────────────────────────────────────────────────────────
 
-    // ── Zeilen-Info für Fehlermeldungen ───────────────────────────────────────
-
-    /// <summary>Aktuelle C#-Quelldatei (für Fehlermeldungen).</summary>
     public string CurrentFile { get; set; } = string.Empty;
-
-    /// <summary>Aktuelle Zeilennummer in der C#-Quelldatei.</summary>
-    public int CurrentLine
-    {
-        get; set;
-    }
+    public int CurrentLine { get; set; }
 
     // ── Konstruktor ───────────────────────────────────────────────────────────
 
@@ -126,7 +93,7 @@ public sealed class TranspilerContext
     }
 
     /// <summary>
-    /// Schlägt den Typ eines Bezeichners nach (lokal → Feld → null).
+    /// Schlägt den Typ eines Bezeichners nach (lokal → Feld → SemanticModel → null).
     /// </summary>
     public string? LookupType(string name)
     {
@@ -136,24 +103,14 @@ public sealed class TranspilerContext
         return null;
     }
 
-    /// <summary>True wenn name auf ein Feld der aktuellen Klasse zeigt.</summary>
     public bool IsFieldAccess(string name) =>
         name.StartsWith('_') && !string.IsNullOrEmpty(CurrentClass);
 
-    /// <summary>Erzeugt eine eindeutige temporäre Variable.</summary>
     public string NextTmp(string prefix = "tmp") =>
         "_" + prefix + "_" + (TmpCounter++);
 
     /// <summary>
-    /// Erzeugt einen eindeutigen lokalen String-Puffer-Namen und
-    /// schreibt die Deklaration direkt in den Output.
-    ///
-    /// Statt des globalen _cs2sx_strbuf wird ein lokales
-    ///   char _sbN[512];
-    /// erzeugt. Das verhindert Buffer-Kollisionen bei
-    /// verschachtelten String-Operationen.
-    ///
-    /// Gibt den Namen des Puffers zurück ("_sb0", "_sb1", ...).
+    /// Erzeugt einen eindeutigen lokalen String-Puffer und schreibt die Deklaration.
     /// </summary>
     public string NextStringBuf(int size = 512)
     {
@@ -162,18 +119,115 @@ public sealed class TranspilerContext
         return name;
     }
 
-    /// <summary>
-    /// Wie NextStringBuf, aber ohne Deklaration — nur Name.
-    /// Verwenden wenn die Deklaration manuell platziert werden soll.
-    /// </summary>
-    public string PeekNextStringBufName() =>
-        "_sb" + TmpStringCounter;
+    public string PeekNextStringBufName() => "_sb" + TmpStringCounter;
 
-    /// <summary>
-    /// Formatiert eine Fehlermeldung mit Datei und Zeilennummer.
-    /// </summary>
     public string FormatDiagnostic(string message) =>
         string.IsNullOrEmpty(CurrentFile)
             ? message
             : $"{CurrentFile}({CurrentLine}): {message}";
+
+    // ── SemanticModel Helpers ─────────────────────────────────────────────────
+
+    /// <summary>
+    /// Versucht den C#-Typ eines SyntaxNode über das SemanticModel zu ermitteln.
+    /// Gibt null zurück wenn kein SemanticModel verfügbar oder Typ nicht bestimmbar.
+    /// </summary>
+    public string? GetSemanticType(SyntaxNode node)
+    {
+        if (SemanticModel == null) return null;
+
+        try
+        {
+            var typeInfo = SemanticModel.GetTypeInfo(node);
+            var type = typeInfo.ConvertedType ?? typeInfo.Type;
+            if (type == null || type is IErrorTypeSymbol) return null;
+
+            return FormatTypeSymbol(type);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Gibt den Rückgabetyp eines Methoden-Symbols zurück.
+    /// </summary>
+    public string? GetMethodReturnType(SyntaxNode node)
+    {
+        if (SemanticModel == null) return null;
+
+        try
+        {
+            var sym = SemanticModel.GetSymbolInfo(node).Symbol;
+            if (sym is IMethodSymbol method)
+                return FormatTypeSymbol(method.ReturnType);
+            return null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Formatiert ein ITypeSymbol zu einem C#-Typ-String.
+    /// Behandelt Nullable, Arrays, Generics.
+    /// </summary>
+    public static string FormatTypeSymbol(ITypeSymbol type)
+    {
+        // Nullable<T> → T?
+        if (type is INamedTypeSymbol named
+            && named.OriginalDefinition.SpecialType == SpecialType.System_Nullable_T
+            && named.TypeArguments.Length == 1)
+        {
+            return FormatTypeSymbol(named.TypeArguments[0]) + "?";
+        }
+
+        // Array → T[]
+        if (type is IArrayTypeSymbol arr)
+            return FormatTypeSymbol(arr.ElementType) + "[]";
+
+        // List<T>
+        if (type is INamedTypeSymbol listType
+            && listType.Name == "List"
+            && listType.TypeArguments.Length == 1)
+        {
+            return "List<" + FormatTypeSymbol(listType.TypeArguments[0]) + ">";
+        }
+
+        // Dictionary<K,V>
+        if (type is INamedTypeSymbol dictType
+            && dictType.Name == "Dictionary"
+            && dictType.TypeArguments.Length == 2)
+        {
+            return "Dictionary<"
+                + FormatTypeSymbol(dictType.TypeArguments[0]) + ","
+                + FormatTypeSymbol(dictType.TypeArguments[1]) + ">";
+        }
+
+        // StringBuilder
+        if (type.Name == "StringBuilder") return "StringBuilder";
+
+        // Special types
+        return type.SpecialType switch
+        {
+            SpecialType.System_Int32   => "int",
+            SpecialType.System_UInt32  => "uint",
+            SpecialType.System_Int64   => "long",
+            SpecialType.System_UInt64  => "ulong",
+            SpecialType.System_Int16   => "short",
+            SpecialType.System_UInt16  => "ushort",
+            SpecialType.System_Byte    => "byte",
+            SpecialType.System_SByte   => "sbyte",
+            SpecialType.System_Single  => "float",
+            SpecialType.System_Double  => "double",
+            SpecialType.System_Boolean => "bool",
+            SpecialType.System_Char    => "char",
+            SpecialType.System_String  => "string",
+            SpecialType.System_Void    => "void",
+            SpecialType.System_Object  => "object",
+            _                          => type.Name,
+        };
+    }
 }

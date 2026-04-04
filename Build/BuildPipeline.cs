@@ -33,6 +33,7 @@ public sealed class BuildPipeline
         using var renderer = new BuildRenderer([
             new BuildStage { Name = "prepare"   },
             new BuildStage { Name = "fwd-decl"  },
+            new BuildStage { Name = "semantic"  },
             new BuildStage { Name = "transpile" },
             new BuildStage { Name = "compile"   },
             new BuildStage { Name = "package"   },
@@ -47,7 +48,6 @@ public sealed class BuildPipeline
             var sPrepare = renderer.GetStage("prepare");
             sPrepare.Status = StageStatus.Running;
 
-            // Nur Runtime-Dateien löschen, keine .c/.h — die werden incremental behandelt
             Directory.CreateDirectory(_buildDir);
 
             var csprojFiles = Directory.GetFiles(_projectDir, "*.csproj");
@@ -69,8 +69,8 @@ public sealed class BuildPipeline
             WriteSwitchformsC(switchformsCPath);
 
             sPrepare.Progress = 100;
-            sPrepare.Status = StageStatus.Done;
-            sPrepare.Elapsed = $"{(DateTime.Now - started).TotalMilliseconds:F0}ms";
+            sPrepare.Status   = StageStatus.Done;
+            sPrepare.Elapsed  = $"{(DateTime.Now - started).TotalMilliseconds:F0}ms";
 
             // ── fwd-decl ──────────────────────────────────────────────────
             var sFwd = renderer.GetStage("fwd-decl");
@@ -84,22 +84,37 @@ public sealed class BuildPipeline
             RuntimeExporter.ExportSwitchForms(switchFormsDir);
 
             var switchFormsFilesForFwd = Directory.GetFiles(switchFormsDir, "*.cs").ToList();
-            var appSourceFiles = reader.SourceFiles.ToList();
-            var allForFwd = switchFormsFilesForFwd.Concat(appSourceFiles).ToList();
-            var forwardPath = Path.Combine(_buildDir, "_forward.h");
+            var appSourceFiles         = reader.SourceFiles.ToList();
+            var allForFwd              = switchFormsFilesForFwd.Concat(appSourceFiles).ToList();
+            var forwardPath            = Path.Combine(_buildDir, "_forward.h");
             WriteForwardDeclarations(allForFwd, forwardPath);
 
             sFwd.Progress = 100;
-            sFwd.Status = StageStatus.Done;
-            sFwd.Elapsed = $"{(DateTime.Now - started).TotalMilliseconds:F0}ms";
+            sFwd.Status   = StageStatus.Done;
+            sFwd.Elapsed  = $"{(DateTime.Now - started).TotalMilliseconds:F0}ms";
 
-            // ── transpile (incremental) ───────────────────────────────────
-            var sTranspile = renderer.GetStage("transpile");
-            sTranspile.Status = StageStatus.Running;
+            // ── semantic ──────────────────────────────────────────────────
+            var sSemantic = renderer.GetStage("semantic");
+            sSemantic.Status = StageStatus.Running;
+            sSemantic.Detail = "building Roslyn compilation…";
 
             var transpiledFiles = appSourceFiles
                 .Where(f => !s_switchFormsSkipTranspile.Contains(Path.GetFileName(f)))
                 .ToList();
+
+            // SemanticModelBuilder einmalig für alle Projektdateien erstellen
+            var semanticBuilder = new SemanticModelBuilder(transpiledFiles);
+
+            Log.Info($"SemanticModel: {transpiledFiles.Count} file(s) analysed");
+
+            sSemantic.Progress = 100;
+            sSemantic.Status   = StageStatus.Done;
+            sSemantic.Detail   = $"{transpiledFiles.Count} file(s)";
+            sSemantic.Elapsed  = $"{(DateTime.Now - started).TotalMilliseconds:F0}ms";
+
+            // ── transpile (incremental) ───────────────────────────────────
+            var sTranspile = renderer.GetStage("transpile");
+            sTranspile.Status = StageStatus.Running;
 
             var allHeaders = transpiledFiles
                 .Select(f => Path.GetFileNameWithoutExtension(f) + ".h")
@@ -108,20 +123,18 @@ public sealed class BuildPipeline
             var cFiles = new List<string> { switchformsCPath };
 
             int transpiled = 0;
-            int skipped = 0;
+            int skipped    = 0;
 
             for (int i = 0; i < transpiledFiles.Count; i++)
             {
-                var csFile = transpiledFiles[i];
+                var csFile   = transpiledFiles[i];
                 var baseName = Path.GetFileNameWithoutExtension(csFile);
-                sTranspile.Detail = $"{baseName}.cs";
+                sTranspile.Detail   = $"{baseName}.cs";
                 sTranspile.Progress = (int)((i + 1) / (double)transpiledFiles.Count * 100);
 
                 var hPath = Path.Combine(_buildDir, baseName + ".h");
                 var cPath = Path.Combine(_buildDir, baseName + ".c");
 
-                // Incremental: .cs nicht neu transpilieren wenn .h und .c
-                // neuer sind als die .cs-Datei
                 if (IsUpToDate(csFile, hPath, cPath))
                 {
                     Log.Info($"→ {baseName}.cs (unchanged)");
@@ -134,11 +147,14 @@ public sealed class BuildPipeline
 
                 var source = File.ReadAllText(csFile);
 
+                // SemanticModel für diese Datei
+                var semanticModel = semanticBuilder.GetModel(csFile);
+
                 // Header generieren
                 var hTranspiler = new CSharpToC(CSharpToC.TranspileMode.HeaderOnly);
                 var hContent = WrapHeader(baseName,
                     "#include \"_forward.h\"\n\n"
-                    + hTranspiler.Transpile(source));
+                    + hTranspiler.Transpile(source, csFile, semanticModel));
                 File.WriteAllText(hPath, hContent);
 
                 // Implementation generieren
@@ -148,26 +164,25 @@ public sealed class BuildPipeline
                 var cTranspiler = new CSharpToC(CSharpToC.TranspileMode.Implementation);
                 var cContent = "#include <stdlib.h>\n"
                                 + allIncludes + "\n\n"
-                                + cTranspiler.Transpile(source);
+                                + cTranspiler.Transpile(source, csFile, semanticModel);
                 File.WriteAllText(cPath, cContent);
                 cFiles.Add(cPath);
                 transpiled++;
             }
 
-            // Zusammenfassung im Detail-Feld
             sTranspile.Detail = transpiled > 0
                 ? $"{transpiled} transpiled, {skipped} unchanged"
                 : $"all {skipped} unchanged";
 
             sTranspile.Progress = 100;
-            sTranspile.Status = StageStatus.Done;
-            sTranspile.Elapsed = $"{(DateTime.Now - started).TotalMilliseconds:F0}ms";
+            sTranspile.Status   = StageStatus.Done;
+            sTranspile.Elapsed  = $"{(DateTime.Now - started).TotalMilliseconds:F0}ms";
 
             // ── compile ───────────────────────────────────────────────────
             var sCompile = renderer.GetStage("compile");
             sCompile.Status = StageStatus.Running;
 
-            var appClass = FindSwitchAppClass(appSourceFiles) ?? _config.MainClass;
+            var appClass      = FindSwitchAppClass(appSourceFiles) ?? _config.MainClass;
             var appHeaderFile = FindHeaderForClass(appSourceFiles, appClass)
                               ?? (appClass + ".h");
             var mainPath = EntryPointGenerator.Write(
@@ -186,8 +201,8 @@ public sealed class BuildPipeline
             new CCompiler().Compile(cFiles, elfPath, _buildDir, _projectDir);
 
             sCompile.Progress = 100;
-            sCompile.Status = StageStatus.Done;
-            sCompile.Elapsed = $"{(DateTime.Now - started).TotalMilliseconds:F0}ms";
+            sCompile.Status   = StageStatus.Done;
+            sCompile.Elapsed  = $"{(DateTime.Now - started).TotalMilliseconds:F0}ms";
 
             // ── package ───────────────────────────────────────────────────
             var sPackage = renderer.GetStage("package");
@@ -198,7 +213,7 @@ public sealed class BuildPipeline
             new NacpBuilder().Build(nacpPath, _config.Name, _config.Author, _config.Version);
             sPackage.Progress = 50;
 
-            var nroPath = Path.Combine(_projectDir, _config.Name + ".nro");
+            var nroPath  = Path.Combine(_projectDir, _config.Name + ".nro");
             var iconPath = _config.Icon != null
                 ? Path.Combine(_projectDir, _config.Icon)
                 : null;
@@ -210,9 +225,9 @@ public sealed class BuildPipeline
             new NroBuilder().Build(elfPath, nroPath, nacpPath, iconPath);
 
             sPackage.Progress = 100;
-            sPackage.Status = StageStatus.Done;
-            sPackage.Detail = nroPath;
-            sPackage.Elapsed = $"{(DateTime.Now - started).TotalMilliseconds:F0}ms";
+            sPackage.Status   = StageStatus.Done;
+            sPackage.Detail   = nroPath;
+            sPackage.Elapsed  = $"{(DateTime.Now - started).TotalMilliseconds:F0}ms";
 
             Log.Ok($"→ {nroPath}");
             renderer.Complete(DateTime.Now - started, warnings, errors: 0);
@@ -220,7 +235,7 @@ public sealed class BuildPipeline
         catch (Exception ex)
         {
             Log.Error(ex.Message);
-            foreach (var stage in new[] { "prepare", "fwd-decl", "transpile", "compile", "package" })
+            foreach (var stage in new[] { "prepare", "fwd-decl", "semantic", "transpile", "compile", "package" })
             {
                 var s = renderer.GetStage(stage);
                 if (s.Status == StageStatus.Running)
@@ -240,22 +255,16 @@ public sealed class BuildPipeline
 
     // ── Incremental Build ─────────────────────────────────────────────────
 
-    /// <summary>
-    /// True wenn .h und .c beide existieren und neuer sind als die .cs-Datei.
-    /// Außerdem wird geprüft ob switchforms.h oder _forward.h neuer sind —
-    /// in dem Fall muss alles neu transpiliert werden.
-    /// </summary>
     private bool IsUpToDate(string csFile, string hPath, string cPath)
     {
         if (!File.Exists(hPath) || !File.Exists(cPath)) return false;
 
         var csTime = File.GetLastWriteTimeUtc(csFile);
-        var hTime = File.GetLastWriteTimeUtc(hPath);
-        var cTime = File.GetLastWriteTimeUtc(cPath);
+        var hTime  = File.GetLastWriteTimeUtc(hPath);
+        var cTime  = File.GetLastWriteTimeUtc(cPath);
 
         if (hTime < csTime || cTime < csTime) return false;
 
-        // Wenn switchforms.h neuer ist → neu transpilieren
         var switchformsH = Path.Combine(_buildDir, "switchforms.h");
         if (File.Exists(switchformsH))
         {
@@ -263,7 +272,6 @@ public sealed class BuildPipeline
             if (hTime < sfTime || cTime < sfTime) return false;
         }
 
-        // Wenn _forward.h neuer ist → neu transpilieren
         var forwardH = Path.Combine(_buildDir, "_forward.h");
         if (File.Exists(forwardH))
         {
@@ -309,7 +317,7 @@ public sealed class BuildPipeline
         foreach (var csFile in sourceFiles)
         {
             var source = File.ReadAllText(csFile);
-            var tree = Microsoft.CodeAnalysis.CSharp.CSharpSyntaxTree.ParseText(source);
+            var tree   = Microsoft.CodeAnalysis.CSharp.CSharpSyntaxTree.ParseText(source);
             foreach (var cls in tree.GetRoot()
                 .DescendantNodes().OfType<ClassDeclarationSyntax>())
             {
@@ -337,7 +345,7 @@ public sealed class BuildPipeline
         foreach (var file in sourceFiles)
         {
             var source = File.ReadAllText(file);
-            var tree = Microsoft.CodeAnalysis.CSharp.CSharpSyntaxTree.ParseText(source);
+            var tree   = Microsoft.CodeAnalysis.CSharp.CSharpSyntaxTree.ParseText(source);
             foreach (var cls in tree.GetRoot()
                 .DescendantNodes().OfType<ClassDeclarationSyntax>())
                 if (cls.BaseList?.Types.FirstOrDefault()?.ToString().Trim() == "SwitchApp")

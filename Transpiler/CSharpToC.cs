@@ -32,22 +32,37 @@ public sealed class CSharpToC : CSharpSyntaxWalker
         _exprWriter = new ExpressionWriter(_ctx);
         _stmtWriter = new StatementWriter(_ctx, _exprWriter);
 
-        _constructorStrategies = new IConstructorStrategy[]
-        {
+        _constructorStrategies =
+        [
             new SwitchAppConstructorStrategy(),
             new ControlSubclassConstructorStrategy(),
             new DefaultConstructorStrategy(),
-        };
+        ];
     }
 
     // ── Öffentliche API ───────────────────────────────────────────────────
 
-    public string Transpile(string csharpSource, string? filePath = null)
+    /// <summary>
+    /// Transpiliert eine C#-Quelldatei.
+    /// </summary>
+    /// <param name="csharpSource">Quellcode der Datei.</param>
+    /// <param name="filePath">Optionaler Dateipfad für Fehlermeldungen.</param>
+    /// <param name="semanticModel">
+    /// Optionales SemanticModel für exakte Typ-Inferenz.
+    /// Wenn null, werden syntaktische Heuristiken verwendet.
+    /// </param>
+    public string Transpile(
+        string csharpSource,
+        string? filePath = null,
+        SemanticModel? semanticModel = null)
     {
         _sourceFilePath = filePath ?? string.Empty;
         _ctx.CurrentFile = System.IO.Path.GetFileName(_sourceFilePath);
+        _ctx.SemanticModel = semanticModel;
 
-        var tree = CSharpSyntaxTree.ParseText(csharpSource);
+        var tree = semanticModel?.SyntaxTree
+            ?? CSharpSyntaxTree.ParseText(csharpSource);
+
         var diags = tree.GetDiagnostics()
             .Where(d => d.Severity == DiagnosticSeverity.Error)
             .ToList();
@@ -117,14 +132,12 @@ public sealed class CSharpToC : CSharpSyntaxWalker
 
         if (_mode == TranspileMode.HeaderOnly)
         {
-            // VTable-Struct für Klassen mit virtual/abstract Methoden
             if (VTableBuilder.HasVirtualMethods(node))
                 VTableBuilder.WriteVTableStruct(node, node.Identifier.Text, _ctx.Out);
 
             WriteStructDefinition(node, baseType);
             WriteFunctionSignatures(node, isSwitchAppChild);
 
-            // Property-Signaturen für Properties mit explizitem Body
             foreach (var prop in node.Members.OfType<PropertyDeclarationSyntax>())
                 if (!PropertyWriter.IsAutoProperty(prop))
                     PropertyWriter.WriteSignatures(prop, node.Identifier.Text, _ctx.Out);
@@ -134,12 +147,10 @@ public sealed class CSharpToC : CSharpSyntaxWalker
             WriteConstructor(node);
             WriteMethodBodies(node);
 
-            // Property-Implementierungen
             foreach (var prop in node.Members.OfType<PropertyDeclarationSyntax>())
                 if (!PropertyWriter.IsAutoProperty(prop))
                     PropertyWriter.WriteImplementations(prop, node.Identifier.Text, _ctx, _exprWriter, _stmtWriter);
 
-            // VTable-Instanz für abgeleitete Klassen
             if (!string.IsNullOrEmpty(baseType) && baseType != SwitchAppBase
                 && !IsControlSubclass(baseType))
             {
@@ -157,7 +168,10 @@ public sealed class CSharpToC : CSharpSyntaxWalker
         foreach (var field in node.Members.OfType<FieldDeclarationSyntax>())
         {
             if (field.Modifiers.Any(m => m.IsKind(SyntaxKind.StaticKeyword))) continue;
-            var csType = field.Declaration.Type.ToString().Trim();
+
+            // SemanticModel für Typ-Bestimmung nutzen
+            var csType = ResolveFieldType(field);
+
             foreach (var v in field.Declaration.Variables)
                 _ctx.FieldTypes[v.Identifier.Text.TrimStart('_')] = csType;
         }
@@ -165,10 +179,44 @@ public sealed class CSharpToC : CSharpSyntaxWalker
         foreach (var prop in node.Members.OfType<PropertyDeclarationSyntax>())
         {
             if (prop.Modifiers.Any(m => m.IsKind(SyntaxKind.StaticKeyword))) continue;
-            var csType = prop.Type.ToString().Trim();
+
+            var csType = ResolvePropertyType(prop);
             _ctx.PropertyTypes[prop.Identifier.Text] = csType;
             _ctx.FieldTypes[prop.Identifier.Text] = csType;
         }
+    }
+
+    private string ResolveFieldType(FieldDeclarationSyntax field)
+    {
+        // SemanticModel: exakter Typ
+        if (_ctx.SemanticModel != null)
+        {
+            try
+            {
+                var typeSymbol = _ctx.SemanticModel.GetTypeInfo(field.Declaration.Type).Type;
+                if (typeSymbol != null && typeSymbol is not IErrorTypeSymbol)
+                    return TranspilerContext.FormatTypeSymbol(typeSymbol);
+            }
+            catch { }
+        }
+
+        return field.Declaration.Type.ToString().Trim();
+    }
+
+    private string ResolvePropertyType(PropertyDeclarationSyntax prop)
+    {
+        if (_ctx.SemanticModel != null)
+        {
+            try
+            {
+                var typeSymbol = _ctx.SemanticModel.GetTypeInfo(prop.Type).Type;
+                if (typeSymbol != null && typeSymbol is not IErrorTypeSymbol)
+                    return TranspilerContext.FormatTypeSymbol(typeSymbol);
+            }
+            catch { }
+        }
+
+        return prop.Type.ToString().Trim();
     }
 
     // ── Struct-Definition (Header) ────────────────────────────────────────
@@ -181,7 +229,6 @@ public sealed class CSharpToC : CSharpSyntaxWalker
         _ctx.Out.WriteLine("{");
         _ctx.Indent();
 
-        // VTable-Zeiger als erstes Feld wenn Basisklasse virtual-Methoden hat
         if (!string.IsNullOrEmpty(baseType) && baseType != SwitchAppBase
             && !IsControlSubclass(baseType))
         {
@@ -213,7 +260,7 @@ public sealed class CSharpToC : CSharpSyntaxWalker
         {
             if (field.Modifiers.Any(m => m.IsKind(SyntaxKind.StaticKeyword))) continue;
 
-            var csType = field.Declaration.Type.ToString().Trim();
+            var csType = ResolveFieldType(field);
             var cType = TypeRegistry.MapType(csType);
             var needPtr = TypeRegistry.NeedsPointerSuffix(csType)
                        || TypeRegistry.IsStringBuilder(csType)
@@ -227,7 +274,6 @@ public sealed class CSharpToC : CSharpSyntaxWalker
                 var prefix = TypeRegistry.HasNoPrefix(fieldName) ? "" : "f_";
                 _ctx.FieldTypes[fieldName] = csType;
 
-                // Nullable: inneren Typ verwenden
                 if (NullableHandler.IsNullable(csType))
                 {
                     var inner = NullableHandler.GetInnerType(csType);
@@ -247,12 +293,10 @@ public sealed class CSharpToC : CSharpSyntaxWalker
         foreach (var prop in node.Members.OfType<PropertyDeclarationSyntax>())
         {
             if (prop.Modifiers.Any(m => m.IsKind(SyntaxKind.StaticKeyword))) continue;
-
-            // Auto-Properties bekommen ein Backing-Feld im Struct
-            // Explizite Properties bekommen Getter/Setter-Funktionen (keine Felder)
             if (!PropertyWriter.IsAutoProperty(prop)) continue;
 
-            var cType = TypeRegistry.MapType(prop.Type.ToString().Trim());
+            var csType = ResolvePropertyType(prop);
+            var cType = TypeRegistry.MapType(csType);
             _ctx.WriteLine(cType + " f_" + prop.Identifier + ";");
         }
     }
@@ -262,14 +306,14 @@ public sealed class CSharpToC : CSharpSyntaxWalker
         foreach (var method in node.Members.OfType<MethodDeclarationSyntax>())
         {
             var isAbstract = method.Modifiers.Any(m => m.IsKind(SyntaxKind.AbstractKeyword));
-            var isVirtual = method.Modifiers.Any(m => m.IsKind(SyntaxKind.VirtualKeyword));
+            var isVirtual  = method.Modifiers.Any(m => m.IsKind(SyntaxKind.VirtualKeyword));
             if (!isAbstract && !isVirtual) continue;
 
-            var returnType = TypeRegistry.MapType(method.ReturnType.ToString().Trim());
+            var returnType = ResolveMethodReturnType(method);
             var paramTypes = new List<string> { name + "*" };
             foreach (var p in method.ParameterList.Parameters)
             {
-                var pt = TypeRegistry.MapType(p.Type!.ToString().Trim());
+                var pt = ResolveParamType(p);
                 var isRef = p.Modifiers.Any(m =>
                     m.IsKind(SyntaxKind.RefKeyword) || m.IsKind(SyntaxKind.OutKeyword));
                 paramTypes.Add(isRef ? pt + "*" : pt);
@@ -277,6 +321,40 @@ public sealed class CSharpToC : CSharpSyntaxWalker
             _ctx.WriteLine(returnType + " (*" + method.Identifier.Text + ")("
                          + string.Join(", ", paramTypes) + ");");
         }
+    }
+
+    // ── Typ-Auflösung für Methoden-Signaturen ─────────────────────────────
+
+    private string ResolveMethodReturnType(MethodDeclarationSyntax method)
+    {
+        if (_ctx.SemanticModel != null)
+        {
+            try
+            {
+                var sym = _ctx.SemanticModel.GetDeclaredSymbol(method);
+                if (sym != null)
+                    return TypeRegistry.MapType(TranspilerContext.FormatTypeSymbol(sym.ReturnType));
+            }
+            catch { }
+        }
+        return TypeRegistry.MapType(method.ReturnType.ToString().Trim());
+    }
+
+    private string ResolveParamType(ParameterSyntax p)
+    {
+        if (p.Type == null) return "int";
+
+        if (_ctx.SemanticModel != null)
+        {
+            try
+            {
+                var typeInfo = _ctx.SemanticModel.GetTypeInfo(p.Type);
+                if (typeInfo.Type != null && typeInfo.Type is not IErrorTypeSymbol)
+                    return TypeRegistry.MapType(TranspilerContext.FormatTypeSymbol(typeInfo.Type));
+            }
+            catch { }
+        }
+        return TypeRegistry.MapType(p.Type.ToString().Trim());
     }
 
     // ── Static-Felder ─────────────────────────────────────────────────────
@@ -287,7 +365,7 @@ public sealed class CSharpToC : CSharpSyntaxWalker
         {
             if (!field.Modifiers.Any(m => m.IsKind(SyntaxKind.StaticKeyword))) continue;
 
-            var csType = field.Declaration.Type.ToString().Trim();
+            var csType = ResolveFieldType(field);
             var cType = TypeRegistry.MapType(csType);
             var needPtr = NeedsPtr(csType);
             var ptr = needPtr ? "*" : "";
@@ -309,7 +387,7 @@ public sealed class CSharpToC : CSharpSyntaxWalker
         {
             if (!field.Modifiers.Any(m => m.IsKind(SyntaxKind.StaticKeyword))) continue;
 
-            var csType = field.Declaration.Type.ToString().Trim();
+            var csType = ResolveFieldType(field);
             var cType = TypeRegistry.MapType(csType);
             var ptr = NeedsPtr(csType) ? "*" : "";
 
@@ -373,9 +451,9 @@ public sealed class CSharpToC : CSharpSyntaxWalker
     private void WriteMethodSignature(MethodDeclarationSyntax method, string className)
     {
         var isAbstract = method.Modifiers.Any(m => m.IsKind(SyntaxKind.AbstractKeyword));
-        var isStatic = method.Modifiers.Any(m => m.IsKind(SyntaxKind.StaticKeyword));
-        var returnType = TypeRegistry.MapType(method.ReturnType.ToString().Trim());
-        var name = className + "_" + method.Identifier.Text;
+        var isStatic   = method.Modifiers.Any(m => m.IsKind(SyntaxKind.StaticKeyword));
+        var returnType = ResolveMethodReturnType(method);
+        var name       = className + "_" + method.Identifier.Text;
 
         var parameters = new List<string>();
         if (!isStatic) parameters.Add(className + "* self");
@@ -385,7 +463,7 @@ public sealed class CSharpToC : CSharpSyntaxWalker
         var sig = returnType + " " + name + "(" + string.Join(", ", parameters) + ")";
 
         if (isAbstract) _ctx.Out.WriteLine("/* abstract: " + sig + " */");
-        else _ctx.Out.WriteLine(sig + ";");
+        else            _ctx.Out.WriteLine(sig + ";");
     }
 
     // ── Methoden-Bodies ───────────────────────────────────────────────────
@@ -401,11 +479,23 @@ public sealed class CSharpToC : CSharpSyntaxWalker
         var lineSpan = node.GetLocation().GetLineSpan();
         _ctx.CurrentLine = lineSpan.StartLinePosition.Line + 1;
 
-        _ctx.MethodReturnTypes[node.Identifier.Text] = node.ReturnType.ToString().Trim();
+        // Rückgabetyp über SemanticModel bestimmen
+        var csReturnType = node.ReturnType.ToString().Trim();
+        if (_ctx.SemanticModel != null)
+        {
+            try
+            {
+                var sym = _ctx.SemanticModel.GetDeclaredSymbol(node);
+                if (sym != null)
+                    csReturnType = TranspilerContext.FormatTypeSymbol(sym.ReturnType);
+            }
+            catch { }
+        }
+        _ctx.MethodReturnTypes[node.Identifier.Text] = csReturnType;
 
         var isAbstract = node.Modifiers.Any(m => m.IsKind(SyntaxKind.AbstractKeyword));
-        var isStatic = node.Modifiers.Any(m => m.IsKind(SyntaxKind.StaticKeyword));
-        var returnType = TypeRegistry.MapType(node.ReturnType.ToString().Trim());
+        var isStatic   = node.Modifiers.Any(m => m.IsKind(SyntaxKind.StaticKeyword));
+        var returnType = TypeRegistry.MapType(csReturnType);
 
         var name = string.IsNullOrEmpty(_ctx.CurrentClass)
             ? node.Identifier.Text
@@ -422,7 +512,7 @@ public sealed class CSharpToC : CSharpSyntaxWalker
         if (_mode == TranspileMode.HeaderOnly)
         {
             if (isAbstract) _ctx.Out.WriteLine("/* abstract: " + sig + " */");
-            else _ctx.Out.WriteLine(sig + ";");
+            else            _ctx.Out.WriteLine(sig + ";");
             return;
         }
 
@@ -432,8 +522,30 @@ public sealed class CSharpToC : CSharpSyntaxWalker
 
         foreach (var p in node.ParameterList.Parameters)
         {
-            if (p.Type != null)
-                _ctx.LocalTypes[p.Identifier.Text] = p.Type.ToString().Trim();
+            if (p.Type == null) continue;
+
+            // SemanticModel für Parameter-Typen
+            string paramType;
+            if (_ctx.SemanticModel != null)
+            {
+                try
+                {
+                    var typeInfo = _ctx.SemanticModel.GetTypeInfo(p.Type);
+                    paramType = typeInfo.Type != null && typeInfo.Type is not IErrorTypeSymbol
+                        ? TranspilerContext.FormatTypeSymbol(typeInfo.Type)
+                        : p.Type.ToString().Trim();
+                }
+                catch
+                {
+                    paramType = p.Type.ToString().Trim();
+                }
+            }
+            else
+            {
+                paramType = p.Type.ToString().Trim();
+            }
+
+            _ctx.LocalTypes[p.Identifier.Text] = paramType;
         }
 
         _ctx.Out.WriteLine(sig);
@@ -455,8 +567,9 @@ public sealed class CSharpToC : CSharpSyntaxWalker
 
     public override void VisitPropertyDeclaration(PropertyDeclarationSyntax node)
     {
-        _ctx.PropertyTypes[node.Identifier.Text] = node.Type.ToString().Trim();
-        _ctx.FieldTypes[node.Identifier.Text] = node.Type.ToString().Trim();
+        var csType = ResolvePropertyType(node);
+        _ctx.PropertyTypes[node.Identifier.Text] = csType;
+        _ctx.FieldTypes[node.Identifier.Text] = csType;
         base.VisitPropertyDeclaration(node);
     }
 
@@ -472,12 +585,13 @@ public sealed class CSharpToC : CSharpSyntaxWalker
         {
             _ctx.BaseFieldTypes["focused"] = "int";
             _ctx.BaseFieldTypes["OnClick"] = "Action";
-            _ctx.BaseFieldTypes["text"] = "string";
+            _ctx.BaseFieldTypes["text"]    = "string";
         }
-        if (baseType is "Label") _ctx.BaseFieldTypes["text"] = "string";
+        if (baseType is "Label")
+            _ctx.BaseFieldTypes["text"] = "string";
         if (baseType is "ProgressBar")
         {
-            _ctx.BaseFieldTypes["value"] = "int";
+            _ctx.BaseFieldTypes["value"]       = "int";
             _ctx.BaseFieldTypes["width_chars"] = "int";
         }
     }
@@ -493,23 +607,34 @@ public sealed class CSharpToC : CSharpSyntaxWalker
      || TypeRegistry.IsControlType(csType)
      || NullableHandler.IsNullable(csType);
 
-    internal static string BuildParamDecl(ParameterSyntax p)
+    internal string BuildParamDecl(ParameterSyntax p)
     {
         if (p.Type == null) return p.Identifier.Text;
 
         var csType = p.Type.ToString().Trim();
 
-        // Nullable-Parameter: T? → T*
+        // SemanticModel für exakten Typ
+        if (_ctx.SemanticModel != null)
+        {
+            try
+            {
+                var typeInfo = _ctx.SemanticModel.GetTypeInfo(p.Type);
+                if (typeInfo.Type != null && typeInfo.Type is not IErrorTypeSymbol)
+                    csType = TranspilerContext.FormatTypeSymbol(typeInfo.Type);
+            }
+            catch { }
+        }
+
         if (NullableHandler.IsNullable(csType))
         {
-            var inner = NullableHandler.GetInnerType(csType);
+            var inner  = NullableHandler.GetInnerType(csType);
             var cInner = TypeRegistry.MapType(inner);
             return cInner + "* " + p.Identifier;
         }
 
-        var cType = TypeRegistry.MapType(csType);
+        var cType  = TypeRegistry.MapType(csType);
         var isPrim = TypeRegistry.IsPrimitive(csType) || csType == "string";
-        var isRef = p.Modifiers.Any(m =>
+        var isRef  = p.Modifiers.Any(m =>
             m.IsKind(SyntaxKind.RefKeyword) || m.IsKind(SyntaxKind.OutKeyword));
         var ptr = (!isPrim || isRef) ? "*" : "";
         return cType + ptr + " " + p.Identifier;
