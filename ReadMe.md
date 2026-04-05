@@ -76,16 +76,13 @@ public class MyApp : SwitchApp
         Form.Add(_button);
     }
 
-    public override void OnFrame()
-    {
-    }
+    public override void OnFrame() { }
 
     public void OnPress()
     {
         _values.Add(_values.Count);
         _label.Text = $"Pressed {_values.Count} times!";
-        File.WriteAllText("/switch/MeinProjekt/save.txt",
-            _values.Count.ToString());
+        File.WriteAllText("/switch/MeinProjekt/save.txt", _values.Count.ToString());
     }
 }
 ```
@@ -107,12 +104,57 @@ public class MyApp : SwitchApp
         Graphics.FillRect(100, 200, 200, 50, Color.Blue);
         Graphics.DrawLine(0, 0, 400, 400, Color.Red);
         Graphics.FillCircle(640, 360, 80, Color.Green);
-
-        // Neue Primitiven
         Graphics.FillTriangle(200, 100, 300, 300, 100, 300, Color.RGB(255, 128, 0));
         Graphics.FillEllipse(640, 360, 120, 60, Color.RGB(80, 200, 120));
         Graphics.FillRoundedRect(50, 50, 300, 150, 20, Color.RGB(60, 60, 180));
         Graphics.DrawTextShadow(100, 400, "Shadow!", Color.White, Color.RGB(0,0,0), 2);
+    }
+}
+```
+
+### Multi-File-App mit statischer Hilfsklasse
+
+```csharp
+// MinUI.cs
+public static class MinUI
+{
+    public static void DrawHeader(string title, MinUiColorPreset preset)
+    {
+        Graphics.FillRect(1, 1, 1278, 50, preset.Background);
+        Graphics.DrawRect(0, 0, 1280, 52, preset.Accent);
+        Graphics.DrawText(10, 20, title, preset.Foreground, 2);
+    }
+}
+
+public class MinUiColorPreset
+{
+    public uint Background { get; set; }
+    public uint Foreground { get; set; }
+    public uint Accent     { get; set; }
+
+    public MinUiColorPreset(uint background, uint foreground, uint accent)
+    {
+        Background = background;
+        Foreground = foreground;
+        Accent     = accent;
+    }
+}
+
+// Program.cs
+public class MyApp : SwitchApp
+{
+    public MinUiColorPreset uiPreset;
+
+    public override void OnInit()
+    {
+        Graphics.Init(1280, 720);
+        uiPreset = new MinUiColorPreset(Color.Gray, Color.White, Color.Cyan);
+    }
+
+    public override void OnFrame()
+    {
+        Graphics.FillScreen(Color.Black);
+        MinUI.DrawHeader("Meine App", uiPreset);
     }
 }
 ```
@@ -174,16 +216,6 @@ int v = x ?? 0;            // → (x != NULL ? *x : 0)
 | `float.Parse(s)` | ✅ |
 | `float.TryParse(s, out val)` | ✅ |
 
-```csharp
-int val = int.Parse("42");
-
-int result = 0;
-if (int.TryParse(someString, out result))
-{
-    // result enthält den geparsten Wert
-}
-```
-
 ---
 
 ## Grafik (Framebuffer)
@@ -216,9 +248,9 @@ Aktivierung: `Graphics.Init(1280, 720)` in `OnInit()` aufrufen.
 | `Graphics.FillTriangle(x0,y0, x1,y1, x2,y2, color)` | Gefülltes Dreieck (Scanline-Fill) |
 | `Graphics.DrawEllipse(cx, cy, rx, ry, color)` | Ellipse-Outline |
 | `Graphics.FillEllipse(cx, cy, rx, ry, color)` | Gefüllte Ellipse |
-| `Graphics.DrawRoundedRect(x, y, w, h, r, color)` | Rechteck mit abgerundeten Ecken |
+| `Graphics.DrawRoundedRect(x, y, w, h, r, color)` | Abgerundetes Rechteck |
 | `Graphics.FillRoundedRect(x, y, w, h, r, color)` | Gefülltes abgerundetes Rechteck |
-| `Graphics.DrawGrid(x, y, w, h, cellW, cellH, color)` | Gitter zeichnen |
+| `Graphics.DrawGrid(x, y, w, h, cellW, cellH, color)` | Gitter |
 | `Graphics.DrawTextShadow(x, y, text, color, shadow, scale)` | Text mit 1px-Schatten |
 
 ### Alpha-Blending
@@ -229,15 +261,6 @@ Aktivierung: `Graphics.Init(1280, 720)` in `OnInit()` aufrufen.
 | `Graphics.FillRectAlpha(x, y, w, h, color, alpha)` | Rechteck mit Alpha |
 | `Graphics.DrawTextAlpha(x, y, text, color, scale, alpha)` | Text mit Alpha |
 
-```csharp
-// Halbtransparentes Overlay
-Graphics.FillRectAlpha(0, 0, 1280, 720, Color.RGB(0, 0, 0), 128);
-
-// Text mit Schatten für bessere Lesbarkeit
-Graphics.DrawTextShadow(100, 100, "Score: 42",
-    Color.White, Color.RGB(0, 0, 0), 2);
-```
-
 ### Farb-Konstanten
 
 ```csharp
@@ -245,18 +268,8 @@ Color.Black   Color.White   Color.Red     Color.Green
 Color.Blue    Color.Yellow  Color.Cyan    Color.Magenta
 Color.Gray    Color.Orange
 
-// Eigene Farben
 uint myColor  = Color.RGB(255, 128, 0);
 uint myColorA = Color.RGBA(255, 128, 0, 200);
-```
-
-### Texture & IDisposable
-
-```csharp
-using (Texture tex = new Texture(64, 64, pixels))
-{
-    Graphics.DrawTexture(tex, 100, 100);
-} // → Texture_Dispose(tex) wird automatisch aufgerufen
 ```
 
 ---
@@ -266,32 +279,24 @@ using (Texture tex = new Texture(64, 64, pixels))
 ### Buttons
 
 ```csharp
-public override void OnFrame()
-{
-    if (Input.IsDown(NpadButton.A))   { /* einmalig beim Drücken */ }
-    if (Input.IsHeld(NpadButton.ZR))  { /* solange gehalten      */ }
-    if (Input.IsUp(NpadButton.B))     { /* einmalig beim Loslassen */ }
-}
+if (Input.IsDown(NpadButton.A))   { /* einmalig beim Drücken  */ }
+if (Input.IsHeld(NpadButton.ZR))  { /* solange gehalten       */ }
+if (Input.IsUp(NpadButton.B))     { /* einmalig beim Loslassen */ }
 ```
 
-Verfügbare Buttons: `A`, `B`, `X`, `Y`, `L`, `R`, `ZL`, `ZR`, `Plus`, `Minus`, `Up`, `Down`, `Left`, `Right`, `StickL`, `StickR` sowie alle `StickL/RUp/Down/Left/Right`-Richtungen.
+Verfügbare Buttons: `A`, `B`, `X`, `Y`, `L`, `R`, `ZL`, `ZR`, `Plus`, `Minus`, `Up`, `Down`, `Left`, `Right`, `StickL`, `StickR` sowie alle Stick-Richtungen.
 
 ### Analog-Sticks
 
 ```csharp
-StickPos left  = Input.GetStickLeft();   // x/y: -32767..+32767
+StickPos left  = Input.GetStickLeft();
 StickPos right = Input.GetStickRight();
 
 if (left.x > 5000)
     Console.WriteLine("Stick rechts");
-
-// Normierter Wert 0..100 (Betrag, Deadzone bereits herausgefiltert)
-// int norm = CS2SX_StickNorm(left.x < 0 ? -left.x : left.x);
 ```
 
-> **Deadzone:** Werte innerhalb von ±3000 werden automatisch auf 0 gesetzt.
-
-> **Achsen:** X negativ = links, positiv = rechts. Y positiv = oben, negativ = unten.
+> Deadzone ±3000 wird automatisch herausgefiltert. X: negativ = links, positiv = rechts. Y: positiv = oben.
 
 ### Touch-Screen
 
@@ -300,16 +305,13 @@ TouchState touch = Input.GetTouch();
 
 if (touch.count > 0)
 {
-    int x = touch.x[0];   // 0..1280
-    int y = touch.y[0];   // 0..720
+    int x = touch.x[0];
+    int y = touch.y[0];
     Graphics.FillCircle(x, y, 20, Color.Red);
 }
 
-// Bis zu 10 simultane Berührungspunkte
 for (int i = 0; i < touch.count && i < 10; i++)
-{
     Graphics.FillCircle(touch.x[i], touch.y[i], 15, Color.Green);
-}
 ```
 
 ---
@@ -320,10 +322,7 @@ for (int i = 0; i < touch.count && i < 10; i++)
 
 ```csharp
 BatteryInfo battery = System.GetBattery();
-
-Graphics.DrawText(10, 10,
-    $"Akku: {battery.percent}%  Lädt: {battery.charging}",
-    Color.White, 1);
+Graphics.DrawText(10, 10, $"Akku: {battery.percent}%", Color.White, 1);
 ```
 
 | Feld | Typ | Beschreibung |
@@ -331,8 +330,6 @@ Graphics.DrawText(10, 10,
 | `percent` | `int` | Ladezustand 0–100 |
 | `charging` | `bool` | `true` wenn geladen wird |
 | `connected` | `bool` | `true` wenn Ladegerät angesteckt |
-
-> `System.GetBattery()` ruft intern `psmInitialize()` auf — kein manuelles Init nötig.
 
 ---
 
@@ -359,7 +356,7 @@ Alle Pfade müssen absolut sein und mit `/switch/` beginnen.
 | `Directory.CreateDirectory(path)` | Verzeichnis anlegen |
 | `Directory.Delete(path)` | Verzeichnis löschen |
 | `Directory.GetFiles(path, pattern)` | Dateien auflisten → `List<string>` |
-| `Directory.GetDirectories(path)` | Unterverzeichnisse auflisten → `List<string>` |
+| `Directory.GetDirectories(path)` | Unterverzeichnisse → `List<string>` |
 | `Directory.GetEntries(path)` | Dateien + Verzeichnisse → `List<string>` |
 
 ### Pfad-Hilfsmethoden
@@ -371,18 +368,6 @@ Alle Pfade müssen absolut sein und mit `/switch/` beginnen.
 | `Path.GetDirectoryName(path)` | `"/switch/app.nro"` | `"/switch"` |
 | `Path.Combine(a, b)` | `"/switch"`, `"save.txt"` | `"/switch/save.txt"` |
 | `Path.IsDirectory(path)` | `"/switch/mydir"` | `true` |
-
-```csharp
-List<string> dirs = Directory.GetDirectories("/switch");
-for (int i = 0; i < dirs.Count; i++)
-{
-    string name = Path.GetFileName(dirs[i]);
-    Graphics.DrawText(20, 100 + i * 20, name, Color.White, 1);
-}
-
-string savePath = Path.Combine("/switch/MeinSpiel", "save.dat");
-File.WriteAllText(savePath, "42");
-```
 
 ---
 
@@ -404,28 +389,11 @@ File.WriteAllText(savePath, "42");
 ## Pattern Matching
 
 ```csharp
-// is-Pattern mit Typ und Binding-Variable
-if (obj is Dog d)
-{
-    d.Bark();
-}
+string label = value switch { 0 => "zero", 1 => "one", _ => "other" };
 
-// switch-Expression
-string label = value switch
-{
-    0 => "zero",
-    1 => "one",
-    _ => "other",
-};
+string category = score switch { >= 90 => "A", >= 70 => "B", _ => "C" };
 
-// Relational Pattern
-string category = score switch
-{
-    >= 90 => "A",
-    >= 70 => "B",
-    _     => "C",
-};
-
+if (obj is Dog d) { d.Bark(); }
 if (x is not null) { ... }
 ```
 
@@ -441,76 +409,62 @@ if (x is not null) { ... }
 
 ---
 
-## Properties
-
-```csharp
-// Auto-Property → einfaches Struct-Feld
-public int Speed { get; set; }
-
-// Expliziter Body → Player_get_Speed() / Player_set_Speed()
-public int Speed
-{
-    get => _speed * 2;
-    set => _speed = value / 2;
-}
-```
-
----
-
-## Lambda-Ausdrücke
-
-```csharp
-_button.OnClick = () => DoSomething();
-
-Action<int> handler = x => Console.WriteLine($"Value: {x}");
-```
-
-Lambdas werden automatisch zu statischen C-Funktionen geliftet. Captures werden als Capture-Struct realisiert.
-
----
-
 ## Klassen & OOP
 
 | Feature | Status | Hinweis |
 |---|---|---|
 | Klassen mit Feldern und Methoden | ✅ | → C-Structs |
+| `static class` | ✅ | → reine C-Funktionen, kein Struct |
 | Vererbung (einzeln) | ✅ | `SwitchApp`, `Control` als Basis |
 | `abstract`-Klassen | ✅ | → vtable-Infrastruktur |
 | `virtual` / `override` | ✅ | → vtable-Funktionszeiger |
 | Eigene Controls (erbt von `Control`) | ✅ | `Draw()` + `Update()` |
 | `static`-Felder und -Methoden | ✅ | → globale C-Variablen |
+| Auto-Properties `{ get; set; }` | ✅ | → `f_`-prefixed Struct-Felder |
+| Properties mit Body | ✅ | → Getter/Setter-Funktionen |
 | `IDisposable` / `using` | ✅ | → `Dispose()`-Aufruf am Blockende |
 | Enums mit Werten | ✅ | |
 | `interface` | ❌ | |
 | Generics | ❌ | |
 
-### Vererbung & virtuelle Methoden
+### Felder: mit und ohne `_` Prefix
+
+Beide Konventionen werden korrekt transpiliert:
 
 ```csharp
-// Animal.cs
-public abstract class Animal
-{
-    private int _health;
-    public abstract void Speak();
-    public virtual void Update() { _health++; }
-}
-
-// Dog.cs
-public class Dog : Animal
-{
-    public override void Speak()
-    {
-        Console.WriteLine("Woof!");
-    }
-}
+private uint _bgColor;       // → self->f_bgColor
+public  uint Background;     // → self->f_Background
 ```
 
-Virtuelle Aufrufe: `animal.Speak()` → `animal->vtable->Speak(animal)`
+### static class
+
+```csharp
+// MinUI.cs
+public static class MinUI
+{
+    public static void DrawHeader(string title, MinUiColorPreset preset)
+    {
+        Graphics.FillRect(1, 1, 1278, 50, preset.Background);
+        Graphics.DrawText(10, 20, title, preset.Foreground, 2);
+    }
+}
+
+// Aufruf in Program.cs:
+MinUI.DrawHeader("Titel", myPreset);  // → MinUI_DrawHeader("Titel", myPreset)
+```
+
+### Methoden-Naming
+
+Eigene Methoden werden unabhängig von Groß-/Kleinschreibung korrekt transpiliert:
+
+```csharp
+public void buildHeader(string title) { }   // → MyApp_buildHeader(self, title)
+public void UpdateScore(int s) { }          // → MyApp_UpdateScore(self, s)
+```
 
 ### Eigene Controls
 
 ```csharp
-// ValueMeter.cs
 public class ValueMeter : Control
 {
     private int _value;
@@ -534,16 +488,6 @@ public class ValueMeter : Control
 }
 ```
 
-```csharp
-// Nutzung in OnInit()
-_meter = new ValueMeter();
-_meter.X = 14;
-_meter.Y = 4;
-_meter.SetMax(100);
-_meter.SetWidth(20);
-Form.Add(_meter);
-```
-
 ---
 
 ## Render-Modi
@@ -553,7 +497,7 @@ Form.Add(_meter);
 | **Console** | Standard (kein `Graphics.Init`) | ANSI-Terminal, `Label`, `Button`, `ProgressBar` |
 | **Framebuffer** | `Graphics.Init(1280, 720)` in `OnInit()` | Direktes Pixel-Rendering, 1280×720 RGBA8888 |
 
-Im Framebuffer-Modus sind Console-Controls nicht sichtbar — der gesamte Output läuft über `Graphics.*`.
+Im Framebuffer-Modus sind Console-Controls nicht sichtbar.
 
 ---
 
@@ -562,11 +506,11 @@ Im Framebuffer-Modus sind Console-Controls nicht sichtbar — der gesamte Output
 ```
 MeinProjekt/
 ├── MeinProjekt.csproj
-├── cs2sx.json              — Projektkonfiguration
+├── cs2sx.json
 ├── Program.cs              — Haupt-App (eine Klasse pro Datei!)
-├── MeineKlasse.cs          — weitere Klassen
+├── MeineKlasse.cs
 ├── cs2sx_out/              — generierter C-Code (nicht manuell bearbeiten)
-└── MeinProjekt.nro         — fertige Switch-Homebrew-Datei
+└── MeinProjekt.nro
 ```
 
 `cs2sx.json`:
@@ -591,32 +535,26 @@ CS2SX/
 │   ├── TypeRegistry.cs         — einzige Quelle aller Typ-Mappings
 │   └── TranspilerContext.cs    — geteilter Zustand, kein globaler State
 ├── Transpiler/
-│   ├── Handlers/               — pluggable Methoden-Aufruf-Handler
-│   │   ├── IInvocationHandler.cs
-│   │   ├── InvocationHandlerBase.cs
+│   ├── Handlers/
 │   │   ├── InvocationDispatcher.cs
 │   │   ├── LibNxHandler.cs
-│   │   ├── InputHandler.cs
-│   │   ├── InputExtHandler.cs       — Sticks, Touch
+│   │   ├── InputHandler.cs / InputExtHandler.cs
 │   │   ├── ConsoleHandler.cs
 │   │   ├── FormHandler.cs
-│   │   ├── GraphicsHandler.cs
-│   │   ├── GraphicsExtHandler.cs    — neue Primitiven, Alpha
+│   │   ├── GraphicsHandler.cs / GraphicsExtHandler.cs
 │   │   ├── ColorHandler.cs
 │   │   ├── FileHandler.cs
-│   │   ├── DirectoryExtHandler.cs   — GetDirectories, GetEntries
-│   │   ├── PathHandler.cs           — Path.GetFileName, Combine etc.
-│   │   ├── SystemExtHandler.cs      — System.GetBattery
+│   │   ├── DirectoryExtHandler.cs
+│   │   ├── PathHandler.cs
+│   │   ├── SystemExtHandler.cs
 │   │   ├── ParseHandler.cs
-│   │   ├── ListHandler.cs
-│   │   ├── DictionaryHandler.cs
-│   │   ├── StringBuilderHandler.cs
-│   │   ├── StringMethodHandler.cs
+│   │   ├── ListHandler.cs / DictionaryHandler.cs
+│   │   ├── StringBuilderHandler.cs / StringMethodHandler.cs
 │   │   ├── FieldMethodHandler.cs
-│   │   ├── OwnMethodHandler.cs
+│   │   ├── StaticClassHandler.cs    — static class Aufrufe (MinUI.DrawHeader)
+│   │   ├── OwnMethodHandler.cs      — eigene Methoden (groß + klein)
 │   │   └── MathHandler.cs
 │   ├── Strategies/
-│   │   ├── IConstructorStrategy.cs
 │   │   ├── SwitchAppConstructorStrategy.cs
 │   │   ├── ControlSubclassConstructorStrategy.cs
 │   │   └── DefaultConstructorStrategy.cs
@@ -630,17 +568,12 @@ CS2SX/
 │   ├── CSharpToC.cs
 │   ├── LambdaLifter.cs
 │   ├── PropertyWriter.cs
-│   ├── VTableBuilder.cs
-│   └── TypeMapper.cs
+│   └── VTableBuilder.cs
 ├── Build/
-│   ├── BuildPipeline.cs
-│   ├── CCompiler.cs
+│   ├── BuildPipeline.cs / CCompiler.cs
 │   ├── EntryPointGenerator.cs
-│   ├── NacpBuilder.cs
-│   ├── NroBuilder.cs
-│   ├── ProjectConfig.cs
-│   ├── ProjectCreator.cs
-│   └── ProjectReader.cs
+│   ├── NacpBuilder.cs / NroBuilder.cs
+│   └── ProjectConfig.cs / ProjectCreator.cs / ProjectReader.cs
 └── Runtime/
     ├── switchforms.h    — UI-Controls, Collections, String-Utils, File I/O
     ├── switchforms.c    — globale Variablendefinitionen
@@ -665,29 +598,26 @@ public sealed class MeinHandler : InvocationHandlerBase
     }
 }
 
-// 2. In InvocationDispatcher.cs eintragen
+// 2. In InvocationDispatcher.cs vor OwnMethodHandler eintragen
 new MeinHandler(),
 ```
 
 ### Neuen Typ hinzufügen
 
-Eintrag in `Core/TypeRegistry.cs` in der entsprechenden Kategorie ergänzen — `s_primitives`, `s_controlTypes` oder `s_libNxStructs`.
-
-Für Struct-Rückgabetypen (Stack-Allokation, kein Pointer) zusätzlich in `TypeInferrer.cs` → `InferInvocation()` eintragen.
+Eintrag in `Core/TypeRegistry.cs` ergänzen — `s_primitives`, `s_controlTypes` oder `s_libNxStructs`. Für Stack-Struct-Rückgabetypen zusätzlich in `TypeInferrer.cs` → `InferInvocation()`.
 
 ---
 
 ## Bekannte Einschränkungen
 
-- **Ein `SwitchApp`-Subtyp pro Projekt** — der Einstiegspunkt wird automatisch erkannt
+- **Ein `SwitchApp`-Subtyp pro Projekt**
 - **Eine Klasse pro `.cs`-Datei** — keine verschachtelten Klassen
-- **`string`-Puffer 512 Bytes** — interne String-Puffer; Dateipuffer 8192 Bytes
-- **Bitmap-Font 8×8** — `Graphics.DrawText` nutzt einen eingebauten Font ohne Anti-Aliasing
-- **Kein Heap-GC** — allokierte Objekte (`*_New()`) müssen manuell freigegeben werden
-- **Lambda-Captures** — nur Werttypen und primitive Captures zuverlässig unterstützt
+- **`string`-Puffer 512 Bytes** — Dateipuffer 8192 Bytes
+- **Bitmap-Font 8×8** — kein Anti-Aliasing
+- **Kein Heap-GC** — allokierte Objekte (`*_New()`) manuell freigeben
+- **Lambda-Captures** — nur Werttypen und primitive Captures zuverlässig
 - **`is`-Typ-Pattern** — erfordert `TypeName_Is()`-Hilfsfunktion in der Runtime
-- **Char-Literale in Vergleichen** — `s[i] == '\n'` funktioniert; für komplexe Fälle `int`-Konstanten nutzen (`int nl = 10;`)
-- **Statische String-Puffer** — `String_Trim`, `String_ToUpper` etc. nutzen statische interne Puffer; verschachtelte Aufrufe wie `String_Trim(String_ToUpper(s))` können sich gegenseitig überschreiben
+- **Statische String-Puffer** — verschachtelte String-Methoden können sich überschreiben
 
 ---
 

@@ -33,6 +33,7 @@ public sealed class InvocationDispatcher
         new DirectoryExtHandler(),  // NEU: GetDirectories, GetEntries
         new PathHandler(),          // NEU: Path.GetFileName, GetExtension, Combine
         new SystemExtHandler(),     // NEU: System.GetBattery
+        new StaticClassHandler(),   // NEU: Behandelt statische Klassen wie MinUI, Math, System etc.
         new OwnMethodHandler(),
     };
 

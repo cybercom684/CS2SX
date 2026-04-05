@@ -23,7 +23,6 @@ public sealed class ExpressionWriter
 
         return node switch
         {
-            // Null-coalescing vor generellem BinaryExpression prüfen
             BinaryExpressionSyntax coalesce
                 when coalesce.IsKind(SyntaxKind.CoalesceExpression)
                                                                => WriteCoalesce(coalesce),
@@ -44,16 +43,9 @@ public sealed class ExpressionWriter
             ElementAccessExpressionSyntax elem => WriteElementAccess(elem),
             DefaultExpressionSyntax => "NULL",
             ThisExpressionSyntax => "self",
-
-            // Switch-Ausdruck (C# 8+)
             SwitchExpressionSyntax switchExpr => PatternMatchingWriter.WriteSwitchExpression(switchExpr, _ctx, Write),
-
-            // is-Pattern-Ausdruck
             IsPatternExpressionSyntax isPattern => PatternMatchingWriter.WriteIsPattern(isPattern, _ctx, Write),
-
-            // Conditional access: x?.Member
             ConditionalAccessExpressionSyntax condAccess => WriteConditionalAccess(condAccess),
-
             _ => node.ToString(),
         };
     }
@@ -94,8 +86,10 @@ public sealed class ExpressionWriter
         if (_ctx.EnumMembers.Contains(name)) return name;
         if (name == "_cs2sx_strbuf") return "_cs2sx_strbuf";
 
+        // Lokale Variable hat immer Vorrang
         if (_ctx.LocalTypes.ContainsKey(name)) return name;
 
+        // Felder MIT _ prefix (klassische Konvention)
         if (_ctx.IsFieldAccess(name))
         {
             var trimmed = name.TrimStart('_');
@@ -103,6 +97,16 @@ public sealed class ExpressionWriter
                 return _ctx.CurrentClass + "_" + trimmed;
             var prefix = TypeRegistry.HasNoPrefix(trimmed) ? "" : "f_";
             return "self->" + prefix + trimmed;
+        }
+
+        // FIX: Felder OHNE _ prefix (z.B. public uint bgColor)
+        // IsFieldAccess() greift nur für _-prefixed Namen.
+        // Wenn der Name in FieldTypes der aktuellen Klasse steht → Feld.
+        if (!string.IsNullOrEmpty(_ctx.CurrentClass)
+            && _ctx.FieldTypes.ContainsKey(name))
+        {
+            var prefix = TypeRegistry.HasNoPrefix(name) ? "" : "f_";
+            return "self->" + prefix + name;
         }
 
         if (TypeRegistry.ControlFields.Contains(name) && !string.IsNullOrEmpty(_ctx.CurrentClass))
@@ -136,7 +140,6 @@ public sealed class ExpressionWriter
         var right = Write(coalesce.Right);
         var leftType = TypeInferrer.InferCSharpType(coalesce.Left, _ctx);
 
-        // Nullable<T>: x ?? default → (x != NULL ? *x : default)
         if (NullableHandler.IsNullable(leftType))
         {
             var innerType = NullableHandler.GetInnerType(leftType);
@@ -156,7 +159,6 @@ public sealed class ExpressionWriter
     {
         var receiver = Write(condAccess.Expression);
 
-        // WhenNotNull kann MemberBindingExpression oder InvocationExpression sein
         string accessExpr;
         if (condAccess.WhenNotNull is MemberBindingExpressionSyntax memberBinding)
         {
@@ -193,6 +195,8 @@ public sealed class ExpressionWriter
         if (assign.Left is ElementAccessExpressionSyntax elemLeft)
             return WriteIndexerAssignment(elemLeft, op, right);
 
+        // Write(assign.Left) nutzt WriteIdentifier — der Fix dort sorgt
+        // dafür dass Felder ohne _ prefix korrekt zu self->f_name werden.
         return Write(assign.Left) + " " + op + " " + right;
     }
 
@@ -243,11 +247,9 @@ public sealed class ExpressionWriter
             return obj + "->OnClick = (void(*)(void*))" + _ctx.CurrentClass + "_" + methodName;
         }
 
-        // Nullable-Feld-Zuweisung: x.value = 5 → x = &(int){5} oder Pointer-Trick
         var fieldType = lt ?? ft;
         if (fieldType != null && NullableHandler.IsNullable(fieldType) && right != "NULL")
         {
-            // Temporäre Variable als Workaround für Nullable-Zuweisung
             var tmp = _ctx.NextTmp("nval");
             var inner = NullableHandler.GetInnerType(fieldType);
             var innerC = TypeRegistry.MapType(inner);
@@ -312,21 +314,54 @@ public sealed class ExpressionWriter
         if (prop == "Length" && IsStringBuilderExpr(mem.Expression))
             return obj + "->length";
 
-        // Nullable.HasValue → (x != NULL)
         if (prop == "HasValue" && IsNullableExpr(mem.Expression))
             return NullableHandler.WriteHasValue(obj);
 
-        // Nullable.Value → (*x)
         if (prop == "Value" && IsNullableExpr(mem.Expression))
             return NullableHandler.WriteGetValue(obj);
 
         var rawExpr = mem.Expression.ToString();
         var key = rawExpr.TrimStart('_');
+
+        // LibNx-Structs (TouchState, StickPos, BatteryInfo etc.) → dot-Zugriff
         if ((_ctx.LocalTypes.TryGetValue(rawExpr, out var lt) && IsStructType(lt))
- || (_ctx.FieldTypes.TryGetValue(key, out var ft) && IsStructType(ft)))
+         || (_ctx.FieldTypes.TryGetValue(key, out var ft) && IsStructType(ft)))
             return obj + "." + prop;
 
+        // FIX: Auto-Properties von eigenen Klassen haben f_-Prefix im Struct.
+        // Receiver-Typ bestimmen — wenn bekannter Klassen-Typ (nicht LibNx-Struct,
+        // nicht Primitiv) → f_-Prefix verwenden.
+        // colorPreset.Background → colorPreset->f_Background
+        var receiverType = ResolveReceiverType(rawExpr);
+        if (receiverType != null
+            && !TypeRegistry.IsLibNxStruct(receiverType)
+            && !TypeRegistry.IsLibNxStruct(TypeRegistry.MapType(receiverType).TrimEnd('*'))
+            && receiverType is not ("string" or "int" or "uint" or "float"
+                                 or "bool" or "char" or "long" or "ulong"
+                                 or "short" or "ushort" or "byte" or "sbyte"
+                                 or "double" or "u8" or "u16" or "u32" or "u64"
+                                 or "s8" or "s16" or "s32" or "s64"))
+        {
+            if (TypeRegistry.HasNoPrefix(prop))
+                return obj + "->" + prop;
+
+            return obj + "->f_" + prop;
+        }
+
         return obj + "->" + prop;
+    }
+
+    /// <summary>
+    /// Bestimmt den C#-Typ eines Member-Access-Receivers.
+    /// Sucht in LocalTypes, dann FieldTypes.
+    /// </summary>
+    private string? ResolveReceiverType(string rawExpr)
+    {
+        var key = rawExpr.TrimStart('_');
+        if (_ctx.LocalTypes.TryGetValue(rawExpr, out var lt)) return lt;
+        if (_ctx.FieldTypes.TryGetValue(key, out var ft)) return ft;
+        if (_ctx.FieldTypes.TryGetValue(rawExpr, out var ft2)) return ft2;
+        return null;
     }
 
     // ── Objekt-Erstellung ─────────────────────────────────────────────────
@@ -359,7 +394,7 @@ public sealed class ExpressionWriter
         }
 
         var args = obj.ArgumentList?.Arguments.Select(a => Write(a.Expression))
-                       ?? Enumerable.Empty<string>();
+                          ?? Enumerable.Empty<string>();
         var creation = typeName + "_New(" + string.Join(", ", args) + ")";
 
         if (obj.Initializer?.Expressions.Count > 0)
@@ -416,9 +451,9 @@ public sealed class ExpressionWriter
     // ── Sonstiges ─────────────────────────────────────────────────────────
 
     private static bool IsStructType(string csType) =>
-    TypeRegistry.IsLibNxStruct(csType)
-    || TypeRegistry.IsLibNxStruct(TypeRegistry.MapType(csType).TrimEnd('*'))
-    || csType is "TouchState" or "StickPos" or "BatteryInfo";
+        TypeRegistry.IsLibNxStruct(csType)
+        || TypeRegistry.IsLibNxStruct(TypeRegistry.MapType(csType).TrimEnd('*'))
+        || csType is "TouchState" or "StickPos" or "BatteryInfo";
 
     private string WriteInvocation(InvocationExpressionSyntax inv)
     {
