@@ -435,13 +435,32 @@ public sealed class CSharpToC : CSharpSyntaxWalker
     {
         var name = node.Identifier.Text;
 
-        // FIX: static class bekommt keine _New() / _Init() Signatur
         if (!isStaticClass)
         {
             if (isSwitchAppChild)
+            {
                 _ctx.Out.WriteLine("void " + name + "_Init(" + name + "* self);");
+            }
             else
-                _ctx.Out.WriteLine(name + "* " + name + "_New();");
+            {
+                // FIX: expliziten Konstruktor mit Parametern berücksichtigen
+                var explicitCtor = node.Members
+                    .OfType<ConstructorDeclarationSyntax>()
+                    .FirstOrDefault();
+
+                if (explicitCtor != null && explicitCtor.ParameterList.Parameters.Count > 0)
+                {
+                    var paramDecls = explicitCtor.ParameterList.Parameters
+                        .Select(p => BuildParamDecl(p))
+                        .ToList();
+                    _ctx.Out.WriteLine(name + "* " + name + "_New("
+                        + string.Join(", ", paramDecls) + ");");
+                }
+                else
+                {
+                    _ctx.Out.WriteLine(name + "* " + name + "_New();");
+                }
+            }
         }
 
         foreach (var method in node.Members.OfType<MethodDeclarationSyntax>())

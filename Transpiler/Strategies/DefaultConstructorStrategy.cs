@@ -8,8 +8,17 @@ namespace CS2SX.Transpiler.Strategies;
 
 /// <summary>
 /// Konstruktor-Strategie für normale Klassen (keine SwitchApp, kein Control).
-/// Generiert eine _New-Funktion mit malloc + Feld-Initialisierung.
-/// Setzt zusätzlich vtable-Zeiger wenn die Basisklasse virtuelle Methoden hat.
+/// Generiert eine _New()-Funktion mit malloc + Feld-Initialisierung.
+///
+/// FIX: Wenn die Klasse einen expliziten Konstruktor mit Parametern hat,
+/// werden diese als Parameter an _New() weitergegeben und der Konstruktor-Body
+/// wird transpiliert.
+///
+/// Beispiel:
+///   C#:  new MinUiColorPreset(Color.Gray, Color.White, Color.Cyan)
+///   Alt: MinUiColorPreset_New()  → alle Felder 0 (falsch)
+///   Neu: MinUiColorPreset_New(COLOR_GRAY, COLOR_WHITE, COLOR_CYAN)
+///        → führt Konstruktor-Body aus, setzt f_Background etc.
 /// </summary>
 public sealed class DefaultConstructorStrategy : IConstructorStrategy
 {
@@ -20,7 +29,36 @@ public sealed class DefaultConstructorStrategy : IConstructorStrategy
     {
         transpiler.WriteStaticFieldDefinitions(node, name);
 
-        ctx.Out.WriteLine(name + "* " + name + "_New()");
+        // Expliziten Konstruktor der Klasse suchen
+        var explicitCtor = node.Members
+            .OfType<ConstructorDeclarationSyntax>()
+            .FirstOrDefault();
+
+        // Parameter-Liste für _New() aufbauen
+        var paramDecls = new List<string>();
+        var paramNames = new List<string>();
+
+        if (explicitCtor != null)
+        {
+            foreach (var p in explicitCtor.ParameterList.Parameters)
+            {
+                var decl = transpiler.BuildParamDecl(p);
+                paramDecls.Add(decl);
+                paramNames.Add(p.Identifier.Text);
+
+                // Parameter in LocalTypes registrieren damit der Body-Writer
+                // sie korrekt als lokale Variablen behandelt
+                var csType = p.Type?.ToString().Trim() ?? "int";
+                ctx.LocalTypes[p.Identifier.Text] = csType;
+            }
+        }
+
+        // Signatur: ClassName* ClassName_New(params...)
+        var paramStr = paramDecls.Count > 0
+            ? string.Join(", ", paramDecls)
+            : "void";
+
+        ctx.Out.WriteLine(name + "* " + name + "_New(" + paramStr + ")");
         ctx.Out.WriteLine("{");
         ctx.Indent();
 
@@ -35,19 +73,30 @@ public sealed class DefaultConstructorStrategy : IConstructorStrategy
             ctx.WriteLine("self->vtable = &" + name + "_vtable_instance;");
         }
 
+        // Feld-Initializer aus Feld-Deklarationen
         transpiler.WriteInstanceFieldInitializers(node);
 
-        // Override-Funktionszeiger für eigene virtual/override Methoden verdrahten
-        // (für Klassen ohne explizite Basisklasse, die eigene virtual-Methoden haben)
+        // Expliziten Konstruktor-Body transpilieren
+        if (explicitCtor?.Body != null)
+        {
+            var stmtWriter = new StatementWriter(ctx, exprWriter);
+            foreach (var stmt in explicitCtor.Body.Statements)
+                stmtWriter.Write(stmt);
+        }
+        else if (explicitCtor?.ExpressionBody != null)
+        {
+            ctx.WriteLine(exprWriter.Write(explicitCtor.ExpressionBody.Expression) + ";");
+        }
+
+        // Override-Funktionszeiger für virtuelle Methoden
         foreach (var method in node.Members.OfType<MethodDeclarationSyntax>())
         {
             var isOverride = method.Modifiers.Any(m => m.IsKind(SyntaxKind.OverrideKeyword));
             var isVirtual = method.Modifiers.Any(m => m.IsKind(SyntaxKind.VirtualKeyword));
             if (!isOverride && !isVirtual) continue;
 
-            // Nur für Inline-Funktionszeiger im Struct (nicht VTable-basiert)
             if (!string.IsNullOrEmpty(baseType) && !CSharpToC.IsControlSubclass(baseType))
-                continue; // VTable übernimmt das
+                continue;
 
             var returnType = TypeRegistry.MapType(method.ReturnType.ToString().Trim());
             var paramTypes = new List<string> { name + "*" };
@@ -63,5 +112,9 @@ public sealed class DefaultConstructorStrategy : IConstructorStrategy
         ctx.Dedent();
         ctx.Out.WriteLine("}");
         ctx.Out.WriteLine();
+
+        // LocalTypes aufräumen
+        foreach (var p in paramNames)
+            ctx.LocalTypes.Remove(p);
     }
 }
