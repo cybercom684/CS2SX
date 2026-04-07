@@ -3,6 +3,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <limits.h>
+#include <float.h>
+#include <math.h>
 #include "switchforms.h"
 
 // ============================================================================
@@ -19,11 +22,91 @@
 #define COLOR_BLUE    CS2SX_RGB(0,   0,   255)
 #define COLOR_YELLOW  CS2SX_RGB(255, 255, 0  )
 #define COLOR_CYAN    CS2SX_RGB(0,   255, 255)
+// Fix 9: COLOR_MAGENTA war schon definiert, aber Color.Magenta fehlte im TypeRegistry-Mapping
 #define COLOR_MAGENTA CS2SX_RGB(255, 0,   255)
 #define COLOR_GRAY    CS2SX_RGB(128, 128, 128)
 #define COLOR_DGRAY   CS2SX_RGB(64,  64,  64 )
 #define COLOR_LGRAY   CS2SX_RGB(192, 192, 192)
 #define COLOR_ORANGE  CS2SX_RGB(255, 165, 0  )
+
+// Fix 9: Fehlende Farben
+#define COLOR_PINK    CS2SX_RGB(255, 105, 180)
+#define COLOR_PURPLE  CS2SX_RGB(128, 0,   128)
+#define COLOR_BROWN   CS2SX_RGB(139, 69,  19 )
+#define COLOR_TEAL    CS2SX_RGB(0,   128, 128)
+#define COLOR_LIME    CS2SX_RGB(0,   255, 0  )
+#define COLOR_NAVY    CS2SX_RGB(0,   0,   128)
+#define COLOR_SILVER  CS2SX_RGB(192, 192, 192)
+#define COLOR_MAROON  CS2SX_RGB(128, 0,   0  )
+#define COLOR_OLIVE   CS2SX_RGB(128, 128, 0  )
+
+// ============================================================================
+// Fix 2: Math-Hilfsmakros
+// ============================================================================
+
+#ifndef MIN
+#define MIN(a, b) ((a) < (b) ? (a) : (b))
+#endif
+
+#ifndef MAX
+#define MAX(a, b) ((a) > (b) ? (a) : (b))
+#endif
+
+#ifndef CLAMP
+#define CLAMP(v, lo, hi) ((v) < (lo) ? (lo) : ((v) > (hi) ? (hi) : (v)))
+#endif
+
+static inline int CS2SX_Sign(int x) { return (x > 0) - (x < 0); }
+
+// ============================================================================
+// Fix 3: Pseudo-Zufallszahlengenerator
+// ============================================================================
+
+extern unsigned int _cs2sx_rand_state;
+
+static inline void CS2SX_Rand_Seed(unsigned int seed)
+{
+    _cs2sx_rand_state = seed ? seed : 12345u;
+}
+
+static inline int CS2SX_Rand_Next(int min_val, int max_val)
+{
+    if (max_val <= min_val) return min_val;
+    _cs2sx_rand_state = _cs2sx_rand_state * 1664525u + 1013904223u;
+    unsigned int r = (_cs2sx_rand_state >> 16) & 0x7FFFu;
+    return min_val + (int)(r % (unsigned int)(max_val - min_val));
+}
+
+static inline int CS2SX_Rand_NextMax(int max_val)
+{
+    return CS2SX_Rand_Next(0, max_val);
+}
+
+static inline float CS2SX_Rand_Float(void)
+{
+    _cs2sx_rand_state = _cs2sx_rand_state * 1664525u + 1013904223u;
+    return (float)(_cs2sx_rand_state & 0xFFFFu) / 65535.0f;
+}
+
+// ============================================================================
+// Fix 15: Environment.Exit
+// ============================================================================
+
+static inline void Environment_Exit(int code)
+{
+    exit(code);
+}
+
+#define System_Exit(code) Environment_Exit(code)
+
+// ============================================================================
+// Fix 17: Color.WithAlpha
+// ============================================================================
+
+static inline u32 Color_WithAlpha(u32 color, u8 alpha)
+{
+    return (color & 0x00FFFFFFu) | ((u32)alpha << 24);
+}
 
 // ============================================================================
 // SwitchApp
@@ -183,7 +266,7 @@ static inline void Texture_Dispose(Texture* t)
 }
 
 // ============================================================================
-// Framebuffer State — definiert in switchforms.c
+// Framebuffer State
 // ============================================================================
 
 extern Framebuffer g_fb;
@@ -191,9 +274,6 @@ extern u32* g_fb_addr;
 extern int         g_fb_width;
 extern int         g_fb_height;
 extern int         g_gfx_init;
-
-// Fix: g_cs2sx_pad hier deklarieren (definiert in switchforms.c).
-// Muss VOR den inline-Funktionen stehen die es benutzen.
 extern PadState    g_cs2sx_pad;
 
 // ============================================================================
@@ -348,8 +428,7 @@ static inline int Graphics_MeasureTextHeight(int scale)
 }
 
 // ============================================================================
-// Extension Graphics (aus switchapp_ext.h — inline gemerged)
-// Kein separates #include nötig — verhindert "file not found" Fehler.
+// Extension Graphics (merged from switchapp_ext.h)
 // ============================================================================
 
 static inline void Graphics_DrawTriangle(int x0, int y0, int x1, int y1, int x2, int y2, u32 color)
@@ -485,7 +564,7 @@ static inline void Graphics_DrawGrid(int x, int y, int w, int h, int cellW, int 
 }
 
 // ============================================================================
-// Extension Input — Analog-Sticks & Touch
+// Extension Input
 // ============================================================================
 
 #define CS2SX_STICK_DEADZONE 3000
@@ -511,7 +590,6 @@ static inline CS2SX_StickPos CS2SX_Input_GetStickRight(PadState* pad)
     return pos;
 }
 
-// Globale Wrapper — kein PadState-Parameter nötig aus C#-Code
 static inline CS2SX_StickPos _cs2sx_get_stick_left(void) { return CS2SX_Input_GetStickLeft(&g_cs2sx_pad); }
 static inline CS2SX_StickPos _cs2sx_get_stick_right(void) { return CS2SX_Input_GetStickRight(&g_cs2sx_pad); }
 
@@ -540,7 +618,7 @@ static inline int CS2SX_Touch_HitRect(CS2SX_TouchState* ts, int idx, int rx, int
 }
 
 // ============================================================================
-// Extension Filesystem
+// Extension Filesystem (unverändert aus Original)
 // ============================================================================
 
 static inline List_str* CS2SX_Dir_GetDirectories(const char* path)
@@ -646,7 +724,6 @@ static inline void SwitchApp_Run(SwitchApp* self)
     while (appletMainLoop())
     {
         padUpdate(&pad);
-        // Fix: g_cs2sx_pad befüllen damit _cs2sx_get_stick_left/right() funktionieren
         g_cs2sx_pad = pad;
         self->kDown = padGetButtonsDown(&pad);
         self->kHeld = padGetButtons(&pad);

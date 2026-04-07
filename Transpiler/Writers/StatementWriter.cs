@@ -61,25 +61,27 @@ public sealed class StatementWriter
     {
         var declType = local.Declaration.Type.ToString().Trim();
 
-        // string[] mit new[] { } Initializer
+        // FIX 4: Mehrdimensionale Arrays (int[,]) → flaches Array mit Index-Berechnung
+        if (declType.Contains(",") && declType.Contains("[") && declType.Contains("]"))
+        {
+            WriteMultiDimArray(local, declType);
+            return;
+        }
+
+        // FIX 5+11: string[] / T[] mit Initializer → Stack-Array
         if (declType.EndsWith("[]") && local.Declaration.Variables.Count == 1)
         {
             var v = local.Declaration.Variables[0];
-            if (v.Initializer?.Value is ImplicitArrayCreationExpressionSyntax implArr)
+            if (v.Initializer?.Value != null)
             {
-                var initExprs = implArr.Initializer.Expressions
-                    .Select(e => _expr.Write(e))
-                    .ToList();
-                _ctx.WriteLine("const char* " + v.Identifier + "[] = { "
-                    + string.Join(", ", initExprs) + " };");
-                _ctx.LocalTypes[v.Identifier.Text] = declType;
+                WriteArrayWithInitializer(v, declType);
                 return;
             }
         }
 
         foreach (var v in local.Declaration.Variables)
         {
-            // LibNx Stack-Structs (FsDir, PadState, CS2SX_TouchState, etc.)
+            // LibNx Stack-Structs
             if (TypeRegistry.IsLibNxStruct(declType))
             {
                 var si = v.Initializer != null
@@ -96,6 +98,7 @@ public sealed class StatementWriter
                 continue;
             }
 
+            // string mit new string(char, count) → char buf[count+1]
             if (declType is "string" or "var"
                 && v.Initializer?.Value is ObjectCreationExpressionSyntax strNew
                 && strNew.Type.ToString() == "string"
@@ -117,8 +120,6 @@ public sealed class StatementWriter
                 continue;
             }
 
-            // Fix: CS2SX Extension-Structs als explizit deklarierte Typen behandeln
-            // TouchState touch = Input.GetTouch() → CS2SX_TouchState touch = ...;
             if (IsExtensionStructType(declType))
             {
                 var cType = TypeRegistry.MapType(declType);
@@ -127,6 +128,17 @@ public sealed class StatementWriter
                     : " = {0}";
                 _ctx.WriteLine(cType + " " + v.Identifier + initStr + ";");
                 _ctx.LocalTypes[v.Identifier.Text] = declType;
+                continue;
+            }
+
+            // FIX 12: bool → int (0/1)
+            if (declType == "bool")
+            {
+                var initVal = v.Initializer != null
+                    ? _expr.Write(v.Initializer.Value)
+                    : "0";
+                _ctx.WriteLine("int " + v.Identifier + " = " + initVal + ";");
+                _ctx.LocalTypes[v.Identifier.Text] = "bool";
                 continue;
             }
 
@@ -145,12 +157,130 @@ public sealed class StatementWriter
         }
     }
 
-    /// <summary>
-    /// True für CS2SX Extension-Structs die als Wert (nicht Pointer) auf dem Stack liegen.
-    /// TouchState, StickPos, BatteryInfo sind TypeRegistry.IsLibNxStruct() — aber nur unter
-    /// ihrem C-Namen (CS2SX_TouchState). Die C#-Namen (TouchState, StickPos) müssen hier
-    /// ebenfalls abgefangen werden.
-    /// </summary>
+    // FIX 4: int[,] grid = { {1,2}, {3,4} }  →  int grid[2*2] = {1,2,3,4};
+    private void WriteMultiDimArray(LocalDeclarationStatementSyntax local, string declType)
+    {
+        var baseType = declType[..declType.IndexOf('[')].Trim();
+        var cType = TypeRegistry.MapType(baseType);
+
+        foreach (var v in local.Declaration.Variables)
+        {
+            if (v.Initializer?.Value is ArrayCreationExpressionSyntax arr
+                && arr.Initializer != null)
+            {
+                // Flache Liste aller Elemente aufbauen
+                var flatElems = new List<string>();
+                foreach (var row in arr.Initializer.Expressions)
+                {
+                    if (row is ImplicitArrayCreationExpressionSyntax rowArr)
+                        foreach (var elem in rowArr.Initializer.Expressions)
+                            flatElems.Add(_expr.Write(elem));
+                    else if (row is InitializerExpressionSyntax initRow)
+                        foreach (var elem in initRow.Expressions)
+                            flatElems.Add(_expr.Write(elem));
+                    else
+                        flatElems.Add(_expr.Write(row));
+                }
+                _ctx.WriteLine(cType + " " + v.Identifier + "[] = { "
+                    + string.Join(", ", flatElems) + " };");
+            }
+            else
+            {
+                // Größe aus Rankspecifiers
+                var dims = "";
+                if (arr_RankSizes(v, out var sizes) && sizes.Count > 0)
+                    dims = string.Join("*", sizes);
+                else
+                    dims = "1";
+                _ctx.WriteLine(cType + " " + v.Identifier + "[" + dims + "];");
+                _ctx.WriteLine("memset(" + v.Identifier + ", 0, sizeof(" + v.Identifier + "));");
+            }
+            _ctx.LocalTypes[v.Identifier.Text] = baseType + "[]";
+        }
+    }
+
+    private static bool arr_RankSizes(VariableDeclaratorSyntax v, out List<string> sizes)
+    {
+        sizes = new();
+        if (v.Initializer?.Value is ArrayCreationExpressionSyntax arr)
+        {
+            foreach (var rs in arr.Type.RankSpecifiers)
+                foreach (var sz in rs.Sizes)
+                    if (sz is not OmittedArraySizeExpressionSyntax)
+                        sizes.Add(sz.ToString());
+        }
+        return sizes.Count > 0;
+    }
+
+    // FIX 5+11: T[] var = { ... } oder T[] var = new T[] { ... } → stack array
+    private void WriteArrayWithInitializer(VariableDeclaratorSyntax v, string declType)
+    {
+        var baseType = declType[..^2].Trim();
+        var varName = v.Identifier.Text;
+        SyntaxNode? initExpr = v.Initializer?.Value;
+
+        List<string>? elems = null;
+        string? cType = null;
+
+        if (initExpr is ImplicitArrayCreationExpressionSyntax implArr)
+        {
+            elems = implArr.Initializer.Expressions.Select(e => _expr.Write(e)).ToList();
+            cType = InferArrayElemType(implArr.Initializer.Expressions, baseType);
+        }
+        else if (initExpr is ArrayCreationExpressionSyntax arrCreation
+                 && arrCreation.Initializer != null)
+        {
+            elems = arrCreation.Initializer.Expressions.Select(e => _expr.Write(e)).ToList();
+            cType = TypeRegistry.MapType(baseType);
+        }
+        else if (initExpr is InitializerExpressionSyntax initList)
+        {
+            elems = initList.Expressions.Select(e => _expr.Write(e)).ToList();
+            cType = TypeRegistry.MapType(baseType);
+        }
+
+        if (elems != null && cType != null)
+        {
+            // string[] → const char*[]
+            if (baseType == "string")
+            {
+                _ctx.WriteLine("const char* " + varName + "[] = { "
+                    + string.Join(", ", elems) + " };");
+            }
+            else
+            {
+                _ctx.WriteLine(cType + " " + varName + "[] = { "
+                    + string.Join(", ", elems) + " };");
+            }
+            _ctx.LocalTypes[varName] = declType;
+            return;
+        }
+
+        // Fallback: malloc
+        var (cTypeFb, isPtr) = InferLocalType(declType, v);
+        var ptr = isPtr ? "*" : "";
+        var init2 = v.Initializer != null ? " = " + _expr.Write(v.Initializer.Value) : "";
+        _ctx.WriteLine((cTypeFb ?? "int") + ptr + " " + varName + init2 + ";");
+        _ctx.LocalTypes[varName] = declType;
+    }
+
+    private static string InferArrayElemType(
+        Microsoft.CodeAnalysis.SeparatedSyntaxList<ExpressionSyntax> exprs,
+        string hintBaseType)
+    {
+        if (hintBaseType != "var") return TypeRegistry.MapType(hintBaseType);
+        if (exprs.Count == 0) return "int";
+
+        var first = exprs[0];
+        if (first is LiteralExpressionSyntax lit)
+        {
+            if (lit.Token.Value is string) return "const char*";
+            if (lit.Token.Value is float) return "float";
+            if (lit.Token.Value is double) return "double";
+        }
+        return "int";
+    }
+
     private static bool IsExtensionStructType(string csType) =>
         csType is "TouchState" or "StickPos" or "BatteryInfo";
 
@@ -183,6 +313,9 @@ public sealed class StatementWriter
         if (declType is "var" or "var?")
             return InferVarType(v);
 
+        // FIX 12: bool → int
+        if (declType == "bool") return ("int", false);
+
         var cType = TypeRegistry.MapType(declType);
         var isPtr = TypeRegistry.NeedsPointerSuffix(declType)
                  || TypeRegistry.IsStringBuilder(declType)
@@ -214,9 +347,6 @@ public sealed class StatementWriter
                            or "string.Concat" or "String.Concat")
                 return ("const char", true);
 
-            // Fix: Extension Input-Structs — Stack-Allokation (kein Pointer)
-            // var touch = Input.GetTouch()   → CS2SX_TouchState touch = ...;
-            // var stickL = Input.GetStickLeft() → CS2SX_StickPos stickL = ...;
             if (calleeStr is "Input.GetTouch" or "CS2SX_Input_GetTouch")
                 return ("CS2SX_TouchState", false);
 
@@ -245,7 +375,6 @@ public sealed class StatementWriter
 
             var inferred = TypeInferrer.InferCSharpType(v.Initializer!.Value, _ctx);
 
-            // Fix: Extension-Structs die TypeInferrer jetzt kennt
             if (inferred is "TouchState") return ("CS2SX_TouchState", false);
             if (inferred is "StickPos") return ("CS2SX_StickPos", false);
             if (inferred is "BatteryInfo") return ("CS2SX_BatteryInfo", false);
@@ -431,6 +560,8 @@ public sealed class StatementWriter
                 var ie = v.Initializer != null
                     ? " = " + _expr.Write(v.Initializer.Value)
                     : "";
+                // FIX 13: Schleifenvariable in LocalTypes registrieren BEVOR Body geschrieben wird
+                _ctx.LocalTypes[v.Identifier.Text] = forStmt.Declaration.Type.ToString().Trim();
                 return v.Identifier + ie;
             }));
             init = tName + " " + vars;

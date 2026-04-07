@@ -36,6 +36,7 @@ public sealed class ExpressionWriter
             InvocationExpressionSyntax inv => WriteInvocation(inv),
             InterpolatedStringExpressionSyntax interp => FormatStringBuilder.BuildToBuffer(interp, _ctx, Write),
             ArrayCreationExpressionSyntax arr => WriteArrayCreation(arr),
+            ImplicitArrayCreationExpressionSyntax implArr => WriteImplicitArrayCreation(implArr),
             ObjectCreationExpressionSyntax obj => WriteObjectCreation(obj),
             ParenthesizedExpressionSyntax par => "(" + Write(par.Expression) + ")",
             ConditionalExpressionSyntax cond => WriteConditional(cond),
@@ -80,14 +81,22 @@ public sealed class ExpressionWriter
     {
         var name = id.Identifier.Text;
 
+        // Enum-Mapping zuerst
         var mapped = TypeRegistry.MapEnum(name);
         if (mapped != name) return mapped;
 
         if (_ctx.EnumMembers.Contains(name)) return name;
         if (name == "_cs2sx_strbuf") return "_cs2sx_strbuf";
 
-        // Lokale Variable hat immer Vorrang
-        if (_ctx.LocalTypes.ContainsKey(name)) return name;
+        // FIX 13+14: Lokale Variable hat immer absoluten Vorrang —
+        // vor Feldzugriffen, vor ControlFields, vor allem.
+        if (_ctx.LocalTypes.TryGetValue(name, out var localType))
+        {
+            // FIX 14: ref/out Parameter → Dereferenzierung beim Lesen
+            if (localType.StartsWith("@ref:", StringComparison.Ordinal))
+                return "(*" + name + ")";
+            return name;
+        }
 
         // Felder MIT _ prefix (klassische Konvention)
         if (_ctx.IsFieldAccess(name))
@@ -99,9 +108,7 @@ public sealed class ExpressionWriter
             return "self->" + prefix + trimmed;
         }
 
-        // FIX: Felder OHNE _ prefix (z.B. public uint bgColor)
-        // IsFieldAccess() greift nur für _-prefixed Namen.
-        // Wenn der Name in FieldTypes der aktuellen Klasse steht → Feld.
+        // Felder OHNE _ prefix — aber nur wenn der Name in FieldTypes der aktuellen Klasse steht
         if (!string.IsNullOrEmpty(_ctx.CurrentClass)
             && _ctx.FieldTypes.ContainsKey(name))
         {
@@ -109,6 +116,27 @@ public sealed class ExpressionWriter
             return "self->" + prefix + name;
         }
 
+        // FIX 8: static const Felder der aktuellen Klasse (z.B. WALL, EMPTY)
+        // werden zu ClassName_WALL umgeschrieben damit sie in switch-case funktionieren.
+        // Voraussetzung: SemanticModel muss das Symbol als static const kennen.
+        if (!string.IsNullOrEmpty(_ctx.CurrentClass) && _ctx.SemanticModel != null)
+        {
+            try
+            {
+                var symbolInfo = _ctx.SemanticModel.GetSymbolInfo(id);
+                if (symbolInfo.Symbol is Microsoft.CodeAnalysis.IFieldSymbol field
+                    && field.IsStatic
+                    && (field.IsConst || field.IsReadOnly))
+                {
+                    var ownerClass = field.ContainingType?.Name ?? _ctx.CurrentClass;
+                    return ownerClass + "_" + name;
+                }
+            }
+            catch { }
+        }
+
+        // ControlFields (x, y, width, height) NUR als Feld-Zugriff wenn
+        // bereits oben keine lokale Variable gefunden wurde
         if (TypeRegistry.ControlFields.Contains(name) && !string.IsNullOrEmpty(_ctx.CurrentClass))
             return "self->base." + name;
 
@@ -119,6 +147,13 @@ public sealed class ExpressionWriter
 
     private string WriteBinary(BinaryExpressionSyntax bin)
     {
+        // FIX 1: String-Konkatenation mit + → snprintf
+        if (bin.IsKind(SyntaxKind.AddExpression))
+        {
+            var concat = StringConcatFixer.TryBuildConcat(bin, _ctx, Write);
+            if (concat != null) return concat;
+        }
+
         var left = Write(bin.Left);
         var right = Write(bin.Right);
         var op = bin.OperatorToken.Text;
@@ -195,8 +230,15 @@ public sealed class ExpressionWriter
         if (assign.Left is ElementAccessExpressionSyntax elemLeft)
             return WriteIndexerAssignment(elemLeft, op, right);
 
-        // Write(assign.Left) nutzt WriteIdentifier — der Fix dort sorgt
-        // dafür dass Felder ohne _ prefix korrekt zu self->f_name werden.
+        // FIX 14: ref/out Parameter-Zuweisung → *param = value
+        if (assign.Left is IdentifierNameSyntax leftId)
+        {
+            var lname = leftId.Identifier.Text;
+            if (_ctx.LocalTypes.TryGetValue(lname, out var lt2)
+                && lt2.StartsWith("@ref:", StringComparison.Ordinal))
+                return "*" + lname + " " + op + " " + right;
+        }
+
         return Write(assign.Left) + " " + op + " " + right;
     }
 
@@ -293,6 +335,10 @@ public sealed class ExpressionWriter
     {
         var full = mem.ToString();
 
+        // FIX 10: int.MaxValue / int.MinValue etc.
+        if (IsNumericTypeMember(mem, out var constResult))
+            return constResult;
+
         var mapped = TypeRegistry.MapEnum(full);
         if (mapped != full) return mapped;
 
@@ -323,15 +369,12 @@ public sealed class ExpressionWriter
         var rawExpr = mem.Expression.ToString();
         var key = rawExpr.TrimStart('_');
 
-        // LibNx-Structs (TouchState, StickPos, BatteryInfo etc.) → dot-Zugriff
+        // LibNx-Structs → dot-Zugriff
         if ((_ctx.LocalTypes.TryGetValue(rawExpr, out var lt) && IsStructType(lt))
          || (_ctx.FieldTypes.TryGetValue(key, out var ft) && IsStructType(ft)))
             return obj + "." + prop;
 
-        // FIX: Auto-Properties von eigenen Klassen haben f_-Prefix im Struct.
-        // Receiver-Typ bestimmen — wenn bekannter Klassen-Typ (nicht LibNx-Struct,
-        // nicht Primitiv) → f_-Prefix verwenden.
-        // colorPreset.Background → colorPreset->f_Background
+        // Auto-Properties von eigenen Klassen haben f_-Prefix
         var receiverType = ResolveReceiverType(rawExpr);
         if (receiverType != null
             && !TypeRegistry.IsLibNxStruct(receiverType)
@@ -352,9 +395,47 @@ public sealed class ExpressionWriter
     }
 
     /// <summary>
-    /// Bestimmt den C#-Typ eines Member-Access-Receivers.
-    /// Sucht in LocalTypes, dann FieldTypes.
+    /// FIX 10: int.MaxValue, int.MinValue, float.MaxValue etc.
     /// </summary>
+    private static bool IsNumericTypeMember(
+        MemberAccessExpressionSyntax mem, out string result)
+    {
+        var typeName = mem.Expression.ToString();
+        var memberName = mem.Name.Identifier.Text;
+
+        result = (typeName, memberName) switch
+        {
+            ("int", "MaxValue") => "INT_MAX",
+            ("int", "MinValue") => "INT_MIN",
+            ("uint", "MaxValue") => "UINT_MAX",
+            ("uint", "MinValue") => "0U",
+            ("long", "MaxValue") => "LLONG_MAX",
+            ("long", "MinValue") => "LLONG_MIN",
+            ("ulong", "MaxValue") => "ULLONG_MAX",
+            ("ulong", "MinValue") => "0ULL",
+            ("short", "MaxValue") => "SHRT_MAX",
+            ("short", "MinValue") => "SHRT_MIN",
+            ("byte", "MaxValue") => "255",
+            ("byte", "MinValue") => "0",
+            ("float", "MaxValue") => "FLT_MAX",
+            ("float", "MinValue") => "FLT_MIN",
+            ("float", "Epsilon") => "FLT_EPSILON",
+            ("double", "MaxValue") => "DBL_MAX",
+            ("double", "MinValue") => "DBL_MIN",
+            // FIX: Math-Konstanten
+            ("Math", "PI") => "(float)M_PI",
+            ("Math", "E") => "(float)M_E",
+            ("MathF", "PI") => "3.14159265f",
+            ("MathF", "E") => "2.71828182f",
+            ("float", "NaN") => "NAN",
+            ("float", "PositiveInfinity") => "INFINITY",
+            ("float", "NegativeInfinity") => "(-INFINITY)",
+            _ => null!,
+        };
+
+        return result != null;
+    }
+
     private string? ResolveReceiverType(string rawExpr)
     {
         var key = rawExpr.TrimStart('_');
@@ -392,6 +473,10 @@ public sealed class ExpressionWriter
             var cVal = types.val == "string" ? "str" : TypeRegistry.MapType(types.val);
             return "Dict_" + cKey + "_" + cVal + "_New()";
         }
+
+        // FIX 3: new Random() — kein eigenes Objekt nötig, direkt CS2SX_Rand_Next() verwenden
+        if (typeName == "Random")
+            return "NULL /* Random — use CS2SX_Rand_Next() directly */";
 
         var args = obj.ArgumentList?.Arguments.Select(a => Write(a.Expression))
                           ?? Enumerable.Empty<string>();
@@ -433,10 +518,19 @@ public sealed class ExpressionWriter
         return creation;
     }
 
+    // ── Array-Erstellung ─────────────────────────────────────────────────
+
     private string WriteArrayCreation(ArrayCreationExpressionSyntax arr)
     {
         var elemType = arr.Type.ElementType.ToString().Trim();
         var cType = TypeRegistry.MapType(elemType);
+
+        // FIX 5: Array mit Initializer → Stack-Array-Inhalt
+        if (arr.Initializer != null && arr.Initializer.Expressions.Count > 0)
+        {
+            var elems = arr.Initializer.Expressions.Select(e => Write(e));
+            return "{ " + string.Join(", ", elems) + " }";
+        }
 
         if (arr.Type.RankSpecifiers.Count > 0
             && arr.Type.RankSpecifiers[0].Sizes.Count > 0)
@@ -446,6 +540,13 @@ public sealed class ExpressionWriter
         }
 
         return "(" + cType + "*)malloc(sizeof(" + cType + "))";
+    }
+
+    // FIX 5: new[] { 1, 2, 3 } → { 1, 2, 3 }
+    private string WriteImplicitArrayCreation(ImplicitArrayCreationExpressionSyntax implArr)
+    {
+        var elems = implArr.Initializer.Expressions.Select(e => Write(e));
+        return "{ " + string.Join(", ", elems) + " }";
     }
 
     // ── Sonstiges ─────────────────────────────────────────────────────────

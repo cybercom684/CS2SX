@@ -219,6 +219,7 @@ namespace CS2SX.Switch
     }
 }
 
+
 // Parse-Stubs — werden vom Transpiler zu CS2SX_Int_Parse etc. übersetzt
 
 public static class IntParser

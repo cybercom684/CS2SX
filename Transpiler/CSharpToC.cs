@@ -116,8 +116,6 @@ public sealed class CSharpToC : CSharpSyntaxWalker
         var baseType = _ctx.CurrentBaseType;
         var isSwitchAppChild = baseType == SwitchAppBase;
 
-        // FIX: static class → kein Konstruktor, keine _New()/_Init()-Signatur.
-        // static-Klassen wie MinUI haben nur statische Methoden.
         var isStaticClass = node.Modifiers.Any(m => m.IsKind(SyntaxKind.StaticKeyword));
 
         if (!string.IsNullOrEmpty(baseType) && baseType != SwitchAppBase)
@@ -130,7 +128,6 @@ public sealed class CSharpToC : CSharpSyntaxWalker
             if (!isStaticClass && VTableBuilder.HasVirtualMethods(node))
                 VTableBuilder.WriteVTableStruct(node, node.Identifier.Text, _ctx.Out);
 
-            // static class bekommt kein Struct — nur Methoden-Signaturen
             if (!isStaticClass)
                 WriteStructDefinition(node, baseType);
 
@@ -142,7 +139,6 @@ public sealed class CSharpToC : CSharpSyntaxWalker
         }
         else
         {
-            // static class bekommt keinen Konstruktor
             if (!isStaticClass)
                 WriteConstructor(node);
 
@@ -322,7 +318,7 @@ public sealed class CSharpToC : CSharpSyntaxWalker
         }
     }
 
-    // ── Typ-Auflösung für Methoden-Signaturen ─────────────────────────────
+    // ── Typ-Auflösung ─────────────────────────────────────────────────────
 
     private string ResolveMethodReturnType(MethodDeclarationSyntax method)
     {
@@ -358,6 +354,11 @@ public sealed class CSharpToC : CSharpSyntaxWalker
 
     // ── Static-Felder ─────────────────────────────────────────────────────
 
+    /// <summary>
+    /// FIX 6: static readonly T[] fields werden als C-Arrays ausgegeben.
+    /// private static readonly int[] DX = { 1, 0, -1, 0 }
+    /// → static const int ClassName_DX[] = {1, 0, -1, 0};
+    /// </summary>
     internal void WriteStaticFieldDefinitions(ClassDeclarationSyntax node, string name)
     {
         foreach (var field in node.Members.OfType<FieldDeclarationSyntax>())
@@ -365,9 +366,19 @@ public sealed class CSharpToC : CSharpSyntaxWalker
             if (!field.Modifiers.Any(m => m.IsKind(SyntaxKind.StaticKeyword))) continue;
 
             var csType = ResolveFieldType(field);
+
+            // Array-Typen gesondert behandeln
+            if (csType.EndsWith("[]"))
+            {
+                WriteStaticArrayFieldDef(field, name, csType);
+                continue;
+            }
+
             var cType = TypeRegistry.MapType(csType);
             var needPtr = NeedsPtr(csType);
             var ptr = needPtr ? "*" : "";
+            var isReadOnly = field.Modifiers.Any(m => m.IsKind(SyntaxKind.ReadOnlyKeyword))
+                          || field.Modifiers.Any(m => m.IsKind(SyntaxKind.ConstKeyword));
 
             foreach (var v in field.Declaration.Variables)
             {
@@ -375,7 +386,46 @@ public sealed class CSharpToC : CSharpSyntaxWalker
                 var init = v.Initializer != null
                     ? " = " + _exprWriter.Write(v.Initializer.Value)
                     : "";
-                _ctx.Out.WriteLine(cType + ptr + " " + name + "_" + fieldName + init + ";");
+                var constMod = isReadOnly ? "static const " : "static ";
+                _ctx.Out.WriteLine(constMod + cType + ptr + " " + name + "_" + fieldName + init + ";");
+            }
+        }
+    }
+
+    private void WriteStaticArrayFieldDef(FieldDeclarationSyntax field, string className, string csType)
+    {
+        var baseType = csType[..^2].Trim();
+        var cType = baseType == "string" ? "const char*" : TypeRegistry.MapType(baseType);
+        var isConst = field.Modifiers.Any(m => m.IsKind(SyntaxKind.ReadOnlyKeyword))
+                   || field.Modifiers.Any(m => m.IsKind(SyntaxKind.ConstKeyword));
+
+        foreach (var v in field.Declaration.Variables)
+        {
+            var fieldName = v.Identifier.Text.TrimStart('_');
+            var fullName = className + "_" + fieldName;
+
+            if (v.Initializer?.Value is ArrayCreationExpressionSyntax arr
+                && arr.Initializer != null)
+            {
+                var elems = arr.Initializer.Expressions
+                    .Select(e => _exprWriter.Write(e))
+                    .ToList();
+                var mod = isConst ? "static const " : "static ";
+                _ctx.Out.WriteLine(mod + cType + " " + fullName + "[] = { "
+                    + string.Join(", ", elems) + " };");
+            }
+            else if (v.Initializer?.Value is ImplicitArrayCreationExpressionSyntax implArr)
+            {
+                var elems = implArr.Initializer.Expressions
+                    .Select(e => _exprWriter.Write(e))
+                    .ToList();
+                var mod = isConst ? "static const " : "static ";
+                _ctx.Out.WriteLine(mod + cType + " " + fullName + "[] = { "
+                    + string.Join(", ", elems) + " };");
+            }
+            else
+            {
+                _ctx.Out.WriteLine("static " + cType + " " + fullName + "[1];");
             }
         }
     }
@@ -387,13 +437,30 @@ public sealed class CSharpToC : CSharpSyntaxWalker
             if (!field.Modifiers.Any(m => m.IsKind(SyntaxKind.StaticKeyword))) continue;
 
             var csType = ResolveFieldType(field);
-            var cType = TypeRegistry.MapType(csType);
+
+            // FIX 6: Array-Externs
+            if (csType.EndsWith("[]"))
+            {
+                var baseType = csType[..^2].Trim();
+                var cType = baseType == "string" ? "const char*" : TypeRegistry.MapType(baseType);
+                var isConst = field.Modifiers.Any(m => m.IsKind(SyntaxKind.ReadOnlyKeyword))
+                           || field.Modifiers.Any(m => m.IsKind(SyntaxKind.ConstKeyword));
+                foreach (var v in field.Declaration.Variables)
+                {
+                    var fieldName = v.Identifier.Text.TrimStart('_');
+                    var constMod = isConst ? "const " : "";
+                    _ctx.Out.WriteLine("extern " + constMod + cType + " " + name + "_" + fieldName + "[];");
+                }
+                continue;
+            }
+
+            var cTypeNorm = TypeRegistry.MapType(csType);
             var ptr = NeedsPtr(csType) ? "*" : "";
 
             foreach (var v in field.Declaration.Variables)
             {
                 var fieldName = v.Identifier.Text.TrimStart('_');
-                _ctx.Out.WriteLine("extern " + cType + ptr + " " + name + "_" + fieldName + ";");
+                _ctx.Out.WriteLine("extern " + cTypeNorm + ptr + " " + name + "_" + fieldName + ";");
             }
         }
     }
@@ -443,7 +510,6 @@ public sealed class CSharpToC : CSharpSyntaxWalker
             }
             else
             {
-                // FIX: expliziten Konstruktor mit Parametern berücksichtigen
                 var explicitCtor = node.Members
                     .OfType<ConstructorDeclarationSyntax>()
                     .FirstOrDefault();
@@ -481,7 +547,6 @@ public sealed class CSharpToC : CSharpSyntaxWalker
         var name = className + "_" + method.Identifier.Text;
 
         var parameters = new List<string>();
-        // static class oder static method → kein self Parameter
         if (!isStatic) parameters.Add(className + "* self");
         foreach (var p in method.ParameterList.Parameters)
             parameters.Add(BuildParamDecl(p));
@@ -527,7 +592,6 @@ public sealed class CSharpToC : CSharpSyntaxWalker
             : _ctx.CurrentClass + "_" + node.Identifier.Text;
 
         var parameters = new List<string>();
-        // static class oder static method → kein self Parameter
         if (!string.IsNullOrEmpty(_ctx.CurrentClass) && !isStatic)
             parameters.Add(_ctx.CurrentClass + "* self");
         foreach (var p in node.ParameterList.Parameters)
@@ -567,7 +631,10 @@ public sealed class CSharpToC : CSharpSyntaxWalker
                 paramType = p.Type.ToString().Trim();
             }
 
-            _ctx.LocalTypes[p.Identifier.Text] = paramType;
+            // FIX 14: ref/out Parameter mit @ref: markieren für korrekte Dereferenzierung
+            var isRefParam = p.Modifiers.Any(m =>
+                m.IsKind(SyntaxKind.RefKeyword) || m.IsKind(SyntaxKind.OutKeyword));
+            _ctx.LocalTypes[p.Identifier.Text] = isRefParam ? "@ref:" + paramType : paramType;
         }
 
         _ctx.Out.WriteLine(sig);

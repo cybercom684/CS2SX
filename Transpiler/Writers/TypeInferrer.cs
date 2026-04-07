@@ -41,6 +41,9 @@ public static class TypeInferrer
                 return InferBinary(bin, ctx);
 
             case PrefixUnaryExpressionSyntax pre:
+                // FIX 12: !expr → bool
+                if (pre.OperatorToken.IsKind(SyntaxKind.ExclamationToken))
+                    return "bool";
                 return InferSyntactic(pre.Operand, ctx);
 
             case PostfixUnaryExpressionSyntax post:
@@ -77,6 +80,11 @@ public static class TypeInferrer
 
     private static string InferLiteral(LiteralExpressionSyntax lit)
     {
+        // FIX 12: bool-Literale
+        if (lit.IsKind(SyntaxKind.TrueLiteralExpression)) return "bool";
+        if (lit.IsKind(SyntaxKind.FalseLiteralExpression)) return "bool";
+        if (lit.IsKind(SyntaxKind.NullLiteralExpression)) return "object";
+
         if (lit.Token.Value is int) return "int";
         if (lit.Token.Value is uint) return "uint";
         if (lit.Token.Value is long) return "long";
@@ -105,7 +113,13 @@ public static class TypeInferrer
 
     private static string InferIdentifier(string name, TranspilerContext ctx)
     {
-        if (ctx.LocalTypes.TryGetValue(name, out var lt)) return lt;
+        if (ctx.LocalTypes.TryGetValue(name, out var lt))
+        {
+            // FIX 14: @ref: Marker entfernen für Typ-Inferenz
+            if (lt.StartsWith("@ref:", StringComparison.Ordinal))
+                return lt["@ref:".Length..];
+            return lt;
+        }
 
         var trimmed = name.TrimStart('_');
         if (ctx.FieldTypes.TryGetValue(trimmed, out var ft)) return ft;
@@ -120,6 +134,17 @@ public static class TypeInferrer
         var prop = mem.Name.Identifier.Text;
         var objRaw = mem.Expression.ToString();
         var objKey = objRaw.TrimStart('_');
+
+        // Bekannte Typ-Konstanten
+        if (prop is "MaxValue" or "MinValue" or "Epsilon")
+        {
+            var typeName = objRaw;
+            return typeName switch
+            {
+                "float" or "double" => typeName,
+                _ => "int",
+            };
+        }
 
         if (prop is "Count" or "Length" or "count" or "length")
             return "int";
@@ -157,7 +182,12 @@ public static class TypeInferrer
             return "string";
 
         if (callee is "string.IsNullOrEmpty" or "String.IsNullOrEmpty"
-                   or "string.IsNullOrWhiteSpace" or "String.IsNullOrWhiteSpace")
+                   or "string.IsNullOrWhiteSpace" or "String.IsNullOrWhiteSpace"
+                   or "string.Contains" or "String.Contains"
+                   or "string.StartsWith" or "String.StartsWith"
+                   or "string.EndsWith" or "String.EndsWith"
+                   or "int.TryParse" or "Int32.TryParse"
+                   or "float.TryParse" or "Single.TryParse")
             return "bool";
 
         if (callee is "int.Parse" or "Int32.Parse" or "CS2SX_Int_Parse")
@@ -165,7 +195,6 @@ public static class TypeInferrer
         if (callee is "float.Parse" or "Single.Parse" or "CS2SX_Float_Parse")
             return "float";
 
-        // String-Methoden die immer string zurückgeben
         if (callee is "string.Substring" or "String.Substring"
                    or "string.Replace" or "String.Replace"
                    or "string.Trim" or "String.Trim"
@@ -173,24 +202,45 @@ public static class TypeInferrer
                    or "string.ToLower" or "String.ToLower")
             return "string";
 
-        // ── Fix: Extension Input-Methoden ─────────────────────────────────────
-        // CS2SX_TouchState und CS2SX_StickPos sind LibNx-Structs (Stack-Allokation, kein Pointer).
-        // Ohne diese Einträge wird der Rückgabewert als "int" inferiert, was zu
-        // touch->x[i] statt touch.x[i] führt (Struct braucht ".", kein "->").
-
         if (callee is "Input.GetTouch" or "CS2SX_Input_GetTouch")
-            return "TouchState";      // → CS2SX_TouchState in TypeRegistry
+            return "TouchState";
 
         if (callee is "Input.GetStickLeft" or "_cs2sx_get_stick_left"
                    or "CS2SX_Input_GetStickLeft")
-            return "StickPos";        // → CS2SX_StickPos in TypeRegistry
+            return "StickPos";
 
         if (callee is "Input.GetStickRight" or "_cs2sx_get_stick_right"
                    or "CS2SX_Input_GetStickRight")
             return "StickPos";
 
         if (callee is "System.GetBattery" or "CS2SX_GetBattery")
-            return "BatteryInfo";     // → CS2SX_BatteryInfo in TypeRegistry
+            return "BatteryInfo";
+
+        // FIX 3: Random Methoden → int/float
+        if (callee is "CS2SX_Rand_Next" or "CS2SX_Rand_NextMax")
+            return "int";
+        if (callee is "CS2SX_Rand_Float")
+            return "float";
+
+        // FIX 2: Math-Methoden
+        if (callee is "Math.Abs" or "System.Math.Abs"
+                   or "Math.Min" or "System.Math.Min"
+                   or "Math.Max" or "System.Math.Max"
+                   or "Math.Clamp" or "System.Math.Clamp"
+                   or "Math.Sign" or "System.Math.Sign"
+                   or "Math.Round" or "System.Math.Round")
+            return "int";
+
+        if (callee is "Math.Sqrt" or "System.Math.Sqrt"
+                   or "Math.Sin" or "System.Math.Sin"
+                   or "Math.Cos" or "System.Math.Cos"
+                   or "Math.Tan" or "System.Math.Tan"
+                   or "Math.Pow" or "System.Math.Pow"
+                   or "Math.Floor" or "System.Math.Floor"
+                   or "Math.Ceil" or "System.Math.Ceil"
+                   or "Math.Ceiling" or "System.Math.Ceiling"
+                   or "Math.Atan2" or "System.Math.Atan2")
+            return "float";
 
         if (inv.Expression is IdentifierNameSyntax idName
             && ctx.MethodReturnTypes.TryGetValue(idName.Identifier.Text, out var rt))
@@ -209,6 +259,7 @@ public static class TypeInferrer
 
     private static string InferBinary(BinaryExpressionSyntax bin, TranspilerContext ctx)
     {
+        // Vergleichsoperatoren → bool
         if (bin.IsKind(SyntaxKind.EqualsExpression)
          || bin.IsKind(SyntaxKind.NotEqualsExpression)
          || bin.IsKind(SyntaxKind.LessThanExpression)
@@ -263,7 +314,6 @@ public static class TypeInferrer
 
             if (objType == "string") return "char";
 
-            // Fix: Array-Felder von LibNx-Structs (z.B. TouchState.x[i] → int)
             if (objType is "TouchState") return "int";
             if (objType is "StickPos") return "int";
         }
@@ -281,6 +331,10 @@ public static class TypeInferrer
         }
 
         var csType = InferCSharpType(expr, ctx);
+
+        // FIX 12: bool → %d
+        if (csType == "bool") return "%d";
+
         var cType = TypeRegistry.MapType(csType);
         return TypeRegistry.FormatSpecifier(cType);
     }

@@ -6,34 +6,34 @@ namespace CS2SX.Transpiler.Handlers;
 
 /// <summary>
 /// Orchestriert alle IInvocationHandler in Prioritäts-Reihenfolge.
-///
-/// Erweiterung: Neuen Handler in s_handlers Liste eintragen.
-/// Reihenfolge ist wichtig — spezifischste Handler zuerst.
+/// Neue Handler: RandomHandler, EnvironmentHandler — ColorHandler erweitert.
 /// </summary>
 public sealed class InvocationDispatcher
 {
     private static readonly IReadOnlyList<IInvocationHandler> s_handlers = new List<IInvocationHandler>
     {
         new LibNxHandler(),
+        new EnvironmentHandler(),   // Fix 15: Environment.Exit, Console.Clear
         new InputHandler(),
         new FormHandler(),
         new ConsoleHandler(),
-        new MathHandler(),
+        new MathHandler(),          // Fix 2: System.Math.X Varianten
+        new RandomHandler(),        // Fix 3: System.Random / Random.Shared.Next()
         new FileHandler(),
         new ParseHandler(),
-        new ColorHandler(),
+        new ColorHandler(),         // Fix 17: Color.WithAlpha
         new StringBuilderHandler(),
         new ListHandler(),
         new DictionaryHandler(),
         new StringMethodHandler(),
         new FieldMethodHandler(),
         new GraphicsHandler(),
-        new GraphicsExtHandler(),   // NEU: DrawTriangle, FillEllipse, RoundedRect, Alpha
-        new InputExtHandler(),      // NEU: GetStickLeft, GetStickRight, GetTouch
-        new DirectoryExtHandler(),  // NEU: GetDirectories, GetEntries
-        new PathHandler(),          // NEU: Path.GetFileName, GetExtension, Combine
-        new SystemExtHandler(),     // NEU: System.GetBattery
-        new StaticClassHandler(),   // NEU: Behandelt statische Klassen wie MinUI, Math, System etc.
+        new GraphicsExtHandler(),
+        new InputExtHandler(),
+        new DirectoryExtHandler(),
+        new PathHandler(),
+        new SystemExtHandler(),
+        new StaticClassHandler(),
         new OwnMethodHandler(),
     };
 
@@ -48,10 +48,6 @@ public sealed class InvocationDispatcher
         _writeExpr = writeExpr;
     }
 
-    /// <summary>
-    /// Dispatcht einen Invocation-Ausdruck an den passenden Handler.
-    /// Gibt null zurück wenn kein Handler greift (Fallback: direkte C-Funktion).
-    /// </summary>
     public string? Dispatch(InvocationExpressionSyntax inv)
     {
         var calleeStr = inv.Expression.ToString();
@@ -89,6 +85,7 @@ public sealed class InvocationDispatcher
         if (_ctx.FieldTypes.TryGetValue(fieldKey, out var ft) && ft == "string")
             return expr;
 
+        // FIX 14: ref/out auf alle anderen Typen → & Prefix
         return "&" + expr;
     }
 }

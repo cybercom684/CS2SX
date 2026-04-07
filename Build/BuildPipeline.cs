@@ -276,6 +276,10 @@ public sealed class BuildPipeline
         sb.AppendLine("#include <string.h>");
         sb.AppendLine("#include <stdio.h>");
         sb.AppendLine("#include <stdbool.h>");
+        // FIX 10: limits.h und float.h für INT_MAX, FLT_MAX etc.
+        sb.AppendLine("#include <limits.h>");
+        sb.AppendLine("#include <float.h>");
+        sb.AppendLine("#include <math.h>");
         sb.AppendLine();
         sb.AppendLine("typedef void (*Action)(void*);");
         sb.AppendLine();
@@ -286,11 +290,6 @@ public sealed class BuildPipeline
         sb.AppendLine("typedef struct ProgressBar ProgressBar;");
         sb.AppendLine("typedef struct SwitchApp  SwitchApp;");
         sb.AppendLine();
-        // Fix 1: Kein #include "switchapp_ext.h" — existiert nicht als separate Datei.
-        //        Inhalt ist direkt in switchapp.h inline gemerged.
-        // Fix 2: Kein explizites "extern PadState g_cs2sx_pad" —
-        //        diese Deklaration liegt in switchapp.h vor SwitchApp_Run.
-        //        switchapp.h wird durch dieses #include bereits eingebunden.
         sb.AppendLine("#include \"switchapp.h\"");
         sb.AppendLine();
         sb.AppendLine("extern char _cs2sx_strbuf[512];");
@@ -350,17 +349,21 @@ public sealed class BuildPipeline
         return null;
     }
 
+    /// <summary>
+    /// FIX 3: _cs2sx_rand_state als globale Variable hinzugefügt.
+    /// </summary>
     private static void WriteSwitchformsC(string path)
     {
         using var w = new StreamWriter(path, append: false, encoding: Encoding.UTF8);
         w.WriteLine("#include \"_forward.h\"");
         w.WriteLine();
-        w.WriteLine("char        _cs2sx_strbuf[512];");
-        w.WriteLine("Framebuffer g_fb;");
-        w.WriteLine("u32*        g_fb_addr   = NULL;");
-        w.WriteLine("int         g_fb_width  = 1280;");
-        w.WriteLine("int         g_fb_height = 720;");
-        w.WriteLine("int         g_gfx_init  = 0;");
-        w.WriteLine("PadState    g_cs2sx_pad;");
+        w.WriteLine("char         _cs2sx_strbuf[512];");
+        w.WriteLine("Framebuffer  g_fb;");
+        w.WriteLine("u32*         g_fb_addr       = NULL;");
+        w.WriteLine("int          g_fb_width      = 1280;");
+        w.WriteLine("int          g_fb_height     = 720;");
+        w.WriteLine("int          g_gfx_init      = 0;");
+        w.WriteLine("PadState     g_cs2sx_pad;");
+        w.WriteLine("unsigned int _cs2sx_rand_state = 12345u;");
     }
 }

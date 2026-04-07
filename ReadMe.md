@@ -112,6 +112,35 @@ public class MyApp : SwitchApp
 }
 ```
 
+### Zufall & Mathematik
+
+```csharp
+public class MyApp : SwitchApp
+{
+    public override void OnInit()
+    {
+        Graphics.Init(1280, 720);
+    }
+
+    public override void OnFrame()
+    {
+        // Random — beide Schreibweisen funktionieren
+        int r1 = Random.Shared.Next(0, 100);
+        int r2 = System.Random.Shared.Next(50);
+        float rf = Random.Shared.NextSingle();
+
+        // Math — beide Schreibweisen funktionieren
+        float d = System.Math.Sqrt(r1 * r1 + r2 * r2);
+        float angle = Math.Atan2(r2, r1);
+        int clamped = Math.Clamp(r1, 0, 10);
+
+        Graphics.FillScreen(Color.Black);
+        Graphics.DrawText(10, 10, "r1=" + r1.ToString(), Color.White, 2);
+        Graphics.DrawText(10, 50, "dist=" + d.ToString(), Color.Cyan, 2);
+    }
+}
+```
+
 ### Multi-File-App mit statischer Hilfsklasse
 
 ```csharp
@@ -179,9 +208,24 @@ public class MyApp : SwitchApp
 | `List<string>` | ✅ | `foreach`, `string.Join`, `string.Split` |
 | `Dictionary<K,V>` | ✅ | `Add`, `Remove`, `ContainsKey`, `TryGetValue`, Indexer |
 | `StringBuilder` | ✅ | `Append`, `AppendLine`, `Clear`, `ToString`, `Insert`, `Replace`, `IndexOf` |
+| `int[]`, `float[]`, `string[]` | ✅ | Stack-Arrays mit Initializer (`new[] { 1, 2, 3 }`) |
+| `int[,]` mehrdimensionale Arrays | ✅ | wird als flaches 1D-Array transpiliert |
 | `StickPos` | ✅ | Analog-Stick-Position (`x`, `y`) |
 | `TouchState` | ✅ | Touch-Screen-Zustand (`count`, `x[]`, `y[]`) |
 | `BatteryInfo` | ✅ | Akkustand (`percent`, `charging`, `connected`) |
+
+### Numerische Konstanten
+
+```csharp
+int max  = int.MaxValue;    // → INT_MAX
+int min  = int.MinValue;    // → INT_MIN
+float fm = float.MaxValue;  // → FLT_MAX
+float fe = float.Epsilon;   // → FLT_EPSILON
+double dm = double.MaxValue;// → DBL_MAX
+float pi = Math.PI;         // → (float)M_PI  (auch MathF.PI → 3.14159265f)
+float e  = Math.E;          // → (float)M_E
+float nan = float.NaN;      // → NAN
+```
 
 ### Nullable-Typen
 
@@ -204,6 +248,7 @@ int v = x ?? 0;            // → (x != NULL ? *x : 0)
 | `PadLeft`, `PadRight` | ✅ |
 | `Split`, `string.Join` | ✅ |
 | `string.Format`, `string.Concat` | ✅ |
+| `"Hello" + variable.ToString()` | ✅ | → `snprintf`-basierte Konkatenation |
 | `IsNullOrEmpty`, `IsNullOrWhiteSpace` | ✅ |
 | String-Interpolation `$"..."` | ✅ |
 
@@ -215,6 +260,95 @@ int v = x ?? 0;            // → (x != NULL ? *x : 0)
 | `int.TryParse(s, out val)` | ✅ |
 | `float.Parse(s)` | ✅ |
 | `float.TryParse(s, out val)` | ✅ |
+
+### ref / out Parameter
+
+```csharp
+public void Swap(ref int a, ref int b)
+{
+    int tmp = a;
+    a = b;
+    b = tmp;
+}
+
+int x = 1, y = 2;
+Swap(ref x, ref y);  // → Swap_impl(&x, &y)
+```
+
+`ref`- und `out`-Parameter werden korrekt als Zeiger transpiliert und beim Aufruf automatisch mit `&` versehen.
+
+---
+
+## Zufall
+
+CS2SX verwendet einen eingebauten LCG-Zufallsgenerator ohne externe Abhängigkeiten.
+
+```csharp
+// Alle folgenden Schreibweisen funktionieren:
+int n  = Random.Shared.Next(0, 100);     // Zahl zwischen 0 und 99
+int n2 = Random.Shared.Next(50);         // Zahl zwischen 0 und 49
+int n3 = System.Random.Shared.Next();    // Beliebige positive Zahl
+float f = Random.Shared.NextSingle();    // Float zwischen 0.0 und 1.0
+
+// Instanz-Aufrufe werden ebenso unterstützt:
+var rng = new Random();
+int n4 = rng.Next(1, 7);                 // Würfelwurf
+```
+
+| Methode | C-Ausgabe |
+|---|---|
+| `Next(min, max)` | `CS2SX_Rand_Next(min, max)` |
+| `Next(max)` | `CS2SX_Rand_NextMax(max)` |
+| `Next()` | `CS2SX_Rand_Next(0, 32767)` |
+| `NextSingle()` / `NextFloat()` | `CS2SX_Rand_Float()` |
+| `NextDouble()` | `(double)CS2SX_Rand_Float()` |
+
+---
+
+## Mathematik
+
+Alle Methoden unterstützen sowohl die Kurzform `Math.X` als auch die vollständig qualifizierte Form `System.Math.X`.
+
+```csharp
+float d    = Math.Sqrt(x * x + y * y);
+float s    = System.Math.Sin(angle);
+int   v    = Math.Clamp(value, 0, 100);
+int   sign = Math.Sign(delta);
+float r    = Math.Round(3.7f);     // → 4.0f
+```
+
+| C#-Methode | C-Ausgabe |
+|---|---|
+| `Math.Abs` / `System.Math.Abs` | `abs(x)` |
+| `Math.Min` / `Max` | `MIN(a,b)` / `MAX(a,b)` |
+| `Math.Clamp` | `CLAMP(v,lo,hi)` |
+| `Math.Sqrt` | `sqrtf(x)` |
+| `Math.Floor` / `Ceiling` / `Round` | `floorf` / `ceilf` / `roundf` |
+| `Math.Sin` / `Cos` / `Tan` | `sinf` / `cosf` / `tanf` |
+| `Math.Atan2` | `atan2f(y,x)` |
+| `Math.Pow` | `powf(x,y)` |
+| `Math.Sign` | `CS2SX_Sign(x)` |
+
+---
+
+## Farben
+
+```csharp
+// Vordefinierte Farben
+Color.Black    Color.White    Color.Red      Color.Green
+Color.Blue     Color.Yellow   Color.Cyan     Color.Magenta
+Color.Gray     Color.Orange   Color.Pink     Color.Purple
+Color.Brown    Color.Teal     Color.Lime     Color.Navy
+Color.Silver   Color.Maroon   Color.Olive
+
+// Eigene Farben
+uint myColor  = Color.RGB(255, 128, 0);
+uint myColorA = Color.RGBA(255, 128, 0, 200);
+
+// Alpha-Variante einer bestehenden Farbe
+uint halfBlack = Color.Black.WithAlpha(128);  // → Color_WithAlpha(COLOR_BLACK, 128)
+uint semiRed   = Color.Red.WithAlpha(200);
+```
 
 ---
 
@@ -260,17 +394,6 @@ Aktivierung: `Graphics.Init(1280, 720)` in `OnInit()` aufrufen.
 | `Graphics.SetPixelAlpha(x, y, color, alpha)` | Pixel mit Alpha (0=transparent, 255=deckend) |
 | `Graphics.FillRectAlpha(x, y, w, h, color, alpha)` | Rechteck mit Alpha |
 | `Graphics.DrawTextAlpha(x, y, text, color, scale, alpha)` | Text mit Alpha |
-
-### Farb-Konstanten
-
-```csharp
-Color.Black   Color.White   Color.Red     Color.Green
-Color.Blue    Color.Yellow  Color.Cyan    Color.Magenta
-Color.Gray    Color.Orange
-
-uint myColor  = Color.RGB(255, 128, 0);
-uint myColorA = Color.RGBA(255, 128, 0, 200);
-```
 
 ---
 
@@ -331,6 +454,13 @@ Graphics.DrawText(10, 10, $"Akku: {battery.percent}%", Color.White, 1);
 | `charging` | `bool` | `true` wenn geladen wird |
 | `connected` | `bool` | `true` wenn Ladegerät angesteckt |
 
+### App beenden
+
+```csharp
+Environment.Exit(0);   // Beendet die App sauber (→ exit(0))
+Environment.Exit(1);   // Beendet mit Fehlercode
+```
+
 ---
 
 ## File I/O (SD-Karte)
@@ -378,11 +508,35 @@ Alle Pfade müssen absolut sein und mit `/switch/` beginnen.
 | `if`, `else if`, `else` | ✅ |
 | `for`, `foreach`, `while`, `do...while` | ✅ |
 | `switch` (Wert und Pattern) | ✅ |
+| `switch` mit `const`-Feldern als case-Labels | ✅ |
 | `break`, `continue`, `return` | ✅ |
 | `try` / `catch` | ✅ (via `setjmp`) |
 | `using` (mit `IDisposable`) | ✅ |
 | `??` Null-Coalescing | ✅ |
 | `??=` Null-Coalescing-Zuweisung | ✅ |
+
+### const-Felder als case-Labels
+
+```csharp
+public class Grid
+{
+    private const int EMPTY = 0;
+    private const int WALL  = 1;
+    private const int FOOD  = 2;
+
+    public void Process(int cell)
+    {
+        switch (cell)
+        {
+            case WALL:  Graphics.SetPixel(x, y, Color.Gray); break;
+            case FOOD:  Graphics.SetPixel(x, y, Color.Green); break;
+            case EMPTY: break;
+        }
+    }
+}
+```
+
+`const`-Felder werden via Roslyn SemanticModel erkannt und zu `ClassName_WALL` etc. aufgelöst, was in C als `static const int` gültig ist.
 
 ---
 
@@ -420,6 +574,7 @@ if (x is not null) { ... }
 | `virtual` / `override` | ✅ | → vtable-Funktionszeiger |
 | Eigene Controls (erbt von `Control`) | ✅ | `Draw()` + `Update()` |
 | `static`-Felder und -Methoden | ✅ | → globale C-Variablen |
+| `static readonly` Array-Felder | ✅ | → `static const T ClassName_Feld[] = {...}` |
 | Auto-Properties `{ get; set; }` | ✅ | → `f_`-prefixed Struct-Felder |
 | Properties mit Body | ✅ | → Getter/Setter-Funktionen |
 | `IDisposable` / `using` | ✅ | → `Dispose()`-Aufruf am Blockende |
@@ -434,6 +589,18 @@ Beide Konventionen werden korrekt transpiliert:
 ```csharp
 private uint _bgColor;       // → self->f_bgColor
 public  uint Background;     // → self->f_Background
+```
+
+### static readonly Array-Felder
+
+```csharp
+public class Snake
+{
+    private static readonly int[] DX = { 1, 0, -1,  0 };
+    private static readonly int[] DY = { 0, 1,  0, -1 };
+}
+// → static const int Snake_DX[] = {1, 0, -1, 0};
+//   static const int Snake_DY[] = {0, 1, 0, -1};
 ```
 
 ### static class
@@ -540,9 +707,12 @@ CS2SX/
 │   │   ├── LibNxHandler.cs
 │   │   ├── InputHandler.cs / InputExtHandler.cs
 │   │   ├── ConsoleHandler.cs
+│   │   ├── EnvironmentHandler.cs      — Environment.Exit, Console.Clear
 │   │   ├── FormHandler.cs
 │   │   ├── GraphicsHandler.cs / GraphicsExtHandler.cs
-│   │   ├── ColorHandler.cs
+│   │   ├── ColorHandler.cs            — Color.RGB, Color.WithAlpha
+│   │   ├── RandomHandler.cs           — Random.Shared.Next, NextSingle
+│   │   ├── MathHandler.cs             — Math.X + System.Math.X
 │   │   ├── FileHandler.cs
 │   │   ├── DirectoryExtHandler.cs
 │   │   ├── PathHandler.cs
@@ -550,10 +720,11 @@ CS2SX/
 │   │   ├── ParseHandler.cs
 │   │   ├── ListHandler.cs / DictionaryHandler.cs
 │   │   ├── StringBuilderHandler.cs / StringMethodHandler.cs
+│   │   ├── StringConcatHandler.cs     — "string" + variable.ToString()
 │   │   ├── FieldMethodHandler.cs
-│   │   ├── StaticClassHandler.cs    — static class Aufrufe (MinUI.DrawHeader)
-│   │   ├── OwnMethodHandler.cs      — eigene Methoden (groß + klein)
-│   │   └── MathHandler.cs
+│   │   ├── StaticClassHandler.cs      — static class Aufrufe (MinUI.DrawHeader)
+│   │   ├── OwnMethodHandler.cs        — eigene Methoden (groß + klein)
+│   │   └── ConstFieldAccessWriter.cs  — const-Felder in switch-Labels
 │   ├── Strategies/
 │   │   ├── SwitchAppConstructorStrategy.cs
 │   │   ├── ControlSubclassConstructorStrategy.cs
@@ -618,6 +789,7 @@ Eintrag in `Core/TypeRegistry.cs` ergänzen — `s_primitives`, `s_controlTypes`
 - **Lambda-Captures** — nur Werttypen und primitive Captures zuverlässig
 - **`is`-Typ-Pattern** — erfordert `TypeName_Is()`-Hilfsfunktion in der Runtime
 - **Statische String-Puffer** — verschachtelte String-Methoden können sich überschreiben
+- **Mehrdimensionale Arrays** — `int[,]` wird als flaches 1D-Array transpiliert, kein echter 2D-Indexer
 
 ---
 
