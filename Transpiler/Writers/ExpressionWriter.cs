@@ -17,9 +17,17 @@ public sealed class ExpressionWriter
         _dispatcher = new InvocationDispatcher(ctx, Write);
     }
 
+    // Datei: Transpiler/Writers/ExpressionWriter.cs
+    // Methode: Write() — vollständig ersetzen
+
     public string Write(SyntaxNode? node)
     {
         if (node == null) return "";
+
+        // nameof(X) früh abfangen bevor InvocationExpressionSyntax greift
+        if (node is InvocationExpressionSyntax nameofInv
+            && nameofInv.Expression.ToString() == "nameof")
+            return WriteNameOf(nameofInv);
 
         return node switch
         {
@@ -42,7 +50,7 @@ public sealed class ExpressionWriter
             ConditionalExpressionSyntax cond => WriteConditional(cond),
             CastExpressionSyntax cast => WriteCast(cast),
             ElementAccessExpressionSyntax elem => WriteElementAccess(elem),
-            DefaultExpressionSyntax => "NULL",
+            DefaultExpressionSyntax def => WriteDefault(def),
             ThisExpressionSyntax => "self",
             SwitchExpressionSyntax switchExpr => PatternMatchingWriter.WriteSwitchExpression(switchExpr, _ctx, Write),
             IsPatternExpressionSyntax isPattern => PatternMatchingWriter.WriteIsPattern(isPattern, _ctx, Write),
@@ -223,6 +231,111 @@ public sealed class ExpressionWriter
         }
 
         return Write(assign.Left) + " " + op + " " + right;
+    }
+
+    // Datei: Transpiler/Writers/ExpressionWriter.cs
+    // Methoden: WriteNameOf() und WriteDefault() — neu hinzufügen
+    // Methode:  WriteInvocation() — vollständig ersetzen
+
+    // ── nameof ────────────────────────────────────────────────────────────────
+
+    private static string WriteNameOf(InvocationExpressionSyntax inv)
+    {
+        // nameof(SomeIdentifier) oder nameof(Some.Member)
+        if (inv.ArgumentList.Arguments.Count == 0)
+            return "\"\"";
+
+        var arg = inv.ArgumentList.Arguments[0].Expression;
+
+        // Letzten Bezeichner nehmen: nameof(Foo.Bar) → "Bar"
+        var name = arg is MemberAccessExpressionSyntax mem
+            ? mem.Name.Identifier.Text
+            : arg.ToString().Trim();
+
+        return "\"" + name + "\"";
+    }
+
+    // ── default ───────────────────────────────────────────────────────────────
+
+    private static string WriteDefault(DefaultExpressionSyntax def)
+    {
+        var csType = def.Type.ToString().Trim();
+        if (TypeRegistry.IsPrimitive(csType) && csType != "string")
+            return "0";
+        if (csType == "bool")
+            return "0";
+        return "NULL";
+    }
+
+    // ── Invocation mit VTable-Dispatch ────────────────────────────────────────
+
+    private string WriteInvocation(InvocationExpressionSyntax inv)
+    {
+        var result = _dispatcher.Dispatch(inv);
+        if (result != null) return result;
+
+        // VTable-Dispatch: obj.Method(args) wenn obj einen bekannten Klassen-Typ hat
+        if (inv.Expression is MemberAccessExpressionSyntax vtableMem)
+        {
+            var vtableResult = TryWriteVirtualCall(vtableMem, inv);
+            if (vtableResult != null) return vtableResult;
+        }
+
+        var args = inv.ArgumentList.Arguments.Select(a => Write(a.Expression)).ToList();
+        var calleeStr = inv.Expression.ToString();
+        return calleeStr + "(" + string.Join(", ", args) + ")";
+    }
+
+    /// <summary>
+    /// Versucht einen Methodenaufruf als virtuellen vtable-Aufruf zu schreiben.
+    ///
+    /// Voraussetzung: Receiver-Typ ist eine bekannte Klasse (nicht Primitive, nicht
+    /// LibNx-Struct) UND der Typ hat eine vtable (wurde als Basisklasse mit
+    /// virtual/abstract Methoden registriert).
+    ///
+    /// obj.Speak()  →  obj->vtable->Speak(obj)
+    /// ((Animal*)dog).Speak()  →  ((Animal*)dog)->vtable->Speak(((Animal*)dog))
+    /// </summary>
+    private string? TryWriteVirtualCall(
+        MemberAccessExpressionSyntax mem,
+        InvocationExpressionSyntax inv)
+    {
+        var methodName = mem.Name.Identifier.Text;
+        var receiverRaw = mem.Expression.ToString();
+        var receiverKey = receiverRaw.TrimStart('_');
+
+        // Receiver-Typ ermitteln
+        string? receiverType = null;
+        _ctx.LocalTypes.TryGetValue(receiverRaw, out receiverType);
+        if (receiverType == null)
+            _ctx.FieldTypes.TryGetValue(receiverKey, out receiverType);
+
+        // Pointer-Typ normalisieren: "Dog*" → "Dog"
+        if (receiverType != null && receiverType.EndsWith("*"))
+            receiverType = receiverType.TrimEnd('*').Trim();
+
+        if (receiverType == null) return null;
+
+        // Primitive, LibNx-Structs und bekannte APIs nicht als vtable-Typen behandeln
+        if (TypeRegistry.IsPrimitive(receiverType)) return null;
+        if (TypeRegistry.IsLibNxStruct(receiverType)) return null;
+        if (TypeRegistry.IsControlType(receiverType)) return null;
+        if (receiverType is "string" or "StringBuilder") return null;
+
+        // Prüfen ob dieser Typ vtable-Methoden hat
+        // Indikator: _vtableTypes Registry (wird von CSharpToC beim Parsen befüllt)
+        if (!_ctx.VTableTypes.Contains(receiverType)) return null;
+
+        var receiver = Write(mem.Expression);
+        var args = inv.ArgumentList.Arguments
+            .Select(a => Write(a.Expression))
+            .ToList();
+
+        var allArgs = new List<string> { receiver };
+        allArgs.AddRange(args);
+
+        return receiver + "->vtable->" + methodName
+             + "(" + string.Join(", ", allArgs) + ")";
     }
 
     private string WriteNullCoalescingAssignment(
@@ -576,15 +689,15 @@ public sealed class ExpressionWriter
         || TypeRegistry.IsLibNxStruct(TypeRegistry.MapType(csType).TrimEnd('*'))
         || csType is "TouchState" or "StickPos" or "BatteryInfo";
 
-    private string WriteInvocation(InvocationExpressionSyntax inv)
-    {
-        var result = _dispatcher.Dispatch(inv);
-        if (result != null) return result;
+    //private string WriteInvocation(InvocationExpressionSyntax inv)
+    //{
+    //    var result = _dispatcher.Dispatch(inv);
+    //    if (result != null) return result;
 
-        var args = inv.ArgumentList.Arguments.Select(a => Write(a.Expression)).ToList();
-        var calleeStr = inv.Expression.ToString();
-        return calleeStr + "(" + string.Join(", ", args) + ")";
-    }
+    //    var args = inv.ArgumentList.Arguments.Select(a => Write(a.Expression)).ToList();
+    //    var calleeStr = inv.Expression.ToString();
+    //    return calleeStr + "(" + string.Join(", ", args) + ")";
+    //}
 
     private string WriteConditional(ConditionalExpressionSyntax cond)
         => "(" + Write(cond.Condition) + " ? " + Write(cond.WhenTrue) + " : " + Write(cond.WhenFalse) + ")";

@@ -1,33 +1,20 @@
-﻿// ============================================================================
-// CS2SX — Build/CheckCommand.cs  (NEU)
-//
-// `cs2sx check <project.csproj>`
-//
-// Transpiliert alle Quelldateien und gibt Warnings aus —
-// OHNE GCC aufzurufen. Ideal für schnelles Feedback während der Entwicklung.
-//
-// Output-Beispiel:
-//
-//   CS2SX check: MyGame/MyGame.csproj
-//   ✓ Game.cs         — 0 warnings
-//   ⚠ Physics.cs      — 2 warnings
-//     Physics.cs(42): foreach über 'bodies' (Typ '') nicht erkannt — ...
-//     Physics.cs(87): Nicht unterstütztes Statement: YieldStatementSyntax
-//   ✓ UI.cs           — 0 warnings
-//   ─────────────────────────────────────────
-//   2 warning(s) in 3 file(s)  [transpile only, no GCC]
-// ============================================================================
+﻿// Datei: Build/CheckCommand.cs  (vollständig ersetzen)
 
 using CS2SX.Core;
 using CS2SX.Logging;
 using CS2SX.Transpiler;
-using Microsoft.CodeAnalysis.CSharp.Syntax;
 
 namespace CS2SX.Build;
 
 public sealed class CheckCommand
 {
     private readonly string _projectDir;
+
+    private static readonly HashSet<string> s_skip =
+        new(StringComparer.OrdinalIgnoreCase)
+        {
+            "SwitchApp.cs", "Input.cs", "_GlobalTypes.cs",
+        };
 
     public CheckCommand(string csprojPath)
     {
@@ -40,9 +27,8 @@ public sealed class CheckCommand
         Console.WriteLine();
         var config = ProjectConfig.Load(_projectDir);
         Console.WriteLine($"CS2SX check: {config.Name}");
-        Console.WriteLine(new string('─', 50));
+        Console.WriteLine(new string('─', 60));
 
-        var reader = new ProjectReader();
         var csprojFiles = Directory.GetFiles(_projectDir, "*.csproj");
         if (csprojFiles.Length == 0)
         {
@@ -50,6 +36,7 @@ public sealed class CheckCommand
             return 1;
         }
 
+        var reader = new ProjectReader();
         reader.Load(csprojFiles[0]);
 
         if (reader.SourceFiles.Count == 0)
@@ -58,96 +45,128 @@ public sealed class CheckCommand
             return 1;
         }
 
-        var transpiledFiles = reader.SourceFiles
-            .Where(f => !ShouldSkip(f))
+        var files = reader.SourceFiles
+            .Where(f => !s_skip.Contains(Path.GetFileName(f)))
             .ToList();
 
-        // Semantic Model aufbauen für bessere Typ-Auflösung
-        var semanticBuilder = new SemanticModelBuilder(transpiledFiles);
+        var semanticBuilder = new SemanticModelBuilder(files);
 
         int totalWarnings = 0;
-        int totalFiles = 0;
-        var fileResults = new List<(string file, int warnings, List<string> messages)>();
+        int totalErrors = 0;
+        var results = new List<FileResult>();
 
-        foreach (var csFile in transpiledFiles)
+        foreach (var csFile in files)
         {
-            totalFiles++;
             var baseName = Path.GetFileName(csFile);
+            var diags = new List<TranspilerDiagnostic>();
 
             try
             {
                 var source = File.ReadAllText(csFile);
                 var semanticModel = semanticBuilder.GetModel(csFile);
 
-                // Transpilieren ohne GCC
-                var transpiler = new CSharpToC(CSharpToC.TranspileMode.Implementation);
-                transpiler.Transpile(source, csFile, semanticModel);
+                var hResult = new CSharpToC(CSharpToC.TranspileMode.HeaderOnly)
+                    .Transpile(source, csFile, semanticModel);
 
-                // Diagnostics sammeln
-                var ctx = transpiler.GetContext();
-                var diags = ctx.Diagnostics.All
-                    .Where(d => d.Severity == DiagnosticSeverity.Warning)
+                var cResult = new CSharpToC(CSharpToC.TranspileMode.Implementation)
+                    .Transpile(source, csFile, semanticModel);
+
+                diags.AddRange(hResult.Diagnostics);
+                diags.AddRange(cResult.Diagnostics);
+
+                diags = diags
+                    .DistinctBy(d => (d.CsFile, d.CsLine, d.Message))
+                    .OrderBy(d => d.CsLine)
                     .ToList();
-
-                var messages = diags
-                    .Select(d =>
-                    {
-                        var loc = d.CsLine > 0 ? $"({d.CsLine})" : "";
-                        var snippet = d.Context != null ? $"\n      {d.Context}" : "";
-                        return $"  {baseName}{loc}: {d.Message}{snippet}";
-                    })
-                    .ToList();
-
-                fileResults.Add((baseName, diags.Count, messages));
-                totalWarnings += diags.Count;
             }
             catch (Exception ex)
             {
-                fileResults.Add((baseName, 1,
-                    new List<string> { $"  {baseName}: FEHLER: {ex.Message}" }));
-                totalWarnings++;
+                diags.Add(new TranspilerDiagnostic(
+                    DiagnosticSeverity.Error, csFile, 0,
+                    "Transpiler-Exception: " + ex.Message, null));
+                totalErrors++;
             }
+
+            var warnings = diags.Count(d => d.Severity == DiagnosticSeverity.Warning);
+            var errors = diags.Count(d => d.Severity == DiagnosticSeverity.Error);
+
+            totalWarnings += warnings;
+            totalErrors += errors;
+
+            results.Add(new FileResult(baseName, warnings, errors, diags));
         }
 
-        // Ausgabe
-        foreach (var (file, warnings, messages) in fileResults)
+        foreach (var r in results)
         {
-            if (warnings == 0)
+            if (r.Warnings == 0 && r.Errors == 0)
             {
-                Console.WriteLine($"  ✓ {file,-40} 0 warnings");
+                Console.WriteLine($"  ✓ {r.FileName,-44} 0 issues");
+                continue;
             }
-            else
+
+            var label = r.Errors > 0
+                ? $"{r.Errors} error(s), {r.Warnings} warning(s)"
+                : $"{r.Warnings} warning(s)";
+
+            Console.ForegroundColor = r.Errors > 0 ? ConsoleColor.Red : ConsoleColor.Yellow;
+            Console.WriteLine($"  ⚠ {r.FileName,-44} {label}");
+            Console.ResetColor();
+
+            foreach (var d in r.Diagnostics)
             {
-                Console.WriteLine($"  ⚠ {file,-40} {warnings} warning(s)");
-                foreach (var msg in messages)
-                    Console.WriteLine(msg);
+                var loc = d.CsLine > 0 ? $"({d.CsLine})" : "";
+                var sym = d.Severity == DiagnosticSeverity.Error ? "✗" : "!";
+                var color = d.Severity == DiagnosticSeverity.Error
+                    ? ConsoleColor.Red
+                    : ConsoleColor.Yellow;
+
+                Console.ForegroundColor = color;
+                Console.Write($"    {sym} ");
+                Console.ResetColor();
+                Console.Write($"{r.FileName}{loc}: ");
+                Console.WriteLine(d.Message);
+
+                if (d.Context != null)
+                {
+                    Console.ForegroundColor = ConsoleColor.DarkGray;
+                    Console.WriteLine($"        {d.Context}");
+                    Console.ResetColor();
+                }
             }
         }
 
-        Console.WriteLine(new string('─', 50));
+        Console.WriteLine(new string('─', 60));
 
-        if (totalWarnings == 0)
+        if (totalErrors > 0)
         {
-            Console.ForegroundColor = ConsoleColor.Green;
-            Console.WriteLine($"✓ Keine Warnings in {totalFiles} Datei(en)  [transpile-only, kein GCC]");
+            Console.ForegroundColor = ConsoleColor.Red;
+            Console.WriteLine($"✗ {totalErrors} error(s), {totalWarnings} warning(s)"
+                + $" in {files.Count} file(s)  [transpile-only, kein GCC]");
+            Console.ResetColor();
+            Console.WriteLine();
+            return 1;
         }
-        else
+
+        if (totalWarnings > 0)
         {
             Console.ForegroundColor = ConsoleColor.Yellow;
-            Console.WriteLine($"⚠ {totalWarnings} Warning(s) in {totalFiles} Datei(en)  [transpile-only, kein GCC]");
+            Console.WriteLine($"⚠ {totalWarnings} warning(s)"
+                + $" in {files.Count} file(s)  [transpile-only, kein GCC]");
+            Console.ResetColor();
+            Console.WriteLine();
+            return 2;
         }
 
+        Console.ForegroundColor = ConsoleColor.Green;
+        Console.WriteLine($"✓ Keine Issues in {files.Count} Datei(en)  [transpile-only, kein GCC]");
         Console.ResetColor();
         Console.WriteLine();
-
-        return totalWarnings > 0 ? 2 : 0; // Exit-Code 2 = Warnings, 0 = clean
+        return 0;
     }
 
-    private static readonly HashSet<string> s_skip = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "SwitchApp.cs", "Input.cs", "_GlobalTypes.cs",
-    };
-
-    private static bool ShouldSkip(string f) =>
-        s_skip.Contains(Path.GetFileName(f));
+    private record FileResult(
+        string FileName,
+        int Warnings,
+        int Errors,
+        List<TranspilerDiagnostic> Diagnostics);
 }

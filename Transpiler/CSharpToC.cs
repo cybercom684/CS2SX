@@ -42,7 +42,7 @@ public sealed class CSharpToC : CSharpSyntaxWalker
 
     // ── Öffentliche API ───────────────────────────────────────────────────
 
-    public string Transpile(
+    public TranspileResult Transpile(
         string csharpSource,
         string? filePath = null,
         SemanticModel? semanticModel = null)
@@ -67,7 +67,10 @@ public sealed class CSharpToC : CSharpSyntaxWalker
             }
 
         Visit(tree.GetRoot());
-        return _ctx.Out.ToString();
+
+        return new TranspileResult(
+            _ctx.Out.ToString(),
+            _ctx.Diagnostics.All);
     }
 
     // ── Namespace ─────────────────────────────────────────────────────────
@@ -115,13 +118,28 @@ public sealed class CSharpToC : CSharpSyntaxWalker
 
         var baseType = _ctx.CurrentBaseType;
         var isSwitchAppChild = baseType == SwitchAppBase;
-
         var isStaticClass = node.Modifiers.Any(m => m.IsKind(SyntaxKind.StaticKeyword));
 
         if (!string.IsNullOrEmpty(baseType) && baseType != SwitchAppBase)
             LoadBaseFields(baseType);
 
         CollectFieldTypes(node);
+
+        // VTable-Registry befüllen:
+        // Klasse hat vtable wenn sie virtual/abstract Methoden deklariert.
+        // Klasse ist vtable-Empfänger wenn sie von einer solchen erbt.
+        if (VTableBuilder.HasVirtualMethods(node))
+            _ctx.VTableTypes.Add(node.Identifier.Text);
+
+        // Basisklasse mit vtable → abgeleitete Klasse ebenfalls registrieren
+        // damit Aufrufe über Basis-Pointer korrekt dispatcht werden.
+        if (!string.IsNullOrEmpty(baseType)
+            && _ctx.VTableTypes.Contains(baseType)
+            && !IsControlSubclass(baseType)
+            && baseType != SwitchAppBase)
+        {
+            _ctx.VTableTypes.Add(node.Identifier.Text);
+        }
 
         if (_mode == TranspileMode.HeaderOnly)
         {
@@ -159,6 +177,7 @@ public sealed class CSharpToC : CSharpSyntaxWalker
 
         _ctx.ClearClassContext();
     }
+
 
     public override void VisitStructDeclaration(StructDeclarationSyntax node)
     {

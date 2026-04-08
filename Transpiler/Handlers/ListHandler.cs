@@ -1,3 +1,5 @@
+// Datei: Transpiler/Handlers/ListHandler.cs  — vollständig ersetzen
+
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using CS2SX.Core;
 
@@ -8,6 +10,7 @@ public sealed class ListHandler : InvocationHandlerBase
     private static readonly HashSet<string> s_methods = new(StringComparer.Ordinal)
     {
         "Add", "Clear", "RemoveAt", "Remove", "Contains", "Insert",
+        "Sort", "IndexOf", "Reverse",
     };
 
     public override bool TryHandle(InvocationExpressionSyntax inv, string calleeStr,
@@ -34,6 +37,9 @@ public sealed class ListHandler : InvocationHandlerBase
             "Remove" => cList + "_RemoveValue(" + listExpr + ", " + JoinArgs(args) + ")",
             "Contains" => cList + "_Contains(" + listExpr + ", " + JoinArgs(args) + ")",
             "Insert" => cList + "_Insert(" + listExpr + ", " + JoinArgs(args) + ")",
+            "Sort" => cList + "_Sort(" + listExpr + ")",
+            "Reverse" => cList + "_Reverse(" + listExpr + ")",
+            "IndexOf" => cList + "_IndexOf(" + listExpr + ", " + JoinArgs(args) + ")",
             _ => listExpr + "->" + method + "(" + JoinArgs(args) + ")",
         };
         return true;

@@ -1,3 +1,5 @@
+// Datei: Core/TranspilerContext.cs  — vollständig ersetzen
+
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 
@@ -21,11 +23,6 @@ public sealed class TranspilerContext
 
     // ── Diagnose-System ───────────────────────────────────────────────────────
 
-    /// <summary>
-    /// Zentraler Diagnose-Collector.
-    /// StatementWriter/ExpressionWriter rufen Diagnostics.Warn() auf wenn
-    /// sie auf nicht unterstützte Syntax stoßen.
-    /// </summary>
     public DiagnosticReporter Diagnostics { get; } = new();
 
     // ── Klassen-Kontext ───────────────────────────────────────────────────────
@@ -49,21 +46,30 @@ public sealed class TranspilerContext
     // ── Methoden-Kontext ──────────────────────────────────────────────────────
 
     public Dictionary<string, string> LocalTypes { get; } = new(StringComparer.Ordinal);
-
-    // FIX 1: Array-Längen für foreach über rohe T[] Arrays.
     public Dictionary<string, string> ArrayLengths { get; } = new(StringComparer.Ordinal);
 
-    // FIX 4: Value-type struct Namen.
+    // ── Value-type und VTable Registries ──────────────────────────────────────
+
+    /// <summary>
+    /// Bekannte C# value-type struct Namen (für Compound-Literal Erzeugung).
+    /// </summary>
     public HashSet<string> ValueTypeStructs { get; } = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// Klassen-Typen die eine vtable haben (haben virtual/abstract Methoden).
+    /// Wird von CSharpToC beim Parsen von Klassen-Deklarationen befüllt.
+    /// ExpressionWriter nutzt dies um virtuelle Aufrufe korrekt zu dispatchen.
+    /// </summary>
+    public HashSet<string> VTableTypes { get; } = new(StringComparer.Ordinal);
 
     // ── Indentierung ──────────────────────────────────────────────────────────
 
     private int _indent;
-    public string Tab => new string(' ', _indent * 4);
+    public string Tab => new(' ', _indent * 4);
     public void Indent() => _indent++;
     public void Dedent() => _indent--;
 
-    // ── Zähler ───────────────────────────────────────────────────────────────
+    // ── Zähler ────────────────────────────────────────────────────────────────
 
     public int TmpCounter
     {
@@ -81,14 +87,7 @@ public sealed class TranspilerContext
     {
         get; set;
     }
-
-    /// <summary>
-    /// Aktuell erzeugte C-Ausgabe-Zeile (für Source-Map).
-    /// Wird von WriteLine() inkrementiert.
-    /// </summary>
     public int CurrentCLine { get; private set; } = 1;
-
-    /// <summary>Name der aktuellen C-Ausgabedatei (z.B. "Game.c").</summary>
     public string CurrentCFile { get; set; } = string.Empty;
 
     // ── Konstruktor ───────────────────────────────────────────────────────────
@@ -108,10 +107,6 @@ public sealed class TranspilerContext
 
     public void WriteRaw(string s) => Out.Write(s);
 
-    /// <summary>
-    /// Schreibt eine Zeile und registriert gleichzeitig das Source-Mapping
-    /// für diese generierte C-Zeile.
-    /// </summary>
     public void WriteLineWithMapping(string line, int csLine, string csSnippet)
     {
         if (!string.IsNullOrEmpty(CurrentCFile) && !string.IsNullOrEmpty(CurrentFile))
@@ -141,6 +136,8 @@ public sealed class TranspilerContext
         MethodReturnTypes.Clear();
         PropertyTypes.Clear();
         EnumMembers.Clear();
+        // VTableTypes und ValueTypeStructs bewusst NICHT löschen —
+        // sie sind global für die gesamte Compilation gültig.
         ClearMethodContext();
     }
 
@@ -174,11 +171,9 @@ public sealed class TranspilerContext
 
     // ── Diagnose-Shortcuts ────────────────────────────────────────────────────
 
-    /// <summary>Warning mit aktueller Quell-Location emittieren.</summary>
     public void Warn(string message, string? context = null) =>
         Diagnostics.Warn(CurrentFile, CurrentLine, message, context);
 
-    /// <summary>Warning für einen konkreten SyntaxNode.</summary>
     public void Warn(SyntaxNode node, string message) =>
         Diagnostics.Warn(node, CurrentFile, message);
 

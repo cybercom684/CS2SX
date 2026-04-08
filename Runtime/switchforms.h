@@ -624,13 +624,26 @@ static inline void List_##T##_Clear(List_##T* l)       { if (l) l->count = 0; } 
 static inline void List_##T##_Free(List_##T* l)        { if (l) { free(l->data); free(l); } }      \
 static inline int  List_##T##_Contains(List_##T* l, T val) {                                       \
     for (int _i = 0; _i < l->count; _i++) { if (l->data[_i] == val) return 1; } return 0; }       \
+static inline int  List_##T##_IndexOf(List_##T* l, T val) {                                        \
+    for (int _i = 0; _i < l->count; _i++) { if (l->data[_i] == val) return _i; } return -1; }     \
 static inline void List_##T##_Remove(List_##T* l, int idx) {                                       \
     if (!l || idx < 0 || idx >= l->count) return;                                                  \
     for (int _i = idx; _i < l->count - 1; _i++) l->data[_i] = l->data[_i + 1];                   \
     l->count--; }                                                                                   \
 static inline void List_##T##_RemoveValue(List_##T* l, T val) {                                    \
     for (int _i = 0; _i < l->count; _i++) {                                                        \
-        if (l->data[_i] == val) { List_##T##_Remove(l, _i); return; } } }
+        if (l->data[_i] == val) { List_##T##_Remove(l, _i); return; } } }                         \
+static inline void List_##T##_Reverse(List_##T* l) {                                               \
+    if (!l || l->count < 2) return;                                                                 \
+    int _lo = 0, _hi = l->count - 1;                                                               \
+    while (_lo < _hi) { T _t = l->data[_lo]; l->data[_lo] = l->data[_hi];                         \
+        l->data[_hi] = _t; _lo++; _hi--; } }                                                       \
+static inline void List_##T##_Sort(List_##T* l) {                                                  \
+    if (!l || l->count < 2) return;                                                                 \
+    for (int _i = 1; _i < l->count; _i++) {                                                        \
+        T _key = l->data[_i]; int _j = _i - 1;                                                     \
+        while (_j >= 0 && l->data[_j] > _key) { l->data[_j+1] = l->data[_j]; _j--; }             \
+        l->data[_j+1] = _key; } }
 
 CS2SX_LIST_DEFINE(int)
 CS2SX_LIST_DEFINE(float)
@@ -684,6 +697,42 @@ static inline int List_str_Contains(List_str* l, const char* val)
     for (int _i = 0; _i < l->count; _i++)
         if (strcmp(l->data[_i], val) == 0) return 1;
     return 0;
+}
+static inline int List_str_IndexOf(List_str* l, const char* val)
+{
+    for (int _i = 0; _i < l->count; _i++)
+        if (strcmp(l->data[_i], val) == 0) return _i;
+    return -1;
+}
+
+static inline void List_str_Reverse(List_str* l)
+{
+    if (!l || l->count < 2) return;
+    int lo = 0, hi = l->count - 1;
+    while (lo < hi)
+    {
+        const char* t = l->data[lo];
+        l->data[lo] = l->data[hi];
+        l->data[hi] = t;
+        lo++; hi--;
+    }
+}
+
+static inline void List_str_Sort(List_str* l)
+{
+    if (!l || l->count < 2) return;
+    // Insertion sort — stabil, kein qsort-Callback nötig
+    for (int i = 1; i < l->count; i++)
+    {
+        const char* key = l->data[i];
+        int j = i - 1;
+        while (j >= 0 && strcmp(l->data[j], key) > 0)
+        {
+            l->data[j + 1] = l->data[j];
+            j--;
+        }
+        l->data[j + 1] = key;
+    }
 }
 
 // ── String_Join / String_Split ────────────────────────────────────────────────
@@ -946,6 +995,43 @@ static inline const char* CS2SX_File_ReadAllText(const char* path)
     fsFileClose(&f);
     fsFsClose(&fs);
     return _file_buf;
+}
+static inline List_str* CS2SX_File_ReadAllLines(const char* path)
+{
+    List_str* result = List_str_New();
+    if (!result) return result;
+
+    const char* content = CS2SX_File_ReadAllText(path);
+    if (!content || content[0] == '\0') return result;
+
+    // Statischen Puffer in beschreibbaren Speicher kopieren
+    static char _lines_buf[CS2SX_FILE_BUF_SIZE];
+    strncpy(_lines_buf, content, CS2SX_FILE_BUF_SIZE - 1);
+    _lines_buf[CS2SX_FILE_BUF_SIZE - 1] = '\0';
+
+    static char _line_ptrs[256][256];
+    int line_count = 0;
+
+    char* cur = _lines_buf;
+    while (*cur && line_count < 256)
+    {
+        char* end = cur;
+        while (*end && *end != '\n') end++;
+
+        int len = (int)(end - cur);
+        // \r am Zeilenende entfernen
+        if (len > 0 && cur[len - 1] == '\r') len--;
+        if (len >= 256) len = 255;
+
+        memcpy(_line_ptrs[line_count], cur, len);
+        _line_ptrs[line_count][len] = '\0';
+        List_str_Add(result, _line_ptrs[line_count]);
+        line_count++;
+
+        cur = (*end == '\n') ? end + 1 : end;
+    }
+
+    return result;
 }
 
 /// Schreibt einen String in eine Datei auf der SD-Karte.

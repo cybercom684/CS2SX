@@ -1,4 +1,5 @@
-﻿using CS2SX.Logging;
+﻿using CS2SX.Core;
+using CS2SX.Logging;
 using CS2SX.Transpiler;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using System.Text;
@@ -148,24 +149,35 @@ public sealed class BuildPipeline
                 var semanticModel = semanticBuilder.GetModel(csFile);
 
                 var hTranspiler = new CSharpToC(CSharpToC.TranspileMode.HeaderOnly);
+                var hResult = hTranspiler.Transpile(source, csFile, semanticModel);
                 var hContent = WrapHeader(baseName,
-                    "#include \"_forward.h\"\n\n"
-                    + hTranspiler.Transpile(source, csFile, semanticModel));
+                    "#include \"_forward.h\"\n\n" + hResult.Code);
                 File.WriteAllText(hPath, hContent);
 
                 var allIncludes = string.Join("\n",
                     allHeaders.Select(h => $"#include \"{h}\""));
 
                 var cTranspiler = new CSharpToC(CSharpToC.TranspileMode.Implementation);
+                var cResult = cTranspiler.Transpile(source, csFile, semanticModel);
                 var cContent = "#include <stdlib.h>\n"
-                                + allIncludes + "\n\n"
-                                + cTranspiler.Transpile(source, csFile, semanticModel);
+                             + allIncludes + "\n\n"
+                             + cResult.Code;
                 File.WriteAllText(cPath, cContent);
 
+                var allDiags = hResult.Diagnostics
+                    .Concat(cResult.Diagnostics)
+                    .DistinctBy(d => (d.CsFile, d.CsLine, d.Message))
+                    .OrderBy(d => d.CsLine)
+                    .ToList();
 
-                // NEU: Warnings aus Transpiler sammeln und ausgeben
-                var fileWarnings = cTranspiler.GetContext().Diagnostics.Flush();
-                warnings += fileWarnings;
+                foreach (var d in allDiags.Where(d => d.Severity == DiagnosticSeverity.Warning))
+                    Log.Warning($"{Path.GetFileName(d.CsFile ?? "")}({d.CsLine}): {d.Message}"
+                        + (d.Context != null ? $"\n  code: {d.Context}" : ""));
+
+                foreach (var d in allDiags.Where(d => d.Severity == DiagnosticSeverity.Error))
+                    Log.Error($"{Path.GetFileName(d.CsFile ?? "")}({d.CsLine}): {d.Message}");
+
+                warnings += allDiags.Count(d => d.Severity == DiagnosticSeverity.Warning);
 
                 cFiles.Add(cPath);
                 transpiled++;

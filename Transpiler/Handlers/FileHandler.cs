@@ -1,4 +1,6 @@
-﻿using Microsoft.CodeAnalysis.CSharp.Syntax;
+﻿// Datei: Transpiler/Handlers/FileHandler.cs  — vollständig ersetzen
+
+using Microsoft.CodeAnalysis.CSharp.Syntax;
 using CS2SX.Core;
 
 namespace CS2SX.Transpiler.Handlers;
@@ -8,13 +10,13 @@ public sealed class FileHandler : InvocationHandlerBase
     private static readonly Dictionary<string, string> s_map =
         new(StringComparer.Ordinal)
         {
-            // File — kurz und mit Namespace
             ["File.ReadAllText"] = "CS2SX_File_ReadAllText",
             ["File.WriteAllText"] = "CS2SX_File_WriteAllText",
             ["File.AppendAllText"] = "CS2SX_File_AppendAllText",
             ["File.Exists"] = "CS2SX_File_Exists",
             ["File.Delete"] = "CS2SX_File_Delete",
             ["File.Copy"] = "CS2SX_File_Copy",
+            ["File.ReadAllLines"] = "CS2SX_File_ReadAllLines",
 
             ["CS2SX.Switch.File.ReadAllText"] = "CS2SX_File_ReadAllText",
             ["CS2SX.Switch.File.WriteAllText"] = "CS2SX_File_WriteAllText",
@@ -22,8 +24,8 @@ public sealed class FileHandler : InvocationHandlerBase
             ["CS2SX.Switch.File.Exists"] = "CS2SX_File_Exists",
             ["CS2SX.Switch.File.Delete"] = "CS2SX_File_Delete",
             ["CS2SX.Switch.File.Copy"] = "CS2SX_File_Copy",
+            ["CS2SX.Switch.File.ReadAllLines"] = "CS2SX_File_ReadAllLines",
 
-            // Directory — kurz und mit Namespace
             ["Directory.Exists"] = "CS2SX_Dir_Exists",
             ["Directory.CreateDirectory"] = "CS2SX_Dir_Create",
             ["Directory.Delete"] = "CS2SX_Dir_Delete",
@@ -37,7 +39,6 @@ public sealed class FileHandler : InvocationHandlerBase
             ["CS2SX.Switch.Directory.Delete"] = "CS2SX_Dir_Delete",
             ["CS2SX.Switch.Directory.GetFiles"] = "CS2SX_Dir_GetFiles",
             ["CS2SX.Switch.Directory.GetCurrentDirectory"] = "CS2SX_Dir_GetCurrent",
-
         };
 
     public override bool TryHandle(InvocationExpressionSyntax inv, string calleeStr,
