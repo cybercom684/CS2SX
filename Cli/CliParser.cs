@@ -8,6 +8,7 @@ public static class CliParser
             ["new"] = ParseNew,
             ["build"] = ParseBuild,
             ["genstubs"] = ParseGenstubs,
+            ["check"] = ParseCheck,
         };
 
     public static CliArgs Parse(string[] args)
@@ -39,5 +40,11 @@ public static class CliParser
         Command = "genstubs",
         LibnxInclude = args.ElementAtOrDefault(0) ?? "C:/devkitPro/libnx/include",
         StubOutput = args.ElementAtOrDefault(1) ?? "./LibNXStubs",
+    };
+
+    private static CliArgs ParseCheck(string[] args) => new()
+    {
+        Command = "check",
+        CheckTarget = args.ElementAtOrDefault(0) ?? string.Empty,
     };
 }

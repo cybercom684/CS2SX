@@ -31,6 +31,14 @@ switch (cli.Command)
         new StubGenerator().Generate(cli.LibnxInclude, cli.StubOutput);
         return 0;
 
+    case "check":
+        if (string.IsNullOrEmpty(cli.CheckTarget))
+        {
+            Console.Error.WriteLine("Usage: cs2sx check <project.csproj>");
+            return 1;
+        }
+        return new CheckCommand(cli.CheckTarget).Run();
+
     case "":
         return Usage();
 

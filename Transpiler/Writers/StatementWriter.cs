@@ -61,14 +61,14 @@ public sealed class StatementWriter
     {
         var declType = local.Declaration.Type.ToString().Trim();
 
-        // FIX 4: Mehrdimensionale Arrays (int[,]) → flaches Array mit Index-Berechnung
+        // FIX 4: Mehrdimensionale Arrays (int[,]) → flaches Array
         if (declType.Contains(",") && declType.Contains("[") && declType.Contains("]"))
         {
             WriteMultiDimArray(local, declType);
             return;
         }
 
-        // FIX 5+11: string[] / T[] mit Initializer → Stack-Array
+        // FIX 5+11: T[] mit Initializer → Stack-Array
         if (declType.EndsWith("[]") && local.Declaration.Variables.Count == 1)
         {
             var v = local.Declaration.Variables[0];
@@ -98,7 +98,7 @@ public sealed class StatementWriter
                 continue;
             }
 
-            // string mit new string(char, count) → char buf[count+1]
+            // string mit new string(char, count) → char buf[N]
             if (declType is "string" or "var"
                 && v.Initializer?.Value is ObjectCreationExpressionSyntax strNew
                 && strNew.Type.ToString() == "string"
@@ -142,6 +142,14 @@ public sealed class StatementWriter
                 continue;
             }
 
+            // FIX 1: T[] ohne Initializer aber MIT new T[N] → Stack oder Heap
+            if (declType.EndsWith("[]")
+                && v.Initializer?.Value is ArrayCreationExpressionSyntax arrCreate)
+            {
+                WriteArrayAlloc(v, declType, arrCreate);
+                continue;
+            }
+
             var (cTypeFinal, isPtr) = InferLocalType(declType, v);
             if (string.IsNullOrWhiteSpace(cTypeFinal)) cTypeFinal = "int";
 
@@ -157,7 +165,57 @@ public sealed class StatementWriter
         }
     }
 
-    // FIX 4: int[,] grid = { {1,2}, {3,4} }  →  int grid[2*2] = {1,2,3,4};
+    // FIX 1: T[] mit new T[N] → Array-Allokation + Länge in ArrayLengths tracken
+    private void WriteArrayAlloc(VariableDeclaratorSyntax v, string declType,
+        ArrayCreationExpressionSyntax arrCreate)
+    {
+        var baseType = declType[..^2].Trim();
+        var varName = v.Identifier.Text;
+        var cType = baseType == "string" ? "const char*" : TypeRegistry.MapType(baseType);
+
+        if (arrCreate.Type.RankSpecifiers.Count > 0
+            && arrCreate.Type.RankSpecifiers[0].Sizes.Count > 0
+            && arrCreate.Type.RankSpecifiers[0].Sizes[0] is not OmittedArraySizeExpressionSyntax)
+        {
+            var sizeExpr = _expr.Write(arrCreate.Type.RankSpecifiers[0].Sizes[0]);
+
+            if (IsConstantSizeExpr(arrCreate.Type.RankSpecifiers[0].Sizes[0]))
+            {
+                // Konstante Größe → Stack-Array
+                _ctx.WriteLine(cType + " " + varName + "[" + sizeExpr + "];");
+                _ctx.WriteLine("memset(" + varName + ", 0, sizeof(" + varName + "));");
+            }
+            else
+            {
+                // Dynamische Größe → calloc
+                _ctx.WriteLine(cType + "* " + varName
+                    + " = (" + cType + "*)calloc(" + sizeExpr + ", sizeof(" + cType + "));");
+            }
+            // FIX 1: Länge tracken
+            _ctx.ArrayLengths[varName] = sizeExpr;
+        }
+        else if (arrCreate.Initializer != null)
+        {
+            var elems = arrCreate.Initializer.Expressions
+                .Select(e => _expr.Write(e)).ToList();
+            _ctx.WriteLine(cType + " " + varName + "[] = { " + string.Join(", ", elems) + " };");
+            _ctx.ArrayLengths[varName] = elems.Count.ToString();
+        }
+        else
+        {
+            _ctx.WriteLine(cType + "* " + varName + " = NULL; /* empty array */");
+        }
+
+        _ctx.LocalTypes[varName] = declType;
+    }
+
+    private static bool IsConstantSizeExpr(SyntaxNode node) =>
+        node is LiteralExpressionSyntax
+        || (node is BinaryExpressionSyntax bin
+            && IsConstantSizeExpr(bin.Left)
+            && IsConstantSizeExpr(bin.Right));
+
+    // FIX 4: int[,] grid = { {1,2}, {3,4} } → int grid[] = {1,2,3,4}
     private void WriteMultiDimArray(LocalDeclarationStatementSyntax local, string declType)
     {
         var baseType = declType[..declType.IndexOf('[')].Trim();
@@ -168,7 +226,6 @@ public sealed class StatementWriter
             if (v.Initializer?.Value is ArrayCreationExpressionSyntax arr
                 && arr.Initializer != null)
             {
-                // Flache Liste aller Elemente aufbauen
                 var flatElems = new List<string>();
                 foreach (var row in arr.Initializer.Expressions)
                 {
@@ -183,10 +240,10 @@ public sealed class StatementWriter
                 }
                 _ctx.WriteLine(cType + " " + v.Identifier + "[] = { "
                     + string.Join(", ", flatElems) + " };");
+                _ctx.ArrayLengths[v.Identifier.Text] = flatElems.Count.ToString();
             }
             else
             {
-                // Größe aus Rankspecifiers
                 var dims = "";
                 if (arr_RankSizes(v, out var sizes) && sizes.Count > 0)
                     dims = string.Join("*", sizes);
@@ -212,7 +269,7 @@ public sealed class StatementWriter
         return sizes.Count > 0;
     }
 
-    // FIX 5+11: T[] var = { ... } oder T[] var = new T[] { ... } → stack array
+    // FIX 5+11: T[] var = { ... } → stack array + ArrayLengths tracken
     private void WriteArrayWithInitializer(VariableDeclaratorSyntax v, string declType)
     {
         var baseType = declType[..^2].Trim();
@@ -241,22 +298,18 @@ public sealed class StatementWriter
 
         if (elems != null && cType != null)
         {
-            // string[] → const char*[]
             if (baseType == "string")
-            {
-                _ctx.WriteLine("const char* " + varName + "[] = { "
-                    + string.Join(", ", elems) + " };");
-            }
+                _ctx.WriteLine("const char* " + varName + "[] = { " + string.Join(", ", elems) + " };");
             else
-            {
-                _ctx.WriteLine(cType + " " + varName + "[] = { "
-                    + string.Join(", ", elems) + " };");
-            }
+                _ctx.WriteLine(cType + " " + varName + "[] = { " + string.Join(", ", elems) + " };");
+
+            // FIX 1: Länge tracken
+            _ctx.ArrayLengths[varName] = elems.Count.ToString();
             _ctx.LocalTypes[varName] = declType;
             return;
         }
 
-        // Fallback: malloc
+        // Fallback
         var (cTypeFb, isPtr) = InferLocalType(declType, v);
         var ptr = isPtr ? "*" : "";
         var init2 = v.Initializer != null ? " = " + _expr.Write(v.Initializer.Value) : "";
@@ -270,7 +323,6 @@ public sealed class StatementWriter
     {
         if (hintBaseType != "var") return TypeRegistry.MapType(hintBaseType);
         if (exprs.Count == 0) return "int";
-
         var first = exprs[0];
         if (first is LiteralExpressionSyntax lit)
         {
@@ -313,7 +365,6 @@ public sealed class StatementWriter
         if (declType is "var" or "var?")
             return InferVarType(v);
 
-        // FIX 12: bool → int
         if (declType == "bool") return ("int", false);
 
         var cType = TypeRegistry.MapType(declType);
@@ -331,16 +382,12 @@ public sealed class StatementWriter
 
         if (v.Initializer?.Value is InvocationExpressionSyntax inv)
         {
-            if (IsSplitCall(inv))
-                return ("List_str", true);
+            if (IsSplitCall(inv)) return ("List_str", true);
 
             var calleeStr = inv.Expression.ToString();
 
-            if (calleeStr is "Directory.GetFiles"
-                          or "CS2SX_Dir_GetFiles"
-                          or "String_Split"
-                          or "string.Split"
-                          or "String.Split")
+            if (calleeStr is "Directory.GetFiles" or "CS2SX_Dir_GetFiles"
+                          or "String_Split" or "string.Split" or "String.Split")
                 return ("List_str", true);
 
             if (calleeStr is "string.Format" or "String.Format"
@@ -368,7 +415,6 @@ public sealed class StatementWriter
                             || TypeRegistry.IsList(retType)
                             || TypeRegistry.IsDictionary(retType)
                             || TypeRegistry.IsControlType(retType);
-
                 var cMapped = TypeRegistry.MapType(retType).TrimEnd('*');
                 return (cMapped, needsPtr);
             }
@@ -381,9 +427,7 @@ public sealed class StatementWriter
 
             if (TypeRegistry.IsList(inferred) || TypeRegistry.IsDictionary(inferred)
                 || TypeRegistry.IsStringBuilder(inferred))
-            {
                 return (TypeRegistry.MapType(inferred).TrimEnd('*'), true);
-            }
 
             if (inferred.EndsWith("*"))
                 return (inferred.TrimEnd('*'), true);
@@ -405,8 +449,7 @@ public sealed class StatementWriter
         return (ct, false);
     }
 
-    private static bool IsSplitCall(InvocationExpressionSyntax inv) =>
-        IsListStrCall(inv);
+    private static bool IsSplitCall(InvocationExpressionSyntax inv) => IsListStrCall(inv);
 
     private static bool IsListStrCall(InvocationExpressionSyntax inv)
     {
@@ -560,7 +603,6 @@ public sealed class StatementWriter
                 var ie = v.Initializer != null
                     ? " = " + _expr.Write(v.Initializer.Value)
                     : "";
-                // FIX 13: Schleifenvariable in LocalTypes registrieren BEVOR Body geschrieben wird
                 _ctx.LocalTypes[v.Identifier.Text] = forStmt.Declaration.Type.ToString().Trim();
                 return v.Identifier + ie;
             }));
@@ -578,7 +620,7 @@ public sealed class StatementWriter
         WriteBlockOrStmt(forStmt.Statement);
     }
 
-    // ── ForEach ───────────────────────────────────────────────────────────────
+    // ── ForEach — FIX 1: rohe Arrays korrekt unterstützen ────────────────────
 
     private void WriteForEach(ForEachStatementSyntax forEach)
     {
@@ -595,15 +637,25 @@ public sealed class StatementWriter
         bool isList = TypeRegistry.IsList(colType);
         bool isString = colType is "string" or "char[]";
 
-        var lenExpr = isList ? colExpr + "->count"
-                    : isString ? "strlen(" + colExpr + ")"
-                    : colExpr + "_count";
+        // FIX 1: Rohe C-Arrays (int[], float[], string[], T[])
+        bool isRawArray = colType.EndsWith("[]") && !isList;
+
+        string lenExpr;
+        if (isList)
+            lenExpr = colExpr + "->count";
+        else if (isString)
+            lenExpr = "strlen(" + colExpr + ")";
+        else if (isRawArray)
+            lenExpr = ResolveArrayLength(colRaw, colKey, colExpr);
+        else
+            lenExpr = colExpr + "_count"; // Fallback für unbekannte Typen
 
         var rawElemType = forEach.Type.ToString().Trim();
         if (rawElemType == "var")
         {
             if (isList) rawElemType = TypeRegistry.GetListInnerType(colType) ?? "int";
             else if (isString) rawElemType = "char";
+            else if (isRawArray) rawElemType = colType[..^2].Trim(); // "int[]" → "int"
         }
 
         _ctx.WriteLine("for (int " + idxVar + " = 0; "
@@ -612,7 +664,8 @@ public sealed class StatementWriter
         _ctx.WriteLine("{");
         _ctx.Indent();
 
-        WriteForEachLoopVar(varName, idxVar, rawElemType, colExpr, colType, isList, isString);
+        WriteForEachLoopVar(varName, idxVar, rawElemType, colExpr, colType,
+            isList, isString, isRawArray);
         _ctx.LocalTypes[varName] = rawElemType;
 
         var bodyStmts = forEach.Statement is BlockSyntax b
@@ -626,14 +679,44 @@ public sealed class StatementWriter
         _ctx.WriteLine("}");
     }
 
+    // FIX 1: Array-Länge ermitteln
+    // 1. ArrayLengths-Dict (befüllt beim Deklarieren)
+    // 2. sizeof-Trick für lokale Stack-Arrays
+    // 3. Fallback
+    private string ResolveArrayLength(string colRaw, string colKey, string colExpr)
+    {
+        if (_ctx.ArrayLengths.TryGetValue(colRaw, out var knownLen))
+            return knownLen;
+        if (_ctx.ArrayLengths.TryGetValue(colKey, out var knownLenField))
+            return knownLenField;
+
+        // sizeof-Trick funktioniert nur für lokale Stack-Arrays (nicht Pointer)
+        if (_ctx.LocalTypes.ContainsKey(colRaw))
+            return "(sizeof(" + colExpr + ") / sizeof(" + colExpr + "[0]))";
+
+        return colExpr + "_count";
+    }
+
     private void WriteForEachLoopVar(
         string varName, string idxVar,
         string rawElemType, string colExpr, string colType,
-        bool isList, bool isString)
+        bool isList, bool isString, bool isRawArray)
     {
         if (isString)
         {
             _ctx.WriteLine("char " + varName + " = " + colExpr + "[" + idxVar + "];");
+            return;
+        }
+
+        // FIX 1: Direkte Array-Indizierung für rohe Arrays
+        if (isRawArray)
+        {
+            var cType = TypeRegistry.MapType(rawElemType);
+            // String-Array → const char*
+            if (rawElemType == "string")
+                _ctx.WriteLine("const char* " + varName + " = " + colExpr + "[" + idxVar + "];");
+            else
+                _ctx.WriteLine(cType + " " + varName + " = " + colExpr + "[" + idxVar + "];");
             return;
         }
 

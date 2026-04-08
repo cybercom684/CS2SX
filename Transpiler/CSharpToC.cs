@@ -55,7 +55,7 @@ public sealed class CSharpToC : CSharpSyntaxWalker
             ?? CSharpSyntaxTree.ParseText(csharpSource);
 
         var diags = tree.GetDiagnostics()
-            .Where(d => d.Severity == DiagnosticSeverity.Error)
+            .Where(d => d.Severity == Microsoft.CodeAnalysis.DiagnosticSeverity.Error)
             .ToList();
 
         if (diags.Count > 0)
@@ -159,6 +159,46 @@ public sealed class CSharpToC : CSharpSyntaxWalker
 
         _ctx.ClearClassContext();
     }
+
+    public override void VisitStructDeclaration(StructDeclarationSyntax node)
+    {
+        var structName = node.Identifier.Text;
+
+        // Struct global registrieren — gilt für alle nachfolgenden Methoden/Klassen
+        _ctx.ValueTypeStructs.Add(structName);
+
+        if (_mode == TranspileMode.HeaderOnly)
+        {
+            _ctx.Out.WriteLine("typedef struct " + structName + " " + structName + ";");
+            var sw = new StructWriter(_ctx, _exprWriter, _stmtWriter);
+            sw.WriteHeaderDecl(node);
+        }
+        else
+        {
+            _ctx.ClearClassContext();
+            _ctx.CurrentClass = structName;
+
+            // FieldTypes vorab laden damit Methoden-Bodies korrekt transpiliert werden
+            foreach (var field in node.Members.OfType<FieldDeclarationSyntax>())
+            {
+                var csType = field.Declaration.Type.ToString().Trim();
+                foreach (var v in field.Declaration.Variables)
+                    _ctx.FieldTypes[v.Identifier.Text] = csType;
+            }
+            foreach (var prop in node.Members.OfType<PropertyDeclarationSyntax>())
+                _ctx.FieldTypes[prop.Identifier.Text] = prop.Type.ToString().Trim();
+
+            var sw = new StructWriter(_ctx, _exprWriter, _stmtWriter);
+            sw.WriteImpl(node);
+
+            _ctx.ClearClassContext();
+        }
+    }
+
+         /// <summary>
+         /// Gibt den TranspilerContext zurück — für Diagnose-Abfragen nach Transpile().
+         /// </summary>
+         public TranspilerContext GetContext() => _ctx;
 
     // ── Field-Type-Sammlung ───────────────────────────────────────────────
 

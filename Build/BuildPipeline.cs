@@ -161,6 +161,12 @@ public sealed class BuildPipeline
                                 + allIncludes + "\n\n"
                                 + cTranspiler.Transpile(source, csFile, semanticModel);
                 File.WriteAllText(cPath, cContent);
+
+
+                // NEU: Warnings aus Transpiler sammeln und ausgeben
+                var fileWarnings = cTranspiler.GetContext().Diagnostics.Flush();
+                warnings += fileWarnings;
+
                 cFiles.Add(cPath);
                 transpiled++;
             }
@@ -304,10 +310,13 @@ public sealed class BuildPipeline
         {
             var source = File.ReadAllText(csFile);
             var tree = Microsoft.CodeAnalysis.CSharp.CSharpSyntaxTree.ParseText(source);
-            foreach (var cls in tree.GetRoot()
-                .DescendantNodes().OfType<ClassDeclarationSyntax>())
+            foreach (var typeDecl in tree.GetRoot()
+             .DescendantNodes()
+             .Where(n => n is ClassDeclarationSyntax or StructDeclarationSyntax))
             {
-                var typeName = cls.Identifier.Text;
+                var typeName = typeDecl is ClassDeclarationSyntax cls
+                    ? cls.Identifier.Text
+                    : ((StructDeclarationSyntax)typeDecl).Identifier.Text;
                 if (alreadyDeclared.Add(typeName))
                     sb.AppendLine($"typedef struct {typeName} {typeName};");
             }

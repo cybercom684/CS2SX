@@ -3,24 +3,6 @@ using Microsoft.CodeAnalysis.CSharp;
 
 namespace CS2SX.Core;
 
-/// <summary>
-/// Geteilter Zustand während der Transpilierung einer Methode.
-///
-/// Änderungen:
-///   • NextStringBuf(size) nimmt jetzt eine optionale Puffer-Größe entgegen.
-///     Standard bleibt 512 Bytes. Für lange Strings (Pfade, Dateinamen)
-///     kann ein größerer Puffer angefordert werden.
-///   • NextStringBuf schreibt die Deklaration jetzt als lokale Variable
-///     statt als static — verhindert Race Conditions bei rekursiven Aufrufen
-///     und macht den generierten Code sicherer.
-///
-/// Hintergrund zum Warning "snprintf output may be truncated":
-///   GCC analysiert Format-Strings statisch und nimmt bei %s das Worst-Case
-///   an (maximale String-Länge = 50175 für FS_MAX_PATH). Das führt zu Warnings
-///   auch wenn der tatsächliche String immer kurz ist (z.B. eine Extension
-///   wie ".txt"). Diese Warnings werden jetzt in CCompiler.cs mit
-///   -Wno-format-truncation unterdrückt.
-/// </summary>
 public sealed class TranspilerContext
 {
     // ── Output ────────────────────────────────────────────────────────────────
@@ -36,6 +18,15 @@ public sealed class TranspilerContext
     {
         get; set;
     }
+
+    // ── Diagnose-System ───────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Zentraler Diagnose-Collector.
+    /// StatementWriter/ExpressionWriter rufen Diagnostics.Warn() auf wenn
+    /// sie auf nicht unterstützte Syntax stoßen.
+    /// </summary>
+    public DiagnosticReporter Diagnostics { get; } = new();
 
     // ── Klassen-Kontext ───────────────────────────────────────────────────────
 
@@ -59,6 +50,12 @@ public sealed class TranspilerContext
 
     public Dictionary<string, string> LocalTypes { get; } = new(StringComparer.Ordinal);
 
+    // FIX 1: Array-Längen für foreach über rohe T[] Arrays.
+    public Dictionary<string, string> ArrayLengths { get; } = new(StringComparer.Ordinal);
+
+    // FIX 4: Value-type struct Namen.
+    public HashSet<string> ValueTypeStructs { get; } = new(StringComparer.Ordinal);
+
     // ── Indentierung ──────────────────────────────────────────────────────────
 
     private int _indent;
@@ -77,13 +74,22 @@ public sealed class TranspilerContext
         get; set;
     }
 
-    // ── Zeilen-Info ───────────────────────────────────────────────────────────
+    // ── Zeilen-Tracking ───────────────────────────────────────────────────────
 
     public string CurrentFile { get; set; } = string.Empty;
     public int CurrentLine
     {
         get; set;
     }
+
+    /// <summary>
+    /// Aktuell erzeugte C-Ausgabe-Zeile (für Source-Map).
+    /// Wird von WriteLine() inkrementiert.
+    /// </summary>
+    public int CurrentCLine { get; private set; } = 1;
+
+    /// <summary>Name der aktuellen C-Ausgabedatei (z.B. "Game.c").</summary>
+    public string CurrentCFile { get; set; } = string.Empty;
 
     // ── Konstruktor ───────────────────────────────────────────────────────────
 
@@ -94,12 +100,33 @@ public sealed class TranspilerContext
 
     // ── Convenience ──────────────────────────────────────────────────────────
 
-    public void WriteLine(string line) => Out.WriteLine(Tab + line);
+    public void WriteLine(string line)
+    {
+        Out.WriteLine(Tab + line);
+        CurrentCLine++;
+    }
+
     public void WriteRaw(string s) => Out.Write(s);
+
+    /// <summary>
+    /// Schreibt eine Zeile und registriert gleichzeitig das Source-Mapping
+    /// für diese generierte C-Zeile.
+    /// </summary>
+    public void WriteLineWithMapping(string line, int csLine, string csSnippet)
+    {
+        if (!string.IsNullOrEmpty(CurrentCFile) && !string.IsNullOrEmpty(CurrentFile))
+        {
+            Diagnostics.RegisterSourceMapping(
+                CurrentCFile, CurrentCLine,
+                CurrentFile, csLine, csSnippet);
+        }
+        WriteLine(line);
+    }
 
     public void ClearMethodContext()
     {
         LocalTypes.Clear();
+        ArrayLengths.Clear();
         TmpCounter = 0;
         TmpStringCounter = 0;
         CurrentLine = 0;
@@ -131,16 +158,6 @@ public sealed class TranspilerContext
     public string NextTmp(string prefix = "tmp") =>
         "_" + prefix + "_" + (TmpCounter++);
 
-    /// <summary>
-    /// Erzeugt einen eindeutigen lokalen String-Puffer und schreibt die Deklaration.
-    ///
-    /// Fix: size-Parameter hinzugefügt (Standard 512).
-    /// Für Pfade und andere lange Strings kann ein größerer Puffer angefordert
-    /// werden — z.B. NextStringBuf(1024) für Pfad-Konkatenationen.
-    ///
-    /// Die Variable ist lokal (kein static) — das ist sicherer bei verschachtelten
-    /// Aufrufen und verhindert Daten-Überschreibung zwischen Frames.
-    /// </summary>
     public string NextStringBuf(int size = 512)
     {
         var name = "_sb" + (TmpStringCounter++);
@@ -155,30 +172,34 @@ public sealed class TranspilerContext
             ? message
             : $"{CurrentFile}({CurrentLine}): {message}";
 
+    // ── Diagnose-Shortcuts ────────────────────────────────────────────────────
+
+    /// <summary>Warning mit aktueller Quell-Location emittieren.</summary>
+    public void Warn(string message, string? context = null) =>
+        Diagnostics.Warn(CurrentFile, CurrentLine, message, context);
+
+    /// <summary>Warning für einen konkreten SyntaxNode.</summary>
+    public void Warn(SyntaxNode node, string message) =>
+        Diagnostics.Warn(node, CurrentFile, message);
+
     // ── SemanticModel Helpers ─────────────────────────────────────────────────
 
     public string? GetSemanticType(SyntaxNode node)
     {
         if (SemanticModel == null) return null;
-
         try
         {
             var typeInfo = SemanticModel.GetTypeInfo(node);
             var type = typeInfo.ConvertedType ?? typeInfo.Type;
             if (type == null || type is IErrorTypeSymbol) return null;
-
             return FormatTypeSymbol(type);
         }
-        catch
-        {
-            return null;
-        }
+        catch { return null; }
     }
 
     public string? GetMethodReturnType(SyntaxNode node)
     {
         if (SemanticModel == null) return null;
-
         try
         {
             var sym = SemanticModel.GetSymbolInfo(node).Symbol;
@@ -186,10 +207,7 @@ public sealed class TranspilerContext
                 return FormatTypeSymbol(method.ReturnType);
             return null;
         }
-        catch
-        {
-            return null;
-        }
+        catch { return null; }
     }
 
     public static string FormatTypeSymbol(ITypeSymbol type)
@@ -197,9 +215,7 @@ public sealed class TranspilerContext
         if (type is INamedTypeSymbol named
             && named.OriginalDefinition.SpecialType == SpecialType.System_Nullable_T
             && named.TypeArguments.Length == 1)
-        {
             return FormatTypeSymbol(named.TypeArguments[0]) + "?";
-        }
 
         if (type is IArrayTypeSymbol arr)
             return FormatTypeSymbol(arr.ElementType) + "[]";
@@ -207,18 +223,14 @@ public sealed class TranspilerContext
         if (type is INamedTypeSymbol listType
             && listType.Name == "List"
             && listType.TypeArguments.Length == 1)
-        {
             return "List<" + FormatTypeSymbol(listType.TypeArguments[0]) + ">";
-        }
 
         if (type is INamedTypeSymbol dictType
             && dictType.Name == "Dictionary"
             && dictType.TypeArguments.Length == 2)
-        {
             return "Dictionary<"
                 + FormatTypeSymbol(dictType.TypeArguments[0]) + ","
                 + FormatTypeSymbol(dictType.TypeArguments[1]) + ">";
-        }
 
         if (type.Name == "StringBuilder") return "StringBuilder";
 

@@ -11,6 +11,9 @@ public sealed class CliArgs
     // --- build ---
     public string BuildTarget { get; init; } = string.Empty;
 
+    // --- check ---
+    public string CheckTarget { get; init; } = string.Empty;
+
     // --- genstubs ---
     public string LibnxInclude { get; init; } = string.Empty;
     public string StubOutput { get; init; } = string.Empty;

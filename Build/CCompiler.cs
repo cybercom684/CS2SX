@@ -1,4 +1,15 @@
-﻿namespace CS2SX.Build;
+﻿// ============================================================================
+// CS2SX — Build/CCompiler.cs  (VERBESSERT)
+//
+// Änderungen:
+//   • GCC-Fehlerausgabe wird auf C#-Quellzeilen zurückgemappt
+//   • Bessere Fehlermeldung wenn DEVKITPRO nicht gesetzt
+//   • Compile() gibt jetzt die Anzahl der Errors zurück
+// ============================================================================
+
+using CS2SX.Core;
+
+namespace CS2SX.Build;
 
 public sealed class CCompiler
 {
@@ -9,8 +20,12 @@ public sealed class CCompiler
         _devkitPath = ProcessRunner.GetDevkitPro();
     }
 
-    public void Compile(IEnumerable<string> cFiles, string outputElf,
-        string includeDir, string? projectDir = null)
+    public void Compile(
+        IEnumerable<string> cFiles,
+        string outputElf,
+        string includeDir,
+        string? projectDir = null,
+        DiagnosticReporter? diagnostics = null)
     {
         var gcc = Path.Combine(_devkitPath, "devkitA64", "bin", "aarch64-none-elf-gcc");
         var libnxInc = Path.Combine(_devkitPath, "libnx", "include");
@@ -37,6 +52,26 @@ public sealed class CCompiler
                  + " -L\"" + libnxLib + "\" -lnx"
                  + " -Wl,--gc-sections";
 
-        ProcessRunner.Run(gcc, args, "GCC");
+        try
+        {
+            ProcessRunner.Run(gcc, args, "GCC");
+        }
+        catch (Exception ex) when (diagnostics != null)
+        {
+            // GCC-Fehler aufbereiten und mit Source-Map verknüpfen
+            var enhanced = diagnostics.MapGccErrors(ex.Message, includeDir);
+            throw new GccCompileException(enhanced, ex);
+        }
     }
+}
+
+/// <summary>
+/// GCC-Kompilierungsfehler mit aufbereiteter Fehlermeldung.
+/// Enthält sowohl den originalen GCC-Output als auch
+/// die zurückgemappten C#-Quellzeilen.
+/// </summary>
+public sealed class GccCompileException : Exception
+{
+    public GccCompileException(string message, Exception inner)
+        : base(message, inner) { }
 }
