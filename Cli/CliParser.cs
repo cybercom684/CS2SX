@@ -9,6 +9,7 @@ public static class CliParser
             ["build"] = ParseBuild,
             ["genstubs"] = ParseGenstubs,
             ["check"] = ParseCheck,
+            ["watch"] = ParseWatch,  // PHASE 4 NEU
         };
 
     public static CliArgs Parse(string[] args)
@@ -18,7 +19,7 @@ public static class CliParser
 
         var command = args[0];
         if (!_commands.TryGetValue(command, out var parser))
-            return new CliArgs { Command = command }; // unknown, handled by caller
+            return new CliArgs { Command = command };
 
         return parser(args[1..]);
     }
@@ -33,6 +34,7 @@ public static class CliParser
     {
         Command = "build",
         BuildTarget = args.ElementAtOrDefault(0) ?? string.Empty,
+        Verbose = args.Contains("--verbose") || args.Contains("-v"),
     };
 
     private static CliArgs ParseGenstubs(string[] args) => new()
@@ -46,5 +48,12 @@ public static class CliParser
     {
         Command = "check",
         CheckTarget = args.ElementAtOrDefault(0) ?? string.Empty,
+        Verbose = args.Contains("--verbose") || args.Contains("-v"),
+    };
+
+    private static CliArgs ParseWatch(string[] args) => new()
+    {
+        Command = "watch",
+        WatchTarget = args.ElementAtOrDefault(0) ?? string.Empty,
     };
 }

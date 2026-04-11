@@ -1,23 +1,21 @@
 ﻿// ============================================================================
 // Transpiler/Handlers/OwnMethodHandler.cs
 //
-// Behandelt Aufrufe eigener Methoden innerhalb der selben Klasse.
-// z.B. buildHeader("title") → TouchDemoApp_buildHeader(self, "title")
+// PHASE 1 FIX: Konflikt zwischen StaticClassHandler und OwnMethodHandler
+// behoben durch SemanticModel-Prüfung.
 //
-// FIX: Vorher wurde geprüft !char.IsUpper(calleeStr[0]) — das schloss
-// alle lowercase Methoden (buildHeader, updateLogic, drawUI etc.) aus.
-// Der Check war gedacht um Konflikte mit C-Stdlib-Funktionen zu vermeiden,
-// aber er war zu aggressiv. Korrekte Bedingung: der Name darf keine
-// Punkte enthalten (kein Member-Access) und muss in MethodReturnTypes
-// oder als Methode der aktuellen Klasse bekannt sein.
-//
-// Neue Strategie:
+// Strategie:
 //   1. Kein Punkt im Namen (kein obj.Method())
-//   2. Name ist kein bekanntes C-Keyword oder Stdlib-Funktion
-//   3. CurrentClass ist gesetzt (wir sind in einer Klasse)
-//   4. Name beginnt mit Buchstabe (kein _ oder Zahl)
+//   2. Bekannte C-Builtins nicht anfassen
+//   3. Wenn SemanticModel verfügbar: prüfen ob Symbol eine eigene Methode ist
+//   4. Fallback: Name beginnt mit Kleinbuchstaben → eigene Methode
+//      (Großbuchstaben → StaticClassHandler übernimmt)
+//
+// Das löst: MinUI.DrawHeader() korrekt als static-class-Aufruf
+//           updateScore() korrekt als eigene Methode
 // ============================================================================
 
+using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using CS2SX.Core;
 
@@ -25,8 +23,6 @@ namespace CS2SX.Transpiler.Handlers;
 
 public sealed class OwnMethodHandler : InvocationHandlerBase
 {
-    // Bekannte C-Stdlib und libnx Funktionen die NICHT als eigene Methoden
-    // behandelt werden dürfen — verhindert false positives.
     private static readonly HashSet<string> s_cBuiltins = new(StringComparer.Ordinal)
     {
         "printf", "sprintf", "snprintf", "fprintf", "puts", "putchar",
@@ -45,6 +41,11 @@ public sealed class OwnMethodHandler : InvocationHandlerBase
         "psmGetBatteryChargePercentage", "psmGetChargerType",
         "psmInitialize", "psmExit",
         "fsOpenSdCardFileSystem", "fsFsClose",
+        // C-Standardbibliothek weitere
+        "atoi", "atof", "atol", "strtol", "strtof", "strtod",
+        "isdigit", "isalpha", "isspace", "isupper", "islower",
+        "toupper", "tolower",
+        "qsort", "bsearch",
     };
 
     public override bool TryHandle(InvocationExpressionSyntax inv, string calleeStr,
@@ -52,14 +53,14 @@ public sealed class OwnMethodHandler : InvocationHandlerBase
         Func<Microsoft.CodeAnalysis.SyntaxNode?, string> writeExpr, out string result)
     {
         // Muss ein einfacher Identifier sein (kein obj.Method())
-        if (inv.Expression is not IdentifierNameSyntax)
+        if (inv.Expression is not IdentifierNameSyntax idNode)
             return NotHandled(out result);
 
         // Muss in einer Klasse sein
         if (string.IsNullOrEmpty(ctx.CurrentClass))
             return NotHandled(out result);
 
-        // Kein Punkt → kein Member-Access
+        // Kein Punkt
         if (calleeStr.Contains('.'))
             return NotHandled(out result);
 
@@ -71,10 +72,52 @@ public sealed class OwnMethodHandler : InvocationHandlerBase
         if (s_cBuiltins.Contains(calleeStr))
             return NotHandled(out result);
 
-        // Alles andere → eigene Methode der Klasse
-        var allArgs = new List<string> { "self" };
-        allArgs.AddRange(args);
-        result = ctx.CurrentClass + "_" + calleeStr + "(" + string.Join(", ", allArgs) + ")";
+        // PHASE 1 FIX: SemanticModel-Prüfung — ist das eine Methode der eigenen Klasse?
+        if (ctx.SemanticModel != null)
+        {
+            try
+            {
+                var symbolInfo = ctx.SemanticModel.GetSymbolInfo(idNode);
+                var symbol = symbolInfo.Symbol ?? symbolInfo.CandidateSymbols.FirstOrDefault();
+
+                if (symbol != null)
+                {
+                    // Wenn es eine Methode der eigenen Klasse ist → eigene Methode
+                    if (symbol is IMethodSymbol method
+                        && method.ContainingType?.Name == ctx.CurrentClass)
+                    {
+                        var isStatic = method.IsStatic;
+                        var allArgs = isStatic
+                            ? args
+                            : new List<string> { "self" }.Concat(args).ToList();
+                        result = ctx.CurrentClass + "_" + calleeStr
+                               + "(" + string.Join(", ", allArgs) + ")";
+                        return true;
+                    }
+
+                    // Wenn es eine statische Methode einer anderen Klasse ist → nicht behandeln
+                    if (symbol is IMethodSymbol staticMethod && staticMethod.IsStatic
+                        && staticMethod.ContainingType?.Name != ctx.CurrentClass)
+                        return NotHandled(out result);
+
+                    // Wenn Symbol bekannt aber nicht Methode → nicht behandeln
+                    if (symbol is not IMethodSymbol)
+                        return NotHandled(out result);
+                }
+            }
+            catch { }
+        }
+
+        // PHASE 1 FIX: Ohne SemanticModel — Heuristik verbessert:
+        // Kleinbuchstabe am Anfang → stark Indiz für eigene Methode
+        // Großbuchstabe → lasse StaticClassHandler entscheiden
+        if (char.IsUpper(calleeStr[0]))
+            return NotHandled(out result);
+
+        // Kleinbuchstabe → eigene Methode
+        var selfArgs = new List<string> { "self" };
+        selfArgs.AddRange(args);
+        result = ctx.CurrentClass + "_" + calleeStr + "(" + string.Join(", ", selfArgs) + ")";
         return true;
     }
 }

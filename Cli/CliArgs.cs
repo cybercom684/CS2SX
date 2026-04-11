@@ -2,7 +2,6 @@
 
 public sealed class CliArgs
 {
-    // --- Subcommand ---
     public string Command { get; init; } = string.Empty;
 
     // --- new ---
@@ -14,11 +13,16 @@ public sealed class CliArgs
     // --- check ---
     public string CheckTarget { get; init; } = string.Empty;
 
+    // --- watch ---
+    public string WatchTarget { get; init; } = string.Empty;
+
     // --- genstubs ---
     public string LibnxInclude { get; init; } = string.Empty;
     public string StubOutput { get; init; } = string.Empty;
 
-    // --- future flags ---
-    // public bool Verbose { get; init; }
-    // public string Config { get; init; } = string.Empty;
+    // --- flags ---
+    public bool Verbose
+    {
+        get; init;
+    }
 }

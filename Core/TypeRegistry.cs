@@ -2,6 +2,7 @@ namespace CS2SX.Core;
 
 /// <summary>
 /// Zentrale Typ-Registry — einzige Quelle der Wahrheit für alle C#→C Typ-Mappings.
+/// PHASE 2: Tuple-Support, params-Support, erweiterte Dictionary/List Typen.
 /// </summary>
 public static class TypeRegistry
 {
@@ -19,7 +20,7 @@ public static class TypeRegistry
         ["sbyte"] = "signed char",
         ["float"] = "float",
         ["double"] = "double",
-        ["bool"] = "int",           // FIX 12: bool → int in C
+        ["bool"] = "int",
         ["char"] = "char",
         ["void"] = "void",
         ["string"] = "const char*",
@@ -47,9 +48,12 @@ public static class TypeRegistry
         ["StickPos"] = "CS2SX_StickPos",
         ["TouchState"] = "CS2SX_TouchState",
         ["BatteryInfo"] = "CS2SX_BatteryInfo",
-
-        // FIX 3: Random → void* (wird nie wirklich als Typ gebraucht)
         ["Random"] = "void",
+        // PHASE 2: Tuple → void* (Tupels werden als temporäre Structs behandelt)
+        ["(int, int)"] = "void*",
+        ["(string, string)"] = "void*",
+        ["(int, string)"] = "void*",
+        ["(float, float)"] = "void*",
     };
 
     // ── SwitchForms Control-Typen ─────────────────────────────────────────────
@@ -142,7 +146,6 @@ public static class TypeRegistry
 
     private static readonly Dictionary<string, string> s_enums = new(StringComparer.Ordinal)
     {
-        // Face Buttons
         ["NpadButton.A"] = "HidNpadButton_A",
         ["NpadButton.B"] = "HidNpadButton_B",
         ["NpadButton.X"] = "HidNpadButton_X",
@@ -167,11 +170,9 @@ public static class TypeRegistry
         ["NpadButton.StickRDown"] = "HidNpadButton_StickRDown",
         ["NpadButton.StickRLeft"] = "HidNpadButton_StickRLeft",
         ["NpadButton.StickRRight"] = "HidNpadButton_StickRRight",
-        // Literale
         ["true"] = "1",
         ["false"] = "0",
         ["null"] = "NULL",
-        // Fix 9: Alle Color-Konstanten inkl. fehlender
         ["Color.Black"] = "COLOR_BLACK",
         ["Color.White"] = "COLOR_WHITE",
         ["Color.Red"] = "COLOR_RED",
@@ -232,6 +233,26 @@ public static class TypeRegistry
             return "Dict_" + cKey + "_" + cVal + "*";
         }
 
+        // PHASE 2: Tuple-Typen → anonyme Structs
+        if (csType.StartsWith("(") && csType.EndsWith(")") && csType.Contains(","))
+            return "void*"; // Tuple wird als void* behandelt
+
+        // PHASE 2: IEnumerable<T> → List<T>*
+        if (csType.StartsWith("IEnumerable<") && csType.EndsWith(">"))
+        {
+            var inner = csType[12..^1].Trim();
+            var cInner = inner == "string" ? "str" : MapType(inner);
+            return "List_" + cInner + "*";
+        }
+
+        // PHASE 2: IReadOnlyList<T> → List<T>*
+        if (csType.StartsWith("IReadOnlyList<") && csType.EndsWith(">"))
+        {
+            var inner = csType[14..^1].Trim();
+            var cInner = inner == "string" ? "str" : MapType(inner);
+            return "List_" + cInner + "*";
+        }
+
         return s_primitives.TryGetValue(csType, out var c) ? c : csType;
     }
 
@@ -247,8 +268,13 @@ public static class TypeRegistry
     public static bool IsPrimitive(string csType) => s_primitives.ContainsKey(csType);
     public static bool IsLibNxStruct(string csType) => s_libNxStructs.Contains(csType);
 
-    public static bool IsList(string csType) =>
-        csType.Trim().StartsWith("List<") && csType.Trim().EndsWith(">");
+    public static bool IsList(string csType)
+    {
+        csType = csType.Trim();
+        return (csType.StartsWith("List<") && csType.EndsWith(">"))
+            || (csType.StartsWith("IEnumerable<") && csType.EndsWith(">"))
+            || (csType.StartsWith("IReadOnlyList<") && csType.EndsWith(">"));
+    }
 
     public static bool IsDictionary(string csType) =>
         csType.Trim().StartsWith("Dictionary<") && csType.Trim().EndsWith(">");
@@ -272,6 +298,10 @@ public static class TypeRegistry
         csType = csType.Trim();
         if (csType.StartsWith("List<") && csType.EndsWith(">"))
             return csType[5..^1].Trim();
+        if (csType.StartsWith("IEnumerable<") && csType.EndsWith(">"))
+            return csType[12..^1].Trim();
+        if (csType.StartsWith("IReadOnlyList<") && csType.EndsWith(">"))
+            return csType[14..^1].Trim();
         return null;
     }
 
@@ -288,4 +318,15 @@ public static class TypeRegistry
         && !IsDictionary(csType)
         && csType != "string"
         && !csType.EndsWith("[]");
+
+    // PHASE 2: Tuple-Erkennung
+    public static bool IsTuple(string csType)
+    {
+        csType = csType.Trim();
+        return csType.StartsWith("(") && csType.EndsWith(")") && csType.Contains(",");
+    }
+
+    // PHASE 2: params-Array-Erkennung
+    public static bool IsParamsArray(string csType) =>
+        csType.EndsWith("[]");
 }

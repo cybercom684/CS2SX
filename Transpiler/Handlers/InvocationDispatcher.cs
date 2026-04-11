@@ -6,22 +6,24 @@ namespace CS2SX.Transpiler.Handlers;
 
 /// <summary>
 /// Orchestriert alle IInvocationHandler in Prioritäts-Reihenfolge.
-/// Neue Handler: RandomHandler, EnvironmentHandler — ColorHandler erweitert.
+///
+/// PHASE 3: AudioHandler hinzugefügt.
+/// PHASE 1 FIX: StaticClassHandler / OwnMethodHandler Konfliktreihenfolge korrigiert.
 /// </summary>
 public sealed class InvocationDispatcher
 {
     private static readonly IReadOnlyList<IInvocationHandler> s_handlers = new List<IInvocationHandler>
     {
         new LibNxHandler(),
-        new EnvironmentHandler(),   // Fix 15: Environment.Exit, Console.Clear
+        new EnvironmentHandler(),
         new InputHandler(),
         new FormHandler(),
         new ConsoleHandler(),
-        new MathHandler(),          // Fix 2: System.Math.X Varianten
-        new RandomHandler(),        // Fix 3: System.Random / Random.Shared.Next()
+        new MathHandler(),
+        new RandomHandler(),
         new FileHandler(),
         new ParseHandler(),
-        new ColorHandler(),         // Fix 17: Color.WithAlpha
+        new ColorHandler(),
         new StringBuilderHandler(),
         new ListHandler(),
         new DictionaryHandler(),
@@ -33,8 +35,9 @@ public sealed class InvocationDispatcher
         new DirectoryExtHandler(),
         new PathHandler(),
         new SystemExtHandler(),
-        new StaticClassHandler(),
-        new OwnMethodHandler(),
+        new AudioHandler(),       // PHASE 3: Audio-Unterstützung
+        new StaticClassHandler(), // PHASE 1 FIX: Vor OwnMethodHandler, aber nach allen API-Handlern
+        new OwnMethodHandler(),   // PHASE 1 FIX: Zuletzt — nur für eigene Methoden
     };
 
     private readonly TranspilerContext _ctx;
@@ -67,6 +70,23 @@ public sealed class InvocationDispatcher
 
     private string BuildArg(ArgumentSyntax a)
     {
+        // PHASE 1 FIX: out var Deklarationen korrekt behandeln
+        if (a.RefKindKeyword.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.OutKeyword)
+            && a.Expression is DeclarationExpressionSyntax declExpr
+            && declExpr.Designation is SingleVariableDesignationSyntax singleDesig)
+        {
+            // out var n → registriere Typ und gib &n zurück
+            var typeName = declExpr.Type.ToString().Trim();
+            if (typeName == "var")
+            {
+                // Typ-Inferenz aus dem Aufruf-Kontext ist hier schwierig
+                // Standard: int für TryParse-Aufrufe
+                typeName = "int";
+            }
+            _ctx.LocalTypes[singleDesig.Identifier.Text] = typeName;
+            return "&" + singleDesig.Identifier.Text;
+        }
+
         var expr = _writeExpr(a.Expression);
         var isRef = a.RefKindKeyword.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.RefKeyword);
         var isOut = a.RefKindKeyword.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.OutKeyword);
@@ -85,7 +105,6 @@ public sealed class InvocationDispatcher
         if (_ctx.FieldTypes.TryGetValue(fieldKey, out var ft) && ft == "string")
             return expr;
 
-        // FIX 14: ref/out auf alle anderen Typen → & Prefix
         return "&" + expr;
     }
 }

@@ -40,7 +40,7 @@ public sealed class CSharpToC : CSharpSyntaxWalker
         ];
     }
 
-    // ── Öffentliche API ───────────────────────────────────────────────────
+    // ── Öffentliche API ───────────────────────────────────────────────
 
     public TranspileResult Transpile(
         string csharpSource,
@@ -73,7 +73,7 @@ public sealed class CSharpToC : CSharpSyntaxWalker
             _ctx.Diagnostics.All);
     }
 
-    // ── Namespace ─────────────────────────────────────────────────────────
+    // ── Namespace ─────────────────────────────────────────────────────
 
     public override void VisitNamespaceDeclaration(NamespaceDeclarationSyntax node)
         => base.VisitNamespaceDeclaration(node);
@@ -81,7 +81,7 @@ public sealed class CSharpToC : CSharpSyntaxWalker
     public override void VisitFileScopedNamespaceDeclaration(FileScopedNamespaceDeclarationSyntax node)
         => base.VisitFileScopedNamespaceDeclaration(node);
 
-    // ── Enum ──────────────────────────────────────────────────────────────
+    // ── Enum ──────────────────────────────────────────────────────────
 
     public override void VisitEnumDeclaration(EnumDeclarationSyntax node)
     {
@@ -104,7 +104,7 @@ public sealed class CSharpToC : CSharpSyntaxWalker
         _ctx.Out.WriteLine();
     }
 
-    // ── Klassen ───────────────────────────────────────────────────────────
+    // ── Klassen ───────────────────────────────────────────────────────
 
     public override void VisitClassDeclaration(ClassDeclarationSyntax node)
     {
@@ -125,14 +125,9 @@ public sealed class CSharpToC : CSharpSyntaxWalker
 
         CollectFieldTypes(node);
 
-        // VTable-Registry befüllen:
-        // Klasse hat vtable wenn sie virtual/abstract Methoden deklariert.
-        // Klasse ist vtable-Empfänger wenn sie von einer solchen erbt.
         if (VTableBuilder.HasVirtualMethods(node))
             _ctx.VTableTypes.Add(node.Identifier.Text);
 
-        // Basisklasse mit vtable → abgeleitete Klasse ebenfalls registrieren
-        // damit Aufrufe über Basis-Pointer korrekt dispatcht werden.
         if (!string.IsNullOrEmpty(baseType)
             && _ctx.VTableTypes.Contains(baseType)
             && !IsControlSubclass(baseType)
@@ -183,7 +178,6 @@ public sealed class CSharpToC : CSharpSyntaxWalker
     {
         var structName = node.Identifier.Text;
 
-        // Struct global registrieren — gilt für alle nachfolgenden Methoden/Klassen
         _ctx.ValueTypeStructs.Add(structName);
 
         if (_mode == TranspileMode.HeaderOnly)
@@ -197,7 +191,6 @@ public sealed class CSharpToC : CSharpSyntaxWalker
             _ctx.ClearClassContext();
             _ctx.CurrentClass = structName;
 
-            // FieldTypes vorab laden damit Methoden-Bodies korrekt transpiliert werden
             foreach (var field in node.Members.OfType<FieldDeclarationSyntax>())
             {
                 var csType = field.Declaration.Type.ToString().Trim();
@@ -214,12 +207,9 @@ public sealed class CSharpToC : CSharpSyntaxWalker
         }
     }
 
-         /// <summary>
-         /// Gibt den TranspilerContext zurück — für Diagnose-Abfragen nach Transpile().
-         /// </summary>
-         public TranspilerContext GetContext() => _ctx;
+    public TranspilerContext GetContext() => _ctx;
 
-    // ── Field-Type-Sammlung ───────────────────────────────────────────────
+    // ── Field-Type-Sammlung ───────────────────────────────────────────
 
     private void CollectFieldTypes(ClassDeclarationSyntax node)
     {
@@ -273,7 +263,7 @@ public sealed class CSharpToC : CSharpSyntaxWalker
         return prop.Type.ToString().Trim();
     }
 
-    // ── Struct-Definition (Header) ────────────────────────────────────────
+    // ── Struct-Definition (Header) ────────────────────────────────────
 
     private void WriteStructDefinition(ClassDeclarationSyntax node, string? baseType)
     {
@@ -377,7 +367,7 @@ public sealed class CSharpToC : CSharpSyntaxWalker
         }
     }
 
-    // ── Typ-Auflösung ─────────────────────────────────────────────────────
+    // ── Typ-Auflösung ─────────────────────────────────────────────────
 
     private string ResolveMethodReturnType(MethodDeclarationSyntax method)
     {
@@ -411,13 +401,8 @@ public sealed class CSharpToC : CSharpSyntaxWalker
         return TypeRegistry.MapType(p.Type.ToString().Trim());
     }
 
-    // ── Static-Felder ─────────────────────────────────────────────────────
+    // ── Static-Felder ─────────────────────────────────────────────────
 
-    /// <summary>
-    /// FIX 6: static readonly T[] fields werden als C-Arrays ausgegeben.
-    /// private static readonly int[] DX = { 1, 0, -1, 0 }
-    /// → static const int ClassName_DX[] = {1, 0, -1, 0};
-    /// </summary>
     internal void WriteStaticFieldDefinitions(ClassDeclarationSyntax node, string name)
     {
         foreach (var field in node.Members.OfType<FieldDeclarationSyntax>())
@@ -426,7 +411,6 @@ public sealed class CSharpToC : CSharpSyntaxWalker
 
             var csType = ResolveFieldType(field);
 
-            // Array-Typen gesondert behandeln
             if (csType.EndsWith("[]"))
             {
                 WriteStaticArrayFieldDef(field, name, csType);
@@ -497,7 +481,6 @@ public sealed class CSharpToC : CSharpSyntaxWalker
 
             var csType = ResolveFieldType(field);
 
-            // FIX 6: Array-Externs
             if (csType.EndsWith("[]"))
             {
                 var baseType = csType[..^2].Trim();
@@ -524,7 +507,7 @@ public sealed class CSharpToC : CSharpSyntaxWalker
         }
     }
 
-    // ── Feld-Initializer ─────────────────────────────────────────────────
+    // ── Feld-Initializer ─────────────────────────────────────────────
 
     internal void WriteInstanceFieldInitializers(ClassDeclarationSyntax node)
     {
@@ -543,7 +526,7 @@ public sealed class CSharpToC : CSharpSyntaxWalker
         }
     }
 
-    // ── Konstruktor ───────────────────────────────────────────────────────
+    // ── Konstruktor ───────────────────────────────────────────────────
 
     private void WriteConstructor(ClassDeclarationSyntax node)
     {
@@ -554,7 +537,7 @@ public sealed class CSharpToC : CSharpSyntaxWalker
         strategy.Write(node, name, baseType, _ctx, _exprWriter, this);
     }
 
-    // ── Funktions-Signaturen (Header) ─────────────────────────────────────
+    // ── Funktions-Signaturen (Header) ─────────────────────────────────
 
     private void WriteFunctionSignatures(ClassDeclarationSyntax node,
         bool isSwitchAppChild, bool isStaticClass)
@@ -594,7 +577,7 @@ public sealed class CSharpToC : CSharpSyntaxWalker
         _ctx.Out.WriteLine();
     }
 
-    // ── Methoden-Signaturen ───────────────────────────────────────────────
+    // ── Methoden-Signaturen ───────────────────────────────────────────
 
     private void WriteMethodSignature(MethodDeclarationSyntax method,
         string className, bool isStaticClass = false)
@@ -616,7 +599,7 @@ public sealed class CSharpToC : CSharpSyntaxWalker
         else _ctx.Out.WriteLine(sig + ";");
     }
 
-    // ── Methoden-Bodies ───────────────────────────────────────────────────
+    // ── Methoden-Bodies ───────────────────────────────────────────────
 
     private void WriteMethodBodies(ClassDeclarationSyntax node)
     {
@@ -673,6 +656,9 @@ public sealed class CSharpToC : CSharpSyntaxWalker
         {
             if (p.Type == null) continue;
 
+            // PHASE 2 FIX: params-Parameter
+            var isParams = p.Modifiers.Any(m => m.IsKind(SyntaxKind.ParamsKeyword));
+
             string paramType;
             if (_ctx.SemanticModel != null)
             {
@@ -690,10 +676,16 @@ public sealed class CSharpToC : CSharpSyntaxWalker
                 paramType = p.Type.ToString().Trim();
             }
 
-            // FIX 14: ref/out Parameter mit @ref: markieren für korrekte Dereferenzierung
             var isRefParam = p.Modifiers.Any(m =>
                 m.IsKind(SyntaxKind.RefKeyword) || m.IsKind(SyntaxKind.OutKeyword));
             _ctx.LocalTypes[p.Identifier.Text] = isRefParam ? "@ref:" + paramType : paramType;
+
+            // params → Array-Länge als _count Variable registrieren
+            if (isParams && paramType.EndsWith("[]"))
+            {
+                var countVar = p.Identifier.Text + "_count";
+                _ctx.LocalTypes[countVar] = "int";
+            }
         }
 
         _ctx.Out.WriteLine(sig);
@@ -711,7 +703,7 @@ public sealed class CSharpToC : CSharpSyntaxWalker
         _ctx.Out.WriteLine();
     }
 
-    // ── Property ─────────────────────────────────────────────────────────
+    // ── Property ─────────────────────────────────────────────────────
 
     public override void VisitPropertyDeclaration(PropertyDeclarationSyntax node)
     {
@@ -721,7 +713,7 @@ public sealed class CSharpToC : CSharpSyntaxWalker
         base.VisitPropertyDeclaration(node);
     }
 
-    // ── Utilities ─────────────────────────────────────────────────────────
+    // ── Utilities ─────────────────────────────────────────────────────
 
     internal void LoadBaseFields(string baseType)
     {
@@ -770,6 +762,16 @@ public sealed class CSharpToC : CSharpSyntaxWalker
                     csType = TranspilerContext.FormatTypeSymbol(typeInfo.Type);
             }
             catch { }
+        }
+
+        // PHASE 2 FIX: params-Parameter → va_list oder Array + count
+        var isParams = p.Modifiers.Any(m => m.IsKind(SyntaxKind.ParamsKeyword));
+        if (isParams && csType.EndsWith("[]"))
+        {
+            var baseType = csType[..^2].Trim();
+            var cBaseType = baseType == "string" ? "const char*" : TypeRegistry.MapType(baseType);
+            // params → Array-Pointer + Anzahl
+            return cBaseType + "* " + p.Identifier + ", int " + p.Identifier + "_count";
         }
 
         if (NullableHandler.IsNullable(csType))

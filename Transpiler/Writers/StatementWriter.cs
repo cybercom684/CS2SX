@@ -52,6 +52,7 @@ public sealed class StatementWriter
 
     private void WriteExprStmt(ExpressionStatementSyntax expr)
     {
+        // Phase 1 Fix: out var in expression statements (z.B. als standalone)
         var result = _expr.Write(expr.Expression);
         if (!string.IsNullOrEmpty(result))
             _ctx.WriteLine(result + ";");
@@ -181,17 +182,14 @@ public sealed class StatementWriter
 
             if (IsConstantSizeExpr(arrCreate.Type.RankSpecifiers[0].Sizes[0]))
             {
-                // Konstante Größe → Stack-Array
                 _ctx.WriteLine(cType + " " + varName + "[" + sizeExpr + "];");
                 _ctx.WriteLine("memset(" + varName + ", 0, sizeof(" + varName + "));");
             }
             else
             {
-                // Dynamische Größe → calloc
                 _ctx.WriteLine(cType + "* " + varName
                     + " = (" + cType + "*)calloc(" + sizeExpr + ", sizeof(" + cType + "));");
             }
-            // FIX 1: Länge tracken
             _ctx.ArrayLengths[varName] = sizeExpr;
         }
         else if (arrCreate.Initializer != null)
@@ -215,7 +213,6 @@ public sealed class StatementWriter
             && IsConstantSizeExpr(bin.Left)
             && IsConstantSizeExpr(bin.Right));
 
-    // FIX 4: int[,] grid = { {1,2}, {3,4} } → int grid[] = {1,2,3,4}
     private void WriteMultiDimArray(LocalDeclarationStatementSyntax local, string declType)
     {
         var baseType = declType[..declType.IndexOf('[')].Trim();
@@ -269,7 +266,6 @@ public sealed class StatementWriter
         return sizes.Count > 0;
     }
 
-    // FIX 5+11: T[] var = { ... } → stack array + ArrayLengths tracken
     private void WriteArrayWithInitializer(VariableDeclaratorSyntax v, string declType)
     {
         var baseType = declType[..^2].Trim();
@@ -303,13 +299,11 @@ public sealed class StatementWriter
             else
                 _ctx.WriteLine(cType + " " + varName + "[] = { " + string.Join(", ", elems) + " };");
 
-            // FIX 1: Länge tracken
             _ctx.ArrayLengths[varName] = elems.Count.ToString();
             _ctx.LocalTypes[varName] = declType;
             return;
         }
 
-        // Fallback
         var (cTypeFb, isPtr) = InferLocalType(declType, v);
         var ptr = isPtr ? "*" : "";
         var init2 = v.Initializer != null ? " = " + _expr.Write(v.Initializer.Value) : "";
@@ -479,6 +473,17 @@ public sealed class StatementWriter
 
     private void WriteIf(IfStatementSyntax ifStmt)
     {
+        // PHASE 1 FIX: out var in if-condition (z.B. if (int.TryParse(s, out var n)))
+        if (TryExtractOutVarFromCondition(ifStmt.Condition, out var outVarDecls))
+        {
+            foreach (var (varName, varType) in outVarDecls)
+            {
+                var cType = TypeRegistry.MapType(varType);
+                _ctx.WriteLine(cType + " " + varName + " = 0;");
+                _ctx.LocalTypes[varName] = varType;
+            }
+        }
+
         if (ifStmt.Condition is IsPatternExpressionSyntax isPattern)
         {
             WriteIfWithIsPattern(ifStmt, isPattern);
@@ -500,6 +505,53 @@ public sealed class StatementWriter
             _ctx.WriteLine("else");
             WriteBlockOrStmt(ifStmt.Else.Statement);
         }
+    }
+
+    /// <summary>
+    /// PHASE 1 FIX: Extrahiert out var Deklarationen aus einer if-Bedingung.
+    /// Beispiel: if (int.TryParse(s, out var n)) → int n = 0; davor deklarieren
+    /// </summary>
+    private static bool TryExtractOutVarFromCondition(
+        ExpressionSyntax condition,
+        out List<(string name, string type)> outVars)
+    {
+        outVars = new();
+
+        IEnumerable<ArgumentSyntax> args = condition switch
+        {
+            InvocationExpressionSyntax inv => inv.ArgumentList.Arguments,
+            _ => Enumerable.Empty<ArgumentSyntax>()
+        };
+
+        foreach (var arg in args)
+        {
+            if (arg.RefKindKeyword.IsKind(SyntaxKind.OutKeyword)
+                && arg.Expression is DeclarationExpressionSyntax decl
+                && decl.Designation is SingleVariableDesignationSyntax desig)
+            {
+                var typeName = decl.Type.ToString().Trim() == "var"
+                    ? InferOutVarType(condition, desig.Identifier.Text)
+                    : decl.Type.ToString().Trim();
+                outVars.Add((desig.Identifier.Text, typeName));
+            }
+        }
+
+        return outVars.Count > 0;
+    }
+
+    private static string InferOutVarType(ExpressionSyntax condition, string varName)
+    {
+        if (condition is InvocationExpressionSyntax inv)
+        {
+            var callee = inv.Expression.ToString();
+            if (callee is "int.TryParse" or "Int32.TryParse") return "int";
+            if (callee is "float.TryParse" or "Single.TryParse") return "float";
+            if (callee is "double.TryParse" or "Double.TryParse") return "double";
+            if (callee is "long.TryParse" or "Int64.TryParse") return "long";
+            if (callee is "uint.TryParse" or "UInt32.TryParse") return "uint";
+            if (callee is "bool.TryParse" or "Boolean.TryParse") return "bool";
+        }
+        return "int";
     }
 
     private void WriteIfWithIsPattern(IfStatementSyntax ifStmt,
@@ -545,6 +597,17 @@ public sealed class StatementWriter
 
     private void WriteIfInline(IfStatementSyntax ifStmt)
     {
+        // PHASE 1 FIX: out var auch in inline-if
+        if (TryExtractOutVarFromCondition(ifStmt.Condition, out var outVarDecls))
+        {
+            foreach (var (varName, varType) in outVarDecls)
+            {
+                var cType = TypeRegistry.MapType(varType);
+                _ctx.WriteLine(cType + " " + varName + " = 0;");
+                _ctx.LocalTypes[varName] = varType;
+            }
+        }
+
         if (ifStmt.Condition is IsPatternExpressionSyntax isPattern)
         {
             _ctx.Out.WriteLine("if (" + _expr.Write(isPattern) + ")");
@@ -620,7 +683,7 @@ public sealed class StatementWriter
         WriteBlockOrStmt(forStmt.Statement);
     }
 
-    // ── ForEach — FIX 1: rohe Arrays korrekt unterstützen ────────────────────
+    // ── ForEach — PHASE 1 FIX: Dictionary<K,V> + raw Arrays ─────────────────
 
     private void WriteForEach(ForEachStatementSyntax forEach)
     {
@@ -635,10 +698,16 @@ public sealed class StatementWriter
         var colType = colLt ?? colFt ?? "";
 
         bool isList = TypeRegistry.IsList(colType);
+        bool isDict = TypeRegistry.IsDictionary(colType);
         bool isString = colType is "string" or "char[]";
-
-        // FIX 1: Rohe C-Arrays (int[], float[], string[], T[])
         bool isRawArray = colType.EndsWith("[]") && !isList;
+
+        // PHASE 1 FIX: foreach über Dictionary → Key-Iteration
+        if (isDict)
+        {
+            WriteForEachDict(forEach, colExpr, colType, varName);
+            return;
+        }
 
         string lenExpr;
         if (isList)
@@ -648,14 +717,14 @@ public sealed class StatementWriter
         else if (isRawArray)
             lenExpr = ResolveArrayLength(colRaw, colKey, colExpr);
         else
-            lenExpr = colExpr + "_count"; // Fallback für unbekannte Typen
+            lenExpr = colExpr + "_count";
 
         var rawElemType = forEach.Type.ToString().Trim();
         if (rawElemType == "var")
         {
             if (isList) rawElemType = TypeRegistry.GetListInnerType(colType) ?? "int";
             else if (isString) rawElemType = "char";
-            else if (isRawArray) rawElemType = colType[..^2].Trim(); // "int[]" → "int"
+            else if (isRawArray) rawElemType = colType[..^2].Trim();
         }
 
         _ctx.WriteLine("for (int " + idxVar + " = 0; "
@@ -679,10 +748,53 @@ public sealed class StatementWriter
         _ctx.WriteLine("}");
     }
 
-    // FIX 1: Array-Länge ermitteln
-    // 1. ArrayLengths-Dict (befüllt beim Deklarieren)
-    // 2. sizeof-Trick für lokale Stack-Arrays
-    // 3. Fallback
+    /// <summary>
+    /// PHASE 1 FIX: foreach over Dictionary<K,V>
+    /// Iteriert über alle Keys und gibt (Key, Value) als separate Variablen aus.
+    ///
+    /// C#:  foreach (var kvp in _myDict) { use kvp.Key, kvp.Value }
+    /// C:   for (int _i = 0; _i < dict->count; _i++) {
+    ///          KeyType kvp_Key = dict->keys[_i];
+    ///          ValType kvp_Value = dict->vals[_i];
+    ///      }
+    ///
+    /// Unterstützt auch: foreach (var key in dict.Keys) → nur Keys
+    /// </summary>
+    private void WriteForEachDict(ForEachStatementSyntax forEach,
+        string colExpr, string colType, string varName)
+    {
+        var types = TypeRegistry.GetDictionaryTypes(colType)!.Value;
+        var cKey = types.key == "string" ? "const char*" : TypeRegistry.MapType(types.key);
+        var cVal = types.val == "string" ? "const char*" : TypeRegistry.MapType(types.val);
+        var idxVar = "_i_" + varName;
+
+        _ctx.WriteLine("for (int " + idxVar + " = 0; "
+                     + idxVar + " < (int)(" + colExpr + "->count); "
+                     + idxVar + "++)");
+        _ctx.WriteLine("{");
+        _ctx.Indent();
+
+        // KeyValuePair simulation: varName_Key + varName_Value
+        _ctx.WriteLine(cKey + " " + varName + "_Key = " + colExpr + "->keys[" + idxVar + "];");
+        _ctx.WriteLine(cVal + " " + varName + "_Value = " + colExpr + "->vals[" + idxVar + "];");
+
+        // Auch als einzelne Vars registrieren für Body-Zugriff über kvp.Key / kvp.Value
+        _ctx.LocalTypes[varName + "_Key"] = types.key;
+        _ctx.LocalTypes[varName + "_Value"] = types.val;
+        // varName selbst als "pseudo-struct" — Member-Zugriffe werden umgeschrieben
+        _ctx.LocalTypes[varName] = "__kvp__" + varName;
+
+        var bodyStmts = forEach.Statement is BlockSyntax b
+            ? b.Statements.Cast<StatementSyntax>()
+            : new[] { forEach.Statement };
+
+        foreach (var s in bodyStmts)
+            Write(s);
+
+        _ctx.Dedent();
+        _ctx.WriteLine("}");
+    }
+
     private string ResolveArrayLength(string colRaw, string colKey, string colExpr)
     {
         if (_ctx.ArrayLengths.TryGetValue(colRaw, out var knownLen))
@@ -690,7 +802,6 @@ public sealed class StatementWriter
         if (_ctx.ArrayLengths.TryGetValue(colKey, out var knownLenField))
             return knownLenField;
 
-        // sizeof-Trick funktioniert nur für lokale Stack-Arrays (nicht Pointer)
         if (_ctx.LocalTypes.ContainsKey(colRaw))
             return "(sizeof(" + colExpr + ") / sizeof(" + colExpr + "[0]))";
 
@@ -708,11 +819,9 @@ public sealed class StatementWriter
             return;
         }
 
-        // FIX 1: Direkte Array-Indizierung für rohe Arrays
         if (isRawArray)
         {
             var cType = TypeRegistry.MapType(rawElemType);
-            // String-Array → const char*
             if (rawElemType == "string")
                 _ctx.WriteLine("const char* " + varName + " = " + colExpr + "[" + idxVar + "];");
             else

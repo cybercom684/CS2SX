@@ -125,6 +125,16 @@ public sealed class BuildPipeline
             int transpiled = 0;
             int skipped = 0;
 
+            // PHASE 4 FIX: Erweiterter Inkremental-Check
+            // Prüfe ob IRGENDEINE .h-Datei neuer als eine abhängige .h/.c ist
+            var allTranspiledHeaders = transpiledFiles
+                .Select(f => Path.Combine(_buildDir, Path.GetFileNameWithoutExtension(f) + ".h"))
+                .Where(File.Exists)
+                .ToList();
+            var latestHeaderTime = allTranspiledHeaders.Count > 0
+                ? allTranspiledHeaders.Max(h => File.GetLastWriteTimeUtc(h))
+                : DateTime.MinValue;
+
             for (int i = 0; i < transpiledFiles.Count; i++)
             {
                 var csFile = transpiledFiles[i];
@@ -135,7 +145,8 @@ public sealed class BuildPipeline
                 var hPath = Path.Combine(_buildDir, baseName + ".h");
                 var cPath = Path.Combine(_buildDir, baseName + ".c");
 
-                if (IsUpToDate(csFile, hPath, cPath))
+                // PHASE 4 FIX: Inkrementeller Check berücksichtigt alle Header-Abhängigkeiten
+                if (IsUpToDate(csFile, hPath, cPath, latestHeaderTime))
                 {
                     Log.Info($"→ {baseName}.cs (unchanged)");
                     cFiles.Add(cPath);
@@ -145,14 +156,14 @@ public sealed class BuildPipeline
 
                 Log.Info($"→ {baseName}.cs");
 
-                var source = File.ReadAllText(csFile);
+                var source = System.IO.File.ReadAllText(csFile);
                 var semanticModel = semanticBuilder.GetModel(csFile);
 
                 var hTranspiler = new CSharpToC(CSharpToC.TranspileMode.HeaderOnly);
                 var hResult = hTranspiler.Transpile(source, csFile, semanticModel);
                 var hContent = WrapHeader(baseName,
                     "#include \"_forward.h\"\n\n" + hResult.Code);
-                File.WriteAllText(hPath, hContent);
+                System.IO.File.WriteAllText(hPath, hContent);
 
                 var allIncludes = string.Join("\n",
                     allHeaders.Select(h => $"#include \"{h}\""));
@@ -162,7 +173,7 @@ public sealed class BuildPipeline
                 var cContent = "#include <stdlib.h>\n"
                              + allIncludes + "\n\n"
                              + cResult.Code;
-                File.WriteAllText(cPath, cContent);
+                System.IO.File.WriteAllText(cPath, cContent);
 
                 var allDiags = hResult.Diagnostics
                     .Concat(cResult.Diagnostics)
@@ -205,7 +216,7 @@ public sealed class BuildPipeline
             foreach (var hFile in Directory.GetFiles(_projectDir, "*.h"))
             {
                 var dest = Path.Combine(_buildDir, Path.GetFileName(hFile));
-                File.Copy(hFile, dest, overwrite: true);
+                System.IO.File.Copy(hFile, dest, overwrite: true);
                 Log.Info($"Custom header: {Path.GetFileName(hFile)}");
             }
 
@@ -266,21 +277,40 @@ public sealed class BuildPipeline
         }
     }
 
-    private bool IsUpToDate(string csFile, string hPath, string cPath)
+    /// <summary>
+    /// PHASE 4 FIX: Erweiterter Inkremental-Check.
+    /// Berücksichtigt:
+    /// - Timestamp der .cs Quelldatei vs .h/.c
+    /// - switchforms.h und _forward.h Timestamps
+    /// - NEU: latestHeaderTime — wenn irgendein anderer Header neuer ist,
+    ///   müssen abhängige Dateien neu transpiliert werden (Vererbungs-Szenarien)
+    /// </summary>
+    private bool IsUpToDate(string csFile, string hPath, string cPath,
+        DateTime latestHeaderTime = default)
     {
         if (!File.Exists(hPath) || !File.Exists(cPath)) return false;
+
         var csTime = File.GetLastWriteTimeUtc(csFile);
         var hTime = File.GetLastWriteTimeUtc(hPath);
         var cTime = File.GetLastWriteTimeUtc(cPath);
+
         if (hTime < csTime || cTime < csTime) return false;
+
         var switchformsH = Path.Combine(_buildDir, "switchforms.h");
         if (File.Exists(switchformsH) && (File.GetLastWriteTimeUtc(switchformsH) > hTime
                                        || File.GetLastWriteTimeUtc(switchformsH) > cTime))
             return false;
+
         var forwardH = Path.Combine(_buildDir, "_forward.h");
         if (File.Exists(forwardH) && (File.GetLastWriteTimeUtc(forwardH) > hTime
                                    || File.GetLastWriteTimeUtc(forwardH) > cTime))
             return false;
+
+        // PHASE 4 FIX: Wenn ein anderer transpilierter Header neuer als dieser ist,
+        // dann könnte dieser Code davon abhängen → neu transpilieren
+        if (latestHeaderTime != default && latestHeaderTime > hTime)
+            return false;
+
         return true;
     }
 
@@ -294,7 +324,6 @@ public sealed class BuildPipeline
         sb.AppendLine("#include <string.h>");
         sb.AppendLine("#include <stdio.h>");
         sb.AppendLine("#include <stdbool.h>");
-        // FIX 10: limits.h und float.h für INT_MAX, FLT_MAX etc.
         sb.AppendLine("#include <limits.h>");
         sb.AppendLine("#include <float.h>");
         sb.AppendLine("#include <math.h>");
@@ -320,7 +349,7 @@ public sealed class BuildPipeline
 
         foreach (var csFile in sourceFiles)
         {
-            var source = File.ReadAllText(csFile);
+            var source = System.IO.File.ReadAllText(csFile);
             var tree = Microsoft.CodeAnalysis.CSharp.CSharpSyntaxTree.ParseText(source);
             foreach (var typeDecl in tree.GetRoot()
              .DescendantNodes()
@@ -334,7 +363,7 @@ public sealed class BuildPipeline
             }
         }
 
-        File.WriteAllText(outputPath, sb.ToString());
+        System.IO.File.WriteAllText(outputPath, sb.ToString());
     }
 
     private static string WrapHeader(string baseName, string content)
@@ -351,7 +380,7 @@ public sealed class BuildPipeline
     {
         foreach (var file in sourceFiles)
         {
-            var source = File.ReadAllText(file);
+            var source = System.IO.File.ReadAllText(file);
             var tree = Microsoft.CodeAnalysis.CSharp.CSharpSyntaxTree.ParseText(source);
             foreach (var cls in tree.GetRoot()
                 .DescendantNodes().OfType<ClassDeclarationSyntax>())
@@ -365,14 +394,11 @@ public sealed class BuildPipeline
         IReadOnlyList<string> sourceFiles, string className)
     {
         foreach (var file in sourceFiles)
-            if (File.ReadAllText(file).Contains("class " + className))
+            if (System.IO.File.ReadAllText(file).Contains("class " + className))
                 return Path.GetFileNameWithoutExtension(file) + ".h";
         return null;
     }
 
-    /// <summary>
-    /// FIX 3: _cs2sx_rand_state als globale Variable hinzugefügt.
-    /// </summary>
     private static void WriteSwitchformsC(string path)
     {
         using var w = new StreamWriter(path, append: false, encoding: Encoding.UTF8);
