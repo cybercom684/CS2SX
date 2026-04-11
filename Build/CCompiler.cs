@@ -49,7 +49,7 @@ public sealed class CCompiler
                  + " -Wno-unused-function"
                  + " -Wno-misleading-indentation"
                  + " -specs=\"" + switchSpecs + "\""
-                 + " -L\"" + libnxLib + "\" -lnx"
+                 + " -L\"" + libnxLib + "\" -lnx -lm"
                  + " -Wl,--gc-sections";
 
         try

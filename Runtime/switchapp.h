@@ -7,6 +7,7 @@
 #include <float.h>
 #include <math.h>
 #include "switchforms.h"
+#include "AudioStub.h"
 
 // ============================================================================
 // Farb-Hilfsmakros (RGBA8888)

@@ -8,12 +8,13 @@
 		<PackAsTool>true</PackAsTool>
 		<ToolCommandName>cs2sx</ToolCommandName>
 		<PackageId>CS2SX</PackageId>
-		<Version>0.4.1.109</Version>
+		<Version>0.4.1.118</Version>
 	</PropertyGroup>
 	<ItemGroup>
 		<PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="5.3.0" />
 		<EmbeddedResource Include="Runtime\switchapp.h" />
 		<EmbeddedResource Include="Runtime\switchforms.h" />
+		<EmbeddedResource Include="Runtime\AudioStub.h" />
 		<EmbeddedResource Include="Stubs\SwitchApp.cs" />
 		<EmbeddedResource Include="Stubs\Input.cs" />
 		<EmbeddedResource Include="Stubs\LibNX\**\*" />

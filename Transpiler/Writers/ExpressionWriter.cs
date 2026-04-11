@@ -129,22 +129,41 @@ public sealed class ExpressionWriter
     {
         var name = id.Identifier.Text;
 
+        // 1. Enum-Mapping
         var mapped = TypeRegistry.MapEnum(name);
         if (mapped != name) return mapped;
 
         if (_ctx.EnumMembers.Contains(name)) return name;
         if (name == "_cs2sx_strbuf") return "_cs2sx_strbuf";
 
+        // 2. Lokale Variablen
         if (_ctx.LocalTypes.TryGetValue(name, out var localType))
         {
             if (localType.StartsWith("@ref:", StringComparison.Ordinal))
                 return "(*" + name + ")";
-            // PHASE 1 FIX: KVP-Pseudo-Typ → Key-Variable auflösen
             if (localType.StartsWith("__kvp__", StringComparison.Ordinal))
-                return name + "_Key"; // Default: Key wenn nur Name verwendet
+                return name + "_Key";
             return name;
         }
 
+        // 3. NEU: Static/Const-Felder via SemanticModel — VOR FieldTypes-Check
+        if (!string.IsNullOrEmpty(_ctx.CurrentClass) && _ctx.SemanticModel != null)
+        {
+            try
+            {
+                var symbolInfo = _ctx.SemanticModel.GetSymbolInfo(id);
+                if (symbolInfo.Symbol is IFieldSymbol field
+                    && field.IsStatic
+                    && (field.IsConst || field.IsReadOnly))
+                {
+                    var ownerClass = field.ContainingType?.Name ?? _ctx.CurrentClass;
+                    return ownerClass + "_" + name;
+                }
+            }
+            catch { }
+        }
+
+        // 4. Instanz-Felder (self->f_X)
         if (_ctx.IsFieldAccess(name))
         {
             var trimmed = name.TrimStart('_');
@@ -161,22 +180,7 @@ public sealed class ExpressionWriter
             return "self->" + prefix + name;
         }
 
-        if (!string.IsNullOrEmpty(_ctx.CurrentClass) && _ctx.SemanticModel != null)
-        {
-            try
-            {
-                var symbolInfo = _ctx.SemanticModel.GetSymbolInfo(id);
-                if (symbolInfo.Symbol is Microsoft.CodeAnalysis.IFieldSymbol field
-                    && field.IsStatic
-                    && (field.IsConst || field.IsReadOnly))
-                {
-                    var ownerClass = field.ContainingType?.Name ?? _ctx.CurrentClass;
-                    return ownerClass + "_" + name;
-                }
-            }
-            catch { }
-        }
-
+        // 5. Control-Felder
         if (TypeRegistry.ControlFields.Contains(name) && !string.IsNullOrEmpty(_ctx.CurrentClass))
             return "self->base." + name;
 

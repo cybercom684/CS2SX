@@ -216,6 +216,8 @@ public sealed class CSharpToC : CSharpSyntaxWalker
         foreach (var field in node.Members.OfType<FieldDeclarationSyntax>())
         {
             if (field.Modifiers.Any(m => m.IsKind(SyntaxKind.StaticKeyword))) continue;
+            if (field.Modifiers.Any(m => m.IsKind(SyntaxKind.ConstKeyword))) continue;
+
 
             var csType = ResolveFieldType(field);
 
@@ -295,6 +297,7 @@ public sealed class CSharpToC : CSharpSyntaxWalker
         _ctx.Out.WriteLine("};");
         _ctx.Out.WriteLine();
 
+        // Für nicht-static Klassen: extern + #define für static/const Felder
         WriteStaticFieldExterns(node, name);
     }
 
@@ -407,7 +410,13 @@ public sealed class CSharpToC : CSharpSyntaxWalker
     {
         foreach (var field in node.Members.OfType<FieldDeclarationSyntax>())
         {
-            if (!field.Modifiers.Any(m => m.IsKind(SyntaxKind.StaticKeyword))) continue;
+            bool isConst = field.Modifiers.Any(m => m.IsKind(SyntaxKind.ConstKeyword));
+            bool isExplicitlyStatic = field.Modifiers.Any(m => m.IsKind(SyntaxKind.StaticKeyword));
+
+            // const → #define im Header, keine Definition in der .c-Datei
+            if (isConst) continue;
+            // nur explizit static-Felder bekommen eine Definition
+            if (!isExplicitlyStatic) continue;
 
             var csType = ResolveFieldType(field);
 
@@ -420,8 +429,6 @@ public sealed class CSharpToC : CSharpSyntaxWalker
             var cType = TypeRegistry.MapType(csType);
             var needPtr = NeedsPtr(csType);
             var ptr = needPtr ? "*" : "";
-            var isReadOnly = field.Modifiers.Any(m => m.IsKind(SyntaxKind.ReadOnlyKeyword))
-                          || field.Modifiers.Any(m => m.IsKind(SyntaxKind.ConstKeyword));
 
             foreach (var v in field.Declaration.Variables)
             {
@@ -429,8 +436,7 @@ public sealed class CSharpToC : CSharpSyntaxWalker
                 var init = v.Initializer != null
                     ? " = " + _exprWriter.Write(v.Initializer.Value)
                     : "";
-                var constMod = isReadOnly ? "static const " : "static ";
-                _ctx.Out.WriteLine(constMod + cType + ptr + " " + name + "_" + fieldName + init + ";");
+                _ctx.Out.WriteLine("static " + cType + ptr + " " + name + "_" + fieldName + init + ";");
             }
         }
     }
@@ -477,21 +483,38 @@ public sealed class CSharpToC : CSharpSyntaxWalker
     {
         foreach (var field in node.Members.OfType<FieldDeclarationSyntax>())
         {
-            if (!field.Modifiers.Any(m => m.IsKind(SyntaxKind.StaticKeyword))) continue;
+            bool isConst = field.Modifiers.Any(m => m.IsKind(SyntaxKind.ConstKeyword));
+            bool isExplicitlyStatic = field.Modifiers.Any(m => m.IsKind(SyntaxKind.StaticKeyword));
+            bool isReadOnly = field.Modifiers.Any(m => m.IsKind(SyntaxKind.ReadOnlyKeyword));
+
+            // const ist in C# implizit static — auch ohne static-Modifier erfassen
+            if (!isExplicitlyStatic && !isConst) continue;
 
             var csType = ResolveFieldType(field);
+
+            // const oder readonly → #define (kein linkage-Problem)
+            if (isConst || (isExplicitlyStatic && isReadOnly))
+            {
+                foreach (var v in field.Declaration.Variables)
+                {
+                    var fieldName = v.Identifier.Text.TrimStart('_');
+                    if (v.Initializer != null)
+                    {
+                        var initVal = _exprWriter.Write(v.Initializer.Value);
+                        _ctx.Out.WriteLine("#define " + name + "_" + fieldName + " (" + initVal + ")");
+                    }
+                }
+                continue;
+            }
 
             if (csType.EndsWith("[]"))
             {
                 var baseType = csType[..^2].Trim();
                 var cType = baseType == "string" ? "const char*" : TypeRegistry.MapType(baseType);
-                var isConst = field.Modifiers.Any(m => m.IsKind(SyntaxKind.ReadOnlyKeyword))
-                           || field.Modifiers.Any(m => m.IsKind(SyntaxKind.ConstKeyword));
                 foreach (var v in field.Declaration.Variables)
                 {
                     var fieldName = v.Identifier.Text.TrimStart('_');
-                    var constMod = isConst ? "const " : "";
-                    _ctx.Out.WriteLine("extern " + constMod + cType + " " + name + "_" + fieldName + "[];");
+                    _ctx.Out.WriteLine("extern " + cType + " " + name + "_" + fieldName + "[];");
                 }
                 continue;
             }
@@ -540,9 +563,13 @@ public sealed class CSharpToC : CSharpSyntaxWalker
     // ── Funktions-Signaturen (Header) ─────────────────────────────────
 
     private void WriteFunctionSignatures(ClassDeclarationSyntax node,
-        bool isSwitchAppChild, bool isStaticClass)
+    bool isSwitchAppChild, bool isStaticClass)
     {
         var name = node.Identifier.Text;
+
+        // Für static classes: Konstanten als #define im Header ausgeben
+        if (isStaticClass)
+            WriteStaticFieldExterns(node, name);
 
         if (!isStaticClass)
         {
@@ -779,6 +806,15 @@ public sealed class CSharpToC : CSharpSyntaxWalker
             var inner = NullableHandler.GetInnerType(csType);
             var cInner = TypeRegistry.MapType(inner);
             return cInner + "* " + p.Identifier;
+        }
+
+        // NACHHER:
+        // Array-Parameter: int[] → int* (nicht int**)
+        if (csType.EndsWith("[]"))
+        {
+            var baseType = csType[..^2].Trim();
+            var cBase = baseType == "string" ? "const char*" : TypeRegistry.MapType(baseType);
+            return cBase + "* " + p.Identifier;
         }
 
         var cType = TypeRegistry.MapType(csType);

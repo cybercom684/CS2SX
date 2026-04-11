@@ -1,16 +1,8 @@
 ﻿// ============================================================================
-// Runtime/AudioStub.h (wird in switchapp.h eingebunden)
+// Runtime/AudioStub.h
 //
-// PHASE 3: Minimaler Audio-Stub für Nintendo Switch PCM-Audio.
-//
-// Wrapper um libnx audoutStartAudioOut / audoutAppendAudioOutBuffer.
-// Unterstützt einfache Sinuswellen und rohe PCM-Puffer.
-//
-// C#-Verwendung (Ziel-API für Transpiler):
-//   Audio.Init(44100);                      // Sample-Rate initialisieren
-//   Audio.PlayTone(440, 0.5f, 500);         // 440Hz, 50% Lautstärke, 500ms
-//   Audio.SetVolume(0.8f);                  // Master-Lautstärke
-//   Audio.Stop();                           // Playback stoppen
+// Minimaler Audio-Stub für Nintendo Switch PCM-Audio.
+// Fix: CS2SX_Audio_PlayTone blockiert nicht mehr beim ersten Aufruf.
 // ============================================================================
 
 #pragma once
@@ -21,14 +13,14 @@
 
 // ── Audio State ──────────────────────────────────────────────────────────────
 
-#define CS2SX_AUDIO_SAMPLE_RATE  44100
-#define CS2SX_AUDIO_CHANNELS     2       // Stereo
-#define CS2SX_AUDIO_BUF_SAMPLES  4096   // Samples pro Puffer
-#define CS2SX_AUDIO_NUM_BUFS     4       // Anzahl zirkulärer Puffer
+#define CS2SX_AUDIO_SAMPLE_RATE  48000
+#define CS2SX_AUDIO_CHANNELS     2
+#define CS2SX_AUDIO_BUF_SAMPLES  4096
+#define CS2SX_AUDIO_NUM_BUFS     4
 
 typedef struct
 {
-    AudioOutBuffer   libnx_buf;
+    AudioOutBuffer libnx_buf;
     s16* data;
 } CS2SX_AudioBuffer;
 
@@ -37,16 +29,16 @@ static float             _cs2sx_audio_volume = 1.0f;
 static float             _cs2sx_audio_phase = 0.0f;
 static CS2SX_AudioBuffer _cs2sx_audio_bufs[CS2SX_AUDIO_NUM_BUFS];
 static int               _cs2sx_audio_buf_idx = 0;
+static int               _cs2sx_audio_submitted = 0;  // Anzahl bisher eingereichter Puffer
 
 static inline int CS2SX_Audio_Init(int sampleRate)
 {
-    (void)sampleRate; // libnx verwendet immer 48000 intern
+    (void)sampleRate;
     if (_cs2sx_audio_init) return 1;
 
     if (R_FAILED(audoutInitialize())) return 0;
     if (R_FAILED(audoutStartAudioOut())) { audoutExit(); return 0; }
 
-    // Puffer allozieren
     int bufSize = CS2SX_AUDIO_BUF_SAMPLES * CS2SX_AUDIO_CHANNELS * sizeof(s16);
     for (int i = 0; i < CS2SX_AUDIO_NUM_BUFS; i++)
     {
@@ -61,6 +53,7 @@ static inline int CS2SX_Audio_Init(int sampleRate)
         _cs2sx_audio_bufs[i].libnx_buf.data_offset = 0;
     }
 
+    _cs2sx_audio_submitted = 0;
     _cs2sx_audio_init = 1;
     return 1;
 }
@@ -72,16 +65,15 @@ static inline void CS2SX_Audio_SetVolume(float volume)
     _cs2sx_audio_volume = volume;
 }
 
-/// Erzeugt einen Sinuston der angegebenen Frequenz für duration_ms Millisekunden.
-/// Blockiert NICHT — gibt Puffer ab und kehrt sofort zurück.
+/// Erzeugt einen Sinuston — blockiert NICHT beim ersten Aufruf.
 static inline void CS2SX_Audio_PlayTone(float freqHz, float amplitude, int duration_ms)
 {
     if (!_cs2sx_audio_init) return;
 
-    int totalSamples = (CS2SX_AUDIO_SAMPLE_RATE * duration_ms) / 1000;
+    int   totalSamples = (CS2SX_AUDIO_SAMPLE_RATE * duration_ms) / 1000;
     float phaseInc = 2.0f * 3.14159265f * freqHz / (float)CS2SX_AUDIO_SAMPLE_RATE;
+    int   processed = 0;
 
-    int processed = 0;
     while (processed < totalSamples)
     {
         int chunk = CS2SX_AUDIO_BUF_SAMPLES;
@@ -91,12 +83,13 @@ static inline void CS2SX_Audio_PlayTone(float freqHz, float amplitude, int durat
         CS2SX_AudioBuffer* buf = &_cs2sx_audio_bufs[_cs2sx_audio_buf_idx];
         _cs2sx_audio_buf_idx = (_cs2sx_audio_buf_idx + 1) % CS2SX_AUDIO_NUM_BUFS;
 
+        // PCM füllen
         for (int i = 0; i < chunk; i++)
         {
             float sample = sinf(_cs2sx_audio_phase) * amplitude * _cs2sx_audio_volume;
-            s16 pcm = (s16)(sample * 32767.0f);
-            buf->data[i * 2] = pcm; // L
-            buf->data[i * 2 + 1] = pcm; // R
+            s16   pcm = (s16)(sample * 32767.0f);
+            buf->data[i * 2] = pcm;
+            buf->data[i * 2 + 1] = pcm;
             _cs2sx_audio_phase += phaseInc;
             if (_cs2sx_audio_phase > 2.0f * 3.14159265f)
                 _cs2sx_audio_phase -= 2.0f * 3.14159265f;
@@ -104,9 +97,16 @@ static inline void CS2SX_Audio_PlayTone(float freqHz, float amplitude, int durat
 
         buf->libnx_buf.data_size = (u64)(chunk * CS2SX_AUDIO_CHANNELS * sizeof(s16));
 
-        AudioOutBuffer* released = NULL;
-        audoutWaitPlayFinish(&released, 1, U64_MAX);
+        // Nur warten wenn bereits Puffer laufen — verhindert Deadlock beim ersten Aufruf
+        if (_cs2sx_audio_submitted >= CS2SX_AUDIO_NUM_BUFS)
+        {
+            AudioOutBuffer* released = NULL;
+            u32             released_count = 0;
+            audoutWaitPlayFinish(&released, &released_count, UINT64_MAX);
+        }
+
         audoutAppendAudioOutBuffer(&buf->libnx_buf);
+        _cs2sx_audio_submitted++;
 
         processed += chunk;
     }
@@ -116,6 +116,7 @@ static inline void CS2SX_Audio_Stop(void)
 {
     if (!_cs2sx_audio_init) return;
     audoutStopAudioOut();
+    _cs2sx_audio_submitted = 0;
     _cs2sx_audio_init = 0;
 }
 
