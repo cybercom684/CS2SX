@@ -63,6 +63,11 @@ public sealed class CSharpToC : CSharpSyntaxWalker
         _exprWriter = new ExpressionWriter(_ctx, _extensionHandler);
         _stmtWriter = new StatementWriter(_ctx, _exprWriter);
         _constructorStrategies = BuildStrategies();
+
+        // Interface-Namen in den Context laden damit ExpressionWriter.TryWriteVirtualCall
+        // Interface-Variablen korrekt als vtable-Wrapper dispatcht.
+        foreach (var ifaceName in collector.Interfaces.Keys)
+            _ctx.InterfaceTypes.Add(ifaceName);
     }
 
     private IConstructorStrategy[] BuildStrategies() =>

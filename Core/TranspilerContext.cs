@@ -1,4 +1,4 @@
-// Datei: Core/TranspilerContext.cs  — vollständig ersetzen
+// Datei: Core/TranspilerContext.cs
 
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
@@ -61,6 +61,14 @@ public sealed class TranspilerContext
     /// ExpressionWriter nutzt dies um virtuelle Aufrufe korrekt zu dispatchen.
     /// </summary>
     public HashSet<string> VTableTypes { get; } = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// NEU: Interface-Namen aus dem Projekt (IRenderable, IUpdatable etc.).
+    /// Wird vom InterfaceExpander befüllt und an den TranspilerContext übergeben.
+    /// ExpressionWriter.TryWriteVirtualCall nutzt dies um Interface-Aufrufe
+    /// korrekt als r->vtable->Method(r->obj, args) zu dispatchen.
+    /// </summary>
+    public HashSet<string> InterfaceTypes { get; } = new(StringComparer.Ordinal);
 
     // ── Indentierung ──────────────────────────────────────────────────────────
 
@@ -136,7 +144,7 @@ public sealed class TranspilerContext
         MethodReturnTypes.Clear();
         PropertyTypes.Clear();
         EnumMembers.Clear();
-        // VTableTypes und ValueTypeStructs bewusst NICHT löschen —
+        // VTableTypes, ValueTypeStructs, InterfaceTypes bewusst NICHT löschen —
         // sie sind global für die gesamte Compilation gültig.
         ClearMethodContext();
     }

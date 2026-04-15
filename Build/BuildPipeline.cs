@@ -89,7 +89,8 @@ public sealed class BuildPipeline
             var appSourceFiles = reader.SourceFiles.ToList();
             var allForFwd = switchFormsFilesForFwd.Concat(appSourceFiles).ToList();
             var forwardPath = Path.Combine(_buildDir, "_forward.h");
-            WriteForwardDeclarations(allForFwd, forwardPath);
+            // Vorläufig ohne expanded types — wird nach dem generics-Pass aktualisiert
+            WriteForwardDeclarations(allForFwd, forwardPath, expandedTypeNames: null);
 
             sFwd.Progress = 100;
             sFwd.Status = StageStatus.Done;
@@ -117,6 +118,16 @@ public sealed class BuildPipeline
             // Generic-Code expandieren und in Dateien schreiben
             var genericExpander = new GenericExpander(genericCollector);
             var (genericHeaderPath, genericImplPath) = genericExpander.WriteToFiles(_buildDir);
+
+            // _forward.h neu schreiben mit den jetzt bekannten expandierten Typen.
+            // Stack_int, Pair_str_float etc. brauchen forward decls damit
+            // andere .h-Dateien sie in Signaturen referenzieren können.
+            var expandedNames = genericExpander.GetExpandedTypeNames().ToList();
+            if (expandedNames.Count > 0)
+            {
+                WriteForwardDeclarations(allForFwd, forwardPath, expandedNames);
+                Log.Info($"_forward.h aktualisiert mit {expandedNames.Count} expanded type(s)");
+            }
 
             var genericsInfo = new List<string>();
             if (genericCollector.GenericClasses.Count > 0)
@@ -380,8 +391,22 @@ public sealed class BuildPipeline
         return true;
     }
 
+    /// <summary>
+    /// Schreibt _forward.h mit typedef-Vorwärtsdeklarationen für alle Typen.
+    ///
+    /// expandedTypeNames: expandierte Generic-Typen (Stack_int, Pair_str_float…)
+    /// die aus _generics.h kommen und ebenfalls forward-deklariert werden müssen,
+    /// damit sie in Signaturen anderer .h-Dateien verwendet werden können bevor
+    /// _generics.h inkludiert wird.
+    ///
+    /// Der Aufruf findet zweimal statt:
+    ///   1. Im fwd-decl-Stage: expandedTypeNames = null (Generics noch nicht bekannt)
+    ///   2. Im generics-Stage: expandedTypeNames gefüllt → _forward.h wird überschrieben
+    /// </summary>
     private static void WriteForwardDeclarations(
-        IReadOnlyList<string> sourceFiles, string outputPath)
+        IReadOnlyList<string> sourceFiles,
+        string outputPath,
+        IEnumerable<string>? expandedTypeNames = null)
     {
         var sb = new StringBuilder();
         sb.AppendLine("#pragma once");
@@ -413,25 +438,47 @@ public sealed class BuildPipeline
             "Control", "Form", "Label", "Button", "ProgressBar", "SwitchApp",
         };
 
+        // Normale Typen aus den Quelldateien
         foreach (var csFile in sourceFiles)
         {
             var source = System.IO.File.ReadAllText(csFile);
             var tree = Microsoft.CodeAnalysis.CSharp.CSharpSyntaxTree.ParseText(source);
             foreach (var typeDecl in tree.GetRoot()
-             .DescendantNodes()
-             .Where(n => n is ClassDeclarationSyntax or StructDeclarationSyntax))
+                .DescendantNodes()
+                .Where(n => n is ClassDeclarationSyntax or StructDeclarationSyntax))
             {
-                // NEU: Generische Klassen werden für alle Instantiierungen forward-deklariert
-                // Die eigentlichen typedef struct kommen aus _generics.h
+                // Generische Klassen selbst nicht forward-deklarieren —
+                // ihre konkreten Expansionen (Stack_int etc.) kommen weiter unten.
                 if (typeDecl is ClassDeclarationSyntax cls
                     && cls.TypeParameterList?.Parameters.Count > 0)
-                    continue; // Generische Klassen nicht als einfachen typedef forward-deklarieren
+                    continue;
 
                 var typeName = typeDecl is ClassDeclarationSyntax c
                     ? c.Identifier.Text
                     : ((StructDeclarationSyntax)typeDecl).Identifier.Text;
+
                 if (alreadyDeclared.Add(typeName))
                     sb.AppendLine($"typedef struct {typeName} {typeName};");
+            }
+        }
+
+        // Expandierte Generic-Typen: Stack_int, Pair_str_float, …
+        // Diese kommen aus _generics.h und müssen hier als opaque forward decl
+        // erscheinen, damit Signaturen in anderen .h-Dateien sie referenzieren können
+        // noch bevor _generics.h inkludiert wird.
+        if (expandedTypeNames != null)
+        {
+            var hadAny = false;
+            foreach (var expandedName in expandedTypeNames)
+            {
+                if (!alreadyDeclared.Add(expandedName)) continue;
+                if (!hadAny)
+                {
+                    sb.AppendLine();
+                    sb.AppendLine("// Expanded generic types (from _generics.h)");
+                    hadAny = true;
+                }
+                sb.AppendLine($"typedef struct {expandedName} {expandedName};");
             }
         }
 

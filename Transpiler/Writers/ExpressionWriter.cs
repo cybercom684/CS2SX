@@ -268,12 +268,62 @@ public sealed class ExpressionWriter
             if (_ctx.LocalTypes.TryGetValue(lname, out var lt2)
                 && lt2.StartsWith("@ref:", StringComparison.Ordinal))
                 return "*" + lname + " " + op + " " + right;
+
+            // ── Interface-Zuweisung ───────────────────────────────────────────
+            // r = button;  wenn r vom Typ IRenderable → r = Button_as_IRenderable(button)
+            string? ltIface = null;
+            _ctx.LocalTypes.TryGetValue(lname, out ltIface);
+            if (ltIface == null) _ctx.FieldTypes.TryGetValue(lname.TrimStart('_'), out ltIface);
+
+            if (ltIface != null && _ctx.InterfaceTypes.Contains(ltIface))
+            {
+                var rightRaw = assign.Right.ToString().Trim();
+                var wrapped = TryWrapAsInterface(rightRaw, right, ltIface);
+                if (wrapped != null)
+                    return Write(assign.Left) + " " + op + " " + wrapped;
+            }
+            // ─────────────────────────────────────────────────────────────────
         }
 
         if (assign.Left is TupleExpressionSyntax tupleLeft)
             return WriteTupleDeconstruction(tupleLeft, right);
 
         return Write(assign.Left) + " " + op + " " + right;
+    }
+
+    /// <summary>
+    /// Prüft ob ein Ausdruck in einen Interface-Wrapper eingepackt werden muss.
+    ///
+    /// IRenderable r = button;
+    ///   targetIfaceName = "IRenderable"
+    ///   exprRaw         = "button"    (Roslyn-Quelltext)
+    ///   exprCode        = "button"    (bereits transpilierter C-Ausdruck)
+    ///   → "Button_as_IRenderable(button)"
+    ///
+    /// Gibt null zurück wenn kein Wrapping nötig oder möglich ist.
+    /// </summary>
+    private string? TryWrapAsInterface(
+        string exprRaw,
+        string exprCode,
+        string targetIfaceName)
+    {
+        if (!_ctx.InterfaceTypes.Contains(targetIfaceName)) return null;
+
+        // Typ des Ausdrucks ermitteln (aus LocalTypes oder FieldTypes)
+        var key = exprRaw.TrimStart('_');
+        string? csType = null;
+        _ctx.LocalTypes.TryGetValue(exprRaw, out csType);
+        if (csType == null) _ctx.FieldTypes.TryGetValue(key, out csType);
+
+        // Typ unbekannt → kein Wrap
+        if (csType == null) return null;
+
+        // Typ IST bereits das Interface (oder Pointer darauf) → kein Wrap
+        var bareType = csType.TrimEnd('*').Trim();
+        if (bareType == targetIfaceName) return null;
+
+        // Wrapper aufrufen: ClassName_as_IFaceName(expr)
+        return bareType + "_as_" + targetIfaceName + "(" + exprCode + ")";
     }
 
     private string WriteTupleDeconstruction(TupleExpressionSyntax tupleLeft, string right)
@@ -356,18 +406,31 @@ public sealed class ExpressionWriter
         if (TypeRegistry.IsControlType(receiverType)) return null;
         if (receiverType is "string" or "StringBuilder") return null;
 
-        if (!_ctx.VTableTypes.Contains(receiverType)) return null;
-
-        var receiver = Write(mem.Expression);
-        var args = inv.ArgumentList.Arguments
+        var callArgs = inv.ArgumentList.Arguments
             .Select(a => Write(a.Expression))
             .ToList();
 
-        var allArgs = new List<string> { receiver };
-        allArgs.AddRange(args);
+        // ── Interface-Dispatch ────────────────────────────────────────────────
+        // Interface-Variablen sind Wrapper-Structs: { IFace_vtable* vtable; void* obj; }
+        // Aufruf: r->vtable->Method(r->obj, args...)
+        if (_ctx.InterfaceTypes.Contains(receiverType))
+        {
+            var receiver = Write(mem.Expression);
+            var ifaceArgs = new List<string> { receiver + "->obj" };
+            ifaceArgs.AddRange(callArgs);
+            return receiver + "->vtable->" + methodName
+                 + "(" + string.Join(", ", ifaceArgs) + ")";
+        }
+        // ─────────────────────────────────────────────────────────────────────
 
-        return receiver + "->vtable->" + methodName
-             + "(" + string.Join(", ", allArgs) + ")";
+        if (!_ctx.VTableTypes.Contains(receiverType)) return null;
+
+        var recv = Write(mem.Expression);
+        var vtableArgs = new List<string> { recv };
+        vtableArgs.AddRange(callArgs);
+
+        return recv + "->vtable->" + methodName
+             + "(" + string.Join(", ", vtableArgs) + ")";
     }
 
     private string WriteNullCoalescingAssignment(

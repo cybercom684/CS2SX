@@ -52,7 +52,6 @@ public sealed class StatementWriter
 
     private void WriteExprStmt(ExpressionStatementSyntax expr)
     {
-        // Phase 1 Fix: out var in expression statements (z.B. als standalone)
         var result = _expr.Write(expr.Expression);
         if (!string.IsNullOrEmpty(result))
             _ctx.WriteLine(result + ";");
@@ -143,6 +142,39 @@ public sealed class StatementWriter
                 continue;
             }
 
+            // ── Interface-Zuweisung ──────────────────────────────────────────
+            // IRenderable r = button;  → IRenderable r = Button_as_IRenderable(button);
+            //
+            // Erkennung: deklarierter Typ ist ein bekanntes Interface aus dem Collector.
+            // Der Initializer-Ausdruck hat einen anderen Typ → Wrapper-Funktion einsetzen.
+            if (_ctx.InterfaceTypes.Contains(declType) && v.Initializer != null)
+            {
+                var initExprRaw = v.Initializer.Value.ToString().Trim();
+                var initCode = _expr.Write(v.Initializer.Value);
+                var wrapped = TryWrapAsInterface(initExprRaw, initCode, declType);
+
+                if (wrapped != null)
+                {
+                    // IRenderable r = Button_as_IRenderable(button);
+                    _ctx.WriteLine(declType + " " + v.Identifier + " = " + wrapped + ";");
+                }
+                else
+                {
+                    // Kein Wrapping möglich (Typ unbekannt oder bereits Interface)
+                    _ctx.WriteLine(declType + " " + v.Identifier + " = " + initCode + ";");
+                }
+                _ctx.LocalTypes[v.Identifier.Text] = declType;
+                continue;
+            }
+            // Wenn kein Initializer aber Interface-Typ: als lokale Variable
+            if (_ctx.InterfaceTypes.Contains(declType))
+            {
+                _ctx.WriteLine(declType + " " + v.Identifier + ";");
+                _ctx.LocalTypes[v.Identifier.Text] = declType;
+                continue;
+            }
+            // ────────────────────────────────────────────────────────────────
+
             // FIX 1: T[] ohne Initializer aber MIT new T[N] → Stack oder Heap
             if (declType.EndsWith("[]")
                 && v.Initializer?.Value is ArrayCreationExpressionSyntax arrCreate)
@@ -164,6 +196,41 @@ public sealed class StatementWriter
                 : (declType is "var" or "var?" ? cTypeFinal : declType);
             _ctx.LocalTypes[v.Identifier.Text] = registeredType;
         }
+    }
+
+    /// <summary>
+    /// Prüft ob ein Initializer-Ausdruck in einen Interface-Wrapper eingepackt werden muss.
+    ///
+    /// IRenderable r = button;
+    ///   targetIfaceName = "IRenderable"
+    ///   exprRaw         = "button"    (Roslyn-Text)
+    ///   exprCode        = "button"    (transpilierter C-Code)
+    ///   → "Button_as_IRenderable(button)"
+    ///
+    /// Gibt null zurück wenn kein Wrapping nötig oder möglich ist.
+    /// </summary>
+    private string? TryWrapAsInterface(
+        string exprRaw,
+        string exprCode,
+        string targetIfaceName)
+    {
+        if (!_ctx.InterfaceTypes.Contains(targetIfaceName)) return null;
+
+        // Typ des Ausdrucks aus LocalTypes oder FieldTypes
+        var key = exprRaw.TrimStart('_');
+        string? csType = null;
+        _ctx.LocalTypes.TryGetValue(exprRaw, out csType);
+        if (csType == null) _ctx.FieldTypes.TryGetValue(key, out csType);
+
+        // Typ unbekannt → kein Wrap (lassen wir den Compiler meckern)
+        if (csType == null) return null;
+
+        // Typ IST bereits das Interface → kein Wrap nötig
+        var bareType = csType.TrimEnd('*').Trim();
+        if (bareType == targetIfaceName) return null;
+
+        // Wrapper: ClassName_as_InterfaceName(expr)
+        return bareType + "_as_" + targetIfaceName + "(" + exprCode + ")";
     }
 
     // FIX 1: T[] mit new T[N] → Array-Allokation + Länge in ArrayLengths tracken
@@ -473,7 +540,6 @@ public sealed class StatementWriter
 
     private void WriteIf(IfStatementSyntax ifStmt)
     {
-        // PHASE 1 FIX: out var in if-condition (z.B. if (int.TryParse(s, out var n)))
         if (TryExtractOutVarFromCondition(ifStmt.Condition, out var outVarDecls))
         {
             foreach (var (varName, varType) in outVarDecls)
@@ -507,10 +573,6 @@ public sealed class StatementWriter
         }
     }
 
-    /// <summary>
-    /// PHASE 1 FIX: Extrahiert out var Deklarationen aus einer if-Bedingung.
-    /// Beispiel: if (int.TryParse(s, out var n)) → int n = 0; davor deklarieren
-    /// </summary>
     private static bool TryExtractOutVarFromCondition(
         ExpressionSyntax condition,
         out List<(string name, string type)> outVars)
@@ -597,7 +659,6 @@ public sealed class StatementWriter
 
     private void WriteIfInline(IfStatementSyntax ifStmt)
     {
-        // PHASE 1 FIX: out var auch in inline-if
         if (TryExtractOutVarFromCondition(ifStmt.Condition, out var outVarDecls))
         {
             foreach (var (varName, varType) in outVarDecls)
@@ -683,7 +744,7 @@ public sealed class StatementWriter
         WriteBlockOrStmt(forStmt.Statement);
     }
 
-    // ── ForEach — PHASE 1 FIX: Dictionary<K,V> + raw Arrays ─────────────────
+    // ── ForEach ───────────────────────────────────────────────────────────────
 
     private void WriteForEach(ForEachStatementSyntax forEach)
     {
@@ -702,7 +763,6 @@ public sealed class StatementWriter
         bool isString = colType is "string" or "char[]";
         bool isRawArray = colType.EndsWith("[]") && !isList;
 
-        // PHASE 1 FIX: foreach über Dictionary → Key-Iteration
         if (isDict)
         {
             WriteForEachDict(forEach, colExpr, colType, varName);
@@ -748,18 +808,6 @@ public sealed class StatementWriter
         _ctx.WriteLine("}");
     }
 
-    /// <summary>
-    /// PHASE 1 FIX: foreach over Dictionary<K,V>
-    /// Iteriert über alle Keys und gibt (Key, Value) als separate Variablen aus.
-    ///
-    /// C#:  foreach (var kvp in _myDict) { use kvp.Key, kvp.Value }
-    /// C:   for (int _i = 0; _i < dict->count; _i++) {
-    ///          KeyType kvp_Key = dict->keys[_i];
-    ///          ValType kvp_Value = dict->vals[_i];
-    ///      }
-    ///
-    /// Unterstützt auch: foreach (var key in dict.Keys) → nur Keys
-    /// </summary>
     private void WriteForEachDict(ForEachStatementSyntax forEach,
         string colExpr, string colType, string varName)
     {
@@ -774,14 +822,11 @@ public sealed class StatementWriter
         _ctx.WriteLine("{");
         _ctx.Indent();
 
-        // KeyValuePair simulation: varName_Key + varName_Value
         _ctx.WriteLine(cKey + " " + varName + "_Key = " + colExpr + "->keys[" + idxVar + "];");
         _ctx.WriteLine(cVal + " " + varName + "_Value = " + colExpr + "->vals[" + idxVar + "];");
 
-        // Auch als einzelne Vars registrieren für Body-Zugriff über kvp.Key / kvp.Value
         _ctx.LocalTypes[varName + "_Key"] = types.key;
         _ctx.LocalTypes[varName + "_Value"] = types.val;
-        // varName selbst als "pseudo-struct" — Member-Zugriffe werden umgeschrieben
         _ctx.LocalTypes[varName] = "__kvp__" + varName;
 
         var bodyStmts = forEach.Statement is BlockSyntax b

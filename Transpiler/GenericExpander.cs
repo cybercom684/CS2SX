@@ -3,9 +3,20 @@
 //
 // Expandiert generische C#-Klassen zu konkreten C-Structs und Funktionen.
 //
-// Strategie: Template-Expansion (wie C++ Templates)
-// Für jede konkrete Instantiierung wird die generische Klasse mit substituierten
-// Typen neu transpiliert.
+// Strategie: Echter Re-Transpile-Pass (nicht Text-Substitution)
+//
+// Für jede konkrete Instantiierung wird die generische Klasse syntaktisch
+// rewritten — Typ-Parameter werden durch konkrete Typen ersetzt — und dann
+// durch den normalen CSharpToC-Transpiler gejagt. Dadurch profitiert die
+// Expansion von der gesamten ExpressionWriter/StatementWriter-Logik:
+// String-Konkatenation, Vererbung, Null-Coalescing, foreach, etc.
+//
+// Ablauf:
+//   1. BuildTypeMap:        T → int,  U → string
+//   2. RewriteSyntaxTree:   Roslyn-Rewriter ersetzt alle Typ-Parameter
+//                           in Signaturen, Feldern, Parametern, Locals
+//   3. CSharpToC.Transpile: normaler Transpiler auf rewritetem Source
+//   4. Rename:              generierte Symbole Foo → Foo_int
 //
 // Beispiel:
 //   class Stack<T> {
@@ -15,29 +26,27 @@
 //       public T Pop() { return _items[--_count]; }
 //   }
 //
-//   → Stack<int> expandiert zu:
+//   → nach Rewrite für T=int:
+//   class Stack_int {
+//       private int[] _items;
+//       private int _count;
+//       public void Push(int item) { _items[_count++] = item; }
+//       public int Pop() { return _items[--_count]; }
+//   }
 //
-//   typedef struct Stack_int {
-//       int* f_items;
-//       int f_count;
-//   } Stack_int;
-//
+//   → CSharpToC erzeugt daraus normalen C-Code:
+//   typedef struct Stack_int Stack_int;
+//   struct Stack_int { int* f_items; int f_count; };
+//   Stack_int* Stack_int_New();
 //   void Stack_int_Push(Stack_int* self, int item);
 //   int  Stack_int_Pop(Stack_int* self);
-//
-//   void Stack_int_Push(Stack_int* self, int item) {
-//       self->f_items[self->f_count++] = item;
-//   }
-//   int Stack_int_Pop(Stack_int* self) {
-//       return self->f_items[--self->f_count];
-//   }
 // ============================================================================
 
-using CS2SX.Core;
-using CS2SX.Logging;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
+using CS2SX.Core;
+using CS2SX.Logging;
 
 namespace CS2SX.Transpiler;
 
@@ -53,208 +62,145 @@ public sealed class GenericExpander
     // ── Öffentliche API ───────────────────────────────────────────────────────
 
     /// <summary>
-    /// Erzeugt für alle gesammelten Instantiierungen den C-Header-Code.
-    /// Wird in _forward.h oder eine separate generic_types.h eingebettet.
+    /// Erzeugt für alle gesammelten Instantiierungen den C-Header- und
+    /// Implementierungs-Code via echtem Re-Transpile-Pass.
+    /// Gibt die Pfade der erzeugten .h und .c Dateien zurück.
     /// </summary>
-    public string ExpandHeaders()
+    public (string headerPath, string implPath) WriteToFiles(string buildDir)
     {
-        var sb = new System.Text.StringBuilder();
-        sb.AppendLine("// ── Expanded Generic Types (auto-generated) ──────────────────────────");
-        sb.AppendLine();
+        if (_collector.Instantiations.Count == 0)
+            return (string.Empty, string.Empty);
+
+        var headerSb = new System.Text.StringBuilder();
+        headerSb.AppendLine("// ── Expanded Generic Types (auto-generated) ──────────────────────────");
+        headerSb.AppendLine("// DO NOT EDIT — regenerated on every build");
+        headerSb.AppendLine();
+
+        var implSb = new System.Text.StringBuilder();
+        implSb.AppendLine("// ── Expanded Generic Implementations (auto-generated) ────────────────");
+        implSb.AppendLine("// DO NOT EDIT — regenerated on every build");
+        implSb.AppendLine();
 
         foreach (var inst in _collector.Instantiations)
         {
             if (!_collector.GenericClasses.TryGetValue(inst.BaseName, out var classDef))
                 continue;
 
-            sb.AppendLine(ExpandClassHeader(classDef, inst));
+            Log.Debug($"GenericExpander: Expanding {inst}");
+
+            try
+            {
+                var (hCode, cCode) = ExpandInstantiation(classDef, inst);
+                headerSb.AppendLine(hCode);
+                implSb.AppendLine(cCode);
+            }
+            catch (Exception ex)
+            {
+                Log.Warning($"GenericExpander: Expansion von {inst} fehlgeschlagen: {ex.Message}");
+                // Fallback: leerer Stub damit der Build nicht bricht
+                headerSb.AppendLine($"/* expansion failed: {inst} */");
+            }
         }
 
-        return sb.ToString();
+        var headerPath = Path.Combine(buildDir, "_generics.h");
+        var implPath = Path.Combine(buildDir, "_generics.c");
+
+        File.WriteAllText(headerPath,
+            "#pragma once\n#include \"_forward.h\"\n\n" + headerSb);
+        File.WriteAllText(implPath,
+            "#include \"_generics.h\"\n\n" + implSb);
+
+        Log.Info($"GenericExpander: {_collector.Instantiations.Count} Expansion(en) → _generics.h / _generics.c");
+        return (headerPath, implPath);
     }
 
     /// <summary>
-    /// Erzeugt für alle gesammelten Instantiierungen den C-Implementierungs-Code.
-    /// Wird als separate .c-Datei geschrieben.
+    /// Gibt alle expandierten C-Typ-Namen zurück (für Forward-Declarations in _forward.h).
+    /// z.B. ["Stack_int", "Pair_str_float"]
     /// </summary>
-    public string ExpandImplementations()
+    public IEnumerable<string> GetExpandedTypeNames() =>
+        _collector.Instantiations
+            .Where(i => _collector.GenericClasses.ContainsKey(i.BaseName))
+            .Select(i => i.CName);
+
+    // ── Kern-Expansion ────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Expandiert eine einzelne Instantiierung über einen echten Re-Transpile-Pass.
+    /// Gibt (headerCode, implCode) zurück.
+    /// </summary>
+    private (string header, string impl) ExpandInstantiation(
+        ClassDeclarationSyntax originalClass,
+        GenericInstantiation inst)
     {
-        var sb = new System.Text.StringBuilder();
-        sb.AppendLine("// ── Expanded Generic Implementations (auto-generated) ────────────────");
-        sb.AppendLine();
+        var typeMap = BuildTypeMap(originalClass, inst);
 
-        foreach (var inst in _collector.Instantiations)
+        // Schritt 1: Syntax-Tree rewriten — Typ-Parameter durch konkrete Typen ersetzen
+        //            und Klassenname von "Stack" zu "Stack_int" umbenennen
+        var rewrittenSource = RewriteGenericClass(originalClass, inst, typeMap);
+
+        Log.Debug($"GenericExpander: Rewritten source for {inst}:\n{rewrittenSource[..Math.Min(200, rewrittenSource.Length)]}…");
+
+        // Schritt 2: Normaler Transpiler-Pass (Header)
+        var hTranspiler = new CSharpToC(CSharpToC.TranspileMode.HeaderOnly);
+        var hResult = hTranspiler.Transpile(rewrittenSource, filePath: $"<generic:{inst}>");
+
+        // Schritt 3: Normaler Transpiler-Pass (Implementierung)
+        var cTranspiler = new CSharpToC(CSharpToC.TranspileMode.Implementation);
+        var cResult = cTranspiler.Transpile(rewrittenSource, filePath: $"<generic:{inst}>");
+
+        // Warnungen aus dem Generic-Transpile loggen
+        foreach (var d in hResult.Diagnostics.Concat(cResult.Diagnostics)
+            .Where(d => d.Severity == Core.DiagnosticSeverity.Warning))
         {
-            if (!_collector.GenericClasses.TryGetValue(inst.BaseName, out var classDef))
-                continue;
-
-            sb.AppendLine(ExpandClassImpl(classDef, inst));
+            Log.Warning($"GenericExpander/{inst}: {d.Message}");
         }
 
-        return sb.ToString();
+        return (hResult.Code, cResult.Code);
     }
 
-    // ── Header-Expansion ──────────────────────────────────────────────────────
+    // ── Syntax-Rewriter ───────────────────────────────────────────────────────
 
-    private string ExpandClassHeader(ClassDeclarationSyntax cls, GenericInstantiation inst)
-    {
-        var sb = new System.Text.StringBuilder();
-        var cName = inst.CName;
-        var typeMap = BuildTypeMap(cls, inst);
-
-        sb.AppendLine($"// Generic expansion: {inst}");
-
-        // Forward declaration
-        sb.AppendLine($"typedef struct {cName} {cName};");
-        sb.AppendLine();
-
-        // Struct definition
-        sb.AppendLine($"struct {cName}");
-        sb.AppendLine("{");
-
-        foreach (var field in cls.Members.OfType<FieldDeclarationSyntax>())
-        {
-            if (field.Modifiers.Any(m => m.IsKind(SyntaxKind.StaticKeyword))) continue;
-
-            var csType = field.Declaration.Type.ToString().Trim();
-            var cType = SubstituteType(csType, typeMap);
-            var needsPtr = NeedsPointer(csType, typeMap);
-            var ptr = needsPtr ? "*" : "";
-
-            foreach (var v in field.Declaration.Variables)
-            {
-                var fieldName = v.Identifier.Text.TrimStart('_');
-                sb.AppendLine($"    {cType}{ptr} f_{fieldName};");
-            }
-        }
-
-        foreach (var prop in cls.Members.OfType<PropertyDeclarationSyntax>())
-        {
-            if (prop.Modifiers.Any(m => m.IsKind(SyntaxKind.StaticKeyword))) continue;
-            if (!IsAutoProperty(prop)) continue;
-
-            var csType = prop.Type.ToString().Trim();
-            var cType = SubstituteType(csType, typeMap);
-            var ptr = NeedsPointer(csType, typeMap) ? "*" : "";
-            sb.AppendLine($"    {cType}{ptr} f_{prop.Identifier};");
-        }
-
-        sb.AppendLine("};");
-        sb.AppendLine();
-
-        // _New Funktion
-        sb.AppendLine($"{cName}* {cName}_New();");
-
-        // Methoden-Signaturen
-        foreach (var method in cls.Members.OfType<MethodDeclarationSyntax>())
-        {
-            if (method.Modifiers.Any(m => m.IsKind(SyntaxKind.AbstractKeyword))) continue;
-
-            var sig = BuildMethodSignature(method, cName, typeMap, withSemicolon: true);
-            sb.AppendLine(sig);
-        }
-
-        sb.AppendLine();
-        return sb.ToString();
-    }
-
-    // ── Implementierungs-Expansion ─────────────────────────────────────────────
-
-    private string ExpandClassImpl(ClassDeclarationSyntax cls, GenericInstantiation inst)
-    {
-        var sb = new System.Text.StringBuilder();
-        var cName = inst.CName;
-        var typeMap = BuildTypeMap(cls, inst);
-
-        sb.AppendLine($"// Implementation: {inst}");
-
-        // _New
-        sb.AppendLine($"{cName}* {cName}_New()");
-        sb.AppendLine("{");
-        sb.AppendLine($"    {cName}* self = ({cName}*)malloc(sizeof({cName}));");
-        sb.AppendLine("    if (!self) return NULL;");
-        sb.AppendLine($"    memset(self, 0, sizeof({cName}));");
-
-        // Feld-Initializer
-        foreach (var field in cls.Members.OfType<FieldDeclarationSyntax>())
-        {
-            if (field.Modifiers.Any(m => m.IsKind(SyntaxKind.StaticKeyword))) continue;
-            foreach (var v in field.Declaration.Variables)
-            {
-                if (v.Initializer == null) continue;
-                var fieldName = v.Identifier.Text.TrimStart('_');
-                var initVal = SubstituteExpression(v.Initializer.Value.ToString(), typeMap);
-                sb.AppendLine($"    self->f_{fieldName} = {initVal};");
-            }
-        }
-
-        // Expliziter Konstruktor
-        var ctor = cls.Members.OfType<ConstructorDeclarationSyntax>().FirstOrDefault();
-        if (ctor?.Body != null)
-        {
-            sb.AppendLine("    // Constructor body (text substitution):");
-            foreach (var stmt in ctor.Body.Statements)
-            {
-                var stmtText = SubstituteStatement(stmt.ToString(), typeMap, cName);
-                sb.AppendLine("    " + stmtText.Replace("\n", "\n    ").TrimEnd());
-            }
-        }
-
-        sb.AppendLine("    return self;");
-        sb.AppendLine("}");
-        sb.AppendLine();
-
-        // Methoden
-        foreach (var method in cls.Members.OfType<MethodDeclarationSyntax>())
-        {
-            if (method.Modifiers.Any(m => m.IsKind(SyntaxKind.AbstractKeyword))) continue;
-            sb.AppendLine(ExpandMethod(method, cName, typeMap));
-        }
-
-        return sb.ToString();
-    }
-
-    private string ExpandMethod(MethodDeclarationSyntax method, string cName,
+    /// <summary>
+    /// Erzeugt C#-Quellcode der die generische Klasse mit substituierten
+    /// Typen enthält.  Beispiel für Stack&lt;T&gt; mit T=int:
+    ///
+    ///   class Stack_int {
+    ///       private int[] _items;
+    ///       public void Push(int item) { ... }
+    ///       public int Pop() { ... }
+    ///   }
+    /// </summary>
+    private static string RewriteGenericClass(
+        ClassDeclarationSyntax cls,
+        GenericInstantiation inst,
         Dictionary<string, string> typeMap)
     {
-        var sb = new System.Text.StringBuilder();
-        var sig = BuildMethodSignature(method, cName, typeMap, withSemicolon: false);
-        sb.AppendLine(sig);
-        sb.AppendLine("{");
+        // Den originalen Quelltext der Klasse aus dem SyntaxTree extrahieren
+        var originalSource = cls.SyntaxTree.GetText().ToString();
 
-        if (method.Body != null)
+        // Rewriter anwenden
+        var rewriter = new TypeParameterRewriter(typeMap, inst.CName, cls.Identifier.Text);
+        var newRoot = rewriter.Visit(cls.SyntaxTree.GetRoot());
+
+        // Nur die Klasse selbst als eigenständigen Source extrahieren
+        // Dazu: finde die neu geschriebene Klasse im neuen Baum
+        var newClass = newRoot.DescendantNodes()
+            .OfType<ClassDeclarationSyntax>()
+            .FirstOrDefault(c => c.Identifier.Text == inst.CName);
+
+        if (newClass == null)
         {
-            foreach (var stmt in method.Body.Statements)
-            {
-                var stmtText = SubstituteStatement(stmt.ToString(), typeMap, cName);
-                // Einrücken
-                foreach (var line in stmtText.Split('\n'))
-                {
-                    if (!string.IsNullOrWhiteSpace(line))
-                        sb.AppendLine("    " + line.TrimEnd());
-                }
-            }
-        }
-        else if (method.ExpressionBody != null)
-        {
-            var exprText = SubstituteExpression(method.ExpressionBody.Expression.ToString(), typeMap);
-            var retType = method.ReturnType.ToString().Trim();
-            if (retType != "void")
-                sb.AppendLine("    return " + exprText + ";");
-            else
-                sb.AppendLine("    " + exprText + ";");
+            // Fallback: gesamten Baum als Source verwenden
+            return newRoot.NormalizeWhitespace().ToFullString();
         }
 
-        sb.AppendLine("}");
-        sb.AppendLine();
-        return sb.ToString();
+        // Nur die Klasse zurückgeben (ohne namespace wrapper etc.)
+        return newClass.NormalizeWhitespace().ToFullString();
     }
 
-    // ── Typ-Substitution ──────────────────────────────────────────────────────
+    // ── Typ-Map ───────────────────────────────────────────────────────────────
 
-    /// <summary>
-    /// Baut eine Mapping-Tabelle: T → int, U → string etc.
-    /// </summary>
     private static Dictionary<string, string> BuildTypeMap(
         ClassDeclarationSyntax cls, GenericInstantiation inst)
     {
@@ -263,39 +209,37 @@ public sealed class GenericExpander
                          ?? new List<TypeParameterSyntax>();
 
         for (int i = 0; i < typeParams.Count && i < inst.TypeArguments.Count; i++)
-        {
             map[typeParams[i].Identifier.Text] = inst.TypeArguments[i];
-        }
 
         return map;
     }
 
+    // ── Public Helpers (für BuildPipeline) ───────────────────────────────────
+
     /// <summary>
-    /// Ersetzt Typ-Parameter in einem C#-Typen durch konkrete Typen,
-    /// dann mappt auf C.
+    /// Mappt einen C#-Typ-String mit substituierten Typparametern auf C.
+    /// Wird von CSharpToC.WriteInstanceFieldDeclarations genutzt.
     /// </summary>
     public static string SubstituteType(string csType, Dictionary<string, string> typeMap)
     {
-        var resolved = csType;
-
         // Direkte Substitution: T → int
         if (typeMap.TryGetValue(csType, out var direct))
-            resolved = direct;
+            return TypeRegistry.MapType(direct);
 
-        // Array: T[] → int[]
+        // Array: T[] → int*
         if (csType.EndsWith("[]"))
         {
             var baseType = csType[..^2];
             if (typeMap.TryGetValue(baseType, out var arrBase))
-                resolved = arrBase + "[]";
+                return TypeRegistry.MapType(arrBase) + "*";
         }
 
-        // List<T> → List<int>
+        // List<T>
         if (csType.StartsWith("List<") && csType.EndsWith(">"))
         {
             var inner = csType[5..^1].Trim();
-            var resolvedInner = typeMap.TryGetValue(inner, out var ri) ? ri : inner;
-            var cInner = resolvedInner == "string" ? "str" : TypeRegistry.MapType(resolvedInner);
+            var resolved = typeMap.TryGetValue(inner, out var ri) ? ri : inner;
+            var cInner = resolved == "string" ? "str" : TypeRegistry.MapType(resolved);
             return $"List_{cInner}*";
         }
 
@@ -308,127 +252,205 @@ public sealed class GenericExpander
             {
                 var k = inner[..comma].Trim();
                 var v = inner[(comma + 1)..].Trim();
-                var ck = (typeMap.TryGetValue(k, out var rk) ? rk : k) == "string" ? "str" : TypeRegistry.MapType(typeMap.TryGetValue(k, out _) ? typeMap[k] : k);
-                var cv = (typeMap.TryGetValue(v, out var rv) ? rv : v) == "string" ? "str" : TypeRegistry.MapType(typeMap.TryGetValue(v, out _) ? typeMap[v] : v);
+                var rk = typeMap.TryGetValue(k, out var rkv) ? rkv : k;
+                var rv = typeMap.TryGetValue(v, out var rvv) ? rvv : v;
+                var ck = rk == "string" ? "str" : TypeRegistry.MapType(rk);
+                var cv = rv == "string" ? "str" : TypeRegistry.MapType(rv);
                 return $"Dict_{ck}_{cv}*";
             }
         }
 
-        // Auf C mappen
-        return TypeRegistry.MapType(resolved);
+        return TypeRegistry.MapType(csType);
+    }
+}
+
+// ============================================================================
+// TypeParameterRewriter — Roslyn CSharpSyntaxRewriter
+//
+// Ersetzt alle Vorkommen von Typ-Parametern (T, U, TKey, TValue etc.)
+// durch die konkreten Typen und benennt die Klasse um.
+//
+// Behandelt:
+//   • Klassen-Name:        Stack<T>     → Stack_int
+//   • Felder:              private T[]  → private int[]
+//   • Auto-Properties:     public T Foo → public int Foo
+//   • Methoden-Parameter:  void Push(T) → void Push(int)
+//   • Rückgabetypen:       T Pop()      → int Pop()
+//   • Lokale Variablen:    T x = ...    → int x = ...
+//   • Cast-Ausdrücke:      (T)value     → (int)value
+//   • typeof(T)            → typeof(int)
+//   • new T()              → new int()  (selten, aber möglich)
+//   • Constraint-Klausel:  where T : ...  → wird entfernt
+// ============================================================================
+internal sealed class TypeParameterRewriter : CSharpSyntaxRewriter
+{
+    private readonly Dictionary<string, string> _typeMap;
+    private readonly string _newClassName;
+    private readonly string _oldClassName;
+
+    public TypeParameterRewriter(
+        Dictionary<string, string> typeMap,
+        string newClassName,
+        string oldClassName)
+    {
+        _typeMap = typeMap;
+        _newClassName = newClassName;
+        _oldClassName = oldClassName;
     }
 
-    private static bool NeedsPointer(string csType, Dictionary<string, string> typeMap)
-    {
-        var resolved = typeMap.TryGetValue(csType, out var r) ? r : csType;
-        if (resolved == "string") return false; // const char* bereits Pointer
-        return TypeRegistry.NeedsPointerSuffix(resolved)
-            || TypeRegistry.IsList(resolved)
-            || TypeRegistry.IsDictionary(resolved);
-    }
+    // ── Klassendeklaration ────────────────────────────────────────────────────
 
-    /// <summary>
-    /// Text-basierte Substitution in generierten Ausdrücken.
-    /// Ersetzt T durch den konkreten C-Typ in C-Code.
-    /// </summary>
-    public static string SubstituteExpression(string expr, Dictionary<string, string> typeMap)
+    public override SyntaxNode? VisitClassDeclaration(ClassDeclarationSyntax node)
     {
-        var result = expr;
-        foreach (var (typeParam, concreteType) in typeMap)
+        // Nur die generische Klasse selbst umbenennen (nicht nested classes)
+        if (node.Identifier.Text == _oldClassName)
         {
-            var cType = TypeRegistry.MapType(concreteType);
-            // Vorsichtige Ersetzung: nur als ganzes Wort
-            result = System.Text.RegularExpressions.Regex.Replace(
-                result,
-                $@"\b{typeParam}\b",
-                cType);
+            // Typ-Parameter-Liste entfernen, Klasse umbenennen
+            var newName = SyntaxFactory.Identifier(_newClassName)
+                .WithLeadingTrivia(node.Identifier.LeadingTrivia)
+                .WithTrailingTrivia(node.Identifier.TrailingTrivia);
+
+            node = node
+                .WithIdentifier(newName)
+                .WithTypeParameterList(null)         // <T> entfernen
+                .WithConstraintClauses(              // where T : ... entfernen
+                    SyntaxFactory.List<TypeParameterConstraintClauseSyntax>());
         }
-        return result;
+
+        return base.VisitClassDeclaration(node);
     }
 
-    /// <summary>
-    /// Text-basierte Substitution in Statement-Text.
-    /// Ersetzt außerdem Klassen-Namen (Stack → Stack_int) und this-Felder.
-    /// </summary>
-    private static string SubstituteStatement(string stmt,
-        Dictionary<string, string> typeMap, string cName)
-    {
-        var result = SubstituteExpression(stmt, typeMap);
+    // ── Konstruktor ───────────────────────────────────────────────────────────
 
-        // Typ-Casts: (T)x → (int)x
-        foreach (var (typeParam, concreteType) in typeMap)
+    public override SyntaxNode? VisitConstructorDeclaration(ConstructorDeclarationSyntax node)
+    {
+        // Konstruktor-Name muss mit Klassennamen übereinstimmen
+        if (node.Identifier.Text == _oldClassName)
         {
-            var cType = TypeRegistry.MapType(concreteType);
-            result = result.Replace($"({typeParam})", $"({cType})");
-            result = result.Replace($"({typeParam}*)", $"({cType}*)");
+            node = node.WithIdentifier(
+                SyntaxFactory.Identifier(_newClassName)
+                    .WithTriviaFrom(node.Identifier));
+        }
+        return base.VisitConstructorDeclaration(node);
+    }
+
+    // ── Destruktor ────────────────────────────────────────────────────────────
+
+    public override SyntaxNode? VisitDestructorDeclaration(DestructorDeclarationSyntax node)
+    {
+        if (node.Identifier.Text == _oldClassName)
+        {
+            node = node.WithIdentifier(
+                SyntaxFactory.Identifier(_newClassName)
+                    .WithTriviaFrom(node.Identifier));
+        }
+        return base.VisitDestructorDeclaration(node);
+    }
+
+    // ── Typen ─────────────────────────────────────────────────────────────────
+
+    public override SyntaxNode? VisitIdentifierName(IdentifierNameSyntax node)
+    {
+        var name = node.Identifier.Text;
+
+        // Typ-Parameter ersetzen: T → int
+        if (_typeMap.TryGetValue(name, out var concrete))
+        {
+            return SyntaxFactory.IdentifierName(concrete)
+                .WithTriviaFrom(node);
         }
 
-        return result;
+        // Eigene Klasse umbenennen wenn als Typ verwendet (Rückgabetyp, Parameter etc.)
+        if (name == _oldClassName)
+        {
+            return SyntaxFactory.IdentifierName(_newClassName)
+                .WithTriviaFrom(node);
+        }
+
+        return base.VisitIdentifierName(node);
     }
 
-    // ── Signatur-Bau ───────────────────────────────────────────────────────────
-
-    private string BuildMethodSignature(MethodDeclarationSyntax method,
-        string cName, Dictionary<string, string> typeMap, bool withSemicolon)
+    public override SyntaxNode? VisitGenericName(GenericNameSyntax node)
     {
-        var retCsType = method.ReturnType.ToString().Trim();
-        var retCType = SubstituteType(retCsType, typeMap);
-        var isStatic = method.Modifiers.Any(m => m.IsKind(SyntaxKind.StaticKeyword));
-        var methodName = $"{cName}_{method.Identifier.Text}";
-
-        var paramList = new List<string>();
-        if (!isStatic)
-            paramList.Add($"{cName}* self");
-
-        foreach (var p in method.ParameterList.Parameters)
+        // Generischen Aufruf der eigenen Klasse: Stack<int> im Body → Stack_int
+        if (node.Identifier.Text == _oldClassName)
         {
-            var pCsType = p.Type?.ToString().Trim() ?? "int";
-            var pCType = SubstituteType(pCsType, typeMap);
-            var isRef = p.Modifiers.Any(m =>
-                m.IsKind(SyntaxKind.RefKeyword) || m.IsKind(SyntaxKind.OutKeyword));
-            var ptr = isRef ? "*" : "";
-
-            // Typ-Parameter direkt im Parametertyp
-            if (typeMap.ContainsKey(pCsType))
+            // Prüfen ob die Typ-Argumente mit unserer Instantiierung übereinstimmen
+            var args = node.TypeArgumentList.Arguments;
+            bool matches = args.Count == _typeMap.Count;
+            if (matches)
             {
-                var concrete = typeMap[pCsType];
-                pCType = TypeRegistry.MapType(concrete);
-                if (!TypeRegistry.IsPrimitive(concrete) && concrete != "string")
-                    ptr = "*";
+                var typeParams = _typeMap.Keys.ToList();
+                for (int i = 0; i < args.Count && matches; i++)
+                {
+                    var argText = args[i].ToString().Trim();
+                    if (_typeMap.TryGetValue(typeParams[i], out var expected))
+                        matches = argText == expected;
+                }
             }
 
-            paramList.Add($"{pCType}{ptr} {p.Identifier}");
+            if (matches)
+            {
+                return SyntaxFactory.IdentifierName(_newClassName)
+                    .WithTriviaFrom(node);
+            }
         }
 
-        var suffix = withSemicolon ? ";" : "";
-        return $"{retCType} {methodName}({string.Join(", ", paramList)}){suffix}";
+        // Typ-Argumente in generischen Typen rewriten: List<T> → List<int>
+        return base.VisitGenericName(node);
     }
 
-    // ── Utility ───────────────────────────────────────────────────────────────
-
-    private static bool IsAutoProperty(PropertyDeclarationSyntax prop) =>
-        prop.AccessorList != null
-        && prop.AccessorList.Accessors.All(a => a.Body == null && a.ExpressionBody == null);
-
-    /// <summary>
-    /// Schreibt den generierten Code in Dateien.
-    /// Gibt die Pfade der erzeugten .h und .c Dateien zurück.
-    /// </summary>
-    public (string headerPath, string implPath) WriteToFiles(string buildDir)
+    public override SyntaxNode? VisitArrayType(ArrayTypeSyntax node)
     {
-        if (_collector.Instantiations.Count == 0)
-            return (string.Empty, string.Empty);
+        // T[] → int[]
+        if (node.ElementType is IdentifierNameSyntax idType
+            && _typeMap.TryGetValue(idType.Identifier.Text, out var concrete))
+        {
+            return node.WithElementType(
+                SyntaxFactory.IdentifierName(concrete)
+                    .WithTriviaFrom(idType));
+        }
+        return base.VisitArrayType(node);
+    }
 
-        var headerContent = ExpandHeaders();
-        var implContent = ExpandImplementations();
+    public override SyntaxNode? VisitNullableType(NullableTypeSyntax node)
+    {
+        // T? → int?
+        if (node.ElementType is IdentifierNameSyntax idType
+            && _typeMap.TryGetValue(idType.Identifier.Text, out var concrete))
+        {
+            return node.WithElementType(
+                SyntaxFactory.IdentifierName(concrete)
+                    .WithTriviaFrom(idType));
+        }
+        return base.VisitNullableType(node);
+    }
 
-        var headerPath = Path.Combine(buildDir, "_generics.h");
-        var implPath = Path.Combine(buildDir, "_generics.c");
+    // ── Objekt-Erstellung ─────────────────────────────────────────────────────
 
-        File.WriteAllText(headerPath, "#pragma once\n#include \"_forward.h\"\n\n" + headerContent);
-        File.WriteAllText(implPath, "#include \"_generics.h\"\n\n" + implContent);
+    public override SyntaxNode? VisitObjectCreationExpression(ObjectCreationExpressionSyntax node)
+    {
+        // new Stack<T>() im Methodenbody → new Stack_int()
+        if (node.Type is GenericNameSyntax gn && gn.Identifier.Text == _oldClassName)
+        {
+            return node.WithType(
+                SyntaxFactory.IdentifierName(_newClassName)
+                    .WithTriviaFrom(node.Type));
+        }
+        return base.VisitObjectCreationExpression(node);
+    }
 
-        Log.Info($"GenericExpander: {_collector.Instantiations.Count} Expansion(en) → _generics.h / _generics.c");
-        return (headerPath, implPath);
+    // ── typeof ────────────────────────────────────────────────────────────────
+
+    public override SyntaxNode? VisitTypeOfExpression(TypeOfExpressionSyntax node)
+    {
+        if (node.Type is IdentifierNameSyntax idType
+            && _typeMap.TryGetValue(idType.Identifier.Text, out var concrete))
+        {
+            return node.WithType(
+                SyntaxFactory.IdentifierName(concrete)
+                    .WithTriviaFrom(idType));
+        }
+        return base.VisitTypeOfExpression(node);
     }
 }
