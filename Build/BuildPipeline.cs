@@ -34,6 +34,7 @@ public sealed class BuildPipeline
         using var renderer = new BuildRenderer([
             new BuildStage { Name = "prepare"   },
             new BuildStage { Name = "fwd-decl"  },
+            new BuildStage { Name = "generics"  }, // NEU
             new BuildStage { Name = "semantic"  },
             new BuildStage { Name = "transpile" },
             new BuildStage { Name = "compile"   },
@@ -94,14 +95,50 @@ public sealed class BuildPipeline
             sFwd.Status = StageStatus.Done;
             sFwd.Elapsed = $"{(DateTime.Now - started).TotalMilliseconds:F0}ms";
 
-            // ── semantic ──────────────────────────────────────────────────
-            var sSemantic = renderer.GetStage("semantic");
-            sSemantic.Status = StageStatus.Running;
-            sSemantic.Detail = "building Roslyn compilation…";
+            // ── generics (NEU) ────────────────────────────────────────────
+            var sGenerics = renderer.GetStage("generics");
+            sGenerics.Status = StageStatus.Running;
+            sGenerics.Detail = "collecting instantiations…";
 
             var transpiledFiles = appSourceFiles
                 .Where(f => !s_switchFormsSkipTranspile.Contains(Path.GetFileName(f)))
                 .ToList();
+
+            // Pass 1: Generic/Interface/Extension-Definitionen und Instantiierungen sammeln
+            var genericCollector = new GenericInstantiationCollector();
+            genericCollector.Collect(transpiledFiles, switchFormsFilesForFwd);
+
+            var interfaceExpander = new InterfaceExpander(genericCollector);
+            interfaceExpander.AnalyzeImplementations(transpiledFiles);
+
+            // Interface-Header schreiben
+            var ifaceHeaderPath = interfaceExpander.WriteInterfaceHeader(_buildDir);
+
+            // Generic-Code expandieren und in Dateien schreiben
+            var genericExpander = new GenericExpander(genericCollector);
+            var (genericHeaderPath, genericImplPath) = genericExpander.WriteToFiles(_buildDir);
+
+            var genericsInfo = new List<string>();
+            if (genericCollector.GenericClasses.Count > 0)
+                genericsInfo.Add($"{genericCollector.GenericClasses.Count} generic class(es)");
+            if (genericCollector.Interfaces.Count > 0)
+                genericsInfo.Add($"{genericCollector.Interfaces.Count} interface(s)");
+            if (genericCollector.ExtensionMethods.Count > 0)
+                genericsInfo.Add($"{genericCollector.ExtensionMethods.Values.SelectMany(v => v).Count()} extension method(s)");
+            if (genericCollector.Instantiations.Count > 0)
+                genericsInfo.Add($"{genericCollector.Instantiations.Count} instantiation(s)");
+
+            sGenerics.Detail = genericsInfo.Count > 0
+                ? string.Join(", ", genericsInfo)
+                : "nothing to expand";
+            sGenerics.Progress = 100;
+            sGenerics.Status = StageStatus.Done;
+            sGenerics.Elapsed = $"{(DateTime.Now - started).TotalMilliseconds:F0}ms";
+
+            // ── semantic ──────────────────────────────────────────────────
+            var sSemantic = renderer.GetStage("semantic");
+            sSemantic.Status = StageStatus.Running;
+            sSemantic.Detail = "building Roslyn compilation…";
 
             var semanticBuilder = new SemanticModelBuilder(transpiledFiles);
 
@@ -120,13 +157,21 @@ public sealed class BuildPipeline
                 .Select(f => Path.GetFileNameWithoutExtension(f) + ".h")
                 .ToList();
 
+            // NEU: Generierte Generic/Interface-Header einbeziehen
+            if (!string.IsNullOrEmpty(genericHeaderPath))
+                allHeaders.Insert(0, Path.GetFileName(genericHeaderPath));
+            if (!string.IsNullOrEmpty(ifaceHeaderPath))
+                allHeaders.Insert(0, Path.GetFileName(ifaceHeaderPath));
+
             var cFiles = new List<string> { switchformsCPath };
+
+            // NEU: Generic-Implementierungen als .c-Datei hinzufügen
+            if (!string.IsNullOrEmpty(genericImplPath) && File.Exists(genericImplPath))
+                cFiles.Add(genericImplPath);
 
             int transpiled = 0;
             int skipped = 0;
 
-            // PHASE 4 FIX: Erweiterter Inkremental-Check
-            // Prüfe ob IRGENDEINE .h-Datei neuer als eine abhängige .h/.c ist
             var allTranspiledHeaders = transpiledFiles
                 .Select(f => Path.Combine(_buildDir, Path.GetFileNameWithoutExtension(f) + ".h"))
                 .Where(File.Exists)
@@ -145,7 +190,6 @@ public sealed class BuildPipeline
                 var hPath = Path.Combine(_buildDir, baseName + ".h");
                 var cPath = Path.Combine(_buildDir, baseName + ".c");
 
-                // PHASE 4 FIX: Inkrementeller Check berücksichtigt alle Header-Abhängigkeiten
                 if (IsUpToDate(csFile, hPath, cPath, latestHeaderTime))
                 {
                     Log.Info($"→ {baseName}.cs (unchanged)");
@@ -159,16 +203,35 @@ public sealed class BuildPipeline
                 var source = System.IO.File.ReadAllText(csFile);
                 var semanticModel = semanticBuilder.GetModel(csFile);
 
-                var hTranspiler = new CSharpToC(CSharpToC.TranspileMode.HeaderOnly);
+                // NEU: Transpiler mit Generic/Interface-Support instanziieren
+                var hTranspiler = new CSharpToC(
+                    CSharpToC.TranspileMode.HeaderOnly,
+                    genericCollector,
+                    interfaceExpander);
                 var hResult = hTranspiler.Transpile(source, csFile, semanticModel);
+
+                // NEU: Interface-Header im Include-Block
+                var interfaceInclude = !string.IsNullOrEmpty(ifaceHeaderPath)
+                    ? $"#include \"{Path.GetFileName(ifaceHeaderPath)}\"\n"
+                    : "";
+                var genericInclude = !string.IsNullOrEmpty(genericHeaderPath)
+                    ? $"#include \"{Path.GetFileName(genericHeaderPath)}\"\n"
+                    : "";
+
                 var hContent = WrapHeader(baseName,
-                    "#include \"_forward.h\"\n\n" + hResult.Code);
+                    "#include \"_forward.h\"\n"
+                    + interfaceInclude
+                    + genericInclude
+                    + "\n" + hResult.Code);
                 System.IO.File.WriteAllText(hPath, hContent);
 
                 var allIncludes = string.Join("\n",
                     allHeaders.Select(h => $"#include \"{h}\""));
 
-                var cTranspiler = new CSharpToC(CSharpToC.TranspileMode.Implementation);
+                var cTranspiler = new CSharpToC(
+                    CSharpToC.TranspileMode.Implementation,
+                    genericCollector,
+                    interfaceExpander);
                 var cResult = cTranspiler.Transpile(source, csFile, semanticModel);
                 var cContent = "#include <stdlib.h>\n"
                              + allIncludes + "\n\n"
@@ -259,7 +322,7 @@ public sealed class BuildPipeline
         catch (Exception ex)
         {
             Log.Error(ex.Message);
-            foreach (var stage in new[] { "prepare", "fwd-decl", "semantic", "transpile", "compile", "package" })
+            foreach (var stage in new[] { "prepare", "fwd-decl", "generics", "semantic", "transpile", "compile", "package" })
             {
                 var s = renderer.GetStage(stage);
                 if (s.Status == StageStatus.Running)
@@ -278,12 +341,7 @@ public sealed class BuildPipeline
     }
 
     /// <summary>
-    /// PHASE 4 FIX: Erweiterter Inkremental-Check.
-    /// Berücksichtigt:
-    /// - Timestamp der .cs Quelldatei vs .h/.c
-    /// - switchforms.h und _forward.h Timestamps
-    /// - NEU: latestHeaderTime — wenn irgendein anderer Header neuer ist,
-    ///   müssen abhängige Dateien neu transpiliert werden (Vererbungs-Szenarien)
+    /// Erweiterter Inkremental-Check.
     /// </summary>
     private bool IsUpToDate(string csFile, string hPath, string cPath,
         DateTime latestHeaderTime = default)
@@ -306,8 +364,16 @@ public sealed class BuildPipeline
                                    || File.GetLastWriteTimeUtc(forwardH) > cTime))
             return false;
 
-        // PHASE 4 FIX: Wenn ein anderer transpilierter Header neuer als dieser ist,
-        // dann könnte dieser Code davon abhängen → neu transpilieren
+        // NEU: Generics-Header invalidieren
+        var genericsH = Path.Combine(_buildDir, "_generics.h");
+        if (File.Exists(genericsH) && File.GetLastWriteTimeUtc(genericsH) > hTime)
+            return false;
+
+        // NEU: Interface-Header invalidieren
+        var ifacesH = Path.Combine(_buildDir, "_interfaces.h");
+        if (File.Exists(ifacesH) && File.GetLastWriteTimeUtc(ifacesH) > hTime)
+            return false;
+
         if (latestHeaderTime != default && latestHeaderTime > hTime)
             return false;
 
@@ -355,8 +421,14 @@ public sealed class BuildPipeline
              .DescendantNodes()
              .Where(n => n is ClassDeclarationSyntax or StructDeclarationSyntax))
             {
-                var typeName = typeDecl is ClassDeclarationSyntax cls
-                    ? cls.Identifier.Text
+                // NEU: Generische Klassen werden für alle Instantiierungen forward-deklariert
+                // Die eigentlichen typedef struct kommen aus _generics.h
+                if (typeDecl is ClassDeclarationSyntax cls
+                    && cls.TypeParameterList?.Parameters.Count > 0)
+                    continue; // Generische Klassen nicht als einfachen typedef forward-deklarieren
+
+                var typeName = typeDecl is ClassDeclarationSyntax c
+                    ? c.Identifier.Text
                     : ((StructDeclarationSyntax)typeDecl).Identifier.Text;
                 if (alreadyDeclared.Add(typeName))
                     sb.AppendLine($"typedef struct {typeName} {typeName};");

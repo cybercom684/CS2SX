@@ -11,26 +11,33 @@ public sealed class ExpressionWriter
     private readonly TranspilerContext _ctx;
     private readonly InvocationDispatcher _dispatcher;
 
+    // ── NEU: Zwei Konstruktoren ───────────────────────────────────────────────
+
+    /// <summary>Original-Konstruktor (Rückwärtskompatibilität).</summary>
     public ExpressionWriter(TranspilerContext ctx)
     {
         _ctx = ctx;
         _dispatcher = new InvocationDispatcher(ctx, Write);
     }
 
+    /// <summary>NEU: Konstruktor mit Extension-Method-Handler.</summary>
+    public ExpressionWriter(TranspilerContext ctx, ExtensionMethodHandler extensionHandler)
+    {
+        _ctx = ctx;
+        _dispatcher = new InvocationDispatcher(ctx, Write, extensionHandler);
+    }
+
     public string Write(SyntaxNode? node)
     {
         if (node == null) return "";
 
-        // nameof(X) früh abfangen
         if (node is InvocationExpressionSyntax nameofInv
             && nameofInv.Expression.ToString() == "nameof")
             return WriteNameOf(nameofInv);
 
-        // PHASE 1 FIX: out var in Argument-Position (z.B. int.TryParse(s, out var n))
         if (node is DeclarationExpressionSyntax declExpr
             && declExpr.Designation is SingleVariableDesignationSyntax singleDesig)
         {
-            // Registriere den Typ wenn möglich
             var typeName = declExpr.Type.ToString().Trim();
             if (typeName != "var")
                 _ctx.LocalTypes[singleDesig.Identifier.Text] = typeName;
@@ -63,23 +70,16 @@ public sealed class ExpressionWriter
             SwitchExpressionSyntax switchExpr => PatternMatchingWriter.WriteSwitchExpression(switchExpr, _ctx, Write),
             IsPatternExpressionSyntax isPattern => PatternMatchingWriter.WriteIsPattern(isPattern, _ctx, Write),
             ConditionalAccessExpressionSyntax condAccess => WriteConditionalAccess(condAccess),
-            // PHASE 1 FIX: Lambda-Expressions
             LambdaExpressionSyntax lambda => WriteLambda(lambda),
-            // PHASE 2 FIX: Tuple-Expressions
             TupleExpressionSyntax tuple => WriteTuple(tuple),
             _ => node.ToString(),
         };
     }
 
-    // ── PHASE 1 FIX: Lambda-Integration ──────────────────────────────────────
+    // ── Lambda ────────────────────────────────────────────────────────────────
 
     private string WriteLambda(LambdaExpressionSyntax lambda)
     {
-        // Einfache Lambdas: () => expr oder x => expr
-        // Werden als statische Inline-Funktionen gelifted
-        // Für jetzt: wenn nur ein Ausdruck, inline als Funktionszeiger-Cast
-        // Komplexe Lambdas erfordern LambdaLifter
-
         var lifter = new LambdaLifter(_ctx, this);
         var stmtWriter = new StatementWriter(_ctx, this);
         lifter.SetStatementWriter(stmtWriter);
@@ -89,12 +89,10 @@ public sealed class ExpressionWriter
         return funcName;
     }
 
-    // ── PHASE 2 FIX: Tuple-Expressions ───────────────────────────────────────
+    // ── Tuple ─────────────────────────────────────────────────────────────────
 
     private string WriteTuple(TupleExpressionSyntax tuple)
     {
-        // Tuples werden als struct-Initialisierung ausgegeben
-        // (TupleType){ val1, val2 }
         var elems = tuple.Arguments.Select(a => Write(a.Expression));
         return "{ " + string.Join(", ", elems) + " }";
     }
@@ -129,14 +127,12 @@ public sealed class ExpressionWriter
     {
         var name = id.Identifier.Text;
 
-        // 1. Enum-Mapping
         var mapped = TypeRegistry.MapEnum(name);
         if (mapped != name) return mapped;
 
         if (_ctx.EnumMembers.Contains(name)) return name;
         if (name == "_cs2sx_strbuf") return "_cs2sx_strbuf";
 
-        // 2. Lokale Variablen
         if (_ctx.LocalTypes.TryGetValue(name, out var localType))
         {
             if (localType.StartsWith("@ref:", StringComparison.Ordinal))
@@ -146,7 +142,6 @@ public sealed class ExpressionWriter
             return name;
         }
 
-        // 3. NEU: Static/Const-Felder via SemanticModel — VOR FieldTypes-Check
         if (!string.IsNullOrEmpty(_ctx.CurrentClass) && _ctx.SemanticModel != null)
         {
             try
@@ -163,7 +158,6 @@ public sealed class ExpressionWriter
             catch { }
         }
 
-        // 4. Instanz-Felder (self->f_X)
         if (_ctx.IsFieldAccess(name))
         {
             var trimmed = name.TrimStart('_');
@@ -180,7 +174,6 @@ public sealed class ExpressionWriter
             return "self->" + prefix + name;
         }
 
-        // 5. Control-Felder
         if (TypeRegistry.ControlFields.Contains(name) && !string.IsNullOrEmpty(_ctx.CurrentClass))
             return "self->base." + name;
 
@@ -277,30 +270,20 @@ public sealed class ExpressionWriter
                 return "*" + lname + " " + op + " " + right;
         }
 
-        // PHASE 2 FIX: Tuple-Dekonstruktion (var (a, b) = Foo())
         if (assign.Left is TupleExpressionSyntax tupleLeft)
             return WriteTupleDeconstruction(tupleLeft, right);
 
         return Write(assign.Left) + " " + op + " " + right;
     }
 
-    /// <summary>
-    /// PHASE 2 FIX: Tuple-Dekonstruktion
-    /// var (a, b) = GetValues();
-    /// → _tmp_tuple = GetValues(); int a = _tmp_tuple.Item1; int b = _tmp_tuple.Item2;
-    /// Vereinfacht: direkte Zuweisung wenn Funktion bekannt
-    /// </summary>
     private string WriteTupleDeconstruction(TupleExpressionSyntax tupleLeft, string right)
     {
         var names = tupleLeft.Arguments.Select(a => a.Expression.ToString()).ToList();
-        var tmpName = "_tuple_" + _ctx.NextTmp();
-
-        // Generiere temporäre Struct-Zuweisung
         _ctx.Out.WriteLine(_ctx.Tab + "/* tuple deconstruction */");
         for (int i = 0; i < names.Count; i++)
         {
             var varName = names[i];
-            if (varName != "_") // discard
+            if (varName != "_")
             {
                 if (!_ctx.LocalTypes.ContainsKey(varName))
                 {
@@ -312,12 +295,9 @@ public sealed class ExpressionWriter
         return "/* tuple: " + string.Join(", ", names) + " = " + right + " */";
     }
 
-    // ── nameof ────────────────────────────────────────────────────────────────
-
     private static string WriteNameOf(InvocationExpressionSyntax inv)
     {
-        if (inv.ArgumentList.Arguments.Count == 0)
-            return "\"\"";
+        if (inv.ArgumentList.Arguments.Count == 0) return "\"\"";
 
         var arg = inv.ArgumentList.Arguments[0].Expression;
         var name = arg is MemberAccessExpressionSyntax mem
@@ -327,15 +307,11 @@ public sealed class ExpressionWriter
         return "\"" + name + "\"";
     }
 
-    // ── default ───────────────────────────────────────────────────────────────
-
     private static string WriteDefault(DefaultExpressionSyntax def)
     {
         var csType = def.Type.ToString().Trim();
-        if (TypeRegistry.IsPrimitive(csType) && csType != "string")
-            return "0";
-        if (csType == "bool")
-            return "0";
+        if (TypeRegistry.IsPrimitive(csType) && csType != "string") return "0";
+        if (csType == "bool") return "0";
         return "NULL";
     }
 
@@ -346,7 +322,6 @@ public sealed class ExpressionWriter
         var result = _dispatcher.Dispatch(inv);
         if (result != null) return result;
 
-        // VTable-Dispatch: obj.Method(args) wenn obj einen bekannten Klassen-Typ hat
         if (inv.Expression is MemberAccessExpressionSyntax vtableMem)
         {
             var vtableResult = TryWriteVirtualCall(vtableMem, inv);
@@ -414,7 +389,6 @@ public sealed class ExpressionWriter
         var objRaw = mem.Expression.ToString();
         var objKey = objRaw.TrimStart('_');
 
-        // PHASE 1 FIX: KVP Member-Zugriff (kvp.Key, kvp.Value in foreach über Dict)
         if (_ctx.LocalTypes.TryGetValue(objRaw, out var kvpType)
             && kvpType.StartsWith("__kvp__", StringComparison.Ordinal))
         {
@@ -511,7 +485,6 @@ public sealed class ExpressionWriter
         if (mem.Expression is BaseExpressionSyntax)
             return "((Control*)self)->" + prop.ToLowerInvariant();
 
-        // PHASE 1 FIX: KVP Member-Zugriff (kvp.Key, kvp.Value)
         var rawExprForKvp = mem.Expression.ToString();
         if (_ctx.LocalTypes.TryGetValue(rawExprForKvp, out var kvpType)
             && kvpType.StartsWith("__kvp__", StringComparison.Ordinal))
@@ -524,11 +497,11 @@ public sealed class ExpressionWriter
             if (IsStringExpr(mem.Expression))
                 return "strlen(" + obj + ")";
 
-            var receiverRaw = mem.Expression.ToString();
-            var receiverKey = receiverRaw.TrimStart('_');
-            if ((_ctx.LocalTypes.TryGetValue(receiverRaw, out var rlt)
+            var receiverRaw2 = mem.Expression.ToString();
+            var receiverKey2 = receiverRaw2.TrimStart('_');
+            if ((_ctx.LocalTypes.TryGetValue(receiverRaw2, out var rlt)
                  && rlt is "string" or "String" or "char[]" or "const char*")
-             || (_ctx.FieldTypes.TryGetValue(receiverKey, out var rft)
+             || (_ctx.FieldTypes.TryGetValue(receiverKey2, out var rft)
                  && rft is "string" or "String" or "char[]" or "const char*"))
                 return "strlen(" + obj + ")";
         }
@@ -545,16 +518,14 @@ public sealed class ExpressionWriter
         if (prop == "Value" && IsNullableExpr(mem.Expression))
             return NullableHandler.WriteGetValue(obj);
 
-        // PHASE 2 FIX: Dictionary.Count
         if (prop == "Count" && IsDictExpr(mem.Expression))
             return obj + "->count";
 
-        // PHASE 2 FIX: Dictionary.Keys / Dictionary.Values Iteration
         if (prop == "Keys" && IsDictExpr(mem.Expression))
-            return obj; // Keys werden über foreach direkt auf dict gemappt
+            return obj;
 
         if (prop == "Values" && IsDictExpr(mem.Expression))
-            return obj; // Values werden über foreach direkt auf dict gemappt
+            return obj;
 
         var rawExpr = mem.Expression.ToString();
         var key = rawExpr.TrimStart('_');
@@ -662,6 +633,24 @@ public sealed class ExpressionWriter
             var cKey = types.key == "string" ? "str" : TypeRegistry.MapType(types.key);
             var cVal = types.val == "string" ? "str" : TypeRegistry.MapType(types.val);
             return "Dict_" + cKey + "_" + cVal + "_New()";
+        }
+
+        // NEU: Generische Klassen — new Foo<int>() → Foo_int_New()
+        if (obj.Type is GenericNameSyntax genericTypeName)
+        {
+            var baseName = genericTypeName.Identifier.Text;
+            var typeArgs = genericTypeName.TypeArgumentList.Arguments
+                .Select(a =>
+                {
+                    var t = a.ToString().Trim();
+                    return t == "string" ? "str" : TypeRegistry.MapType(t);
+                })
+                .ToList();
+            var cName = baseName + "_" + string.Join("_", typeArgs);
+
+            var ctorArgs = obj.ArgumentList?.Arguments.Select(a => Write(a.Expression))
+                ?? Enumerable.Empty<string>();
+            return cName + "_New(" + string.Join(", ", ctorArgs) + ")";
         }
 
         if (typeName == "Random")

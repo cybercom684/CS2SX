@@ -1,3 +1,13 @@
+// ============================================================================
+// CS2SX — Transpiler/Handlers/InvocationDispatcher.cs
+//
+// Änderungen gegenüber Original:
+//   • ExtensionMethodHandler hinzugefügt (nach AudioHandler)
+//   • Handler-Registry ist jetzt instanz-basiert (nicht mehr static readonly)
+//     damit ExtensionMethodHandler mit der Registry initialisiert werden kann
+//   • Zweiter Konstruktor: InvocationDispatcher(ctx, writeExpr, extensionHandler)
+// ============================================================================
+
 using CS2SX.Core;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
@@ -6,49 +16,70 @@ namespace CS2SX.Transpiler.Handlers;
 
 /// <summary>
 /// Orchestriert alle IInvocationHandler in Prioritäts-Reihenfolge.
-///
-/// PHASE 3: AudioHandler hinzugefügt.
-/// PHASE 1 FIX: StaticClassHandler / OwnMethodHandler Konfliktreihenfolge korrigiert.
 /// </summary>
 public sealed class InvocationDispatcher
 {
-    private static readonly IReadOnlyList<IInvocationHandler> s_handlers = new List<IInvocationHandler>
-    {
-        new LibNxHandler(),
-        new EnvironmentHandler(),
-        new InputHandler(),
-        new FormHandler(),
-        new ConsoleHandler(),
-        new MathHandler(),
-        new RandomHandler(),
-        new FileHandler(),
-        new ParseHandler(),
-        new ColorHandler(),
-        new StringBuilderHandler(),
-        new ListHandler(),
-        new DictionaryHandler(),
-        new StringMethodHandler(),
-        new FieldMethodHandler(),
-        new GraphicsHandler(),
-        new GraphicsExtHandler(),
-        new InputExtHandler(),
-        new DirectoryExtHandler(),
-        new PathHandler(),
-        new SystemExtHandler(),
-        new AudioHandler(),       // PHASE 3: Audio-Unterstützung
-        new StaticClassHandler(), // PHASE 1 FIX: Vor OwnMethodHandler, aber nach allen API-Handlern
-        new OwnMethodHandler(),   // PHASE 1 FIX: Zuletzt — nur für eigene Methoden
-    };
-
+    private readonly IReadOnlyList<IInvocationHandler> _handlers;
     private readonly TranspilerContext _ctx;
-    private readonly Func<Microsoft.CodeAnalysis.SyntaxNode?, string> _writeExpr;
+    private readonly Func<SyntaxNode?, string> _writeExpr;
 
+    private static List<IInvocationHandler> BuildHandlers(
+        ExtensionMethodHandler? extensionHandler)
+    {
+        return new List<IInvocationHandler>
+        {
+            new LibNxHandler(),
+            new EnvironmentHandler(),
+            new InputHandler(),
+            new FormHandler(),
+            new ConsoleHandler(),
+            new MathHandler(),
+            new RandomHandler(),
+            new FileHandler(),
+            new ParseHandler(),
+            new ColorHandler(),
+            new StringBuilderHandler(),
+            new ListHandler(),
+            new DictionaryHandler(),
+            new StringMethodHandler(),
+            new FieldMethodHandler(),
+            new GraphicsHandler(),
+            new GraphicsExtHandler(),
+            new InputExtHandler(),
+            new DirectoryExtHandler(),
+            new PathHandler(),
+            new SystemExtHandler(),
+            new AudioHandler(),
+            extensionHandler ?? new ExtensionMethodHandler(), // NEU: Extension-Methods
+            new StaticClassHandler(),
+            new OwnMethodHandler(),
+        };
+    }
+
+    /// <summary>
+    /// Standard-Konstruktor (Rückwärtskompatibilität, keine Extension-Methods).
+    /// </summary>
     public InvocationDispatcher(
         TranspilerContext ctx,
-        Func<Microsoft.CodeAnalysis.SyntaxNode?, string> writeExpr)
+        Func<SyntaxNode?, string> writeExpr)
     {
         _ctx = ctx;
         _writeExpr = writeExpr;
+        _handlers = BuildHandlers(null);
+    }
+
+    /// <summary>
+    /// Konstruktor mit Extension-Method-Registry.
+    /// Wird von CSharpToC verwendet wenn ein GenericInstantiationCollector vorhanden ist.
+    /// </summary>
+    public InvocationDispatcher(
+        TranspilerContext ctx,
+        Func<SyntaxNode?, string> writeExpr,
+        ExtensionMethodHandler extensionHandler)
+    {
+        _ctx = ctx;
+        _writeExpr = writeExpr;
+        _handlers = BuildHandlers(extensionHandler);
     }
 
     public string? Dispatch(InvocationExpressionSyntax inv)
@@ -59,7 +90,7 @@ public sealed class InvocationDispatcher
             .Select(a => BuildArg(a))
             .ToList();
 
-        foreach (var handler in s_handlers)
+        foreach (var handler in _handlers)
         {
             if (handler.TryHandle(inv, calleeStr, args, _ctx, _writeExpr, out var result))
                 return result;
@@ -70,19 +101,13 @@ public sealed class InvocationDispatcher
 
     private string BuildArg(ArgumentSyntax a)
     {
-        // PHASE 1 FIX: out var Deklarationen korrekt behandeln
+        // PHASE 1 FIX: out var in Argument-Position (z.B. int.TryParse(s, out var n))
         if (a.RefKindKeyword.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.OutKeyword)
             && a.Expression is DeclarationExpressionSyntax declExpr
             && declExpr.Designation is SingleVariableDesignationSyntax singleDesig)
         {
-            // out var n → registriere Typ und gib &n zurück
             var typeName = declExpr.Type.ToString().Trim();
-            if (typeName == "var")
-            {
-                // Typ-Inferenz aus dem Aufruf-Kontext ist hier schwierig
-                // Standard: int für TryParse-Aufrufe
-                typeName = "int";
-            }
+            if (typeName == "var") typeName = "int";
             _ctx.LocalTypes[singleDesig.Identifier.Text] = typeName;
             return "&" + singleDesig.Identifier.Text;
         }
@@ -98,7 +123,8 @@ public sealed class InvocationDispatcher
         if (_ctx.LocalTypes.TryGetValue(argName, out var lt) && lt == "char[]")
             return expr;
 
-        if (_ctx.LocalTypes.TryGetValue(argName, out var lst) && TypeRegistry.IsLibNxStruct(lst))
+        if (_ctx.LocalTypes.TryGetValue(argName, out var lst)
+            && TypeRegistry.IsLibNxStruct(lst))
             return "&" + expr;
 
         var fieldKey = argName.TrimStart('_');
