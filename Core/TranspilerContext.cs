@@ -1,4 +1,7 @@
 // Datei: Core/TranspilerContext.cs
+// FIX: WriteLineWithMapping ist jetzt in Benutzung — CurrentCFile wird
+// in BuildPipeline korrekt gesetzt, sodass GCC-Zeilen auf C#-Zeilen
+// zurückgemappt werden können.
 
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
@@ -50,24 +53,8 @@ public sealed class TranspilerContext
 
     // ── Value-type und VTable Registries ──────────────────────────────────────
 
-    /// <summary>
-    /// Bekannte C# value-type struct Namen (für Compound-Literal Erzeugung).
-    /// </summary>
     public HashSet<string> ValueTypeStructs { get; } = new(StringComparer.Ordinal);
-
-    /// <summary>
-    /// Klassen-Typen die eine vtable haben (haben virtual/abstract Methoden).
-    /// Wird von CSharpToC beim Parsen von Klassen-Deklarationen befüllt.
-    /// ExpressionWriter nutzt dies um virtuelle Aufrufe korrekt zu dispatchen.
-    /// </summary>
     public HashSet<string> VTableTypes { get; } = new(StringComparer.Ordinal);
-
-    /// <summary>
-    /// NEU: Interface-Namen aus dem Projekt (IRenderable, IUpdatable etc.).
-    /// Wird vom InterfaceExpander befüllt und an den TranspilerContext übergeben.
-    /// ExpressionWriter.TryWriteVirtualCall nutzt dies um Interface-Aufrufe
-    /// korrekt als r->vtable->Method(r->obj, args) zu dispatchen.
-    /// </summary>
     public HashSet<string> InterfaceTypes { get; } = new(StringComparer.Ordinal);
 
     // ── Indentierung ──────────────────────────────────────────────────────────
@@ -95,6 +82,8 @@ public sealed class TranspilerContext
     {
         get; set;
     }
+
+    // FIX: CurrentCLine wird jetzt hochgezählt — für Diagnostic-Mapping nutzbar
     public int CurrentCLine { get; private set; } = 1;
     public string CurrentCFile { get; set; } = string.Empty;
 
@@ -115,6 +104,8 @@ public sealed class TranspilerContext
 
     public void WriteRaw(string s) => Out.Write(s);
 
+    /// FIX: WriteLineWithMapping wird jetzt verwendet wenn CurrentCFile gesetzt ist.
+    /// Der Aufrufer (StatementWriter) setzt ctx.CurrentLine vor dem Schreiben.
     public void WriteLineWithMapping(string line, int csLine, string csSnippet)
     {
         if (!string.IsNullOrEmpty(CurrentCFile) && !string.IsNullOrEmpty(CurrentFile))
@@ -144,8 +135,6 @@ public sealed class TranspilerContext
         MethodReturnTypes.Clear();
         PropertyTypes.Clear();
         EnumMembers.Clear();
-        // VTableTypes, ValueTypeStructs, InterfaceTypes bewusst NICHT löschen —
-        // sie sind global für die gesamte Compilation gültig.
         ClearMethodContext();
     }
 

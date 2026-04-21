@@ -1,4 +1,12 @@
-﻿// Datei: Build/CheckCommand.cs  (vollständig ersetzen)
+﻿// ============================================================================
+// CS2SX — Build/CheckCommand.cs  (FIXED)
+//
+// Fixes:
+//   • Nutzt jetzt GenericInstantiationCollector + InterfaceExpander identisch
+//     zur BuildPipeline — Check-Ergebnisse stimmen mit Build überein.
+//   • CSharpToC wird mit vollem Collector instanziiert.
+//   • SemanticModelBuilder wird korrekt initialisiert.
+// ============================================================================
 
 using CS2SX.Core;
 using CS2SX.Logging;
@@ -49,6 +57,31 @@ public sealed class CheckCommand
             .Where(f => !s_skip.Contains(Path.GetFileName(f)))
             .ToList();
 
+        // FIX: Gleiche Analyse wie BuildPipeline
+        var switchFormsDir = Path.Combine(Path.GetTempPath(),
+            "cs2sx_check_" + Path.GetFileName(_projectDir));
+        if (Directory.Exists(switchFormsDir))
+            Directory.Delete(switchFormsDir, recursive: true);
+        Directory.CreateDirectory(switchFormsDir);
+
+        try
+        {
+            RuntimeExporter.ExportSwitchForms(switchFormsDir);
+        }
+        catch (Exception ex)
+        {
+            Log.Warning($"SwitchForms-Export fehlgeschlagen: {ex.Message}");
+        }
+
+        var switchFormsFiles = Directory.GetFiles(switchFormsDir, "*.cs").ToList();
+
+        // FIX: Collector + Expander wie BuildPipeline
+        var genericCollector = new GenericInstantiationCollector();
+        genericCollector.Collect(files, switchFormsFiles);
+
+        var interfaceExpander = new InterfaceExpander(genericCollector);
+        interfaceExpander.AnalyzeImplementations(files);
+
         var semanticBuilder = new SemanticModelBuilder(files);
 
         int totalWarnings = 0;
@@ -65,10 +98,17 @@ public sealed class CheckCommand
                 var source = File.ReadAllText(csFile);
                 var semanticModel = semanticBuilder.GetModel(csFile);
 
-                var hResult = new CSharpToC(CSharpToC.TranspileMode.HeaderOnly)
+                // FIX: Mit Collector instanziieren — identisch zu BuildPipeline
+                var hResult = new CSharpToC(
+                    CSharpToC.TranspileMode.HeaderOnly,
+                    genericCollector,
+                    interfaceExpander)
                     .Transpile(source, csFile, semanticModel);
 
-                var cResult = new CSharpToC(CSharpToC.TranspileMode.Implementation)
+                var cResult = new CSharpToC(
+                    CSharpToC.TranspileMode.Implementation,
+                    genericCollector,
+                    interfaceExpander)
                     .Transpile(source, csFile, semanticModel);
 
                 diags.AddRange(hResult.Diagnostics);
@@ -134,6 +174,10 @@ public sealed class CheckCommand
                 }
             }
         }
+
+        // Temp-Verzeichnis aufräumen
+        try { Directory.Delete(switchFormsDir, recursive: true); }
+        catch { }
 
         Console.WriteLine(new string('─', 60));
 

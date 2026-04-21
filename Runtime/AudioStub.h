@@ -1,8 +1,9 @@
 ﻿// ============================================================================
 // Runtime/AudioStub.h
 //
-// Minimaler Audio-Stub für Nintendo Switch PCM-Audio.
-// Fix: CS2SX_Audio_PlayTone blockiert nicht mehr beim ersten Aufruf.
+// FIX: Audio-State-Variablen sind nicht mehr static — sie werden einmalig
+// in switchforms_globals.c definiert und hier als extern deklariert.
+// Das verhindert ODR-Konflikte bei mehrfachem Include.
 // ============================================================================
 
 #pragma once
@@ -24,12 +25,13 @@ typedef struct
     s16* data;
 } CS2SX_AudioBuffer;
 
-static int               _cs2sx_audio_init = 0;
-static float             _cs2sx_audio_volume = 1.0f;
-static float             _cs2sx_audio_phase = 0.0f;
-static CS2SX_AudioBuffer _cs2sx_audio_bufs[CS2SX_AUDIO_NUM_BUFS];
-static int               _cs2sx_audio_buf_idx = 0;
-static int               _cs2sx_audio_submitted = 0;  // Anzahl bisher eingereichter Puffer
+// FIX: extern statt static — Definition in switchforms_globals.c
+extern int               _cs2sx_audio_init;
+extern float             _cs2sx_audio_volume;
+extern float             _cs2sx_audio_phase;
+extern CS2SX_AudioBuffer _cs2sx_audio_bufs[CS2SX_AUDIO_NUM_BUFS];
+extern int               _cs2sx_audio_buf_idx;
+extern int               _cs2sx_audio_submitted;
 
 static inline int CS2SX_Audio_Init(int sampleRate)
 {
@@ -65,7 +67,6 @@ static inline void CS2SX_Audio_SetVolume(float volume)
     _cs2sx_audio_volume = volume;
 }
 
-/// Erzeugt einen Sinuston — blockiert NICHT beim ersten Aufruf.
 static inline void CS2SX_Audio_PlayTone(float freqHz, float amplitude, int duration_ms)
 {
     if (!_cs2sx_audio_init) return;
@@ -83,7 +84,6 @@ static inline void CS2SX_Audio_PlayTone(float freqHz, float amplitude, int durat
         CS2SX_AudioBuffer* buf = &_cs2sx_audio_bufs[_cs2sx_audio_buf_idx];
         _cs2sx_audio_buf_idx = (_cs2sx_audio_buf_idx + 1) % CS2SX_AUDIO_NUM_BUFS;
 
-        // PCM füllen
         for (int i = 0; i < chunk; i++)
         {
             float sample = sinf(_cs2sx_audio_phase) * amplitude * _cs2sx_audio_volume;
@@ -97,7 +97,6 @@ static inline void CS2SX_Audio_PlayTone(float freqHz, float amplitude, int durat
 
         buf->libnx_buf.data_size = (u64)(chunk * CS2SX_AUDIO_CHANNELS * sizeof(s16));
 
-        // Nur warten wenn bereits Puffer laufen — verhindert Deadlock beim ersten Aufruf
         if (_cs2sx_audio_submitted >= CS2SX_AUDIO_NUM_BUFS)
         {
             AudioOutBuffer* released = NULL;

@@ -1,3 +1,12 @@
+// ============================================================================
+// CS2SX — Build/SemanticModelBuilder.cs  (FIXED)
+//
+// Fixes:
+//   • GetModelForBaseName() neu: findet SemanticModel anhand des Klassennamens
+//     (für GenericExpander der synthetische Dateipfade <generic:Foo_int> nutzt)
+//   • GetModel() toleriert nun auch synthetische Pfade (<generic:...>)
+// ============================================================================
+
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using CS2SX.Logging;
@@ -5,18 +14,14 @@ using System.Reflection;
 
 namespace CS2SX.Transpiler;
 
-/// <summary>
-/// Erstellt eine CSharpCompilation aus allen Projektdateien + Stubs und liefert
-/// SemanticModels pro Datei.
-///
-/// Die Stubs (LibNX, SwitchApp, Input etc.) werden aus den eingebetteten Ressourcen
-/// geladen und in die Compilation aufgenommen — dadurch kennt Roslyn u32, PadState,
-/// Result, NpadButton etc. als echte C#-Typen.
-/// </summary>
 public sealed class SemanticModelBuilder
 {
     private readonly Dictionary<string, SemanticModel> _models =
         new(StringComparer.OrdinalIgnoreCase);
+
+    // Zusätzliche Suche nach Klassenname (für GenericExpander)
+    private readonly Dictionary<string, SemanticModel> _modelsByClass =
+        new(StringComparer.Ordinal);
 
     private readonly CSharpCompilation _compilation;
 
@@ -65,12 +70,10 @@ public sealed class SemanticModelBuilder
 
         var trees = new List<SyntaxTree>();
 
-        // ── Stubs aus eingebetteten Ressourcen laden ───────────────────────────
         var stubTrees = LoadStubTrees(parseOptions);
         trees.AddRange(stubTrees);
         Log.Debug($"SemanticModel: {stubTrees.Count} Stub-Tree(s) geladen");
 
-        // ── Projektdateien laden ───────────────────────────────────────────────
         foreach (var file in sourceFiles)
         {
             try
@@ -97,12 +100,26 @@ public sealed class SemanticModelBuilder
             s_baseRefs,
             compilationOptions);
 
-        // SemanticModels nur fuer Projektdateien aufbauen (nicht fuer Stubs)
+        // SemanticModels für Projektdateien aufbauen (nicht für Stubs)
         foreach (var tree in trees.Skip(stubTrees.Count))
         {
             var path = tree.FilePath;
             if (!string.IsNullOrEmpty(path))
-                _models[Path.GetFullPath(path)] = _compilation.GetSemanticModel(tree, ignoreAccessibility: true);
+            {
+                var model = _compilation.GetSemanticModel(tree, ignoreAccessibility: true);
+                _models[Path.GetFullPath(path)] = model;
+
+                // Klassenname → Modell für GenericExpander
+                // (synthetische Pfade wie <generic:Stack_int> haben keinen echten Pfad)
+                foreach (var cls in tree.GetRoot()
+                    .DescendantNodes()
+                    .OfType<Microsoft.CodeAnalysis.CSharp.Syntax.ClassDeclarationSyntax>())
+                {
+                    var className = cls.Identifier.Text;
+                    if (!_modelsByClass.ContainsKey(className))
+                        _modelsByClass[className] = model;
+                }
+            }
         }
 
         var errors = _compilation.GetDiagnostics()
@@ -122,11 +139,30 @@ public sealed class SemanticModelBuilder
         }
     }
 
-    // ── Oeffentliche API ───────────────────────────────────────────────────────
+    // ── Öffentliche API ───────────────────────────────────────────────────────
 
+    /// <summary>
+    /// Gibt das SemanticModel für eine Datei zurück.
+    /// Toleriert synthetische Pfade (&lt;generic:...&gt;) — gibt null zurück.
+    /// </summary>
     public SemanticModel? GetModel(string filePath)
     {
+        // Synthetische Pfade (von GenericExpander) → kein Modell
+        if (filePath.StartsWith('<') && filePath.EndsWith('>'))
+            return null;
+
         _models.TryGetValue(Path.GetFullPath(filePath), out var model);
+        return model;
+    }
+
+    /// <summary>
+    /// NEU: Sucht ein SemanticModel anhand eines Klassennamens.
+    /// Wird von GenericExpander genutzt wenn der Dateipfad synthetisch ist.
+    /// Gibt null zurück wenn kein Modell gefunden.
+    /// </summary>
+    public SemanticModel? GetModelForBaseName(string className)
+    {
+        _modelsByClass.TryGetValue(className, out var model);
         return model;
     }
 

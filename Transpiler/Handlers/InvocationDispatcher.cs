@@ -1,11 +1,8 @@
 // ============================================================================
 // CS2SX — Transpiler/Handlers/InvocationDispatcher.cs
 //
-// Änderungen gegenüber Original:
-//   • ExtensionMethodHandler hinzugefügt (nach AudioHandler)
-//   • Handler-Registry ist jetzt instanz-basiert (nicht mehr static readonly)
-//     damit ExtensionMethodHandler mit der Registry initialisiert werden kann
-//   • Zweiter Konstruktor: InvocationDispatcher(ctx, writeExpr, extensionHandler)
+// FIX: Dispatch-Miss erzeugt jetzt eine Warning statt still durchzufallen.
+// FIX: async/await-Aufrufe werden erkannt und mit sinnvollem Fallback behandelt.
 // ============================================================================
 
 using CS2SX.Core;
@@ -23,12 +20,30 @@ public sealed class InvocationDispatcher
     private readonly TranspilerContext _ctx;
     private readonly Func<SyntaxNode?, string> _writeExpr;
 
+    // Bekannte C-Builtins die NICHT gewarnt werden sollen
+    private static readonly HashSet<string> s_silentPassthrough = new(StringComparer.Ordinal)
+    {
+        "printf", "sprintf", "snprintf", "fprintf", "puts",
+        "malloc", "calloc", "realloc", "free",
+        "memset", "memcpy", "memmove",
+        "strlen", "strcmp", "strncmp", "strcpy", "strncpy",
+        "strstr", "strchr", "strcat",
+        "abs", "sqrtf", "sinf", "cosf", "powf", "floorf", "ceilf",
+        "rand", "srand", "exit",
+        "padUpdate", "padGetButtonsDown", "padGetButtons",
+        "framebufferBegin", "framebufferEnd", "appletMainLoop",
+        "consoleInit", "consoleUpdate", "consoleClear", "consoleExit",
+        "setjmp", "longjmp",
+        "atoi", "atof", "strtol",
+    };
+
     private static List<IInvocationHandler> BuildHandlers(
         ExtensionMethodHandler? extensionHandler)
     {
         return new List<IInvocationHandler>
         {
             new LibNxHandler(),
+            new AsyncHandler(),        // FIX: async/await Fallback
             new EnvironmentHandler(),
             new InputHandler(),
             new FormHandler(),
@@ -50,15 +65,12 @@ public sealed class InvocationDispatcher
             new PathHandler(),
             new SystemExtHandler(),
             new AudioHandler(),
-            extensionHandler ?? new ExtensionMethodHandler(), // NEU: Extension-Methods
+            extensionHandler ?? new ExtensionMethodHandler(),
             new StaticClassHandler(),
             new OwnMethodHandler(),
         };
     }
 
-    /// <summary>
-    /// Standard-Konstruktor (Rückwärtskompatibilität, keine Extension-Methods).
-    /// </summary>
     public InvocationDispatcher(
         TranspilerContext ctx,
         Func<SyntaxNode?, string> writeExpr)
@@ -68,10 +80,6 @@ public sealed class InvocationDispatcher
         _handlers = BuildHandlers(null);
     }
 
-    /// <summary>
-    /// Konstruktor mit Extension-Method-Registry.
-    /// Wird von CSharpToC verwendet wenn ein GenericInstantiationCollector vorhanden ist.
-    /// </summary>
     public InvocationDispatcher(
         TranspilerContext ctx,
         Func<SyntaxNode?, string> writeExpr,
@@ -86,6 +94,19 @@ public sealed class InvocationDispatcher
     {
         var calleeStr = inv.Expression.ToString();
 
+        // FIX: async/await Erkennung — await Foo() → Foo() mit Warning
+        // (Roslyn parst await als PrefixUnary, nicht als Invocation,
+        //  aber manche Aufrufe wie Task.Run kommen hier an)
+        if (calleeStr is "Task.Run" or "Task.Delay" or "Task.WhenAll" or "Task.WhenAny")
+        {
+            _ctx.Warn($"async/Task call '{calleeStr}' — executed synchronously (no threading on Switch)",
+                calleeStr);
+            // Task.Run(action) → einfach action() ausführen
+            if (inv.ArgumentList.Arguments.Count > 0)
+                return _writeExpr(inv.ArgumentList.Arguments[0].Expression) + "()";
+            return "/* async not supported */";
+        }
+
         var args = inv.ArgumentList.Arguments
             .Select(a => BuildArg(a))
             .ToList();
@@ -96,12 +117,20 @@ public sealed class InvocationDispatcher
                 return result;
         }
 
+        // FIX: Warning bei unbekanntem Call ausgeben (außer bekannte C-Builtins)
+        if (!s_silentPassthrough.Contains(calleeStr)
+            && !calleeStr.StartsWith("CS2SX_", StringComparison.Ordinal)
+            && !calleeStr.StartsWith("_cs2sx_", StringComparison.Ordinal))
+        {
+            _ctx.Warn($"unknown call '{calleeStr}' — passed through as-is, verify generated C",
+                calleeStr);
+        }
+
         return null;
     }
 
     private string BuildArg(ArgumentSyntax a)
     {
-        // PHASE 1 FIX: out var in Argument-Position (z.B. int.TryParse(s, out var n))
         if (a.RefKindKeyword.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.OutKeyword)
             && a.Expression is DeclarationExpressionSyntax declExpr
             && declExpr.Designation is SingleVariableDesignationSyntax singleDesig)

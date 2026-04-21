@@ -42,13 +42,16 @@ cs2sx check MeinProjekt/MeinProjekt.csproj
 # Datei-Watcher — rebuild bei Änderungen
 cs2sx watch MeinProjekt/MeinProjekt.csproj
 
+# Build-Artefakte löschen
+cs2sx clean MeinProjekt/MeinProjekt.csproj
+
 # LibNX-Stubs generieren (optional)
 cs2sx genstubs <libnx-include> <output>
 ```
 
 Die fertige `.nro`-Datei liegt danach im Projektverzeichnis und kann direkt auf die Switch SD-Karte kopiert werden.
 
-> Der Build ist **inkrementell** — nur geänderte `.cs`-Dateien werden neu transpiliert. Unveränderte Dateien werden übersprungen. Header-Abhängigkeiten (z.B. Vererbung) werden ebenfalls berücksichtigt.
+> Der Build ist **inkrementell** — nur geänderte `.cs`-Dateien werden neu transpiliert. Unveränderte Dateien werden übersprungen. Header-Abhängigkeiten (z.B. Änderungen an `_generics.h` oder `_interfaces.h`) werden automatisch berücksichtigt und triggern bei Bedarf einen vollständigen Rebuild der abhängigen Dateien.
 
 ---
 
@@ -60,13 +63,15 @@ Die fertige `.nro`-Datei liegt danach im Projektverzeichnis und kann direkt auf 
 | `cs2sx build <csproj\|folder>` | Vollständiger Build → `.nro` |
 | `cs2sx check <csproj>` | Transpile-only, kein GCC — schnelle Fehlerprüfung |
 | `cs2sx watch <csproj\|folder>` | Datei-Watcher mit automatischem Rebuild (500ms Debounce) |
+| `cs2sx clean <csproj>` | Löscht `cs2sx_out/` vollständig — behebt Ghost-Symbol-Konflikte nach Klassen-Umbenennungen |
 | `cs2sx genstubs <include> <out>` | Generiert C#-Stubs aus libnx-Headern |
 
 ### Build-Pipeline Stages
 
 ```
-prepare   → Projektdateien einlesen, Runtime exportieren
+prepare   → Projektdateien einlesen, Runtime exportieren, veraltete Artefakte bereinigen
 fwd-decl  → Forward-Declarations (_forward.h) generieren
+generics  → Generics/Interfaces/Extension-Methoden sammeln und expandieren
 semantic  → Roslyn SemanticModel aufbauen
 transpile → C#-Dateien zu .h/.c transpilieren (inkrementell)
 compile   → GCC (aarch64-none-elf) kompilieren
@@ -136,7 +141,7 @@ public class MyApp : SwitchApp
         Graphics.FillTriangle(200, 100, 300, 300, 100, 300, Color.RGB(255, 128, 0));
         Graphics.FillEllipse(640, 360, 120, 60, Color.RGB(80, 200, 120));
         Graphics.FillRoundedRect(50, 50, 300, 150, 20, Color.RGB(60, 60, 180));
-        Graphics.DrawTextShadow(100, 400, "Shadow!", Color.White, Color.RGB(0,0,0), 2);
+        Graphics.DrawTextShadow(100, 400, "Shadow!", Color.White, Color.RGB(0, 0, 0), 2);
     }
 }
 ```
@@ -476,7 +481,7 @@ Audio.Exit();                         // Audio-System freigeben
 | `Audio.Stop()` | `CS2SX_Audio_Stop()` | Wiedergabe stoppen |
 | `Audio.Exit()` | `CS2SX_Audio_Exit()` | Puffer freigeben |
 
-> `PlayTone` gibt den Puffer asynchron ab und blockiert nicht. Intern werden 4 zirkuläre PCM-Puffer à 4096 Samples verwendet (Stereo, 16-bit).
+> `PlayTone` gibt den Puffer asynchron ab und blockiert nicht beim ersten Aufruf. Intern werden 4 zirkuläre PCM-Puffer à 4096 Samples verwendet (Stereo, 16-bit).
 
 ---
 
@@ -560,7 +565,7 @@ Alle Pfade müssen absolut sein und mit `/switch/` beginnen.
 
 | Methode | Beschreibung |
 |---|---|
-| `File.ReadAllText(path)` | Datei lesen (max. 8192 Bytes) |
+| `File.ReadAllText(path)` | Datei lesen (max. 32768 Bytes) |
 | `File.ReadAllLines(path)` | Datei zeilenweise lesen → `List<string>` |
 | `File.WriteAllText(path, content)` | Datei schreiben (überschreibt) |
 | `File.AppendAllText(path, content)` | An Datei anhängen |
@@ -691,8 +696,10 @@ if (x is not null) { ... }
 | Enums mit Werten | ✅ | |
 | Value-type `struct` | ✅ | → C Stack-Struct, kein `malloc` |
 | Explizite Konstruktoren mit Parametern | ✅ | → `ClassName_New(params...)` |
-| `interface` | ❌ | |
-| Generics | ❌ | |
+| Generics | ✅ | Klassen-Expansion zur Build-Zeit (z.B. `Stack<int>` → `Stack_int`) |
+| `interface` | ✅ | → vtable-Wrapper-Struct mit `as_IFace()`-Konverter |
+| Extension-Methoden | ✅ | → freie C-Funktionen mit erweitertem Receiver |
+| `async` / `await` | ⚠️ | Synchroner Fallback mit Transpiler-Warning — kein echtes Threading |
 
 ### Felder: mit und ohne `_` Prefix
 
@@ -767,6 +774,61 @@ var preset = new MinUiColorPreset(Color.Gray, Color.White);
 // → MinUiColorPreset_New(COLOR_GRAY, COLOR_WHITE)
 ```
 
+### Generics
+
+Generische Klassen werden zur Build-Zeit für jede verwendete Typ-Kombination expandiert:
+
+```csharp
+public class Stack<T>
+{
+    private T[] _items;
+    private int _top;
+
+    public void Push(T item) { _items[_top++] = item; }
+    public T Pop() { return _items[--_top]; }
+}
+
+// Verwendung:
+var intStack = new Stack<int>();
+var strStack = new Stack<string>();
+// → Stack_int_New() / Stack_str_New() in _generics.h
+```
+
+### Interfaces
+
+```csharp
+public interface IRenderable
+{
+    void Draw();
+    int GetWidth();
+}
+
+public class Button : IRenderable
+{
+    public void Draw() { /* ... */ }
+    public int GetWidth() { return 100; }
+}
+
+IRenderable r = button.as_IRenderable();
+r.Draw();  // → r->vtable->Draw(r->obj)
+```
+
+Interfaces werden als vtable-Wrapper-Structs expandiert (`IRenderable_vtable` + `IRenderable`). Jede implementierende Klasse erhält eine `ClassName_as_IFace()`-Konverter-Funktion.
+
+### Extension-Methoden
+
+```csharp
+public static class IntExtensions
+{
+    public static bool IsEven(this int x) => x % 2 == 0;
+    public static int Clamp(this int x, int min, int max) => Math.Clamp(x, min, max);
+}
+
+// Verwendung:
+if (score.IsEven()) { ... }      // → IntExtensions_IsEven(score)
+int v = speed.Clamp(0, 100);    // → IntExtensions_Clamp(speed, 0, 100)
+```
+
 ### Eigene Controls
 
 ```csharp
@@ -839,16 +901,20 @@ Im Framebuffer-Modus sind Console-Controls nicht sichtbar. Im Console-Modus steh
 MeinProjekt/
 ├── MeinProjekt.csproj
 ├── cs2sx.json
-├── Program.cs              — Haupt-App (eine Klasse pro Datei!)
+├── icon.jpg                    — App-Icon (256x256 JPEG, wird beim Erstellen automatisch angelegt)
+├── README.md                   — wird beim Erstellen automatisch generiert
+├── Program.cs                  — Haupt-App (eine Klasse pro Datei!)
 ├── MeineKlasse.cs
-├── cs2sx_out/              — generierter C-Code (nicht manuell bearbeiten)
-│   ├── _forward.h          — Forward-Declarations aller Typen
-│   ├── switchforms.h/.c    — Runtime: UI, Collections, String-Utils, File I/O
-│   ├── switchapp.h         — Runtime: SwitchApp-Loop, Grafik, Input, Audio
-│   ├── main.c              — Auto-generierter Einstiegspunkt
-│   ├── MeineKlasse.h/.c    — Transpilierter Code
-│   └── MeinProjekt.elf     — Intermediate ELF
-└── MeinProjekt.nro         — Fertige Homebrew-Datei
+└── cs2sx_out/                  — generierter C-Code (nicht manuell bearbeiten)
+    ├── _forward.h              — Forward-Declarations aller Typen (inkl. expandierter Generics)
+    ├── _generics.h / .c        — expandierte Generic-Klassen
+    ├── _interfaces.h           — vtable-Structs für Interfaces
+    ├── switchforms.c           — Runtime-Globals (String-Pool, Audio-State, Framebuffer)
+    ├── switchforms.h           — Runtime: UI, Collections, String-Utils, File I/O
+    ├── switchapp.h             — Runtime: SwitchApp-Loop, Grafik, Input, Audio
+    ├── main.c                  — Auto-generierter Einstiegspunkt
+    ├── MeineKlasse.h/.c        — Transpilierter Code
+    └── MeinProjekt.elf         — Intermediate ELF
 ```
 
 `cs2sx.json`:
@@ -863,7 +929,25 @@ MeinProjekt/
 }
 ```
 
-> **Wichtig:** `icon.jpg` ist optional. Ohne Icon wird ein Standard-Icon verwendet (Warnung beim Build).
+> `icon.jpg` wird beim `cs2sx new` automatisch als Platzhalter angelegt. Ersetze ihn mit deinem eigenen 256×256 JPEG-Icon.
+
+---
+
+## Diagnostics & Fehlermeldungen
+
+Der Transpiler gibt Warnings aus wenn Konstrukte nicht vollständig unterstützt werden:
+
+```
+Game.cs(42): unknown call 'Foo.Bar' — passed through as-is, verify generated C
+Game.cs(17): Task.Run — executed synchronously (no threading on Switch)
+```
+
+GCC-Fehlermeldungen werden automatisch auf die ursprünglichen C#-Quellzeilen zurückverfolgt:
+
+```
+Game.c:88:5: error: 'foo' undeclared
+    → C# Game.cs(42): someMethod()
+```
 
 ---
 
@@ -878,7 +962,8 @@ CS2SX/
 │   └── DiagnosticReporter.cs   — Warnings/Errors + GCC Source-Mapping
 ├── Transpiler/
 │   ├── Handlers/
-│   │   ├── InvocationDispatcher.cs   — orchestriert alle Handler
+│   │   ├── InvocationDispatcher.cs   — orchestriert alle Handler, Warning bei unbekannten Calls
+│   │   ├── AsyncHandler.cs           — Task.Run/Delay → synchroner Fallback
 │   │   ├── LibNxHandler.cs           — LibNX.X() Aufrufe
 │   │   ├── InputHandler.cs           — Input.IsDown/IsHeld/IsUp
 │   │   ├── InputExtHandler.cs        — Sticks, Touch
@@ -902,6 +987,7 @@ CS2SX/
 │   │   ├── StringMethodHandler.cs    — String.X + Instanz-Methoden
 │   │   ├── StringConcatHandler.cs    — "string" + variable → snprintf
 │   │   ├── FieldMethodHandler.cs     — _field.Method() Aufrufe
+│   │   ├── ExtensionMethodHandler.cs — Extension-Methoden via SemanticModel
 │   │   ├── StaticClassHandler.cs     — static class Aufrufe (MinUI.X)
 │   │   └── OwnMethodHandler.cs       — eigene Methoden
 │   ├── Strategies/
@@ -917,19 +1003,23 @@ CS2SX/
 │   │   ├── StructWriter.cs
 │   │   └── NullableAndPatternWriter.cs
 │   ├── CSharpToC.cs
+│   ├── GenericExpander.cs          — Generics zur Build-Zeit expandieren
+│   ├── GenericInstantiationCollector.cs — Instantiierungen sammeln
+│   ├── InterfaceExpander.cs        — Interface → vtable-Wrapper
 │   ├── LambdaLifter.cs
 │   ├── PropertyWriter.cs
 │   └── VTableBuilder.cs
 ├── Build/
-│   ├── BuildPipeline.cs        — 6-Stage Build-Pipeline mit Live-Renderer
+│   ├── BuildPipeline.cs        — 7-Stage Build-Pipeline mit Live-Renderer
 │   ├── CCompiler.cs            — GCC-Wrapper
 │   ├── CheckCommand.cs         — Transpile-only Check
-│   ├── WatchCommand.cs         — Datei-Watcher mit Debounce
+│   ├── CleanCommand.cs         — cs2sx clean
+│   ├── WatchCommand.cs         — Datei-Watcher mit Debounce + Terminal-Restore
 │   ├── EntryPointGenerator.cs  — main.c generieren
 │   ├── NacpBuilder.cs          — nacptool-Wrapper
 │   ├── NroBuilder.cs           — elf2nro-Wrapper
 │   ├── ProjectConfig.cs        — cs2sx.json lesen
-│   ├── ProjectCreator.cs       — cs2sx new
+│   ├── ProjectCreator.cs       — cs2sx new (mit Default-Icon + README)
 │   ├── ProjectReader.cs        — .csproj parsen
 │   ├── RuntimeExporter.cs      — eingebettete Runtime-Dateien exportieren
 │   ├── SemanticModelBuilder.cs — Roslyn Compilation + SemanticModels
@@ -939,9 +1029,8 @@ CS2SX/
 │   └── CliParser.cs
 └── Runtime/
     ├── switchforms.h    — UI-Controls, Collections, String-Utils, File I/O
-    ├── switchforms.c    — globale Variablendefinitionen
+    ├── switchforms.c    — ODR-sichere Globaldefinitionen (Pool, Audio-State, Framebuffer)
     ├── switchapp.h      — SwitchApp-Loop, Framebuffer, Graphics, Input, System
-    ├── switchapp_ext.h  — Erweiterte Grafik, Sticks, Touch, Battery (merged in switchapp.h)
     └── AudioStub.h      — PCM-Audio via libnx audout
 ```
 
@@ -973,7 +1062,7 @@ Eintrag in `Core/TypeRegistry.cs` ergänzen — `s_primitives`, `s_controlTypes`
 
 ### GCC-Fehler auf C#-Quellzeilen zurückverfolgen
 
-`DiagnosticReporter` verwaltet eine Source-Map von generierten C-Zeilen auf Original-C#-Zeilen. GCC-Fehlermeldungen werden automatisch mit dem zugehörigen C#-Snippet angereichert.
+`DiagnosticReporter` verwaltet eine Source-Map von generierten C-Zeilen auf Original-C#-Zeilen. GCC-Fehlermeldungen werden automatisch mit dem zugehörigen C#-Snippet angereichert. `CurrentCFile` muss in `BuildPipeline` vor dem Transpile-Pass gesetzt werden (geschieht automatisch).
 
 ---
 
@@ -981,14 +1070,13 @@ Eintrag in `Core/TypeRegistry.cs` ergänzen — `s_primitives`, `s_controlTypes`
 
 - **Ein `SwitchApp`-Subtyp pro Projekt**
 - **Eine Klasse pro `.cs`-Datei** — keine verschachtelten Klassen
-- **`string`-Puffer 512 Bytes** — Dateipuffer 8192 Bytes
+- **`string`-Puffer 512 Bytes** — Dateipuffer 32768 Bytes
 - **Bitmap-Font 8×8** — kein Anti-Aliasing, kein TrueType
 - **Kein Heap-GC** — allokierte Objekte (`*_New()`) manuell freigeben
 - **Lambda-Captures** — nur Werttypen und primitive Captures zuverlässig
 - **`is`-Typ-Pattern** — erfordert `TypeName_Is()`-Hilfsfunktion in der Runtime
-- **Statische String-Puffer** — verschachtelte String-Methoden können sich überschreiben
 - **Mehrdimensionale Arrays** — `int[,]` wird als flaches 1D-Array transpiliert
-- **Audio blockiert bei Pufferübergabe** — `PlayTone` wartet auf freien Puffer (`audoutWaitPlayFinish`)
+- **`async`/`await`** — synchroner Fallback mit Warning, kein echtes Threading
 
 ---
 
@@ -996,12 +1084,9 @@ Eintrag in `Core/TypeRegistry.cs` ergänzen — `s_primitives`, `s_controlTypes`
 
 | Feature |
 |---|
-| `async` / `await` |
 | LINQ |
 | `params`-Parameter (nur teilweise) |
 | Tuple-Return / Dekonstruktion (experimentell) |
-| `interface` |
-| Generics |
 | `Console.ReadLine` / Keyboard-Input |
 | Mehrfachvererbung |
 | `delegate` als vollständiger Typ |

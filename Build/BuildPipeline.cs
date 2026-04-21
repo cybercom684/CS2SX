@@ -27,6 +27,24 @@ public sealed class BuildPipeline
         _buildDir = Path.Combine(_projectDir, "cs2sx_out");
     }
 
+    // ── FIX: Clean — löscht veraltete generierte Dateien ─────────────────────
+    public void Clean()
+    {
+        if (!Directory.Exists(_buildDir))
+        {
+            Log.Info("cs2sx_out does not exist — nothing to clean.");
+            return;
+        }
+
+        int deleted = 0;
+        foreach (var f in Directory.GetFiles(_buildDir))
+        {
+            try { File.Delete(f); deleted++; }
+            catch (Exception ex) { Log.Warning($"Could not delete {Path.GetFileName(f)}: {ex.Message}"); }
+        }
+        Log.Ok($"Cleaned cs2sx_out: {deleted} file(s) removed.");
+    }
+
     public void Run()
     {
         var started = DateTime.Now;
@@ -34,7 +52,7 @@ public sealed class BuildPipeline
         using var renderer = new BuildRenderer([
             new BuildStage { Name = "prepare"   },
             new BuildStage { Name = "fwd-decl"  },
-            new BuildStage { Name = "generics"  }, // NEU
+            new BuildStage { Name = "generics"  },
             new BuildStage { Name = "semantic"  },
             new BuildStage { Name = "transpile" },
             new BuildStage { Name = "compile"   },
@@ -51,6 +69,9 @@ public sealed class BuildPipeline
             sPrepare.Status = StageStatus.Running;
 
             Directory.CreateDirectory(_buildDir);
+
+            // FIX: Veraltete Ghost-Dateien aufräumen (umbenannte Klassen hinterlassen Leichen)
+            CleanOrphanedFiles(_buildDir);
 
             var csprojFiles = Directory.GetFiles(_projectDir, "*.csproj");
             if (csprojFiles.Length == 0)
@@ -89,14 +110,13 @@ public sealed class BuildPipeline
             var appSourceFiles = reader.SourceFiles.ToList();
             var allForFwd = switchFormsFilesForFwd.Concat(appSourceFiles).ToList();
             var forwardPath = Path.Combine(_buildDir, "_forward.h");
-            // Vorläufig ohne expanded types — wird nach dem generics-Pass aktualisiert
             WriteForwardDeclarations(allForFwd, forwardPath, expandedTypeNames: null);
 
             sFwd.Progress = 100;
             sFwd.Status = StageStatus.Done;
             sFwd.Elapsed = $"{(DateTime.Now - started).TotalMilliseconds:F0}ms";
 
-            // ── generics (NEU) ────────────────────────────────────────────
+            // ── generics ──────────────────────────────────────────────────
             var sGenerics = renderer.GetStage("generics");
             sGenerics.Status = StageStatus.Running;
             sGenerics.Detail = "collecting instantiations…";
@@ -105,23 +125,17 @@ public sealed class BuildPipeline
                 .Where(f => !s_switchFormsSkipTranspile.Contains(Path.GetFileName(f)))
                 .ToList();
 
-            // Pass 1: Generic/Interface/Extension-Definitionen und Instantiierungen sammeln
             var genericCollector = new GenericInstantiationCollector();
             genericCollector.Collect(transpiledFiles, switchFormsFilesForFwd);
 
             var interfaceExpander = new InterfaceExpander(genericCollector);
             interfaceExpander.AnalyzeImplementations(transpiledFiles);
 
-            // Interface-Header schreiben
             var ifaceHeaderPath = interfaceExpander.WriteInterfaceHeader(_buildDir);
 
-            // Generic-Code expandieren und in Dateien schreiben
             var genericExpander = new GenericExpander(genericCollector);
             var (genericHeaderPath, genericImplPath) = genericExpander.WriteToFiles(_buildDir);
 
-            // _forward.h neu schreiben mit den jetzt bekannten expandierten Typen.
-            // Stack_int, Pair_str_float etc. brauchen forward decls damit
-            // andere .h-Dateien sie in Signaturen referenzieren können.
             var expandedNames = genericExpander.GetExpandedTypeNames().ToList();
             if (expandedNames.Count > 0)
             {
@@ -168,7 +182,6 @@ public sealed class BuildPipeline
                 .Select(f => Path.GetFileNameWithoutExtension(f) + ".h")
                 .ToList();
 
-            // NEU: Generierte Generic/Interface-Header einbeziehen
             if (!string.IsNullOrEmpty(genericHeaderPath))
                 allHeaders.Insert(0, Path.GetFileName(genericHeaderPath));
             if (!string.IsNullOrEmpty(ifaceHeaderPath))
@@ -176,17 +189,24 @@ public sealed class BuildPipeline
 
             var cFiles = new List<string> { switchformsCPath };
 
-            // NEU: Generic-Implementierungen als .c-Datei hinzufügen
             if (!string.IsNullOrEmpty(genericImplPath) && File.Exists(genericImplPath))
                 cFiles.Add(genericImplPath);
 
             int transpiled = 0;
             int skipped = 0;
 
+            // FIX: latestHeaderTime bezieht jetzt generics/interfaces mit ein
             var allTranspiledHeaders = transpiledFiles
                 .Select(f => Path.Combine(_buildDir, Path.GetFileNameWithoutExtension(f) + ".h"))
                 .Where(File.Exists)
                 .ToList();
+
+            // FIX: generierte Headers explizit in latestHeaderTime aufnehmen
+            var generatedHeaders = new[] { "_generics.h", "_interfaces.h", "_forward.h" }
+                .Select(n => Path.Combine(_buildDir, n))
+                .Where(File.Exists);
+            allTranspiledHeaders.AddRange(generatedHeaders);
+
             var latestHeaderTime = allTranspiledHeaders.Count > 0
                 ? allTranspiledHeaders.Max(h => File.GetLastWriteTimeUtc(h))
                 : DateTime.MinValue;
@@ -214,14 +234,12 @@ public sealed class BuildPipeline
                 var source = System.IO.File.ReadAllText(csFile);
                 var semanticModel = semanticBuilder.GetModel(csFile);
 
-                // NEU: Transpiler mit Generic/Interface-Support instanziieren
                 var hTranspiler = new CSharpToC(
                     CSharpToC.TranspileMode.HeaderOnly,
                     genericCollector,
                     interfaceExpander);
                 var hResult = hTranspiler.Transpile(source, csFile, semanticModel);
 
-                // NEU: Interface-Header im Include-Block
                 var interfaceInclude = !string.IsNullOrEmpty(ifaceHeaderPath)
                     ? $"#include \"{Path.GetFileName(ifaceHeaderPath)}\"\n"
                     : "";
@@ -244,6 +262,11 @@ public sealed class BuildPipeline
                     genericCollector,
                     interfaceExpander);
                 var cResult = cTranspiler.Transpile(source, csFile, semanticModel);
+
+                // FIX: Diagnostic-Mapping aktivieren — Source-Map-Context setzen
+                cTranspiler.GetContext().CurrentCFile = baseName + ".c";
+                cTranspiler.GetContext().CurrentFile = Path.GetFileName(csFile);
+
                 var cContent = "#include <stdlib.h>\n"
                              + allIncludes + "\n\n"
                              + cResult.Code;
@@ -261,6 +284,10 @@ public sealed class BuildPipeline
 
                 foreach (var d in allDiags.Where(d => d.Severity == DiagnosticSeverity.Error))
                     Log.Error($"{Path.GetFileName(d.CsFile ?? "")}({d.CsLine}): {d.Message}");
+
+                // FIX: Unbekannte Methoden-Calls loggen (Dispatcher liefert null)
+                foreach (var d in allDiags.Where(d => d.Message.Contains("UNSUPPORTED") || d.Message.Contains("unknown call")))
+                    Log.Warning($"  ↳ unsupported construct in {Path.GetFileName(csFile)} — check generated C");
 
                 warnings += allDiags.Count(d => d.Severity == DiagnosticSeverity.Warning);
 
@@ -314,7 +341,8 @@ public sealed class BuildPipeline
             var nroPath = Path.Combine(_projectDir, _config.Name + ".nro");
             var iconPath = _config.Icon != null
                 ? Path.Combine(_projectDir, _config.Icon)
-                : null;
+                : TryFindDefaultIcon(_projectDir);
+
             if (iconPath == null)
             {
                 Log.Warning("No icon found — using default");
@@ -351,8 +379,49 @@ public sealed class BuildPipeline
         }
     }
 
+    // ── FIX: Orphaned-File-Cleanup ────────────────────────────────────────────
+    /// <summary>
+    /// Löscht .h/.c-Dateien in cs2sx_out die keiner .cs-Quelldatei mehr entsprechen.
+    /// Verhindert Ghost-Symbol-Konflikte nach Klassen-Umbenennungen.
+    /// </summary>
+    private void CleanOrphanedFiles(string buildDir)
+    {
+        var reader = new ProjectReader();
+        var csprojFiles = Directory.GetFiles(_projectDir, "*.csproj");
+        if (csprojFiles.Length == 0) return;
+        reader.Load(csprojFiles[0]);
+
+        var validBases = new HashSet<string>(
+            reader.SourceFiles.Select(f => Path.GetFileNameWithoutExtension(f)),
+            StringComparer.OrdinalIgnoreCase);
+
+        // Immer-gültige generierte Dateien
+        validBases.Add("switchforms");
+        validBases.Add("_forward");
+        validBases.Add("_generics");
+        validBases.Add("_interfaces");
+        validBases.Add("main");
+        validBases.Add("switchapp");
+        validBases.Add("switchforms_globals");
+
+        int removed = 0;
+        foreach (var file in Directory.GetFiles(buildDir, "*.c")
+            .Concat(Directory.GetFiles(buildDir, "*.h")))
+        {
+            var baseName = Path.GetFileNameWithoutExtension(file);
+            if (!validBases.Contains(baseName))
+            {
+                try { File.Delete(file); removed++; Log.Info($"Orphan removed: {Path.GetFileName(file)}"); }
+                catch { }
+            }
+        }
+        if (removed > 0)
+            Log.Info($"Cleaned {removed} orphaned file(s) from cs2sx_out");
+    }
+
     /// <summary>
     /// Erweiterter Inkremental-Check.
+    /// FIX: latestHeaderTime-Parameter schließt jetzt generics/interfaces ein.
     /// </summary>
     private bool IsUpToDate(string csFile, string hPath, string cPath,
         DateTime latestHeaderTime = default)
@@ -375,34 +444,21 @@ public sealed class BuildPipeline
                                    || File.GetLastWriteTimeUtc(forwardH) > cTime))
             return false;
 
-        // NEU: Generics-Header invalidieren
         var genericsH = Path.Combine(_buildDir, "_generics.h");
         if (File.Exists(genericsH) && File.GetLastWriteTimeUtc(genericsH) > hTime)
             return false;
 
-        // NEU: Interface-Header invalidieren
         var ifacesH = Path.Combine(_buildDir, "_interfaces.h");
         if (File.Exists(ifacesH) && File.GetLastWriteTimeUtc(ifacesH) > hTime)
             return false;
 
+        // FIX: latestHeaderTime enthält jetzt auch generics/interfaces (siehe Run())
         if (latestHeaderTime != default && latestHeaderTime > hTime)
             return false;
 
         return true;
     }
 
-    /// <summary>
-    /// Schreibt _forward.h mit typedef-Vorwärtsdeklarationen für alle Typen.
-    ///
-    /// expandedTypeNames: expandierte Generic-Typen (Stack_int, Pair_str_float…)
-    /// die aus _generics.h kommen und ebenfalls forward-deklariert werden müssen,
-    /// damit sie in Signaturen anderer .h-Dateien verwendet werden können bevor
-    /// _generics.h inkludiert wird.
-    ///
-    /// Der Aufruf findet zweimal statt:
-    ///   1. Im fwd-decl-Stage: expandedTypeNames = null (Generics noch nicht bekannt)
-    ///   2. Im generics-Stage: expandedTypeNames gefüllt → _forward.h wird überschrieben
-    /// </summary>
     private static void WriteForwardDeclarations(
         IReadOnlyList<string> sourceFiles,
         string outputPath,
@@ -430,7 +486,7 @@ public sealed class BuildPipeline
         sb.AppendLine();
         sb.AppendLine("#include \"switchapp.h\"");
         sb.AppendLine();
-        sb.AppendLine("extern char _cs2sx_strbuf[512];");
+        sb.AppendLine("extern char _cs2sx_strbuf[1024];");
         sb.AppendLine();
 
         var alreadyDeclared = new HashSet<string>(StringComparer.Ordinal)
@@ -438,7 +494,6 @@ public sealed class BuildPipeline
             "Control", "Form", "Label", "Button", "ProgressBar", "SwitchApp",
         };
 
-        // Normale Typen aus den Quelldateien
         foreach (var csFile in sourceFiles)
         {
             var source = System.IO.File.ReadAllText(csFile);
@@ -447,8 +502,6 @@ public sealed class BuildPipeline
                 .DescendantNodes()
                 .Where(n => n is ClassDeclarationSyntax or StructDeclarationSyntax))
             {
-                // Generische Klassen selbst nicht forward-deklarieren —
-                // ihre konkreten Expansionen (Stack_int etc.) kommen weiter unten.
                 if (typeDecl is ClassDeclarationSyntax cls
                     && cls.TypeParameterList?.Parameters.Count > 0)
                     continue;
@@ -462,10 +515,6 @@ public sealed class BuildPipeline
             }
         }
 
-        // Expandierte Generic-Typen: Stack_int, Pair_str_float, …
-        // Diese kommen aus _generics.h und müssen hier als opaque forward decl
-        // erscheinen, damit Signaturen in anderen .h-Dateien sie referenzieren können
-        // noch bevor _generics.h inkludiert wird.
         if (expandedTypeNames != null)
         {
             var hadAny = false;
@@ -518,12 +567,14 @@ public sealed class BuildPipeline
         return null;
     }
 
+    // FIX: WriteSwitchformsC schreibt jetzt auch Audio-Globals (ODR-sicher)
     private static void WriteSwitchformsC(string path)
     {
         using var w = new StreamWriter(path, append: false, encoding: Encoding.UTF8);
         w.WriteLine("#include \"_forward.h\"");
         w.WriteLine();
-        w.WriteLine("char         _cs2sx_strbuf[512];");
+        // Core globals
+        w.WriteLine("char         _cs2sx_strbuf[1024];");
         w.WriteLine("Framebuffer  g_fb;");
         w.WriteLine("u32*         g_fb_addr       = NULL;");
         w.WriteLine("int          g_fb_width      = 1280;");
@@ -531,5 +582,28 @@ public sealed class BuildPipeline
         w.WriteLine("int          g_gfx_init      = 0;");
         w.WriteLine("PadState     g_cs2sx_pad;");
         w.WriteLine("unsigned int _cs2sx_rand_state = 12345u;");
+        w.WriteLine();
+        // FIX: String-Pool und Audio-State hier definieren (nicht mehr static in Header)
+        w.WriteLine("char _cs2sx_strpool[32][1024];");
+        w.WriteLine("int  _cs2sx_strpool_idx = 0;");
+        w.WriteLine();
+        w.WriteLine("// Audio state (extern in AudioStub.h)");
+        w.WriteLine("int               _cs2sx_audio_init      = 0;");
+        w.WriteLine("float             _cs2sx_audio_volume    = 1.0f;");
+        w.WriteLine("float             _cs2sx_audio_phase     = 0.0f;");
+        w.WriteLine("CS2SX_AudioBuffer _cs2sx_audio_bufs[4];");
+        w.WriteLine("int               _cs2sx_audio_buf_idx   = 0;");
+        w.WriteLine("int               _cs2sx_audio_submitted = 0;");
+    }
+
+    // FIX/NEU: Default-Icon suchen (icon.jpg, icon.png, icon.bmp im Projektordner)
+    private static string? TryFindDefaultIcon(string projectDir)
+    {
+        foreach (var candidate in new[] { "icon.jpg", "icon.jpeg", "icon.png", "icon.bmp" })
+        {
+            var p = Path.Combine(projectDir, candidate);
+            if (File.Exists(p)) return p;
+        }
+        return null;
     }
 }

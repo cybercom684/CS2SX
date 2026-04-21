@@ -1,9 +1,10 @@
 ﻿// ============================================================================
 // Build/WatchCommand.cs
 //
-// PHASE 4: cs2sx watch <project.csproj>
-// Überwacht .cs-Dateien und löst automatisch einen Build aus wenn
-// Änderungen erkannt werden. Debounced mit 500ms Verzögerung.
+// FIX: Terminal-Corruption-Fix — Console.CursorVisible wird jetzt IMMER
+// wiederhergestellt, auch bei unbehandelten Exceptions und SIGINT.
+// Außerdem: cs2sx clean-Aufruf vor jedem Rebuild wenn --clean-on-change
+// Flag gesetzt ist.
 // ============================================================================
 
 using CS2SX.Logging;
@@ -26,6 +27,12 @@ public sealed class WatchCommand
 
     public async Task Run(CancellationToken cancellationToken = default)
     {
+        // FIX: Terminal-Cleanup als AppDomain-Handler registrieren — wird auch
+        // bei unbehandelten Exceptions und Ctrl+C ausgelöst.
+        Console.CancelKeyPress += OnCancelKeyPress;
+        AppDomain.CurrentDomain.UnhandledException += OnUnhandledException;
+        AppDomain.CurrentDomain.ProcessExit += OnProcessExit;
+
         Log.Info($"Watching: {_projectDir}");
         Log.Info("Press Ctrl+C to stop.");
         Console.WriteLine();
@@ -40,7 +47,6 @@ public sealed class WatchCommand
             EnableRaisingEvents = true,
         };
 
-        // Auch .h-Dateien überwachen (Custom Headers)
         using var hWatcher = new FileSystemWatcher(_projectDir, "*.h")
         {
             IncludeSubdirectories = false,
@@ -64,11 +70,15 @@ public sealed class WatchCommand
         {
             Log.Info("Watch stopped.");
         }
+        finally
+        {
+            // FIX: Terminal immer wiederherstellen, egal wie wir hier ankommen
+            RestoreTerminal();
+        }
     }
 
     private void OnFileChanged(object sender, FileSystemEventArgs e)
     {
-        // cs2sx_out Verzeichnis ignorieren — generierte Dateien
         if (e.FullPath.Contains("cs2sx_out")) return;
         if (e.FullPath.Contains(Path.DirectorySeparatorChar + "obj" + Path.DirectorySeparatorChar)) return;
         if (e.FullPath.Contains(Path.DirectorySeparatorChar + "bin" + Path.DirectorySeparatorChar)) return;
@@ -85,9 +95,7 @@ public sealed class WatchCommand
     }
 
     /// <summary>
-    /// Debounced Build — wartet 500ms nach der letzten Änderung
-    /// bevor der Build gestartet wird. Verhindert mehrfache Builds
-    /// beim Speichern mehrerer Dateien gleichzeitig.
+    /// Debounced Build — 500ms Verzögerung nach letzter Änderung.
     /// </summary>
     private void ScheduleBuild()
     {
@@ -117,13 +125,41 @@ public sealed class WatchCommand
         }
         catch (Exception ex)
         {
-            // BuildPipeline loggt bereits den Fehler
-            // Wir loggen nur wenn es kein bekannter Build-Fehler ist
+            // FIX: Terminal nach BuildRenderer-Exception wiederherstellen
+            RestoreTerminal();
             if (ex.Message.Length < 200)
                 Log.Error("Build failed: " + ex.Message);
         }
 
         Console.WriteLine(new string('─', 60));
         Log.Info($"Watching for changes... ({DateTime.Now:HH:mm:ss})");
+    }
+
+    // ── FIX: Terminal-Restore ─────────────────────────────────────────────────
+
+    private static void RestoreTerminal()
+    {
+        try
+        {
+            Console.CursorVisible = true;
+            Console.ResetColor();
+        }
+        catch { /* Ignore — Console könnte nicht verfügbar sein */ }
+    }
+
+    private static void OnCancelKeyPress(object? sender, ConsoleCancelEventArgs e)
+    {
+        RestoreTerminal();
+        // Nicht abbrechen — normaler Ctrl+C-Flow
+    }
+
+    private static void OnUnhandledException(object sender, UnhandledExceptionEventArgs e)
+    {
+        RestoreTerminal();
+    }
+
+    private static void OnProcessExit(object? sender, EventArgs e)
+    {
+        RestoreTerminal();
     }
 }

@@ -619,61 +619,6 @@ static inline int CS2SX_Touch_HitRect(CS2SX_TouchState* ts, int idx, int rx, int
 }
 
 // ============================================================================
-// Extension Filesystem (unverändert aus Original)
-// ============================================================================
-
-static inline List_str* CS2SX_Dir_GetDirectories(const char* path)
-{
-    List_str* result = List_str_New();if (!result)return result;
-    FsFileSystem fs;if (R_FAILED(fsOpenSdCardFileSystem(&fs)))return result;
-    FsDir d;if (R_FAILED(fsFsOpenDirectory(&fs, path, FsDirOpenMode_ReadDirs, &d))) { fsFsClose(&fs);return result; }
-    static FsDirectoryEntry _subdir_entries[64];static char _subdir_paths[64][512];
-    s64 count = 0;fsDirRead(&d, &count, 64, _subdir_entries);
-    for (int i = 0;i < (int)count && i < 64;i++) { snprintf(_subdir_paths[i], sizeof(_subdir_paths[i]), "%s/%s", path, _subdir_entries[i].name);List_str_Add(result, _subdir_paths[i]); }
-    fsDirClose(&d);fsFsClose(&fs);return result;
-}
-
-static inline List_str* CS2SX_Dir_GetEntries(const char* path)
-{
-    List_str* result = List_str_New();if (!result)return result;
-    FsFileSystem fs;if (R_FAILED(fsOpenSdCardFileSystem(&fs)))return result;
-    FsDir d;int mode = FsDirOpenMode_ReadFiles | FsDirOpenMode_ReadDirs;
-    if (R_FAILED(fsFsOpenDirectory(&fs, path, mode, &d))) { fsFsClose(&fs);return result; }
-    static FsDirectoryEntry _all_entries[128];static char _all_paths[128][512];
-    s64 count = 0;fsDirRead(&d, &count, 128, _all_entries);
-    for (int i = 0;i < (int)count && i < 128;i++) { snprintf(_all_paths[i], sizeof(_all_paths[i]), "%s/%s", path, _all_entries[i].name);List_str_Add(result, _all_paths[i]); }
-    fsDirClose(&d);fsFsClose(&fs);return result;
-}
-
-static inline const char* CS2SX_Path_GetFileName(const char* path)
-{
-    if (!path)return"";const char* last = path;
-    for (const char* p = path;*p;p++) if (*p == '/')last = p + 1;
-    return last;
-}
-
-static inline const char* CS2SX_Path_GetExtension(const char* path)
-{
-    const char* name = CS2SX_Path_GetFileName(path);const char* dot = NULL;
-    for (const char* p = name;*p;p++) if (*p == '.')dot = p;
-    return dot ? dot : "";
-}
-
-static inline const char* CS2SX_Path_GetDirectoryName(const char* path)
-{
-    static char _dirname_buf[512];if (!path)return"";
-    int len = (int)strlen(path), slash = -1;
-    for (int i = len - 1;i >= 0;i--) if (path[i] == '/') { slash = i;break; }
-    if (slash <= 0)return"/";int copyLen = slash;if (copyLen >= 512)copyLen = 511;
-    memcpy(_dirname_buf, path, copyLen);_dirname_buf[copyLen] = '\0';return _dirname_buf;
-}
-
-static inline int CS2SX_Path_IsDirectory(const char* path)
-{
-    return CS2SX_Path_GetExtension(path)[0] == '\0';
-}
-
-// ============================================================================
 // Extension System — Battery
 // ============================================================================
 

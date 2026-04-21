@@ -1,19 +1,13 @@
 ﻿// ============================================================================
-// CS2SX — Transpiler/GenericInstantiationCollector.cs
+// CS2SX — Transpiler/GenericInstantiationCollector.cs  (FIXED)
 //
-// Pass 1 vor dem eigentlichen Transpiler:
-// Sammelt alle konkreten Instantiierungen generischer Typen und Methoden.
-//
-// Beispiele die erkannt werden:
-//   new Stack<int>()              → Stack<int>
-//   new Pair<string, float>()     → Pair<string, float>
-//   Stack<int> x = ...            → Stack<int>
-//   void Foo<T>(T x) { }          → Foo<int>, Foo<string> (aus Aufruf-Stellen)
-//   class Container<T> { }        → Container<int>, Container<Player> (aus new)
-//
-// Ergebnis: Dictionary<genericTypeName, HashSet<List<string>>>
-//   "Stack" → { ["int"], ["string"] }
-//   "Pair"  → { ["string","float"], ["int","int"] }
+// Fixes:
+//   1. CName für Multi-Typ-Parameter korrekt: Pair<string,float> → Pair_str_float
+//      (vorher: Pair_str_float war schon korrekt, aber verschachtelte Generics
+//       wie Stack<List<int>> → Stack_List_int_ptr wurden nicht flach gemacht)
+//   2. MapToCSuffix kennt jetzt alle primitiven Typen aus TypeRegistry
+//   3. Deduplizierung von CName-Kollisionen (zwei verschiedene Instantiierungen
+//      die zufällig denselben CName erzeugen würden → Warnung + Skip)
 // ============================================================================
 
 using Microsoft.CodeAnalysis;
@@ -25,74 +19,148 @@ using CS2SX.Logging;
 namespace CS2SX.Transpiler;
 
 /// <summary>
-/// Repräsentiert eine konkrete Instantiierung eines generischen Typs oder einer Methode.
+/// Repräsentiert eine konkrete Instantiierung eines generischen Typs.
 /// Stack&lt;int&gt;  →  GenericInstantiation("Stack", ["int"])
 /// </summary>
 public sealed record GenericInstantiation(
     string BaseName,
     IReadOnlyList<string> TypeArguments)
 {
-    /// <summary>Eindeutiger C-Bezeichner: Stack_int, Pair_str_float</summary>
+    /// <summary>
+    /// Eindeutiger C-Bezeichner: Stack_int, Pair_str_float, Map_str_List_int
+    ///
+    /// FIX: Verschachtelte Generics werden flach gemacht:
+    ///   Stack<List<int>> → Stack_List_int  (nicht Stack_List_int_ptr)
+    ///   Pair<string,float> → Pair_str_float
+    /// </summary>
     public string CName => BaseName + "_" + string.Join("_", TypeArguments.Select(MapToCSuffix));
 
-    /// <summary>Lesbare Darstellung für Debug-Output</summary>
     public override string ToString() =>
         BaseName + "<" + string.Join(", ", TypeArguments) + ">";
 
-    private static string MapToCSuffix(string csType) => csType switch
+    /// <summary>
+    /// Mappt einen C#-Typ auf einen C-Namens-Suffix.
+    /// Verschachtelte Generics werden rekursiv aufgelöst.
+    /// </summary>
+    internal static string MapToCSuffix(string csType)
     {
-        "string" => "str",
-        "int" => "int",
-        "uint" => "uint",
-        "long" => "long",
-        "ulong" => "ulong",
-        "short" => "short",
-        "ushort" => "ushort",
-        "byte" => "byte",
-        "sbyte" => "sbyte",
-        "float" => "float",
-        "double" => "double",
-        "bool" => "bool",
-        "char" => "char",
-        _ => csType,
-    };
+        csType = csType.Trim();
+
+        // Direkte Primitive
+        var primitive = csType switch
+        {
+            "string" => "str",
+            "int" => "int",
+            "uint" => "uint",
+            "long" => "long",
+            "ulong" => "ulong",
+            "short" => "short",
+            "ushort" => "ushort",
+            "byte" => "byte",
+            "sbyte" => "sbyte",
+            "float" => "float",
+            "double" => "double",
+            "bool" => "bool",
+            "char" => "char",
+            "object" => "obj",
+            "void" => "void",
+            "u8" => "u8",
+            "u16" => "u16",
+            "u32" => "u32",
+            "u64" => "u64",
+            "s8" => "s8",
+            "s16" => "s16",
+            "s32" => "s32",
+            "s64" => "s64",
+            _ => null,
+        };
+        if (primitive != null) return primitive;
+
+        // Array: T[] → T_arr
+        if (csType.EndsWith("[]"))
+            return MapToCSuffix(csType[..^2]) + "_arr";
+
+        // Nullable: T? → T
+        if (csType.EndsWith("?"))
+            return MapToCSuffix(csType[..^1]);
+
+        // Generischer Typ: List<T> → List_T, Pair<K,V> → Pair_K_V
+        var angleIdx = csType.IndexOf('<');
+        if (angleIdx > 0 && csType.EndsWith(">"))
+        {
+            var outerName = csType[..angleIdx];
+            var innerPart = csType[(angleIdx + 1)..^1];
+            var innerArgs = SplitTypeArgs(innerPart);
+            var suffix = string.Join("_", innerArgs.Select(MapToCSuffix));
+            return outerName + "_" + suffix;
+        }
+
+        // Unbekannter Typ → direkt verwenden (bereinigt)
+        return csType.Replace(".", "_").Replace(" ", "");
+    }
+
+    /// <summary>
+    /// Teilt Typ-Argumente korrekt auf — respektiert verschachtelte &lt;&gt;.
+    /// "string, float" → ["string", "float"]
+    /// "int, List&lt;string&gt;" → ["int", "List&lt;string&gt;"]
+    /// </summary>
+    private static List<string> SplitTypeArgs(string s)
+    {
+        var result = new List<string>();
+        var current = new System.Text.StringBuilder();
+        int depth = 0;
+
+        foreach (char c in s)
+        {
+            if (c == '<') { depth++; current.Append(c); }
+            else if (c == '>') { depth--; current.Append(c); }
+            else if (c == ',' && depth == 0)
+            {
+                result.Add(current.ToString().Trim());
+                current.Clear();
+            }
+            else current.Append(c);
+        }
+
+        if (current.Length > 0)
+            result.Add(current.ToString().Trim());
+
+        return result;
+    }
 }
 
 /// <summary>
 /// Sammelt alle konkreten Generic-Instantiierungen aus einer Menge von Quelldateien.
-/// Wird vor dem eigentlichen Transpiler-Pass ausgeführt.
 /// </summary>
 public sealed class GenericInstantiationCollector
 {
-    // BaseName → Liste aller gesehenen Type-Argument-Kombinationen
     private readonly Dictionary<string, HashSet<string>> _seen =
         new(StringComparer.Ordinal);
 
-    // Alle eindeutigen Instantiierungen
+    // FIX: CName-Deduplizierung — verhindert Kollisionen
+    private readonly HashSet<string> _usedCNames =
+        new(StringComparer.Ordinal);
+
     private readonly List<GenericInstantiation> _instantiations = new();
 
-    // Generic-Klassen die im Projekt definiert sind (Name → Syntax)
     public Dictionary<string, ClassDeclarationSyntax> GenericClasses
     {
         get;
     } =
         new(StringComparer.Ordinal);
 
-    // Generic-Methoden (ClassName.MethodName → Syntax)
     public Dictionary<string, MethodDeclarationSyntax> GenericMethods
     {
         get;
     } =
         new(StringComparer.Ordinal);
 
-    // Interface-Definitionen
     public Dictionary<string, InterfaceDeclarationSyntax> Interfaces
     {
         get;
     } =
         new(StringComparer.Ordinal);
 
-    // Extension-Methoden (erweiterter Typ → Liste von Methoden)
     public Dictionary<string, List<(string className, MethodDeclarationSyntax method)>> ExtensionMethods
     {
         get;
@@ -103,19 +171,12 @@ public sealed class GenericInstantiationCollector
 
     // ── Öffentliche API ───────────────────────────────────────────────────────
 
-    /// <summary>
-    /// Analysiert alle Quelldateien und sammelt:
-    /// - Definitionen generischer Klassen/Methoden
-    /// - Interface-Definitionen
-    /// - Extension-Methoden
-    /// - Alle konkreten Instantiierungen
-    /// </summary>
     public void Collect(IReadOnlyList<string> sourceFiles, IReadOnlyList<string>? stubFiles = null)
     {
         var allFiles = sourceFiles.ToList();
         if (stubFiles != null) allFiles.AddRange(stubFiles);
 
-        // Pass 1: Definitionen sammeln (generische Klassen, Interfaces, Extensions)
+        // Pass 1: Definitionen sammeln
         foreach (var file in allFiles)
         {
             try
@@ -132,7 +193,7 @@ public sealed class GenericInstantiationCollector
             }
         }
 
-        // Pass 2: Instantiierungen sammeln (nur Projektdateien, nicht Stubs)
+        // Pass 2: Instantiierungen (nur Projektdateien)
         foreach (var file in sourceFiles)
         {
             try
@@ -155,23 +216,21 @@ public sealed class GenericInstantiationCollector
                + $"{ExtensionMethods.Values.SelectMany(v => v).Count()} Extension-Methode(n)");
     }
 
-    // ── Pass 1: Definitionen sammeln ──────────────────────────────────────────
+    // ── Pass 1: Definitionen ──────────────────────────────────────────────────
 
     private void CollectDefinitions(SyntaxTree tree, string filePath)
     {
         var root = tree.GetRoot();
 
-        // Generische Klassen
         foreach (var cls in root.DescendantNodes().OfType<ClassDeclarationSyntax>())
         {
             if (cls.TypeParameterList?.Parameters.Count > 0)
             {
                 var name = cls.Identifier.Text;
                 GenericClasses[name] = cls;
-                Log.Debug($"GenericCollector: Generische Klasse '{name}' gefunden in {Path.GetFileName(filePath)}");
+                Log.Debug($"GenericCollector: Generische Klasse '{name}' in {Path.GetFileName(filePath)}");
             }
 
-            // Extension-Methoden erkennen (static class mit static-Methoden die this-Parameter haben)
             bool isStaticClass = cls.Modifiers.Any(m => m.IsKind(SyntaxKind.StaticKeyword));
             if (isStaticClass)
             {
@@ -187,7 +246,6 @@ public sealed class GenericInstantiationCollector
                     if (!hasThis) continue;
 
                     var extendedType = firstParam.Type?.ToString().Trim() ?? "";
-                    // Generics aus dem Typ entfernen: List<T> → List
                     var baseExtType = StripGenericSuffix(extendedType);
 
                     if (!ExtensionMethods.TryGetValue(baseExtType, out var list))
@@ -197,11 +255,10 @@ public sealed class GenericInstantiationCollector
                     }
                     list.Add((cls.Identifier.Text, method));
 
-                    Log.Debug($"GenericCollector: Extension-Methode '{cls.Identifier.Text}.{method.Identifier.Text}' für '{baseExtType}'");
+                    Log.Debug($"GenericCollector: Extension '{cls.Identifier.Text}.{method.Identifier.Text}' für '{baseExtType}'");
                 }
             }
 
-            // Generische Methoden in nicht-generischen Klassen
             foreach (var method in cls.Members.OfType<MethodDeclarationSyntax>())
             {
                 if (method.TypeParameterList?.Parameters.Count > 0)
@@ -212,7 +269,6 @@ public sealed class GenericInstantiationCollector
             }
         }
 
-        // Interfaces
         foreach (var iface in root.DescendantNodes().OfType<InterfaceDeclarationSyntax>())
         {
             Interfaces[iface.Identifier.Text] = iface;
@@ -220,74 +276,41 @@ public sealed class GenericInstantiationCollector
         }
     }
 
-    // ── Pass 2: Instantiierungen sammeln ──────────────────────────────────────
+    // ── Pass 2: Instantiierungen ──────────────────────────────────────────────
 
     private void CollectInstantiations(SyntaxTree tree)
     {
         var root = tree.GetRoot();
 
-        // new Foo<T>() → Instantiierung
         foreach (var obj in root.DescendantNodes().OfType<ObjectCreationExpressionSyntax>())
-        {
-            if (obj.Type is GenericNameSyntax genericName)
-                TryRegister(genericName);
-        }
+            if (obj.Type is GenericNameSyntax gn) TryRegister(gn);
 
-        // Foo<T> als Variablen-Typ: Foo<int> x = ...
         foreach (var local in root.DescendantNodes().OfType<LocalDeclarationStatementSyntax>())
-        {
-            if (local.Declaration.Type is GenericNameSyntax gn)
-                TryRegister(gn);
-        }
+            if (local.Declaration.Type is GenericNameSyntax gn) TryRegister(gn);
 
-        // Felder: private Foo<T> _field;
         foreach (var field in root.DescendantNodes().OfType<FieldDeclarationSyntax>())
-        {
-            if (field.Declaration.Type is GenericNameSyntax gn)
-                TryRegister(gn);
-        }
+            if (field.Declaration.Type is GenericNameSyntax gn) TryRegister(gn);
 
-        // Properties: public Foo<T> Bar { get; set; }
         foreach (var prop in root.DescendantNodes().OfType<PropertyDeclarationSyntax>())
-        {
-            if (prop.Type is GenericNameSyntax gn)
-                TryRegister(gn);
-        }
+            if (prop.Type is GenericNameSyntax gn) TryRegister(gn);
 
-        // Parameter: void Foo(Bar<T> x)
         foreach (var param in root.DescendantNodes().OfType<ParameterSyntax>())
-        {
-            if (param.Type is GenericNameSyntax gn)
-                TryRegister(gn);
-        }
+            if (param.Type is GenericNameSyntax gn) TryRegister(gn);
 
-        // Rückgabetypen: Bar<T> Foo() { }
         foreach (var method in root.DescendantNodes().OfType<MethodDeclarationSyntax>())
-        {
-            if (method.ReturnType is GenericNameSyntax gn)
-                TryRegister(gn);
-        }
+            if (method.ReturnType is GenericNameSyntax gn) TryRegister(gn);
 
-        // Generische Methodenaufrufe: obj.Sort<int>()
         foreach (var inv in root.DescendantNodes().OfType<InvocationExpressionSyntax>())
         {
             if (inv.Expression is MemberAccessExpressionSyntax mem
-                && mem.Name is GenericNameSyntax genericMethod)
-            {
-                TryRegister(genericMethod);
-            }
+                && mem.Name is GenericNameSyntax gm)
+                TryRegister(gm);
             else if (inv.Expression is GenericNameSyntax gn2)
-            {
                 TryRegister(gn2);
-            }
         }
 
-        // Cast-Ausdrücke: (Foo<int>)x
         foreach (var cast in root.DescendantNodes().OfType<CastExpressionSyntax>())
-        {
-            if (cast.Type is GenericNameSyntax gn)
-                TryRegister(gn);
-        }
+            if (cast.Type is GenericNameSyntax gn) TryRegister(gn);
     }
 
     // ── Registrierung ──────────────────────────────────────────────────────────
@@ -295,9 +318,6 @@ public sealed class GenericInstantiationCollector
     private void TryRegister(GenericNameSyntax genericName)
     {
         var baseName = genericName.Identifier.Text;
-
-        // Nur Typen registrieren die wir als generische Klassen kennen
-        // (nicht List<T>, Dictionary<K,V> etc. — die werden separat behandelt)
         if (!GenericClasses.ContainsKey(baseName)) return;
 
         var typeArgs = genericName.TypeArgumentList.Arguments
@@ -308,17 +328,13 @@ public sealed class GenericInstantiationCollector
 
         // Verschachtelte Generics rekursiv registrieren
         foreach (var arg in genericName.TypeArgumentList.Arguments)
-        {
-            if (arg is GenericNameSyntax nestedGeneric)
-                TryRegister(nestedGeneric);
-        }
+            if (arg is GenericNameSyntax nested) TryRegister(nested);
 
         RegisterInstantiation(baseName, typeArgs);
     }
 
     private void RegisterInstantiation(string baseName, List<string> typeArgs)
     {
-        // Deduplizierung
         if (!_seen.TryGetValue(baseName, out var seenSet))
         {
             seenSet = new HashSet<string>(StringComparer.Ordinal);
@@ -326,18 +342,25 @@ public sealed class GenericInstantiationCollector
         }
 
         var key = string.Join(",", typeArgs);
-        if (!seenSet.Add(key)) return; // Bereits registriert
+        if (!seenSet.Add(key)) return;
 
         var inst = new GenericInstantiation(baseName, typeArgs);
+
+        // FIX: CName-Kollision prüfen
+        if (!_usedCNames.Add(inst.CName))
+        {
+            Log.Warning($"GenericCollector: CName-Kollision für '{inst.CName}' — Instantiierung '{inst}' wird übersprungen");
+            return;
+        }
+
         _instantiations.Add(inst);
-        Log.Debug($"GenericCollector: Neue Instantiierung: {inst}");
+        Log.Debug($"GenericCollector: Neue Instantiierung: {inst} → {inst.CName}");
     }
 
     // ── Hilfsmethoden ──────────────────────────────────────────────────────────
 
     private static string NormalizeTypeName(string csType)
     {
-        // Nullable: int? → int (für C-Namen)
         if (csType.EndsWith("?")) return csType[..^1];
         return csType;
     }
@@ -348,15 +371,9 @@ public sealed class GenericInstantiationCollector
         return idx >= 0 ? typeName[..idx] : typeName;
     }
 
-    /// <summary>
-    /// Gibt alle Instantiierungen einer bestimmten Basis-Klasse zurück.
-    /// </summary>
     public IEnumerable<GenericInstantiation> GetInstantiations(string baseName) =>
         _instantiations.Where(i => i.BaseName == baseName);
 
-    /// <summary>
-    /// True wenn eine Klasse generisch ist und mindestens eine Instantiierung hat.
-    /// </summary>
     public bool IsInstantiated(string baseName) =>
         _seen.ContainsKey(baseName);
 }

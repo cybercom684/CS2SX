@@ -9,14 +9,6 @@ public sealed class BuildRenderer : IDisposable
     private readonly System.Timers.Timer _ticker;
     private bool _disposed;
 
-    private static readonly string[] LevelColors = [
-        "\x1b[36m", // info  → cyan
-        "\x1b[32m", // ok    → green
-        "\x1b[33m", // warn  → yellow
-        "\x1b[31m", // error → red
-        "\x1b[35m", // debug → magenta
-    ];
-
     private const string Reset = "\x1b[0m";
     private const string Dim = "\x1b[2m";
     private const string Bold = "\x1b[1m";
@@ -150,7 +142,16 @@ public sealed class BuildRenderer : IDisposable
         else
             Console.WriteLine($"  {Green}✓{Reset}  {Bold}Build complete{Reset}  {Gray}· {total.TotalSeconds:F1}s · {warnings} warning(s){Reset}");
         Console.WriteLine();
-        Console.CursorVisible = true;
+
+        // FIX: CursorVisible hier schon wiederherstellen (nicht erst in Dispose)
+        // damit Terminal auch bei throw nach Complete() sauber ist
+        RestoreTerminal();
+    }
+
+    private static void RestoreTerminal()
+    {
+        try { Console.CursorVisible = true; }
+        catch { }
     }
 
     private static string Repeat(string s, int n) => string.Concat(Enumerable.Repeat(s, n));
@@ -160,6 +161,7 @@ public sealed class BuildRenderer : IDisposable
         if (_disposed) return;
         _disposed = true;
         _ticker.Dispose();
-        Console.CursorVisible = true;
+        // FIX: immer wiederherstellen, auch wenn Complete() nie aufgerufen wurde
+        RestoreTerminal();
     }
 }

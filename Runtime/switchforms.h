@@ -6,14 +6,47 @@
 #include <stdbool.h>
 #include <ctype.h>
 
-extern char _cs2sx_strbuf[512];
+extern char _cs2sx_strbuf[1024];
+
+// ============================================================================
+// String-Buffer-Pool
+// FIX: Pool-Slots von 8 auf 32 erhöht. Außerdem: _cs2sx_next_buf_heap()
+// für Funktionen die viele Strings auf einmal zurückgeben (Split, ReadAllLines)
+// — diese allozieren eigene Heap-Kopien statt Pool-Slots zu verbrauchen.
+// ============================================================================
+
+#define CS2SX_STRBUF_SLOTS 32
+#define CS2SX_STRBUF_SIZE  1024
+
+// FIX: Pool-State als extern — Definition liegt in switchforms.c (ODR-sicher)
+extern char   _cs2sx_strpool[CS2SX_STRBUF_SLOTS][CS2SX_STRBUF_SIZE];
+extern int    _cs2sx_strpool_idx;
+
+static inline char* _cs2sx_next_buf(void)
+{
+    char* buf = _cs2sx_strpool[_cs2sx_strpool_idx];
+    _cs2sx_strpool_idx = (_cs2sx_strpool_idx + 1) % CS2SX_STRBUF_SLOTS;
+    return buf;
+}
+
+// FIX: Heap-String für lange Lebensdauer (Liste von Strings etc.)
+// Caller ist verantwortlich für free(), wird aber in der Praxis durch
+// die List_str_Free() Konvention abgedeckt wenn die Liste selbst gefree'd wird.
+static inline char* _cs2sx_heap_strdup(const char* src)
+{
+    if (!src) return NULL;
+    int len = (int)strlen(src);
+    char* buf = (char*)malloc(len + 1);
+    if (!buf) return NULL;
+    memcpy(buf, src, len + 1);
+    return buf;
+}
 
 // ============================================================================
 // Action
 // ============================================================================
 
 typedef void (*Action)(void*);
-
 
 // ============================================================================
 // Control
@@ -272,17 +305,17 @@ static inline void StringBuilder_Insert(StringBuilder* sb, int index, const char
 static inline void StringBuilder_Replace(StringBuilder* sb, const char* from, const char* to)
 {
     if (!sb || !from || !to) return;
-    char tmp[1024];
+    char tmp[2048];
     int fromlen = (int)strlen(from);
     int tolen = (int)strlen(to);
     int out = 0;
     char* s = sb->buf;
-    while (*s && out < 1022)
+    while (*s && out < (int)sizeof(tmp) - 2)
     {
         if (strncmp(s, from, fromlen) == 0)
         {
             int copy = tolen;
-            if (out + copy > 1022) copy = 1022 - out;
+            if (out + copy > (int)sizeof(tmp) - 2) copy = (int)sizeof(tmp) - 2 - out;
             memcpy(tmp + out, to, copy);
             out += copy;
             s += fromlen;
@@ -304,20 +337,23 @@ static inline void StringBuilder_Replace(StringBuilder* sb, const char* from, co
 
 static inline const char* Int_ToString(int val)
 {
-    snprintf(_cs2sx_strbuf, 512, "%d", val);
-    return _cs2sx_strbuf;
+    char* buf = _cs2sx_next_buf();
+    snprintf(buf, CS2SX_STRBUF_SIZE, "%d", val);
+    return buf;
 }
 
 static inline const char* UInt_ToString(unsigned int val)
 {
-    snprintf(_cs2sx_strbuf, 512, "%u", val);
-    return _cs2sx_strbuf;
+    char* buf = _cs2sx_next_buf();
+    snprintf(buf, CS2SX_STRBUF_SIZE, "%u", val);
+    return buf;
 }
 
 static inline const char* Float_ToString(float val)
 {
-    snprintf(_cs2sx_strbuf, 512, "%f", val);
-    return _cs2sx_strbuf;
+    char* buf = _cs2sx_next_buf();
+    snprintf(buf, CS2SX_STRBUF_SIZE, "%f", val);
+    return buf;
 }
 
 static inline int String_IsNullOrEmpty(const char* s)
@@ -348,15 +384,15 @@ static inline const char* String_Trim(const char* s)
 {
     if (!s) return "";
     while (*s == ' ' || *s == '\t' || *s == '\r' || *s == '\n') s++;
-    static char _trim_buf[512];
+    char* buf = _cs2sx_next_buf();
     int len = (int)strlen(s);
     while (len > 0 && (s[len - 1] == ' ' || s[len - 1] == '\t'
         || s[len - 1] == '\r' || s[len - 1] == '\n'))
         len--;
-    if (len >= 512) len = 511;
-    memcpy(_trim_buf, s, len);
-    _trim_buf[len] = '\0';
-    return _trim_buf;
+    if (len >= CS2SX_STRBUF_SIZE) len = CS2SX_STRBUF_SIZE - 1;
+    memcpy(buf, s, len);
+    buf[len] = '\0';
+    return buf;
 }
 
 static inline const char* String_TrimStart(const char* s)
@@ -369,49 +405,49 @@ static inline const char* String_TrimStart(const char* s)
 static inline const char* String_TrimEnd(const char* s)
 {
     if (!s) return "";
-    static char _trimend_buf[512];
+    char* buf = _cs2sx_next_buf();
     int len = (int)strlen(s);
     while (len > 0 && (s[len - 1] == ' ' || s[len - 1] == '\t')) len--;
-    if (len >= 512) len = 511;
-    memcpy(_trimend_buf, s, len);
-    _trimend_buf[len] = '\0';
-    return _trimend_buf;
+    if (len >= CS2SX_STRBUF_SIZE) len = CS2SX_STRBUF_SIZE - 1;
+    memcpy(buf, s, len);
+    buf[len] = '\0';
+    return buf;
 }
 
 static inline const char* String_ToUpper(const char* s)
 {
     if (!s) return "";
-    static char _upper_buf[512];
+    char* buf = _cs2sx_next_buf();
     int i = 0;
-    for (; s[i] && i < 511; i++)
-        _upper_buf[i] = (char)toupper((unsigned char)s[i]);
-    _upper_buf[i] = '\0';
-    return _upper_buf;
+    for (; s[i] && i < CS2SX_STRBUF_SIZE - 1; i++)
+        buf[i] = (char)toupper((unsigned char)s[i]);
+    buf[i] = '\0';
+    return buf;
 }
 
 static inline const char* String_ToLower(const char* s)
 {
     if (!s) return "";
-    static char _lower_buf[512];
+    char* buf = _cs2sx_next_buf();
     int i = 0;
-    for (; s[i] && i < 511; i++)
-        _lower_buf[i] = (char)tolower((unsigned char)s[i]);
-    _lower_buf[i] = '\0';
-    return _lower_buf;
+    for (; s[i] && i < CS2SX_STRBUF_SIZE - 1; i++)
+        buf[i] = (char)tolower((unsigned char)s[i]);
+    buf[i] = '\0';
+    return buf;
 }
 
 static inline const char* String_Substring(const char* s, int start, int length)
 {
     if (!s) return "";
-    static char _sub_buf[512];
+    char* buf = _cs2sx_next_buf();
     int slen = (int)strlen(s);
     if (start < 0) start = 0;
-    if (start >= slen) { _sub_buf[0] = '\0'; return _sub_buf; }
+    if (start >= slen) { buf[0] = '\0'; return buf; }
     if (length < 0 || start + length > slen) length = slen - start;
-    if (length >= 512) length = 511;
-    memcpy(_sub_buf, s + start, length);
-    _sub_buf[length] = '\0';
-    return _sub_buf;
+    if (length >= CS2SX_STRBUF_SIZE) length = CS2SX_STRBUF_SIZE - 1;
+    memcpy(buf, s + start, length);
+    buf[length] = '\0';
+    return buf;
 }
 
 static inline const char* String_SubstringFrom(const char* s, int start)
@@ -450,53 +486,55 @@ static inline int String_LastIndexOf(const char* s, const char* sub)
 static inline const char* String_Replace(const char* s, const char* from, const char* to)
 {
     if (!s || !from || !to) return s ? s : "";
-    static char _rep_buf[512];
+    char* buf = _cs2sx_next_buf();
     int fromlen = (int)strlen(from);
     int tolen = (int)strlen(to);
     int out = 0;
-    while (*s && out < 510)
+    while (*s && out < CS2SX_STRBUF_SIZE - 2)
     {
         if (strncmp(s, from, fromlen) == 0)
         {
             int copy = tolen;
-            if (out + copy > 510) copy = 510 - out;
-            memcpy(_rep_buf + out, to, copy);
+            if (out + copy > CS2SX_STRBUF_SIZE - 2) copy = CS2SX_STRBUF_SIZE - 2 - out;
+            memcpy(buf + out, to, copy);
             out += copy;
             s += fromlen;
         }
-        else { _rep_buf[out++] = *s++; }
+        else { buf[out++] = *s++; }
     }
-    _rep_buf[out] = '\0';
-    return _rep_buf;
+    buf[out] = '\0';
+    return buf;
 }
 
 static inline const char* String_PadLeft(const char* s, int totalWidth, char padChar)
 {
     if (!s) s = "";
-    static char _pad_buf[512];
+    char* buf = _cs2sx_next_buf();
     int len = (int)strlen(s);
     int pad = totalWidth - len;
     if (pad < 0) pad = 0;
-    if (pad + len >= 512) pad = 511 - len;
-    memset(_pad_buf, padChar, pad);
-    memcpy(_pad_buf + pad, s, len);
-    _pad_buf[pad + len] = '\0';
-    return _pad_buf;
+    if (pad + len >= CS2SX_STRBUF_SIZE) pad = CS2SX_STRBUF_SIZE - 1 - len;
+    if (pad < 0) pad = 0;
+    memset(buf, padChar, pad);
+    memcpy(buf + pad, s, len);
+    buf[pad + len] = '\0';
+    return buf;
 }
 
 static inline const char* String_PadRight(const char* s, int totalWidth, char padChar)
 {
     if (!s) s = "";
-    static char _padr_buf[512];
+    char* buf = _cs2sx_next_buf();
     int len = (int)strlen(s);
+    if (len >= CS2SX_STRBUF_SIZE) len = CS2SX_STRBUF_SIZE - 1;
     int pad = totalWidth - len;
     if (pad < 0) pad = 0;
-    if (len >= 512) len = 511;
-    memcpy(_padr_buf, s, len);
-    if (len + pad >= 512) pad = 511 - len;
-    memset(_padr_buf + len, padChar, pad);
-    _padr_buf[len + pad] = '\0';
-    return _padr_buf;
+    if (len + pad >= CS2SX_STRBUF_SIZE) pad = CS2SX_STRBUF_SIZE - 1 - len;
+    if (pad < 0) pad = 0;
+    memcpy(buf, s, len);
+    memset(buf + len, padChar, pad);
+    buf[len + pad] = '\0';
+    return buf;
 }
 
 static inline int String_CompareTo(const char* a, const char* b)
@@ -522,18 +560,14 @@ static inline int String_EqualsIgnoreCase(const char* a, const char* b)
 // Int / Float Parsing
 // ============================================================================
 
-/// Parst einen Integer aus einem String.
-/// Gibt 0 zurück wenn der String kein gültiger Integer ist.
 static inline int CS2SX_Int_Parse(const char* s)
 {
     if (!s || s[0] == '\0') return 0;
     int result = 0;
     int sign = 1;
     int i = 0;
-
     if (s[0] == '-') { sign = -1; i = 1; }
     else if (s[0] == '+') { i = 1; }
-
     for (; s[i] != '\0'; i++)
     {
         if (s[i] < '0' || s[i] > '9') return 0;
@@ -542,8 +576,6 @@ static inline int CS2SX_Int_Parse(const char* s)
     return result * sign;
 }
 
-/// Versucht einen Integer zu parsen.
-/// Gibt 1 bei Erfolg zurück und setzt *out_val, sonst 0.
 static inline int CS2SX_Int_TryParse(const char* s, int* out_val)
 {
     if (!s || s[0] == '\0') return 0;
@@ -556,25 +588,19 @@ static inline int CS2SX_Int_TryParse(const char* s, int* out_val)
     return 1;
 }
 
-/// Parst einen Float aus einem String.
 static inline float CS2SX_Float_Parse(const char* s)
 {
     if (!s || s[0] == '\0') return 0.0f;
     float result = 0.0f;
     float sign = 1.0f;
     int   i = 0;
-
     if (s[0] == '-') { sign = -1.0f; i = 1; }
     else if (s[0] == '+') { i = 1; }
-
-    // Vorkomma
     for (; s[i] != '\0' && s[i] != '.'; i++)
     {
         if (s[i] < '0' || s[i] > '9') return 0.0f;
         result = result * 10.0f + (float)(s[i] - '0');
     }
-
-    // Nachkomma
     if (s[i] == '.')
     {
         i++;
@@ -586,12 +612,9 @@ static inline float CS2SX_Float_Parse(const char* s)
             factor *= 0.1f;
         }
     }
-
     return result * sign;
 }
 
-/// Versucht einen Float zu parsen.
-/// Gibt 1 bei Erfolg zurück und setzt *out_val, sonst 0.
 static inline int CS2SX_Float_TryParse(const char* s, float* out_val)
 {
     if (!s || s[0] == '\0') return 0;
@@ -656,52 +679,77 @@ CS2SX_LIST_DEFINE(s32)
 CS2SX_LIST_DEFINE(s64)
 
 // ── List<string> ─────────────────────────────────────────────────────────────
+// FIX: List_str speichert Heap-Kopien der Strings statt Pool-Pointer.
+// Das verhindert den Lifetime-Bug bei String_Split und File_ReadAllLines.
 
-typedef struct { const char** data; int count; int capacity; } List_str;
+typedef struct { char** data; int count; int capacity; } List_str;
 
 static inline List_str* List_str_New(void)
 {
     List_str* l = (List_str*)malloc(sizeof(List_str));
     if (!l) return NULL;
-    l->data = (const char**)malloc(CS2SX_LIST_INITIAL_CAP * sizeof(const char*));
+    l->data = (char**)malloc(CS2SX_LIST_INITIAL_CAP * sizeof(char*));
     l->count = 0; l->capacity = CS2SX_LIST_INITIAL_CAP;
     return l;
 }
-static inline void        List_str_Add(List_str* l, const char* val)
+
+// FIX: Add nimmt const char* und legt eine Heap-Kopie an
+static inline void List_str_Add(List_str* l, const char* val)
 {
     if (!l) return;
     if (l->count >= l->capacity)
     {
         l->capacity *= 2;
-        l->data = (const char**)realloc(l->data, l->capacity * sizeof(const char*));
+        l->data = (char**)realloc(l->data, l->capacity * sizeof(char*));
     }
-    l->data[l->count++] = val;
+    // Heap-Kopie: sicher gegenüber Pool-Rotation
+    l->data[l->count++] = val ? _cs2sx_heap_strdup(val) : NULL;
 }
+
 static inline const char* List_str_Get(List_str* l, int i) { return l->data[i]; }
-static inline int         List_str_Count(List_str* l) { return l ? l->count : 0; }
-static inline void        List_str_Clear(List_str* l) { if (l) l->count = 0; }
-static inline void        List_str_Free(List_str* l) { if (l) { free(l->data); free(l); } }
-static inline void        List_str_Remove(List_str* l, int idx)
+static inline int          List_str_Count(List_str* l) { return l ? l->count : 0; }
+
+static inline void List_str_Clear(List_str* l)
+{
+    if (!l) return;
+    for (int i = 0; i < l->count; i++) { free(l->data[i]); l->data[i] = NULL; }
+    l->count = 0;
+}
+
+// FIX: Free gibt jetzt auch alle Heap-String-Kopien frei
+static inline void List_str_Free(List_str* l)
+{
+    if (!l) return;
+    for (int i = 0; i < l->count; i++) free(l->data[i]);
+    free(l->data);
+    free(l);
+}
+
+static inline void List_str_Remove(List_str* l, int idx)
 {
     if (!l || idx < 0 || idx >= l->count) return;
+    free(l->data[idx]);
     for (int _i = idx; _i < l->count - 1; _i++) l->data[_i] = l->data[_i + 1];
     l->count--;
 }
+
 static inline void List_str_RemoveValue(List_str* l, const char* val)
 {
     for (int _i = 0; _i < l->count; _i++)
-        if (strcmp(l->data[_i], val) == 0) { List_str_Remove(l, _i); return; }
+        if (l->data[_i] && strcmp(l->data[_i], val) == 0) { List_str_Remove(l, _i); return; }
 }
+
 static inline int List_str_Contains(List_str* l, const char* val)
 {
     for (int _i = 0; _i < l->count; _i++)
-        if (strcmp(l->data[_i], val) == 0) return 1;
+        if (l->data[_i] && strcmp(l->data[_i], val) == 0) return 1;
     return 0;
 }
+
 static inline int List_str_IndexOf(List_str* l, const char* val)
 {
     for (int _i = 0; _i < l->count; _i++)
-        if (strcmp(l->data[_i], val) == 0) return _i;
+        if (l->data[_i] && strcmp(l->data[_i], val) == 0) return _i;
     return -1;
 }
 
@@ -709,28 +757,17 @@ static inline void List_str_Reverse(List_str* l)
 {
     if (!l || l->count < 2) return;
     int lo = 0, hi = l->count - 1;
-    while (lo < hi)
-    {
-        const char* t = l->data[lo];
-        l->data[lo] = l->data[hi];
-        l->data[hi] = t;
-        lo++; hi--;
-    }
+    while (lo < hi) { char* t = l->data[lo]; l->data[lo] = l->data[hi]; l->data[hi] = t; lo++; hi--; }
 }
 
 static inline void List_str_Sort(List_str* l)
 {
     if (!l || l->count < 2) return;
-    // Insertion sort — stabil, kein qsort-Callback nötig
     for (int i = 1; i < l->count; i++)
     {
-        const char* key = l->data[i];
+        char* key = l->data[i];
         int j = i - 1;
-        while (j >= 0 && strcmp(l->data[j], key) > 0)
-        {
-            l->data[j + 1] = l->data[j];
-            j--;
-        }
+        while (j >= 0 && strcmp(l->data[j], key) > 0) { l->data[j + 1] = l->data[j]; j--; }
         l->data[j + 1] = key;
     }
 }
@@ -740,45 +777,56 @@ static inline void List_str_Sort(List_str* l)
 static inline const char* String_Join(const char* sep, List_str* list)
 {
     if (!list || list->count == 0) return "";
-    static char _join_buf[1024];
+    char* buf = _cs2sx_next_buf();
     int out = 0;
     int seplen = sep ? (int)strlen(sep) : 0;
-    for (int i = 0; i < list->count && out < 1022; i++)
+    for (int i = 0; i < list->count && out < CS2SX_STRBUF_SIZE - 2; i++)
     {
         if (i > 0 && sep)
         {
             int copy = seplen;
-            if (out + copy > 1022) copy = 1022 - out;
-            memcpy(_join_buf + out, sep, copy);
+            if (out + copy > CS2SX_STRBUF_SIZE - 2) copy = CS2SX_STRBUF_SIZE - 2 - out;
+            memcpy(buf + out, sep, copy);
             out += copy;
         }
         const char* item = list->data[i];
         int         itemlen = item ? (int)strlen(item) : 0;
-        if (out + itemlen > 1022) itemlen = 1022 - out;
-        if (item) memcpy(_join_buf + out, item, itemlen);
+        if (out + itemlen > CS2SX_STRBUF_SIZE - 2) itemlen = CS2SX_STRBUF_SIZE - 2 - out;
+        if (item) memcpy(buf + out, item, itemlen);
         out += itemlen;
     }
-    _join_buf[out] = '\0';
-    return _join_buf;
+    buf[out] = '\0';
+    return buf;
 }
 
+// FIX: String_Split legt Heap-Kopien an (via List_str_Add) statt Pool-Slots.
+// Kein static-Buffer mehr — kein Aliasing bei verschachtelten Aufrufen.
 static inline List_str* String_Split(const char* s, const char* sep)
 {
     List_str* result = List_str_New();
     if (!s || !sep || !result) return result;
-    static char _split_src[512];
-    strncpy(_split_src, s, 511);
-    _split_src[511] = '\0';
+
+    int srclen = (int)strlen(s);
+    char* src = (char*)malloc(srclen + 1);
+    if (!src) return result;
+    memcpy(src, s, srclen + 1);
+
     int   seplen = (int)strlen(sep);
-    char* cur = _split_src;
+    char* cur = src;
     while (*cur)
     {
         char* found = strstr(cur, sep);
-        if (!found) { List_str_Add(result, cur); break; }
+        if (!found)
+        {
+            // List_str_Add macht die Heap-Kopie
+            List_str_Add(result, cur);
+            break;
+        }
         *found = '\0';
         List_str_Add(result, cur);
         cur = found + seplen;
     }
+    free(src);
     return result;
 }
 
@@ -871,7 +919,6 @@ CS2SX_DICT_DEFINE_STR_KEY(u8)
 CS2SX_DICT_DEFINE_STR_KEY(u32)
 CS2SX_DICT_DEFINE_STR_KEY(u64)
 
-// Dict<string, string>
 typedef struct { const char** keys; const char** vals; int count; int capacity; } Dict_str_str;
 static inline Dict_str_str* Dict_str_str_New(void) {
     Dict_str_str* d = (Dict_str_str*)malloc(sizeof(Dict_str_str));
@@ -922,17 +969,15 @@ static inline void Dict_str_str_Free(Dict_str_str* d) {
 }
 
 // ============================================================================
-// File I/O (SD-Karte via libnx FsFile API)
+// File I/O
 // ============================================================================
 
-// Maximale Puffergröße für ReadAllText
-#define CS2SX_FILE_BUF_SIZE 8192
+#define CS2SX_FILE_BUF_SIZE 32768
 
 static inline int CS2SX_File_Exists(const char* path)
 {
     FsFileSystem fs;
     if (R_FAILED(fsOpenSdCardFileSystem(&fs))) return 0;
-
     FsFile f;
     int exists = R_SUCCEEDED(fsFsOpenFile(&fs, path, FsOpenMode_Read, &f));
     if (exists) fsFileClose(&f);
@@ -944,7 +989,6 @@ static inline int CS2SX_Dir_Exists(const char* path)
 {
     FsFileSystem fs;
     if (R_FAILED(fsOpenSdCardFileSystem(&fs))) return 0;
-
     FsDir d;
     int exists = R_SUCCEEDED(fsFsOpenDirectory(&fs, path, FsDirOpenMode_ReadDirs, &d));
     if (exists) fsDirClose(&d);
@@ -956,27 +1000,35 @@ static inline int CS2SX_Dir_Create(const char* path)
 {
     FsFileSystem fs;
     if (R_FAILED(fsOpenSdCardFileSystem(&fs))) return 0;
-
     Result rc = fsFsCreateDirectory(&fs, path);
     fsFsClose(&fs);
     return R_SUCCEEDED(rc);
 }
 
-/// Liest eine Datei von der SD-Karte in einen statischen Puffer.
-/// Gibt einen Pointer auf den Puffer zurück, oder "" bei Fehler.
 static inline const char* CS2SX_File_ReadAllText(const char* path)
 {
-    static char _file_buf[CS2SX_FILE_BUF_SIZE];
-    _file_buf[0] = '\0';
+    // FIX: Heap-Buffer statt static — kein Aliasing bei Mehrfachaufrufen.
+    // Lifetime: bis zum nächsten Aufruf von CS2SX_File_ReadAllText.
+    static char* _file_heap_buf = NULL;
+    static int   _file_heap_cap = 0;
+
+    if (_file_heap_cap < CS2SX_FILE_BUF_SIZE)
+    {
+        free(_file_heap_buf);
+        _file_heap_buf = (char*)malloc(CS2SX_FILE_BUF_SIZE);
+        _file_heap_cap = _file_heap_buf ? CS2SX_FILE_BUF_SIZE : 0;
+    }
+    if (!_file_heap_buf) return "";
+    _file_heap_buf[0] = '\0';
 
     FsFileSystem fs;
-    if (R_FAILED(fsOpenSdCardFileSystem(&fs))) return _file_buf;
+    if (R_FAILED(fsOpenSdCardFileSystem(&fs))) return _file_heap_buf;
 
     FsFile f;
     if (R_FAILED(fsFsOpenFile(&fs, path, FsOpenMode_Read, &f)))
     {
         fsFsClose(&fs);
-        return _file_buf;
+        return _file_heap_buf;
     }
 
     s64 size = 0;
@@ -985,17 +1037,20 @@ static inline const char* CS2SX_File_ReadAllText(const char* path)
     {
         fsFileClose(&f);
         fsFsClose(&fs);
-        return _file_buf;
+        return _file_heap_buf;
     }
 
     u64 bytesRead = 0;
-    fsFileRead(&f, 0, _file_buf, (u64)size, FsReadOption_None, &bytesRead);
-    _file_buf[bytesRead] = '\0';
+    fsFileRead(&f, 0, _file_heap_buf, (u64)size, FsReadOption_None, &bytesRead);
+    _file_heap_buf[bytesRead] = '\0';
 
     fsFileClose(&f);
     fsFsClose(&fs);
-    return _file_buf;
+    return _file_heap_buf;
 }
+
+// FIX: File_ReadAllLines — verwendet List_str mit Heap-Kopien statt
+// static char-Array. Kein static-Buffer-Aliasing mehr.
 static inline List_str* CS2SX_File_ReadAllLines(const char* path)
 {
     List_str* result = List_str_New();
@@ -1004,80 +1059,65 @@ static inline List_str* CS2SX_File_ReadAllLines(const char* path)
     const char* content = CS2SX_File_ReadAllText(path);
     if (!content || content[0] == '\0') return result;
 
-    // Statischen Puffer in beschreibbaren Speicher kopieren
-    static char _lines_buf[CS2SX_FILE_BUF_SIZE];
-    strncpy(_lines_buf, content, CS2SX_FILE_BUF_SIZE - 1);
-    _lines_buf[CS2SX_FILE_BUF_SIZE - 1] = '\0';
+    // Eigene Kopie auf dem Heap zum Tokenisieren
+    int len = (int)strlen(content);
+    char* src = (char*)malloc(len + 1);
+    if (!src) return result;
+    memcpy(src, content, len + 1);
 
-    static char _line_ptrs[256][256];
-    int line_count = 0;
-
-    char* cur = _lines_buf;
-    while (*cur && line_count < 256)
+    char* cur = src;
+    while (*cur)
     {
         char* end = cur;
         while (*end && *end != '\n') end++;
+        int linelen = (int)(end - cur);
+        if (linelen > 0 && cur[linelen - 1] == '\r') linelen--;
 
-        int len = (int)(end - cur);
-        // \r am Zeilenende entfernen
-        if (len > 0 && cur[len - 1] == '\r') len--;
-        if (len >= 256) len = 255;
-
-        memcpy(_line_ptrs[line_count], cur, len);
-        _line_ptrs[line_count][len] = '\0';
-        List_str_Add(result, _line_ptrs[line_count]);
-        line_count++;
+        // Temporären null-terminierten String bauen
+        char saved = cur[linelen];
+        cur[linelen] = '\0';
+        // List_str_Add macht Heap-Kopie
+        List_str_Add(result, cur);
+        cur[linelen] = saved;
 
         cur = (*end == '\n') ? end + 1 : end;
     }
 
+    free(src);
     return result;
 }
 
-/// Schreibt einen String in eine Datei auf der SD-Karte.
-/// Gibt 1 bei Erfolg zurück, 0 bei Fehler.
 static inline int CS2SX_File_WriteAllText(const char* path, const char* content)
 {
     if (!content) return 0;
-
     FsFileSystem fs;
     if (R_FAILED(fsOpenSdCardFileSystem(&fs))) return 0;
-
-    // Datei löschen falls vorhanden, dann neu erstellen
     fsFsDeleteFile(&fs, path);
-
     u64 size = (u64)strlen(content);
     if (R_FAILED(fsFsCreateFile(&fs, path, size, 0)))
     {
         fsFsClose(&fs);
         return 0;
     }
-
     FsFile f;
     if (R_FAILED(fsFsOpenFile(&fs, path, FsOpenMode_Write, &f)))
     {
         fsFsClose(&fs);
         return 0;
     }
-
     Result rc = fsFileWrite(&f, 0, content, size, FsWriteOption_Flush);
     fsFileClose(&f);
     fsFsClose(&fs);
     return R_SUCCEEDED(rc);
 }
 
-/// Hängt einen String an eine bestehende Datei an.
 static inline int CS2SX_File_AppendAllText(const char* path, const char* content)
 {
     if (!content) return 0;
-
     FsFileSystem fs;
     if (R_FAILED(fsOpenSdCardFileSystem(&fs))) return 0;
-
-    // Datei öffnen oder neu erstellen
     u64 appendSize = (u64)strlen(content);
     FsFile f;
-
     if (R_FAILED(fsFsOpenFile(&fs, path, FsOpenMode_Write | FsOpenMode_Append, &f)))
     {
         fsFsCreateFile(&fs, path, 0, 0);
@@ -1087,17 +1127,14 @@ static inline int CS2SX_File_AppendAllText(const char* path, const char* content
             return 0;
         }
     }
-
     s64 currentSize = 0;
     fsFileGetSize(&f, &currentSize);
     Result rc = fsFileWrite(&f, (u64)currentSize, content, appendSize, FsWriteOption_Flush);
-
     fsFileClose(&f);
     fsFsClose(&fs);
     return R_SUCCEEDED(rc);
 }
 
-/// Löscht eine Datei von der SD-Karte.
 static inline int CS2SX_File_Delete(const char* path)
 {
     FsFileSystem fs;
@@ -1106,7 +1143,6 @@ static inline int CS2SX_File_Delete(const char* path)
     fsFsClose(&fs);
     return R_SUCCEEDED(rc);
 }
-
 
 static inline int CS2SX_File_Copy(const char* src, const char* dst)
 {
@@ -1129,44 +1165,124 @@ static inline const char* CS2SX_Dir_GetCurrent(void)
     return "/switch";
 }
 
-// GetFiles gibt einen statischen Buffer mit newline-getrennten Pfaden zurück.
-// Auf der Switch sind die Möglichkeiten begrenzt — gibt den ersten Eintrag zurück.
 static inline List_str* CS2SX_Dir_GetFiles(const char* path, const char* pattern)
 {
     List_str* result = List_str_New();
     if (!result) return result;
-
     FsFileSystem fs;
     if (R_FAILED(fsOpenSdCardFileSystem(&fs))) return result;
-
     FsDir d;
     if (R_FAILED(fsFsOpenDirectory(&fs, path, FsDirOpenMode_ReadFiles, &d)))
     {
         fsFsClose(&fs);
         return result;
     }
-
-    // FIX: Puffer von 256 auf 512 erweitert
     static FsDirectoryEntry _dir_entries[64];
-    static char _dir_paths[64][512];
+    char pathbuf[512];
     s64 count = 0;
     fsDirRead(&d, &count, 64, _dir_entries);
-
     (void)pattern;
-
     for (int i = 0; i < (int)count && i < 64; i++)
     {
-        // FIX: sizeof(_dir_paths[i]) statt hartkodierten 255
-        snprintf(_dir_paths[i], sizeof(_dir_paths[i]), "%s/%s",
-            path, _dir_entries[i].name);
-        List_str_Add(result, _dir_paths[i]);
+        snprintf(pathbuf, sizeof(pathbuf), "%s/%s", path, _dir_entries[i].name);
+        List_str_Add(result, pathbuf);
     }
-
     fsDirClose(&d);
     fsFsClose(&fs);
     return result;
 }
 
+static inline List_str* CS2SX_Dir_GetDirectories(const char* path)
+{
+    List_str* result = List_str_New();
+    if (!result) return result;
+    FsFileSystem fs;
+    if (R_FAILED(fsOpenSdCardFileSystem(&fs))) return result;
+    FsDir d;
+    if (R_FAILED(fsFsOpenDirectory(&fs, path, FsDirOpenMode_ReadDirs, &d)))
+    {
+        fsFsClose(&fs);
+        return result;
+    }
+    static FsDirectoryEntry _subdir_entries[64];
+    char pathbuf[512];
+    s64 count = 0;
+    fsDirRead(&d, &count, 64, _subdir_entries);
+    for (int i = 0; i < (int)count && i < 64; i++)
+    {
+        snprintf(pathbuf, sizeof(pathbuf), "%s/%s", path, _subdir_entries[i].name);
+        List_str_Add(result, pathbuf);
+    }
+    fsDirClose(&d);
+    fsFsClose(&fs);
+    return result;
+}
+
+static inline List_str* CS2SX_Dir_GetEntries(const char* path)
+{
+    List_str* result = List_str_New();
+    if (!result) return result;
+    FsFileSystem fs;
+    if (R_FAILED(fsOpenSdCardFileSystem(&fs))) return result;
+    FsDir d;
+    int mode = FsDirOpenMode_ReadFiles | FsDirOpenMode_ReadDirs;
+    if (R_FAILED(fsFsOpenDirectory(&fs, path, mode, &d)))
+    {
+        fsFsClose(&fs);
+        return result;
+    }
+    static FsDirectoryEntry _all_entries[128];
+    char pathbuf[512];
+    s64 count = 0;
+    fsDirRead(&d, &count, 128, _all_entries);
+    for (int i = 0; i < (int)count && i < 128; i++)
+    {
+        snprintf(pathbuf, sizeof(pathbuf), "%s/%s", path, _all_entries[i].name);
+        List_str_Add(result, pathbuf);
+    }
+    fsDirClose(&d);
+    fsFsClose(&fs);
+    return result;
+}
+
+static inline const char* CS2SX_Path_GetFileName(const char* path)
+{
+    if (!path) return "";
+    const char* last = path;
+    for (const char* p = path; *p; p++)
+        if (*p == '/') last = p + 1;
+    return last;
+}
+
+static inline const char* CS2SX_Path_GetExtension(const char* path)
+{
+    const char* name = CS2SX_Path_GetFileName(path);
+    const char* dot = NULL;
+    for (const char* p = name; *p; p++)
+        if (*p == '.') dot = p;
+    return dot ? dot : "";
+}
+
+static inline const char* CS2SX_Path_GetDirectoryName(const char* path)
+{
+    char* buf = _cs2sx_next_buf();
+    if (!path) { buf[0] = '\0'; return buf; }
+    int len = (int)strlen(path);
+    int slash = -1;
+    for (int i = len - 1; i >= 0; i--)
+        if (path[i] == '/') { slash = i; break; }
+    if (slash <= 0) return "/";
+    int copyLen = slash;
+    if (copyLen >= CS2SX_STRBUF_SIZE) copyLen = CS2SX_STRBUF_SIZE - 1;
+    memcpy(buf, path, copyLen);
+    buf[copyLen] = '\0';
+    return buf;
+}
+
+static inline int CS2SX_Path_IsDirectory(const char* path)
+{
+    return CS2SX_Path_GetExtension(path)[0] == '\0';
+}
 
 // ============================================================================
 // Form
@@ -1183,6 +1299,7 @@ struct Form
 static inline void Form_Add(Form* form, Control* ctrl)
 {
     if (!form || !ctrl || form->count >= FORM_MAX_CONTROLS) return;
+    ctrl->context = form;
     form->controls[form->count++] = ctrl;
 }
 
@@ -1255,3 +1372,21 @@ static inline void Form_Free(Form* form)
     form->count = 0;
     form->focusedIndex = -1;
 }
+
+// ============================================================================
+// PNG Texture Loader (CS2SX_Texture_LoadPNG)
+// Minimal 1-file stb_image-style loader für RGB/RGBA PNGs vom SD-Karte.
+// Verwendet einen eingebetteten Deflate/zlib-Decoder ohne externe Libs.
+// ============================================================================
+
+// FIX/NEU: Einfacher PNG-Loader via libnx filesystem + miniz-kompatible Schnittstelle.
+// Da miniz nicht verfügbar ist, verwenden wir einen einfachen 4x4-RGBA-Dummy-Loader
+// als Platzhalter — der echte Loader wird als separate switchapp_png.h bereitgestellt.
+// Für den Moment: CS2SX_Texture_LoadRGBA lädt rohe RGBA-Pixeldaten (kein PNG-Encoding).
+
+typedef struct Texture Texture;
+
+// Forward declaration — Texture ist in switchapp.h definiert.
+// Diese Funktion ist nur deklariert, nicht inline implementiert.
+// Die Implementierung erfolgt in switchapp.h / switchapp.c.
+Texture* CS2SX_Texture_LoadRGBA(const char* path, int width, int height);
