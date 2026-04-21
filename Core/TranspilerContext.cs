@@ -34,6 +34,10 @@ public sealed class TranspilerContext
     {
         get; set;
     }
+    public string? CurrentReturnBuffer
+    {
+        get; set;
+    }
     public string CurrentClass { get; set; } = string.Empty;
     public string CurrentBaseType { get; set; } = string.Empty;
 
@@ -124,6 +128,7 @@ public sealed class TranspilerContext
         TmpCounter = 0;
         TmpStringCounter = 0;
         CurrentLine = 0;
+        CurrentReturnBuffer = null;   // ← neu
     }
 
     public void ClearClassContext()

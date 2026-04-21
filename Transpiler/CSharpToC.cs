@@ -815,6 +815,12 @@ public sealed class CSharpToC : CSharpSyntaxWalker
         if (isAbstract) return;
 
         _ctx.ClearMethodContext();
+        _ctx.CurrentReturnBuffer = null;
+        if (csReturnType == "string"
+            && ReturnStringFixHelper.HasInterpolatedStringReturn(node))
+        {
+            _ctx.CurrentReturnBuffer = "_ret_buf";
+        }
 
         foreach (var p in node.ParameterList.Parameters)
         {
@@ -854,6 +860,10 @@ public sealed class CSharpToC : CSharpSyntaxWalker
         _ctx.Out.WriteLine(sig);
         _ctx.Out.WriteLine("{");
         _ctx.Indent();
+
+        if (_ctx.CurrentReturnBuffer != null)
+            _ctx.WriteLine("static char _ret_buf[CS2SX_RETURN_BUF_SIZE];");
+
 
         if (node.Body != null)
             foreach (var stmt in node.Body.Statements)

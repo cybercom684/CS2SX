@@ -8,14 +8,13 @@ namespace CS2SX.Transpiler.Writers;
 public sealed class StatementWriter
 {
     private readonly TranspilerContext _ctx;
-    private readonly ExpressionWriter _expr;
+    private readonly IExpressionWriter _expr;   // war: ExpressionWriter
 
-    public StatementWriter(TranspilerContext ctx, ExpressionWriter expr)
+    public StatementWriter(TranspilerContext ctx, IExpressionWriter expr)  // war: ExpressionWriter
     {
         _ctx = ctx;
         _expr = expr;
     }
-
     public void Write(StatementSyntax stmt)
     {
         switch (stmt)
@@ -61,14 +60,12 @@ public sealed class StatementWriter
     {
         var declType = local.Declaration.Type.ToString().Trim();
 
-        // FIX 4: Mehrdimensionale Arrays (int[,]) → flaches Array
         if (declType.Contains(",") && declType.Contains("[") && declType.Contains("]"))
         {
             WriteMultiDimArray(local, declType);
             return;
         }
 
-        // FIX 5+11: T[] mit Initializer → Stack-Array
         if (declType.EndsWith("[]") && local.Declaration.Variables.Count == 1)
         {
             var v = local.Declaration.Variables[0];
@@ -81,7 +78,6 @@ public sealed class StatementWriter
 
         foreach (var v in local.Declaration.Variables)
         {
-            // LibNx Stack-Structs
             if (TypeRegistry.IsLibNxStruct(declType))
             {
                 var si = v.Initializer != null
@@ -98,7 +94,6 @@ public sealed class StatementWriter
                 continue;
             }
 
-            // string mit new string(char, count) → char buf[N]
             if (declType is "string" or "var"
                 && v.Initializer?.Value is ObjectCreationExpressionSyntax strNew
                 && strNew.Type.ToString() == "string"
@@ -131,7 +126,6 @@ public sealed class StatementWriter
                 continue;
             }
 
-            // FIX 12: bool → int (0/1)
             if (declType == "bool")
             {
                 var initVal = v.Initializer != null
@@ -142,11 +136,6 @@ public sealed class StatementWriter
                 continue;
             }
 
-            // ── Interface-Zuweisung ──────────────────────────────────────────
-            // IRenderable r = button;  → IRenderable r = Button_as_IRenderable(button);
-            //
-            // Erkennung: deklarierter Typ ist ein bekanntes Interface aus dem Collector.
-            // Der Initializer-Ausdruck hat einen anderen Typ → Wrapper-Funktion einsetzen.
             if (_ctx.InterfaceTypes.Contains(declType) && v.Initializer != null)
             {
                 var initExprRaw = v.Initializer.Value.ToString().Trim();
@@ -154,28 +143,20 @@ public sealed class StatementWriter
                 var wrapped = TryWrapAsInterface(initExprRaw, initCode, declType);
 
                 if (wrapped != null)
-                {
-                    // IRenderable r = Button_as_IRenderable(button);
                     _ctx.WriteLine(declType + " " + v.Identifier + " = " + wrapped + ";");
-                }
                 else
-                {
-                    // Kein Wrapping möglich (Typ unbekannt oder bereits Interface)
                     _ctx.WriteLine(declType + " " + v.Identifier + " = " + initCode + ";");
-                }
                 _ctx.LocalTypes[v.Identifier.Text] = declType;
                 continue;
             }
-            // Wenn kein Initializer aber Interface-Typ: als lokale Variable
+
             if (_ctx.InterfaceTypes.Contains(declType))
             {
                 _ctx.WriteLine(declType + " " + v.Identifier + ";");
                 _ctx.LocalTypes[v.Identifier.Text] = declType;
                 continue;
             }
-            // ────────────────────────────────────────────────────────────────
 
-            // FIX 1: T[] ohne Initializer aber MIT new T[N] → Stack oder Heap
             if (declType.EndsWith("[]")
                 && v.Initializer?.Value is ArrayCreationExpressionSyntax arrCreate)
             {
@@ -198,42 +179,19 @@ public sealed class StatementWriter
         }
     }
 
-    /// <summary>
-    /// Prüft ob ein Initializer-Ausdruck in einen Interface-Wrapper eingepackt werden muss.
-    ///
-    /// IRenderable r = button;
-    ///   targetIfaceName = "IRenderable"
-    ///   exprRaw         = "button"    (Roslyn-Text)
-    ///   exprCode        = "button"    (transpilierter C-Code)
-    ///   → "Button_as_IRenderable(button)"
-    ///
-    /// Gibt null zurück wenn kein Wrapping nötig oder möglich ist.
-    /// </summary>
-    private string? TryWrapAsInterface(
-        string exprRaw,
-        string exprCode,
-        string targetIfaceName)
+    private string? TryWrapAsInterface(string exprRaw, string exprCode, string targetIfaceName)
     {
         if (!_ctx.InterfaceTypes.Contains(targetIfaceName)) return null;
-
-        // Typ des Ausdrucks aus LocalTypes oder FieldTypes
         var key = exprRaw.TrimStart('_');
         string? csType = null;
         _ctx.LocalTypes.TryGetValue(exprRaw, out csType);
         if (csType == null) _ctx.FieldTypes.TryGetValue(key, out csType);
-
-        // Typ unbekannt → kein Wrap (lassen wir den Compiler meckern)
         if (csType == null) return null;
-
-        // Typ IST bereits das Interface → kein Wrap nötig
         var bareType = csType.TrimEnd('*').Trim();
         if (bareType == targetIfaceName) return null;
-
-        // Wrapper: ClassName_as_InterfaceName(expr)
         return bareType + "_as_" + targetIfaceName + "(" + exprCode + ")";
     }
 
-    // FIX 1: T[] mit new T[N] → Array-Allokation + Länge in ArrayLengths tracken
     private void WriteArrayAlloc(VariableDeclaratorSyntax v, string declType,
         ArrayCreationExpressionSyntax arrCreate)
     {
@@ -246,7 +204,6 @@ public sealed class StatementWriter
             && arrCreate.Type.RankSpecifiers[0].Sizes[0] is not OmittedArraySizeExpressionSyntax)
         {
             var sizeExpr = _expr.Write(arrCreate.Type.RankSpecifiers[0].Sizes[0]);
-
             if (IsConstantSizeExpr(arrCreate.Type.RankSpecifiers[0].Sizes[0]))
             {
                 _ctx.WriteLine(cType + " " + varName + "[" + sizeExpr + "];");
@@ -270,7 +227,6 @@ public sealed class StatementWriter
         {
             _ctx.WriteLine(cType + "* " + varName + " = NULL; /* empty array */");
         }
-
         _ctx.LocalTypes[varName] = declType;
     }
 
@@ -324,12 +280,10 @@ public sealed class StatementWriter
     {
         sizes = new();
         if (v.Initializer?.Value is ArrayCreationExpressionSyntax arr)
-        {
             foreach (var rs in arr.Type.RankSpecifiers)
                 foreach (var sz in rs.Sizes)
                     if (sz is not OmittedArraySizeExpressionSyntax)
                         sizes.Add(sz.ToString());
-        }
         return sizes.Count > 0;
     }
 
@@ -365,7 +319,6 @@ public sealed class StatementWriter
                 _ctx.WriteLine("const char* " + varName + "[] = { " + string.Join(", ", elems) + " };");
             else
                 _ctx.WriteLine(cType + " " + varName + "[] = { " + string.Join(", ", elems) + " };");
-
             _ctx.ArrayLengths[varName] = elems.Count.ToString();
             _ctx.LocalTypes[varName] = declType;
             return;
@@ -416,7 +369,6 @@ public sealed class StatementWriter
             _ctx.WriteLine(innerC + " " + tmpName + " = " + initVal + ";");
             _ctx.WriteLine(innerC + "* " + varName + " = &" + tmpName + ";");
         }
-
         _ctx.LocalTypes[varName] = declType;
     }
 
@@ -425,9 +377,7 @@ public sealed class StatementWriter
     {
         if (declType is "var" or "var?")
             return InferVarType(v);
-
         if (declType == "bool") return ("int", false);
-
         var cType = TypeRegistry.MapType(declType);
         var isPtr = TypeRegistry.NeedsPointerSuffix(declType)
                  || TypeRegistry.IsStringBuilder(declType)
@@ -435,6 +385,8 @@ public sealed class StatementWriter
                  || TypeRegistry.IsDictionary(declType);
         return (cType, isPtr);
     }
+
+    // FIX: Directory.GetEntries und CS2SX_Dir_GetEntries als List_str* erkannt.
 
     private (string cType, bool isPtr) InferVarType(VariableDeclaratorSyntax v)
     {
@@ -447,26 +399,40 @@ public sealed class StatementWriter
 
             var calleeStr = inv.Expression.ToString();
 
-            if (calleeStr is "Directory.GetFiles" or "CS2SX_Dir_GetFiles"
-                          or "String_Split" or "string.Split" or "String.Split")
+            // FIX: Alle Directory/File-Methoden die List_str* zurückgeben
+            if (calleeStr is "Directory.GetFiles"
+                          or "CS2SX_Dir_GetFiles"
+                          or "Directory.GetDirectories"
+                          or "CS2SX_Dir_GetDirectories"
+                          or "Directory.GetEntries"        // NEU
+                          or "CS2SX_Dir_GetEntries"        // NEU
+                          or "String_Split"
+                          or "string.Split"
+                          or "String.Split"
+                          or "CS2SX_File_ReadAllLines"
+                          or "File.ReadAllLines")
                 return ("List_str", true);
 
-            if (calleeStr is "string.Format" or "String.Format"
-                           or "string.Concat" or "String.Concat")
+            if (calleeStr is "string.Format"
+                          or "String.Format"
+                          or "string.Concat"
+                          or "String.Concat")
                 return ("const char", true);
 
-            if (calleeStr is "Input.GetTouch" or "CS2SX_Input_GetTouch")
+            if (calleeStr is "Input.GetTouch"
+                          or "CS2SX_Input_GetTouch")
                 return ("CS2SX_TouchState", false);
 
-            if (calleeStr is "Input.GetStickLeft" or "_cs2sx_get_stick_left"
-                           or "CS2SX_Input_GetStickLeft")
+            if (calleeStr is "Input.GetStickLeft"
+                          or "_cs2sx_get_stick_left")
                 return ("CS2SX_StickPos", false);
 
-            if (calleeStr is "Input.GetStickRight" or "_cs2sx_get_stick_right"
-                           or "CS2SX_Input_GetStickRight")
+            if (calleeStr is "Input.GetStickRight"
+                          or "_cs2sx_get_stick_right")
                 return ("CS2SX_StickPos", false);
 
-            if (calleeStr is "System.GetBattery" or "CS2SX_GetBattery")
+            if (calleeStr is "System.GetBattery"
+                          or "CS2SX_GetBattery")
                 return ("CS2SX_BatteryInfo", false);
 
             if (_ctx.MethodReturnTypes.TryGetValue(calleeStr, out var retType))
@@ -481,32 +447,34 @@ public sealed class StatementWriter
             }
 
             var inferred = TypeInferrer.InferCSharpType(v.Initializer!.Value, _ctx);
-
             if (inferred is "TouchState") return ("CS2SX_TouchState", false);
             if (inferred is "StickPos") return ("CS2SX_StickPos", false);
             if (inferred is "BatteryInfo") return ("CS2SX_BatteryInfo", false);
 
-            if (TypeRegistry.IsList(inferred) || TypeRegistry.IsDictionary(inferred)
+            if (TypeRegistry.IsList(inferred)
+                || TypeRegistry.IsDictionary(inferred)
                 || TypeRegistry.IsStringBuilder(inferred))
                 return (TypeRegistry.MapType(inferred).TrimEnd('*'), true);
 
             if (inferred.EndsWith("*"))
                 return (inferred.TrimEnd('*'), true);
+
             return (inferred, false);
         }
 
         var ct = TypeInferrer.InferCSharpType(v.Initializer?.Value, _ctx);
-
         if (ct is "TouchState") return ("CS2SX_TouchState", false);
         if (ct is "StickPos") return ("CS2SX_StickPos", false);
         if (ct is "BatteryInfo") return ("CS2SX_BatteryInfo", false);
 
-        if (TypeRegistry.IsList(ct) || TypeRegistry.IsDictionary(ct)
+        if (TypeRegistry.IsList(ct)
+            || TypeRegistry.IsDictionary(ct)
             || TypeRegistry.IsStringBuilder(ct))
             return (TypeRegistry.MapType(ct).TrimEnd('*'), true);
 
         if (ct.EndsWith("*"))
             return (ct.TrimEnd('*'), true);
+
         return (ct, false);
     }
 
@@ -528,11 +496,9 @@ public sealed class StatementWriter
     {
         if (v.Initializer != null)
             return " = " + _expr.Write(v.Initializer.Value);
-
         if (!isPtr && TypeRegistry.IsPrimitive(
                 declType is "var" or "var?" ? cType : declType))
             return " = 0";
-
         return "";
     }
 
@@ -541,14 +507,12 @@ public sealed class StatementWriter
     private void WriteIf(IfStatementSyntax ifStmt)
     {
         if (TryExtractOutVarFromCondition(ifStmt.Condition, out var outVarDecls))
-        {
             foreach (var (varName, varType) in outVarDecls)
             {
                 var cType = TypeRegistry.MapType(varType);
                 _ctx.WriteLine(cType + " " + varName + " = 0;");
                 _ctx.LocalTypes[varName] = varType;
             }
-        }
 
         if (ifStmt.Condition is IsPatternExpressionSyntax isPattern)
         {
@@ -578,13 +542,11 @@ public sealed class StatementWriter
         out List<(string name, string type)> outVars)
     {
         outVars = new();
-
         IEnumerable<ArgumentSyntax> args = condition switch
         {
             InvocationExpressionSyntax inv => inv.ArgumentList.Arguments,
             _ => Enumerable.Empty<ArgumentSyntax>()
         };
-
         foreach (var arg in args)
         {
             if (arg.RefKindKeyword.IsKind(SyntaxKind.OutKeyword)
@@ -597,7 +559,6 @@ public sealed class StatementWriter
                 outVars.Add((desig.Identifier.Text, typeName));
             }
         }
-
         return outVars.Count > 0;
     }
 
@@ -623,7 +584,6 @@ public sealed class StatementWriter
         _ctx.WriteLine("if (" + cond + ")");
         _ctx.WriteLine("{");
         _ctx.Indent();
-
         if (isPattern.Pattern is DeclarationPatternSyntax dp
             && dp.Designation is SingleVariableDesignationSyntax desig)
         {
@@ -634,17 +594,13 @@ public sealed class StatementWriter
                          + " = (" + cType + "*)" + subject + ";");
             _ctx.LocalTypes[desig.Identifier.Text] = typeName;
         }
-
         if (ifStmt.Statement is BlockSyntax block)
             foreach (var s in block.Statements) Write(s);
         else
             Write(ifStmt.Statement);
-
         _ctx.Dedent();
         _ctx.WriteLine("}");
-
         if (ifStmt.Else == null) return;
-
         if (ifStmt.Else.Statement is IfStatementSyntax nested)
         {
             _ctx.Out.Write(_ctx.Tab + "else ");
@@ -660,21 +616,18 @@ public sealed class StatementWriter
     private void WriteIfInline(IfStatementSyntax ifStmt)
     {
         if (TryExtractOutVarFromCondition(ifStmt.Condition, out var outVarDecls))
-        {
             foreach (var (varName, varType) in outVarDecls)
             {
                 var cType = TypeRegistry.MapType(varType);
                 _ctx.WriteLine(cType + " " + varName + " = 0;");
                 _ctx.LocalTypes[varName] = varType;
             }
-        }
 
         if (ifStmt.Condition is IsPatternExpressionSyntax isPattern)
         {
             _ctx.Out.WriteLine("if (" + _expr.Write(isPattern) + ")");
             _ctx.WriteLine("{");
             _ctx.Indent();
-
             if (isPattern.Pattern is DeclarationPatternSyntax dp
                 && dp.Designation is SingleVariableDesignationSyntax desig)
             {
@@ -685,12 +638,10 @@ public sealed class StatementWriter
                              + " = (" + cType + "*)" + subject + ";");
                 _ctx.LocalTypes[desig.Identifier.Text] = typeName;
             }
-
             if (ifStmt.Statement is BlockSyntax blk)
                 foreach (var s in blk.Statements) Write(s);
             else
                 Write(ifStmt.Statement);
-
             _ctx.Dedent();
             _ctx.WriteLine("}");
         }
@@ -699,9 +650,7 @@ public sealed class StatementWriter
             _ctx.Out.WriteLine("if (" + _expr.Write(ifStmt.Condition) + ")");
             WriteBlockOrStmt(ifStmt.Statement);
         }
-
         if (ifStmt.Else == null) return;
-
         if (ifStmt.Else.Statement is IfStatementSyntax nested)
         {
             _ctx.Out.Write(_ctx.Tab + "else ");
@@ -736,10 +685,8 @@ public sealed class StatementWriter
         {
             init = string.Join(", ", forStmt.Initializers.Select(e => _expr.Write(e)));
         }
-
         var cond = forStmt.Condition != null ? _expr.Write(forStmt.Condition) : "";
         var incr = string.Join(", ", forStmt.Incrementors.Select(e => _expr.Write(e)));
-
         _ctx.WriteLine("for (" + init + "; " + cond + "; " + incr + ")");
         WriteBlockOrStmt(forStmt.Statement);
     }
@@ -800,7 +747,6 @@ public sealed class StatementWriter
         var bodyStmts = forEach.Statement is BlockSyntax b
             ? b.Statements.Cast<StatementSyntax>()
             : new[] { forEach.Statement };
-
         foreach (var s in bodyStmts)
             Write(s);
 
@@ -832,7 +778,6 @@ public sealed class StatementWriter
         var bodyStmts = forEach.Statement is BlockSyntax b
             ? b.Statements.Cast<StatementSyntax>()
             : new[] { forEach.Statement };
-
         foreach (var s in bodyStmts)
             Write(s);
 
@@ -842,19 +787,14 @@ public sealed class StatementWriter
 
     private string ResolveArrayLength(string colRaw, string colKey, string colExpr)
     {
-        if (_ctx.ArrayLengths.TryGetValue(colRaw, out var knownLen))
-            return knownLen;
-        if (_ctx.ArrayLengths.TryGetValue(colKey, out var knownLenField))
-            return knownLenField;
-
+        if (_ctx.ArrayLengths.TryGetValue(colRaw, out var knownLen)) return knownLen;
+        if (_ctx.ArrayLengths.TryGetValue(colKey, out var knownLenField)) return knownLenField;
         if (_ctx.LocalTypes.ContainsKey(colRaw))
             return "(sizeof(" + colExpr + ") / sizeof(" + colExpr + "[0]))";
-
         return colExpr + "_count";
     }
 
-    private void WriteForEachLoopVar(
-        string varName, string idxVar,
+    private void WriteForEachLoopVar(string varName, string idxVar,
         string rawElemType, string colExpr, string colType,
         bool isList, bool isString, bool isRawArray)
     {
@@ -863,7 +803,6 @@ public sealed class StatementWriter
             _ctx.WriteLine("char " + varName + " = " + colExpr + "[" + idxVar + "];");
             return;
         }
-
         if (isRawArray)
         {
             var cType = TypeRegistry.MapType(rawElemType);
@@ -873,7 +812,6 @@ public sealed class StatementWriter
                 _ctx.WriteLine(cType + " " + varName + " = " + colExpr + "[" + idxVar + "];");
             return;
         }
-
         if (!isList)
         {
             var cType = TypeRegistry.MapType(rawElemType);
@@ -882,16 +820,13 @@ public sealed class StatementWriter
                          + colExpr + "[" + idxVar + "];");
             return;
         }
-
         var inner = TypeRegistry.GetListInnerType(colType) ?? rawElemType;
-
         if (inner == "string")
         {
             _ctx.WriteLine("const char* " + varName
                          + " = List_str_Get(" + colExpr + ", " + idxVar + ");");
             return;
         }
-
         var cInner = TypeRegistry.MapType(inner);
         var isPrim = TypeRegistry.IsPrimitive(inner);
         var elemPtr = isPrim ? "" : "*";
@@ -920,11 +855,9 @@ public sealed class StatementWriter
             WritePatternSwitch(sw);
             return;
         }
-
         _ctx.WriteLine("switch (" + _expr.Write(sw.Expression) + ")");
         _ctx.WriteLine("{");
         _ctx.Indent();
-
         foreach (var section in sw.Sections)
         {
             foreach (var label in section.Labels)
@@ -938,7 +871,6 @@ public sealed class StatementWriter
             foreach (var s in section.Statements) Write(s);
             _ctx.Dedent();
         }
-
         _ctx.Dedent();
         _ctx.WriteLine("}");
     }
@@ -947,7 +879,6 @@ public sealed class StatementWriter
     {
         var subject = _expr.Write(sw.Expression);
         bool first = true;
-
         foreach (var section in sw.Sections)
         {
             foreach (var label in section.Labels)
@@ -963,7 +894,6 @@ public sealed class StatementWriter
                     _ctx.WriteLine("}");
                     continue;
                 }
-
                 if (label is CaseSwitchLabelSyntax caseLabel)
                 {
                     var kw = first ? "if" : "else if";
@@ -977,19 +907,16 @@ public sealed class StatementWriter
                     first = false;
                     continue;
                 }
-
                 if (label is CasePatternSwitchLabelSyntax patternLabel)
                 {
                     var cond = PatternMatchingWriter.WritePattern(
                         patternLabel.Pattern, subject, _ctx, _expr.Write);
                     if (patternLabel.WhenClause != null)
                         cond = "(" + cond + " && " + _expr.Write(patternLabel.WhenClause.Condition) + ")";
-
                     var kw = first ? "if" : "else if";
                     _ctx.WriteLine(kw + " (" + cond + ")");
                     _ctx.WriteLine("{");
                     _ctx.Indent();
-
                     if (patternLabel.Pattern is DeclarationPatternSyntax dp
                         && dp.Designation is SingleVariableDesignationSyntax desig)
                     {
@@ -999,10 +926,8 @@ public sealed class StatementWriter
                                      + " = (" + cType + "*)" + subject + ";");
                         _ctx.LocalTypes[desig.Identifier.Text] = typeName;
                     }
-
                     foreach (var s in section.Statements.Where(s => s is not BreakStatementSyntax))
                         Write(s);
-
                     _ctx.Dedent();
                     _ctx.WriteLine("}");
                     first = false;
@@ -1011,11 +936,15 @@ public sealed class StatementWriter
         }
     }
 
+    // ── FIX: TryCatch — catch(Exception ex) mit ex.Message / ex.ToString() ──
+
     private void WriteTryCatch(TryStatementSyntax tryStmt)
     {
         var jmpBufName = "_ex_buf_" + _ctx.NextTmp();
         _ctx.CurrentJumpBuf = jmpBufName;
 
+        // FIX: statischer Exception-Message-Buffer
+        _ctx.WriteLine("char _ex_msg[256] = \"unknown error\";");
         _ctx.WriteLine("jmp_buf " + jmpBufName + ";");
         _ctx.WriteLine("int _ex_val = setjmp(" + jmpBufName + ");");
         _ctx.WriteLine("if (_ex_val == 0)");
@@ -1026,13 +955,27 @@ public sealed class StatementWriter
         _ctx.Dedent();
         _ctx.WriteLine("}");
 
-        if (tryStmt.Catches.Count > 0)
+        foreach (var catchClause in tryStmt.Catches)
         {
             _ctx.WriteLine("else");
             _ctx.WriteLine("{");
             _ctx.Indent();
-            foreach (var stmt in tryStmt.Catches[0].Block.Statements)
+
+            // FIX: catch(Exception ex) → ex.Message wird zu _ex_msg
+            if (catchClause.Declaration != null)
+            {
+                var exVarName = catchClause.Declaration.Identifier.Text;
+                if (!string.IsNullOrEmpty(exVarName) && exVarName != "_")
+                {
+                    // Pseudo-Objekt registrieren: ex.Message → _ex_msg
+                    _ctx.LocalTypes[exVarName] = "__exception__";
+                    _ctx.LocalTypes[exVarName + ".Message"] = "string";
+                }
+            }
+
+            foreach (var stmt in catchClause.Block.Statements)
                 Write(stmt);
+
             _ctx.Dedent();
             _ctx.WriteLine("}");
         }
@@ -1042,6 +985,19 @@ public sealed class StatementWriter
 
     private void WriteThrow(ThrowStatementSyntax throwStmt)
     {
+        // FIX: throw new Exception("msg") → _ex_msg setzen + longjmp
+        if (throwStmt.Expression is ObjectCreationExpressionSyntax objCreate
+            && objCreate.ArgumentList?.Arguments.Count > 0)
+        {
+            var msg = _expr.Write(objCreate.ArgumentList.Arguments[0].Expression);
+            if (_ctx.CurrentJumpBuf != null)
+            {
+                _ctx.WriteLine("strncpy(_ex_msg, " + msg + ", sizeof(_ex_msg) - 1);");
+                _ctx.WriteLine("longjmp(" + _ctx.CurrentJumpBuf + ", 1);");
+                return;
+            }
+        }
+
         if (_ctx.CurrentJumpBuf != null)
         {
             _ctx.WriteLine("longjmp(" + _ctx.CurrentJumpBuf + ", 1);");
@@ -1058,7 +1014,6 @@ public sealed class StatementWriter
     {
         _ctx.WriteLine("{");
         _ctx.Indent();
-
         if (usingStmt.Declaration != null)
         {
             foreach (var varDecl in usingStmt.Declaration.Variables)
@@ -1072,10 +1027,8 @@ public sealed class StatementWriter
                 var initStr = varDecl.Initializer != null
                     ? _expr.Write(varDecl.Initializer.Value)
                     : "";
-
                 _ctx.WriteLine(cType + ptr + " " + varName + " = " + initStr + ";");
                 Write(usingStmt.Statement);
-
                 if (TypeRegistry.IsDisposable(typeName))
                 {
                     var disposeCall = isValueType
@@ -1090,7 +1043,6 @@ public sealed class StatementWriter
             _ctx.WriteLine("/* using expression not supported */");
             Write(usingStmt.Statement);
         }
-
         _ctx.Dedent();
         _ctx.WriteLine("}");
     }
@@ -1099,12 +1051,10 @@ public sealed class StatementWriter
     {
         _ctx.WriteLine("{");
         _ctx.Indent();
-
         if (stmt is BlockSyntax block)
             foreach (var s in block.Statements) Write(s);
         else
             Write(stmt);
-
         _ctx.Dedent();
         _ctx.WriteLine("}");
     }

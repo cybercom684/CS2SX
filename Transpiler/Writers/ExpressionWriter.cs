@@ -6,21 +6,17 @@ using CS2SX.Transpiler.Handlers;
 
 namespace CS2SX.Transpiler.Writers;
 
-public sealed class ExpressionWriter
+public sealed class ExpressionWriter : IExpressionWriter
 {
     private readonly TranspilerContext _ctx;
     private readonly InvocationDispatcher _dispatcher;
 
-    // ── NEU: Zwei Konstruktoren ───────────────────────────────────────────────
-
-    /// <summary>Original-Konstruktor (Rückwärtskompatibilität).</summary>
     public ExpressionWriter(TranspilerContext ctx)
     {
         _ctx = ctx;
         _dispatcher = new InvocationDispatcher(ctx, Write);
     }
 
-    /// <summary>NEU: Konstruktor mit Extension-Method-Handler.</summary>
     public ExpressionWriter(TranspilerContext ctx, ExtensionMethodHandler extensionHandler)
     {
         _ctx = ctx;
@@ -76,7 +72,8 @@ public sealed class ExpressionWriter
         };
     }
 
-    // ── Lambda ────────────────────────────────────────────────────────────────
+    // Datei: Transpiler/Writers/ExpressionWriter.cs
+    // NUR WriteLambda UND WriteIdentifier ERSETZEN
 
     private string WriteLambda(LambdaExpressionSyntax lambda)
     {
@@ -85,43 +82,20 @@ public sealed class ExpressionWriter
         lifter.SetStatementWriter(stmtWriter);
 
         var funcName = lifter.LiftLambda(lambda);
-        lifter.FlushPending();
+
+        // Prelude einmalig einfügen
+        if (lifter.HasPrelude)
+        {
+            var sb = _ctx.Out.GetStringBuilder();
+            var existingContent = sb.ToString();
+            sb.Clear();
+            sb.Append(lifter.GetPrelude());
+            sb.Append(existingContent);
+            lifter.MarkPreludeFlushed();
+        }
+
         return funcName;
     }
-
-    // ── Tuple ─────────────────────────────────────────────────────────────────
-
-    private string WriteTuple(TupleExpressionSyntax tuple)
-    {
-        var elems = tuple.Arguments.Select(a => Write(a.Expression));
-        return "{ " + string.Join(", ", elems) + " }";
-    }
-
-    // ── Literale ──────────────────────────────────────────────────────────────
-
-    private string WriteLiteral(LiteralExpressionSyntax lit)
-    {
-        if (lit.IsKind(SyntaxKind.NullLiteralExpression)) return "NULL";
-        if (lit.IsKind(SyntaxKind.TrueLiteralExpression)) return "1";
-        if (lit.IsKind(SyntaxKind.FalseLiteralExpression)) return "0";
-
-        if (lit.Token.IsKind(SyntaxKind.StringLiteralToken))
-            return "\"" + StringEscaper.EscapeRaw(lit.Token.ValueText) + "\"";
-
-        if (lit.Token.IsKind(SyntaxKind.CharacterLiteralToken))
-            return "'" + StringEscaper.EscapeChar(lit.Token.ValueText) + "'";
-
-        var text = lit.Token.Text;
-        if (text.EndsWith("f", StringComparison.OrdinalIgnoreCase) && !text.StartsWith("0x")) return text[..^1] + "f";
-        if (text.EndsWith("d", StringComparison.OrdinalIgnoreCase)) return text[..^1];
-        if (text.EndsWith("m", StringComparison.OrdinalIgnoreCase)) return text[..^1];
-        if (text.EndsWith("ul", StringComparison.OrdinalIgnoreCase)) return text[..^2] + "ULL";
-        if (text.EndsWith("u", StringComparison.OrdinalIgnoreCase)) return text[..^1] + "U";
-        if (text.EndsWith("l", StringComparison.OrdinalIgnoreCase)) return text[..^1] + "LL";
-        return text;
-    }
-
-    // ── Identifier ────────────────────────────────────────────────────────────
 
     private string WriteIdentifier(IdentifierNameSyntax id)
     {
@@ -133,12 +107,22 @@ public sealed class ExpressionWriter
         if (_ctx.EnumMembers.Contains(name)) return name;
         if (name == "_cs2sx_strbuf") return "_cs2sx_strbuf";
 
+        // LocalTypes VOR IsFieldAccess
         if (_ctx.LocalTypes.TryGetValue(name, out var localType))
         {
             if (localType.StartsWith("@ref:", StringComparison.Ordinal))
                 return "(*" + name + ")";
             if (localType.StartsWith("__kvp__", StringComparison.Ordinal))
                 return name + "_Key";
+            if (localType == "__exception__")
+                return "_ex_msg";
+            // _-prefixed Capture: "_currentPath" → "currentPath"
+            if (name.StartsWith('_') && !name.StartsWith("__"))
+            {
+                var clean = name.TrimStart('_');
+                if (_ctx.LocalTypes.ContainsKey(clean))
+                    return clean;
+            }
             return name;
         }
 
@@ -146,14 +130,10 @@ public sealed class ExpressionWriter
         {
             try
             {
-                var symbolInfo = _ctx.SemanticModel.GetSymbolInfo(id);
-                if (symbolInfo.Symbol is IFieldSymbol field
-                    && field.IsStatic
+                var sym = _ctx.SemanticModel.GetSymbolInfo(id).Symbol;
+                if (sym is IFieldSymbol field && field.IsStatic
                     && (field.IsConst || field.IsReadOnly))
-                {
-                    var ownerClass = field.ContainingType?.Name ?? _ctx.CurrentClass;
-                    return ownerClass + "_" + name;
-                }
+                    return (field.ContainingType?.Name ?? _ctx.CurrentClass) + "_" + name;
             }
             catch { }
         }
@@ -167,8 +147,7 @@ public sealed class ExpressionWriter
             return "self->" + prefix + trimmed;
         }
 
-        if (!string.IsNullOrEmpty(_ctx.CurrentClass)
-            && _ctx.FieldTypes.ContainsKey(name))
+        if (!string.IsNullOrEmpty(_ctx.CurrentClass) && _ctx.FieldTypes.ContainsKey(name))
         {
             var prefix = TypeRegistry.HasNoPrefix(name) ? "" : "f_";
             return "self->" + prefix + name;
@@ -180,7 +159,30 @@ public sealed class ExpressionWriter
         return name;
     }
 
-    // ── Binäre Ausdrücke ──────────────────────────────────────────────────────
+    private string WriteTuple(TupleExpressionSyntax tuple)
+    {
+        var elems = tuple.Arguments.Select(a => Write(a.Expression));
+        return "{ " + string.Join(", ", elems) + " }";
+    }
+
+    private string WriteLiteral(LiteralExpressionSyntax lit)
+    {
+        if (lit.IsKind(SyntaxKind.NullLiteralExpression)) return "NULL";
+        if (lit.IsKind(SyntaxKind.TrueLiteralExpression)) return "1";
+        if (lit.IsKind(SyntaxKind.FalseLiteralExpression)) return "0";
+        if (lit.Token.IsKind(SyntaxKind.StringLiteralToken))
+            return "\"" + StringEscaper.EscapeRaw(lit.Token.ValueText) + "\"";
+        if (lit.Token.IsKind(SyntaxKind.CharacterLiteralToken))
+            return "'" + StringEscaper.EscapeChar(lit.Token.ValueText) + "'";
+        var text = lit.Token.Text;
+        if (text.EndsWith("f", StringComparison.OrdinalIgnoreCase) && !text.StartsWith("0x")) return text[..^1] + "f";
+        if (text.EndsWith("d", StringComparison.OrdinalIgnoreCase)) return text[..^1];
+        if (text.EndsWith("m", StringComparison.OrdinalIgnoreCase)) return text[..^1];
+        if (text.EndsWith("ul", StringComparison.OrdinalIgnoreCase)) return text[..^2] + "ULL";
+        if (text.EndsWith("u", StringComparison.OrdinalIgnoreCase)) return text[..^1] + "U";
+        if (text.EndsWith("l", StringComparison.OrdinalIgnoreCase)) return text[..^1] + "LL";
+        return text;
+    }
 
     private string WriteBinary(BinaryExpressionSyntax bin)
     {
@@ -194,8 +196,19 @@ public sealed class ExpressionWriter
         var right = Write(bin.Right);
         var op = bin.OperatorToken.Text;
 
+        // String-Vergleich mit strcmp
         if ((op == "==" || op == "!=") && IsStringExpr(bin.Left))
             return "strcmp(" + left + ", " + right + ") " + op + " 0";
+
+        // FIX: string != null / == null → IsNullOrEmpty statt strcmp(..., NULL)
+        if (op == "==" && IsNullLiteral(bin.Right) && IsStringType(bin.Left))
+            return "String_IsNullOrEmpty(" + left + ")";
+        if (op == "!=" && IsNullLiteral(bin.Right) && IsStringType(bin.Left))
+            return "!String_IsNullOrEmpty(" + left + ")";
+        if (op == "==" && IsNullLiteral(bin.Left) && IsStringType(bin.Right))
+            return "String_IsNullOrEmpty(" + right + ")";
+        if (op == "!=" && IsNullLiteral(bin.Left) && IsStringType(bin.Right))
+            return "!String_IsNullOrEmpty(" + right + ")";
 
         if (bin.IsKind(SyntaxKind.IsExpression))
             return "/* is-check: " + bin + " */ 1";
@@ -225,12 +238,9 @@ public sealed class ExpressionWriter
     private string WriteConditionalAccess(ConditionalAccessExpressionSyntax condAccess)
     {
         var receiver = Write(condAccess.Expression);
-
         string accessExpr;
         if (condAccess.WhenNotNull is MemberBindingExpressionSyntax memberBinding)
-        {
             accessExpr = receiver + "->" + memberBinding.Name.Identifier.Text;
-        }
         else if (condAccess.WhenNotNull is InvocationExpressionSyntax inv
             && inv.Expression is MemberBindingExpressionSyntax invMember)
         {
@@ -239,14 +249,9 @@ public sealed class ExpressionWriter
                        + "(" + string.Join(", ", args) + ")";
         }
         else
-        {
             accessExpr = receiver + "->(" + Write(condAccess.WhenNotNull) + ")";
-        }
-
         return NullableHandler.WriteNullConditional(receiver, accessExpr);
     }
-
-    // ── Zuweisungen ───────────────────────────────────────────────────────────
 
     private string WriteAssignment(AssignmentExpressionSyntax assign)
     {
@@ -269,8 +274,6 @@ public sealed class ExpressionWriter
                 && lt2.StartsWith("@ref:", StringComparison.Ordinal))
                 return "*" + lname + " " + op + " " + right;
 
-            // ── Interface-Zuweisung ───────────────────────────────────────────
-            // r = button;  wenn r vom Typ IRenderable → r = Button_as_IRenderable(button)
             string? ltIface = null;
             _ctx.LocalTypes.TryGetValue(lname, out ltIface);
             if (ltIface == null) _ctx.FieldTypes.TryGetValue(lname.TrimStart('_'), out ltIface);
@@ -282,7 +285,6 @@ public sealed class ExpressionWriter
                 if (wrapped != null)
                     return Write(assign.Left) + " " + op + " " + wrapped;
             }
-            // ─────────────────────────────────────────────────────────────────
         }
 
         if (assign.Left is TupleExpressionSyntax tupleLeft)
@@ -291,38 +293,16 @@ public sealed class ExpressionWriter
         return Write(assign.Left) + " " + op + " " + right;
     }
 
-    /// <summary>
-    /// Prüft ob ein Ausdruck in einen Interface-Wrapper eingepackt werden muss.
-    ///
-    /// IRenderable r = button;
-    ///   targetIfaceName = "IRenderable"
-    ///   exprRaw         = "button"    (Roslyn-Quelltext)
-    ///   exprCode        = "button"    (bereits transpilierter C-Ausdruck)
-    ///   → "Button_as_IRenderable(button)"
-    ///
-    /// Gibt null zurück wenn kein Wrapping nötig oder möglich ist.
-    /// </summary>
-    private string? TryWrapAsInterface(
-        string exprRaw,
-        string exprCode,
-        string targetIfaceName)
+    private string? TryWrapAsInterface(string exprRaw, string exprCode, string targetIfaceName)
     {
         if (!_ctx.InterfaceTypes.Contains(targetIfaceName)) return null;
-
-        // Typ des Ausdrucks ermitteln (aus LocalTypes oder FieldTypes)
         var key = exprRaw.TrimStart('_');
         string? csType = null;
         _ctx.LocalTypes.TryGetValue(exprRaw, out csType);
         if (csType == null) _ctx.FieldTypes.TryGetValue(key, out csType);
-
-        // Typ unbekannt → kein Wrap
         if (csType == null) return null;
-
-        // Typ IST bereits das Interface (oder Pointer darauf) → kein Wrap
         var bareType = csType.TrimEnd('*').Trim();
         if (bareType == targetIfaceName) return null;
-
-        // Wrapper aufrufen: ClassName_as_IFaceName(expr)
         return bareType + "_as_" + targetIfaceName + "(" + exprCode + ")";
     }
 
@@ -348,12 +328,10 @@ public sealed class ExpressionWriter
     private static string WriteNameOf(InvocationExpressionSyntax inv)
     {
         if (inv.ArgumentList.Arguments.Count == 0) return "\"\"";
-
         var arg = inv.ArgumentList.Arguments[0].Expression;
         var name = arg is MemberAccessExpressionSyntax mem
             ? mem.Name.Identifier.Text
             : arg.ToString().Trim();
-
         return "\"" + name + "\"";
     }
 
@@ -364,8 +342,6 @@ public sealed class ExpressionWriter
         if (csType == "bool") return "0";
         return "NULL";
     }
-
-    // ── Invocation ────────────────────────────────────────────────────────────
 
     private string WriteInvocation(InvocationExpressionSyntax inv)
     {
@@ -383,8 +359,7 @@ public sealed class ExpressionWriter
         return calleeStr + "(" + string.Join(", ", args) + ")";
     }
 
-    private string? TryWriteVirtualCall(
-        MemberAccessExpressionSyntax mem,
+    private string? TryWriteVirtualCall(MemberAccessExpressionSyntax mem,
         InvocationExpressionSyntax inv)
     {
         var methodName = mem.Name.Identifier.Text;
@@ -400,19 +375,13 @@ public sealed class ExpressionWriter
             receiverType = receiverType.TrimEnd('*').Trim();
 
         if (receiverType == null) return null;
-
         if (TypeRegistry.IsPrimitive(receiverType)) return null;
         if (TypeRegistry.IsLibNxStruct(receiverType)) return null;
         if (TypeRegistry.IsControlType(receiverType)) return null;
         if (receiverType is "string" or "StringBuilder") return null;
 
-        var callArgs = inv.ArgumentList.Arguments
-            .Select(a => Write(a.Expression))
-            .ToList();
+        var callArgs = inv.ArgumentList.Arguments.Select(a => Write(a.Expression)).ToList();
 
-        // ── Interface-Dispatch ────────────────────────────────────────────────
-        // Interface-Variablen sind Wrapper-Structs: { IFace_vtable* vtable; void* obj; }
-        // Aufruf: r->vtable->Method(r->obj, args...)
         if (_ctx.InterfaceTypes.Contains(receiverType))
         {
             var receiver = Write(mem.Expression);
@@ -421,20 +390,17 @@ public sealed class ExpressionWriter
             return receiver + "->vtable->" + methodName
                  + "(" + string.Join(", ", ifaceArgs) + ")";
         }
-        // ─────────────────────────────────────────────────────────────────────
 
         if (!_ctx.VTableTypes.Contains(receiverType)) return null;
 
         var recv = Write(mem.Expression);
         var vtableArgs = new List<string> { recv };
         vtableArgs.AddRange(callArgs);
-
         return recv + "->vtable->" + methodName
              + "(" + string.Join(", ", vtableArgs) + ")";
     }
 
-    private string WriteNullCoalescingAssignment(
-        AssignmentExpressionSyntax assign, string right)
+    private string WriteNullCoalescingAssignment(AssignmentExpressionSyntax assign, string right)
     {
         var target = Write(assign.Left);
         _ctx.Out.WriteLine(_ctx.Tab + "if (" + target + " == NULL)");
@@ -451,6 +417,10 @@ public sealed class ExpressionWriter
         var prop = mem.Name.Identifier.Text;
         var objRaw = mem.Expression.ToString();
         var objKey = objRaw.TrimStart('_');
+
+        // FIX: ex.Message = ... → _ex_msg = ...
+        if (_ctx.LocalTypes.TryGetValue(objRaw, out var exType) && exType == "__exception__")
+            return "_ex_msg " + op + " " + right;
 
         if (_ctx.LocalTypes.TryGetValue(objRaw, out var kvpType)
             && kvpType.StartsWith("__kvp__", StringComparison.Ordinal))
@@ -501,8 +471,7 @@ public sealed class ExpressionWriter
         return obj + arrow + cProp + " " + op + " " + right;
     }
 
-    private string WriteIndexerAssignment(
-        ElementAccessExpressionSyntax elemLeft, string op, string right)
+    private string WriteIndexerAssignment(ElementAccessExpressionSyntax elemLeft, string op, string right)
     {
         var obj = Write(elemLeft.Expression);
         var key = Write(elemLeft.ArgumentList.Arguments[0].Expression);
@@ -523,11 +492,8 @@ public sealed class ExpressionWriter
             var cVal = types.val == "string" ? "str" : TypeRegistry.MapType(types.val);
             return "Dict_" + cKey + "_" + cVal + "_Set(" + obj + ", " + key + ", " + right + ")";
         }
-
         return obj + "[" + key + "] = " + right;
     }
-
-    // ── Member-Zugriff ────────────────────────────────────────────────────────
 
     private string WriteMemberAccess(MemberAccessExpressionSyntax mem)
     {
@@ -548,18 +514,20 @@ public sealed class ExpressionWriter
         if (mem.Expression is BaseExpressionSyntax)
             return "((Control*)self)->" + prop.ToLowerInvariant();
 
-        var rawExprForKvp = mem.Expression.ToString();
-        if (_ctx.LocalTypes.TryGetValue(rawExprForKvp, out var kvpType)
+        var rawExpr = mem.Expression.ToString();
+
+        // FIX: catch-Variable ex.Message / ex.ToString() → _ex_msg
+        if (_ctx.LocalTypes.TryGetValue(rawExpr, out var exType) && exType == "__exception__")
+            return "_ex_msg";
+
+        if (_ctx.LocalTypes.TryGetValue(rawExpr, out var kvpType)
             && kvpType.StartsWith("__kvp__", StringComparison.Ordinal))
-        {
-            return rawExprForKvp + "_" + prop;
-        }
+            return rawExpr + "_" + prop;
 
         if (prop == "Length")
         {
             if (IsStringExpr(mem.Expression))
                 return "strlen(" + obj + ")";
-
             var receiverRaw2 = mem.Expression.ToString();
             var receiverKey2 = receiverRaw2.TrimStart('_');
             if ((_ctx.LocalTypes.TryGetValue(receiverRaw2, out var rlt)
@@ -571,26 +539,17 @@ public sealed class ExpressionWriter
 
         if (prop == "Count" && IsListExpr(mem.Expression))
             return obj + "->count";
-
         if (prop == "Length" && IsStringBuilderExpr(mem.Expression))
             return obj + "->length";
-
         if (prop == "HasValue" && IsNullableExpr(mem.Expression))
             return NullableHandler.WriteHasValue(obj);
-
         if (prop == "Value" && IsNullableExpr(mem.Expression))
             return NullableHandler.WriteGetValue(obj);
-
         if (prop == "Count" && IsDictExpr(mem.Expression))
             return obj + "->count";
-
-        if (prop == "Keys" && IsDictExpr(mem.Expression))
+        if (prop is "Keys" or "Values" && IsDictExpr(mem.Expression))
             return obj;
 
-        if (prop == "Values" && IsDictExpr(mem.Expression))
-            return obj;
-
-        var rawExpr = mem.Expression.ToString();
         var key = rawExpr.TrimStart('_');
 
         if ((_ctx.LocalTypes.TryGetValue(rawExpr, out var lt) && IsStructType(lt))
@@ -615,19 +574,16 @@ public sealed class ExpressionWriter
         {
             if (TypeRegistry.HasNoPrefix(prop))
                 return obj + "->" + prop;
-
             return obj + "->f_" + prop;
         }
 
         return obj + "->" + prop;
     }
 
-    private static bool IsNumericTypeMember(
-        MemberAccessExpressionSyntax mem, out string result)
+    private static bool IsNumericTypeMember(MemberAccessExpressionSyntax mem, out string result)
     {
         var typeName = mem.Expression.ToString();
         var memberName = mem.Name.Identifier.Text;
-
         result = (typeName, memberName) switch
         {
             ("int", "MaxValue") => "INT_MAX",
@@ -656,7 +612,6 @@ public sealed class ExpressionWriter
             ("float", "NegativeInfinity") => "(-INFINITY)",
             _ => null!,
         };
-
         return result != null;
     }
 
@@ -669,8 +624,6 @@ public sealed class ExpressionWriter
         return null;
     }
 
-    // ── Objekt-Erstellung ─────────────────────────────────────────────────────
-
     private string WriteObjectCreation(ObjectCreationExpressionSyntax obj)
     {
         var typeName = obj.Type.ToString();
@@ -682,14 +635,12 @@ public sealed class ExpressionWriter
                 : "256";
             return "StringBuilder_New(" + cap + ")";
         }
-
         if (TypeRegistry.IsList(typeName))
         {
             var inner = TypeRegistry.GetListInnerType(typeName)!;
             var cInner = inner == "string" ? "str" : TypeRegistry.MapType(inner);
             return "List_" + cInner + "_New()";
         }
-
         if (TypeRegistry.IsDictionary(typeName))
         {
             var types = TypeRegistry.GetDictionaryTypes(typeName)!.Value;
@@ -697,8 +648,6 @@ public sealed class ExpressionWriter
             var cVal = types.val == "string" ? "str" : TypeRegistry.MapType(types.val);
             return "Dict_" + cKey + "_" + cVal + "_New()";
         }
-
-        // NEU: Generische Klassen — new Foo<int>() → Foo_int_New()
         if (obj.Type is GenericNameSyntax genericTypeName)
         {
             var baseName = genericTypeName.Identifier.Text;
@@ -707,22 +656,17 @@ public sealed class ExpressionWriter
                 {
                     var t = a.ToString().Trim();
                     return t == "string" ? "str" : TypeRegistry.MapType(t);
-                })
-                .ToList();
+                }).ToList();
             var cName = baseName + "_" + string.Join("_", typeArgs);
-
             var ctorArgs = obj.ArgumentList?.Arguments.Select(a => Write(a.Expression))
                 ?? Enumerable.Empty<string>();
             return cName + "_New(" + string.Join(", ", ctorArgs) + ")";
         }
-
         if (typeName == "Random")
             return "NULL /* Random — use CS2SX_Rand_Next() directly */";
-
         if (_ctx.ValueTypeStructs.Contains(typeName))
         {
             var cType = TypeRegistry.MapType(typeName);
-
             if (obj.Initializer?.Expressions.Count > 0)
             {
                 var fields = obj.Initializer.Expressions
@@ -730,13 +674,11 @@ public sealed class ExpressionWriter
                     .Select(a => "." + a.Left + " = " + Write(a.Right));
                 return "(" + cType + "){ " + string.Join(", ", fields) + " }";
             }
-
             if (obj.ArgumentList?.Arguments.Count > 0)
             {
                 var vals = obj.ArgumentList.Arguments.Select(a => Write(a.Expression));
                 return "(" + cType + "){ " + string.Join(", ", vals) + " }";
             }
-
             return "(" + cType + "){0}";
         }
 
@@ -748,16 +690,12 @@ public sealed class ExpressionWriter
         {
             var tmp = _ctx.NextTmp(typeName.ToLower());
             var cTypeName = TypeRegistry.MapType(typeName);
-
             _ctx.Out.WriteLine(_ctx.Tab + cTypeName + "* " + tmp + " = " + creation + ";");
-
             foreach (var expr in obj.Initializer.Expressions)
             {
                 if (expr is not AssignmentExpressionSyntax asgn) continue;
-
                 var propName = asgn.Left.ToString().Trim();
                 var propVal = Write(asgn.Right);
-
                 if (propName == "Text")
                 {
                     _ctx.Out.WriteLine(_ctx.Tab + "Label_SetText(" + tmp + ", " + propVal + ");");
@@ -769,37 +707,29 @@ public sealed class ExpressionWriter
                         + _ctx.CurrentClass + "_" + propVal.Trim() + ";");
                     continue;
                 }
-
                 var cp = TypeRegistry.MapProperty(propName);
                 _ctx.Out.WriteLine(_ctx.Tab + tmp + "->" + cp + " = " + propVal + ";");
             }
-
             return tmp;
         }
-
         return creation;
     }
-
-    // ── Array-Erstellung ─────────────────────────────────────────────────────
 
     private string WriteArrayCreation(ArrayCreationExpressionSyntax arr)
     {
         var elemType = arr.Type.ElementType.ToString().Trim();
         var cType = TypeRegistry.MapType(elemType);
-
         if (arr.Initializer != null && arr.Initializer.Expressions.Count > 0)
         {
             var elems = arr.Initializer.Expressions.Select(e => Write(e));
             return "{ " + string.Join(", ", elems) + " }";
         }
-
         if (arr.Type.RankSpecifiers.Count > 0
             && arr.Type.RankSpecifiers[0].Sizes.Count > 0)
         {
             var size = Write(arr.Type.RankSpecifiers[0].Sizes[0]);
             return "(" + cType + "*)malloc(" + size + " * sizeof(" + cType + "))";
         }
-
         return "(" + cType + "*)malloc(sizeof(" + cType + "))";
     }
 
@@ -808,8 +738,6 @@ public sealed class ExpressionWriter
         var elems = implArr.Initializer.Expressions.Select(e => Write(e));
         return "{ " + string.Join(", ", elems) + " }";
     }
-
-    // ── Sonstiges ─────────────────────────────────────────────────────────────
 
     private static bool IsStructType(string csType) =>
         TypeRegistry.IsLibNxStruct(csType)
@@ -824,10 +752,8 @@ public sealed class ExpressionWriter
         var targetType = cast.Type.ToString().Trim();
         var cType = TypeRegistry.MapType(targetType);
         var inner = Write(cast.Expression);
-
         if (TypeRegistry.IsControlType(targetType) || TypeRegistry.NeedsPointerSuffix(targetType))
             return "((" + cType + "*)" + inner + ")";
-
         return "((" + cType + ")" + inner + ")";
     }
 
@@ -880,6 +806,18 @@ public sealed class ExpressionWriter
         }
         return false;
     }
+
+    // FIX: string-Typ-Erkennung für != null Check
+    private bool IsStringType(SyntaxNode node)
+    {
+        var t = TypeInferrer.InferCSharpType(node, _ctx);
+        return t == "string";
+    }
+
+    // FIX: null-Literal-Erkennung
+    private static bool IsNullLiteral(SyntaxNode node) =>
+        node is LiteralExpressionSyntax lit
+        && lit.IsKind(SyntaxKind.NullLiteralExpression);
 
     private bool IsListExpr(SyntaxNode node)
     {

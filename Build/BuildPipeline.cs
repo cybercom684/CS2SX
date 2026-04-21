@@ -466,6 +466,7 @@ public sealed class BuildPipeline
     {
         var sb = new StringBuilder();
         sb.AppendLine("#pragma once");
+        sb.AppendLine("#include <setjmp.h>");
         sb.AppendLine("#include <switch.h>");
         sb.AppendLine("#include <stdlib.h>");
         sb.AppendLine("#include <string.h>");

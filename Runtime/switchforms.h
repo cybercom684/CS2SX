@@ -554,6 +554,7 @@ static inline int String_EqualsIgnoreCase(const char* a, const char* b)
     return *a == '\0' && *b == '\0';
 }
 
+
 #define String_Length(s) ((int)strlen(s))
 
 // ============================================================================
@@ -1283,6 +1284,17 @@ static inline int CS2SX_Path_IsDirectory(const char* path)
 {
     return CS2SX_Path_GetExtension(path)[0] == '\0';
 }
+
+static inline int String_LastIndexOfChar(const char* s, char c)
+{
+    if (!s) return -1;
+    const char* last = NULL;
+    for (const char* p = s; *p; p++)
+        if (*p == c) last = p;
+    return last ? (int)(last - s) : -1;
+}
+
+#define CS2SX_RETURN_BUF_SIZE 512
 
 // ============================================================================
 // Form
