@@ -2,6 +2,8 @@
 // FIX: WriteLineWithMapping ist jetzt in Benutzung — CurrentCFile wird
 // in BuildPipeline korrekt gesetzt, sodass GCC-Zeilen auf C#-Zeilen
 // zurückgemappt werden können.
+// FIX: NextLambdaId() hinzugefügt — Lambda-Zähler gehört in den Context,
+// nicht in LambdaLifter (der pro Lambda neu instanziiert wird).
 
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
@@ -79,6 +81,23 @@ public sealed class TranspilerContext
         get; set;
     }
 
+    // FIX: Lambda-Zähler gehört in den Context, NICHT in LambdaLifter.
+    //
+    // Hintergrund: ExpressionWriter.WriteLambda() erstellt pro Lambda-Ausdruck
+    // eine NEUE LambdaLifter-Instanz. Würde der Zähler in LambdaLifter sitzen,
+    // würde er bei jeder Instanz bei 0 starten — alle Lambdas einer Klasse
+    // bekämen denselben Namen "_lambda_0" → Linker-Fehler "duplicate symbol".
+    //
+    // Hier im Context überlebt der Zähler alle LambdaLifter-Instanzen und
+    // wird erst in ClearClassContext() (Klassenwechsel) zurückgesetzt.
+    private int _lambdaCounter;
+
+    /// <summary>
+    /// Gibt eine eindeutige, aufsteigende Lambda-ID für die aktuelle Klasse zurück.
+    /// Thread-safe ist nicht nötig — Transpilierung ist single-threaded.
+    /// </summary>
+    public int NextLambdaId() => _lambdaCounter++;
+
     // ── Zeilen-Tracking ───────────────────────────────────────────────────────
 
     public string CurrentFile { get; set; } = string.Empty;
@@ -87,7 +106,6 @@ public sealed class TranspilerContext
         get; set;
     }
 
-    // FIX: CurrentCLine wird jetzt hochgezählt — für Diagnostic-Mapping nutzbar
     public int CurrentCLine { get; private set; } = 1;
     public string CurrentCFile { get; set; } = string.Empty;
 
@@ -108,8 +126,6 @@ public sealed class TranspilerContext
 
     public void WriteRaw(string s) => Out.Write(s);
 
-    /// FIX: WriteLineWithMapping wird jetzt verwendet wenn CurrentCFile gesetzt ist.
-    /// Der Aufrufer (StatementWriter) setzt ctx.CurrentLine vor dem Schreiben.
     public void WriteLineWithMapping(string line, int csLine, string csSnippet)
     {
         if (!string.IsNullOrEmpty(CurrentCFile) && !string.IsNullOrEmpty(CurrentFile))
@@ -128,7 +144,10 @@ public sealed class TranspilerContext
         TmpCounter = 0;
         TmpStringCounter = 0;
         CurrentLine = 0;
-        CurrentReturnBuffer = null;   // ← neu
+        CurrentReturnBuffer = null;
+        // FIX: _lambdaCounter wird NICHT hier zurückgesetzt — er gilt pro
+        // Klasse, nicht pro Methode. Zwei Lambdas in verschiedenen Methoden
+        // derselben Klasse müssen unterschiedliche IDs bekommen.
     }
 
     public void ClearClassContext()
@@ -141,6 +160,11 @@ public sealed class TranspilerContext
         PropertyTypes.Clear();
         EnumMembers.Clear();
         ClearMethodContext();
+
+        // FIX: Lambda-Zähler beim Klassenwechsel zurücksetzen.
+        // Lambdas verschiedener Klassen können wieder bei 0 starten,
+        // weil sie in verschiedenen .c-Dateien generiert werden.
+        _lambdaCounter = 0;
     }
 
     public string? LookupType(string name)

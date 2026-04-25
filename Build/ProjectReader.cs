@@ -7,17 +7,19 @@ namespace CS2SX.Build;
 /// </summary>
 public sealed class ProjectReader
 {
-    private static readonly HashSet<string> s_excludedDirNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-    {
-        "obj", "bin", "Stubs", "LibNX",
-    };
+    private static readonly HashSet<string> s_excludedDirNames =
+        new(StringComparer.OrdinalIgnoreCase)
+        {
+            "obj", "bin", "Stubs", "LibNX",
+        };
 
-    private static readonly HashSet<string> s_excludedFileNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-    {
-        "SwitchApp.cs",
-        "Input.cs",
-        "_GlobalTypes.cs",
-    };
+    private static readonly HashSet<string> s_excludedFileNames =
+        new(StringComparer.OrdinalIgnoreCase)
+        {
+            "SwitchApp.cs",
+            "Input.cs",
+            "_GlobalTypes.cs",
+        };
 
     public string ProjectDirectory { get; private set; } = string.Empty;
     public IReadOnlyList<string> SourceFiles { get; private set; } = Array.Empty<string>();
@@ -40,16 +42,19 @@ public sealed class ProjectReader
 
         if (explicitFiles.Count > 0)
         {
+            // FIX: Reihenfolge aus der .csproj-Datei beibehalten (bereits deterministisch)
             SourceFiles = explicitFiles;
             return;
         }
 
-        // Fallback: alle .cs-Dateien im Projektordner
+        // FIX: OrderBy(f => f) war schon vorhanden aber nur auf string-Ebene.
+        // Auf Windows und Linux unterscheidet sich die Groß-/Kleinschreibung —
+        // OrdinalIgnoreCase für konsistente Reihenfolge auf beiden Plattformen.
         SourceFiles = Directory
             .EnumerateFiles(ProjectDirectory, "*.cs", SearchOption.AllDirectories)
             .Select(f => Path.GetFullPath(f))
             .Where(f => IsIncluded(f))
-            .OrderBy(f => f)
+            .OrderBy(f => f, StringComparer.OrdinalIgnoreCase)  // FIX: plattformkonsistent
             .ToList();
     }
 
@@ -62,7 +67,6 @@ public sealed class ProjectReader
         var separators = new char[] { Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar };
         var segments = relative.Split(separators, StringSplitOptions.RemoveEmptyEntries);
 
-        // Verzeichnis-Segmente prüfen (alles außer letztem = Dateiname)
         for (int i = 0; i < segments.Length - 1; i++)
         {
             if (s_excludedDirNames.Contains(segments[i]))

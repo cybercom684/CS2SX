@@ -27,7 +27,6 @@ public sealed class BuildPipeline
         _buildDir = Path.Combine(_projectDir, "cs2sx_out");
     }
 
-    // ── FIX: Clean — löscht veraltete generierte Dateien ─────────────────────
     public void Clean()
     {
         if (!Directory.Exists(_buildDir))
@@ -62,6 +61,9 @@ public sealed class BuildPipeline
 
         int warnings = 0;
 
+        // FIX: switchFormsDir hier deklarieren damit finally-Block aufräumen kann
+        string? switchFormsDir = null;
+
         try
         {
             // ── prepare ───────────────────────────────────────────────────
@@ -69,8 +71,6 @@ public sealed class BuildPipeline
             sPrepare.Status = StageStatus.Running;
 
             Directory.CreateDirectory(_buildDir);
-
-            // FIX: Veraltete Ghost-Dateien aufräumen (umbenannte Klassen hinterlassen Leichen)
             CleanOrphanedFiles(_buildDir);
 
             var csprojFiles = Directory.GetFiles(_projectDir, "*.csproj");
@@ -99,7 +99,8 @@ public sealed class BuildPipeline
             var sFwd = renderer.GetStage("fwd-decl");
             sFwd.Status = StageStatus.Running;
 
-            var switchFormsDir = Path.Combine(Path.GetTempPath(),
+            // FIX: switchFormsDir der äußeren Variable zuweisen damit finally aufräumt
+            switchFormsDir = Path.Combine(Path.GetTempPath(),
                 "cs2sx_" + Path.GetFileName(_projectDir));
             if (Directory.Exists(switchFormsDir))
                 Directory.Delete(switchFormsDir, recursive: true);
@@ -195,13 +196,11 @@ public sealed class BuildPipeline
             int transpiled = 0;
             int skipped = 0;
 
-            // FIX: latestHeaderTime bezieht jetzt generics/interfaces mit ein
             var allTranspiledHeaders = transpiledFiles
                 .Select(f => Path.Combine(_buildDir, Path.GetFileNameWithoutExtension(f) + ".h"))
                 .Where(File.Exists)
                 .ToList();
 
-            // FIX: generierte Headers explizit in latestHeaderTime aufnehmen
             var generatedHeaders = new[] { "_generics.h", "_interfaces.h", "_forward.h" }
                 .Select(n => Path.Combine(_buildDir, n))
                 .Where(File.Exists);
@@ -234,10 +233,20 @@ public sealed class BuildPipeline
                 var source = System.IO.File.ReadAllText(csFile);
                 var semanticModel = semanticBuilder.GetModel(csFile);
 
+                // ── Header transpilieren ──────────────────────────────────
+
                 var hTranspiler = new CSharpToC(
                     CSharpToC.TranspileMode.HeaderOnly,
                     genericCollector,
                     interfaceExpander);
+
+                // FIX: CurrentFile VOR Transpile() setzen, nicht danach.
+                // Vorher stand diese Zuweisung nach cTranspiler.Transpile() —
+                // dadurch waren alle Source-Map-Einträge der laufenden Datei
+                // ohne CFile-Referenz und GCC-Fehler konnten nicht zurückgemappt werden.
+                hTranspiler.GetContext().CurrentFile = Path.GetFileName(csFile);
+                hTranspiler.GetContext().CurrentCFile = baseName + ".h";
+
                 var hResult = hTranspiler.Transpile(source, csFile, semanticModel);
 
                 var interfaceInclude = !string.IsNullOrEmpty(ifaceHeaderPath)
@@ -254,6 +263,8 @@ public sealed class BuildPipeline
                     + "\n" + hResult.Code);
                 System.IO.File.WriteAllText(hPath, hContent);
 
+                // ── Implementation transpilieren ──────────────────────────
+
                 var allIncludes = string.Join("\n",
                     allHeaders.Select(h => $"#include \"{h}\""));
 
@@ -261,16 +272,23 @@ public sealed class BuildPipeline
                     CSharpToC.TranspileMode.Implementation,
                     genericCollector,
                     interfaceExpander);
-                var cResult = cTranspiler.Transpile(source, csFile, semanticModel);
 
-                // FIX: Diagnostic-Mapping aktivieren — Source-Map-Context setzen
-                cTranspiler.GetContext().CurrentCFile = baseName + ".c";
+                // FIX: CurrentFile und CurrentCFile VOR Transpile() setzen.
+                // Das ist der eigentliche Bug — vorher war es:
+                //   var cResult = cTranspiler.Transpile(...);
+                //   cTranspiler.GetContext().CurrentCFile = baseName + ".c";  // ZU SPÄT
+                // Jetzt korrekt:
                 cTranspiler.GetContext().CurrentFile = Path.GetFileName(csFile);
+                cTranspiler.GetContext().CurrentCFile = baseName + ".c";
+
+                var cResult = cTranspiler.Transpile(source, csFile, semanticModel);
 
                 var cContent = "#include <stdlib.h>\n"
                              + allIncludes + "\n\n"
                              + cResult.Code;
                 System.IO.File.WriteAllText(cPath, cContent);
+
+                // ── Diagnostics ausgeben ──────────────────────────────────
 
                 var allDiags = hResult.Diagnostics
                     .Concat(cResult.Diagnostics)
@@ -285,7 +303,6 @@ public sealed class BuildPipeline
                 foreach (var d in allDiags.Where(d => d.Severity == DiagnosticSeverity.Error))
                     Log.Error($"{Path.GetFileName(d.CsFile ?? "")}({d.CsLine}): {d.Message}");
 
-                // FIX: Unbekannte Methoden-Calls loggen (Dispatcher liefert null)
                 foreach (var d in allDiags.Where(d => d.Message.Contains("UNSUPPORTED") || d.Message.Contains("unknown call")))
                     Log.Warning($"  ↳ unsupported construct in {Path.GetFileName(csFile)} — check generated C");
 
@@ -376,14 +393,20 @@ public sealed class BuildPipeline
         finally
         {
             Log.DetachRenderer();
+
+            // FIX: Temporäres SwitchForms-Verzeichnis immer aufräumen —
+            // vorher wurde es nur im Erfolgsfall nie explizit gelöscht.
+            // Bei Fehler blieben die Dateien dauerhaft im Temp-Ordner.
+            if (switchFormsDir != null && Directory.Exists(switchFormsDir))
+            {
+                try { Directory.Delete(switchFormsDir, recursive: true); }
+                catch { /* Nicht kritisch — Temp-Verzeichnis, OS räumt auf */ }
+            }
         }
     }
 
-    // ── FIX: Orphaned-File-Cleanup ────────────────────────────────────────────
-    /// <summary>
-    /// Löscht .h/.c-Dateien in cs2sx_out die keiner .cs-Quelldatei mehr entsprechen.
-    /// Verhindert Ghost-Symbol-Konflikte nach Klassen-Umbenennungen.
-    /// </summary>
+    // ── Orphaned-File-Cleanup ─────────────────────────────────────────────────
+
     private void CleanOrphanedFiles(string buildDir)
     {
         var reader = new ProjectReader();
@@ -395,7 +418,6 @@ public sealed class BuildPipeline
             reader.SourceFiles.Select(f => Path.GetFileNameWithoutExtension(f)),
             StringComparer.OrdinalIgnoreCase);
 
-        // Immer-gültige generierte Dateien
         validBases.Add("switchforms");
         validBases.Add("_forward");
         validBases.Add("_generics");
@@ -419,10 +441,6 @@ public sealed class BuildPipeline
             Log.Info($"Cleaned {removed} orphaned file(s) from cs2sx_out");
     }
 
-    /// <summary>
-    /// Erweiterter Inkremental-Check.
-    /// FIX: latestHeaderTime-Parameter schließt jetzt generics/interfaces ein.
-    /// </summary>
     private bool IsUpToDate(string csFile, string hPath, string cPath,
         DateTime latestHeaderTime = default)
     {
@@ -452,7 +470,6 @@ public sealed class BuildPipeline
         if (File.Exists(ifacesH) && File.GetLastWriteTimeUtc(ifacesH) > hTime)
             return false;
 
-        // FIX: latestHeaderTime enthält jetzt auch generics/interfaces (siehe Run())
         if (latestHeaderTime != default && latestHeaderTime > hTime)
             return false;
 
@@ -568,13 +585,11 @@ public sealed class BuildPipeline
         return null;
     }
 
-    // FIX: WriteSwitchformsC schreibt jetzt auch Audio-Globals (ODR-sicher)
     private static void WriteSwitchformsC(string path)
     {
         using var w = new StreamWriter(path, append: false, encoding: Encoding.UTF8);
         w.WriteLine("#include \"_forward.h\"");
         w.WriteLine();
-        // Core globals
         w.WriteLine("char         _cs2sx_strbuf[1024];");
         w.WriteLine("Framebuffer  g_fb;");
         w.WriteLine("u32*         g_fb_addr       = NULL;");
@@ -584,7 +599,6 @@ public sealed class BuildPipeline
         w.WriteLine("PadState     g_cs2sx_pad;");
         w.WriteLine("unsigned int _cs2sx_rand_state = 12345u;");
         w.WriteLine();
-        // FIX: String-Pool und Audio-State hier definieren (nicht mehr static in Header)
         w.WriteLine("char _cs2sx_strpool[32][1024];");
         w.WriteLine("int  _cs2sx_strpool_idx = 0;");
         w.WriteLine();
@@ -597,7 +611,6 @@ public sealed class BuildPipeline
         w.WriteLine("int               _cs2sx_audio_submitted = 0;");
     }
 
-    // FIX/NEU: Default-Icon suchen (icon.jpg, icon.png, icon.bmp im Projektordner)
     private static string? TryFindDefaultIcon(string projectDir)
     {
         foreach (var candidate in new[] { "icon.jpg", "icon.jpeg", "icon.png", "icon.bmp" })

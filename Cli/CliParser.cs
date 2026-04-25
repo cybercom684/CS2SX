@@ -9,7 +9,8 @@ public static class CliParser
             ["build"] = ParseBuild,
             ["genstubs"] = ParseGenstubs,
             ["check"] = ParseCheck,
-            ["watch"] = ParseWatch,  // PHASE 4 NEU
+            ["watch"] = ParseWatch,
+            ["clean"] = ParseClean,   // FIX: war vergessen
         };
 
     public static CliArgs Parse(string[] args)
@@ -55,5 +56,12 @@ public static class CliParser
     {
         Command = "watch",
         WatchTarget = args.ElementAtOrDefault(0) ?? string.Empty,
+    };
+
+    // FIX: clean-Befehl — war komplett vergessen obwohl CleanCommand fertig war
+    private static CliArgs ParseClean(string[] args) => new()
+    {
+        Command = "clean",
+        BuildTarget = args.ElementAtOrDefault(0) ?? string.Empty,
     };
 }

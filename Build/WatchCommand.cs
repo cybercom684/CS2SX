@@ -1,10 +1,18 @@
 ﻿// ============================================================================
 // Build/WatchCommand.cs
 //
-// FIX: Terminal-Corruption-Fix — Console.CursorVisible wird jetzt IMMER
-// wiederhergestellt, auch bei unbehandelten Exceptions und SIGINT.
-// Außerdem: cs2sx clean-Aufruf vor jedem Rebuild wenn --clean-on-change
-// Flag gesetzt ist.
+// FIXES:
+//   1. TriggerBuild() hat jetzt try/catch — BuildPipeline.Run() wirft nach
+//      renderer.Complete() nochmal; ohne catch landet die Exception im
+//      ThreadPool-ContinueWith und wird still verschluckt, das Terminal
+//      bleibt danach in einem kaputten Zustand.
+//
+//   2. Event-Handler werden in Run() sauber deregistriert (finally-Block).
+//      Ohne Deregistrierung akkumulieren sich Handler bei mehrfachem Aufruf.
+//
+//   3. _debounceCts wird jetzt korrekt Disposed bevor es ersetzt wird.
+//      Vorher: Cancel() + Neuzuweisung ohne Dispose → stetiges Memory-Leak
+//      bei vielen Dateiänderungen in einem langen Watch-Lauf.
 // ============================================================================
 
 using CS2SX.Logging;
@@ -27,11 +35,19 @@ public sealed class WatchCommand
 
     public async Task Run(CancellationToken cancellationToken = default)
     {
-        // FIX: Terminal-Cleanup als AppDomain-Handler registrieren — wird auch
-        // bei unbehandelten Exceptions und Ctrl+C ausgelöst.
-        Console.CancelKeyPress += OnCancelKeyPress;
-        AppDomain.CurrentDomain.UnhandledException += OnUnhandledException;
-        AppDomain.CurrentDomain.ProcessExit += OnProcessExit;
+        // FIX 2: Handler als lokale Delegates damit sie sauber deregistriert
+        // werden können — statische Lambda wäre nicht deregistrierbar.
+        ConsoleCancelEventHandler cancelHandler = (_, e) =>
+        {
+            e.Cancel = true;
+            RestoreTerminal();
+        };
+        UnhandledExceptionEventHandler unhandledHandler = (_, _) => RestoreTerminal();
+        EventHandler processExitHandler = (_, _) => RestoreTerminal();
+
+        Console.CancelKeyPress += cancelHandler;
+        AppDomain.CurrentDomain.UnhandledException += unhandledHandler;
+        AppDomain.CurrentDomain.ProcessExit += processExitHandler;
 
         Log.Info($"Watching: {_projectDir}");
         Log.Info("Press Ctrl+C to stop.");
@@ -72,7 +88,14 @@ public sealed class WatchCommand
         }
         finally
         {
-            // FIX: Terminal immer wiederherstellen, egal wie wir hier ankommen
+            // FIX 2: Handler immer deregistrieren
+            Console.CancelKeyPress -= cancelHandler;
+            AppDomain.CurrentDomain.UnhandledException -= unhandledHandler;
+            AppDomain.CurrentDomain.ProcessExit -= processExitHandler;
+
+            // FIX 3: Pending debounce CTS aufräumen
+            DisposeDebounceCts();
+
             RestoreTerminal();
         }
     }
@@ -101,7 +124,9 @@ public sealed class WatchCommand
     {
         lock (_lock)
         {
-            _debounceCts?.Cancel();
+            // FIX 3: Altes CTS canceln UND disposen bevor neues erstellt wird.
+            // Vorher: _debounceCts?.Cancel() + _debounceCts = new ... ohne Dispose.
+            DisposeDebounceCts();
             _debounceCts = new CancellationTokenSource();
             var token = _debounceCts.Token;
 
@@ -113,29 +138,60 @@ public sealed class WatchCommand
         }
     }
 
+    // FIX 3: Hilfsmethode für sauberes Dispose unter Lock
+    private void DisposeDebounceCts()
+    {
+        // Wird immer unter _lock aufgerufen — kein weiteres Locking nötig
+        if (_debounceCts != null)
+        {
+            try
+            {
+                _debounceCts.Cancel();
+                _debounceCts.Dispose();
+            }
+            catch { /* Ignore — CTS könnte bereits disposed sein */ }
+            _debounceCts = null;
+        }
+    }
+
     private void TriggerBuild()
     {
         Console.WriteLine();
         Log.Info($"Building {Path.GetFileNameWithoutExtension(_csprojPath)}...");
         Console.WriteLine(new string('─', 60));
 
+        // FIX 1: try/catch um den gesamten Build.
+        //
+        // BuildPipeline.Run() wirft nach renderer.Complete() nochmal (throw im
+        // catch-Block). Ohne dieses try/catch landet die Exception im
+        // ThreadPool-ContinueWith-Callback und wird still verschluckt.
+        // Das Terminal bleibt danach korrumpiert (Cursor unsichtbar,
+        // Farben falsch) weil BuildRenderer.Dispose() nicht mehr aufgerufen
+        // wurde oder CursorVisible nicht wiederhergestellt wurde.
+        //
+        // Nach dem Catch: Terminal wiederherstellen, Fehlermeldung ausgeben,
+        // und normal weiterlaufen — der Watcher ist weiterhin aktiv.
         try
         {
             new BuildPipeline(_csprojPath).Run();
         }
         catch (Exception ex)
         {
-            // FIX: Terminal nach BuildRenderer-Exception wiederherstellen
+            // Terminal-Zustand reparieren falls BuildRenderer ihn korrumpiert hat
             RestoreTerminal();
-            if (ex.Message.Length < 200)
-                Log.Error("Build failed: " + ex.Message);
+
+            // Fehlermeldung ausgeben — aber kurz halten (GCC-Fehler sind schon
+            // vom BuildRenderer ausgegeben worden; hier nur die finale Exception)
+            var msg = ex.Message;
+            if (msg.Length > 200) msg = msg[..200] + "…";
+            Log.Error("Build failed: " + msg);
         }
 
         Console.WriteLine(new string('─', 60));
         Log.Info($"Watching for changes... ({DateTime.Now:HH:mm:ss})");
     }
 
-    // ── FIX: Terminal-Restore ─────────────────────────────────────────────────
+    // ── Terminal-Restore ──────────────────────────────────────────────────────
 
     private static void RestoreTerminal()
     {
@@ -144,22 +200,6 @@ public sealed class WatchCommand
             Console.CursorVisible = true;
             Console.ResetColor();
         }
-        catch { /* Ignore — Console könnte nicht verfügbar sein */ }
-    }
-
-    private static void OnCancelKeyPress(object? sender, ConsoleCancelEventArgs e)
-    {
-        RestoreTerminal();
-        // Nicht abbrechen — normaler Ctrl+C-Flow
-    }
-
-    private static void OnUnhandledException(object sender, UnhandledExceptionEventArgs e)
-    {
-        RestoreTerminal();
-    }
-
-    private static void OnProcessExit(object? sender, EventArgs e)
-    {
-        RestoreTerminal();
+        catch { /* Console könnte nicht verfügbar sein (z.B. kein TTY) */ }
     }
 }

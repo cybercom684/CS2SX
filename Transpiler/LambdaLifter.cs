@@ -1,5 +1,5 @@
 // Datei: Transpiler/LambdaLifter.cs
-// VOLLSTÄNDIGE DATEI — bereinigt, kein doppelter Prelude möglich
+// VOLLSTÄNDIGE DATEI — Lambda-Namenskollision behoben
 
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
@@ -15,12 +15,18 @@ public sealed class LambdaLifter
     private readonly IExpressionWriter _expr;
     private StatementWriter? _stmt;
 
-    private int _lambdaCounter;
+    // FIX: _lambdaCounter ENTFERNT aus LambdaLifter.
+    //
+    // Das Problem war: ExpressionWriter.WriteLambda() erstellt für jede Lambda
+    // eine NEUE LambdaLifter-Instanz. Damit startete _lambdaCounter immer bei 0.
+    // Zwei Lambdas in verschiedenen Methoden derselben Klasse bekamen beide
+    // den Namen "_lambda_0" → Linker-Fehler "duplicate symbol".
+    //
+    // Fix: Der Zähler sitzt jetzt in TranspilerContext (NextLambdaId()),
+    // der über die gesamte Klassen-Transpilierung geteilt wird.
+    // In ClearClassContext() wird er zurückgesetzt.
 
-    // Prelude: Struct-Definitionen und Lambda-Funktionen auf File-Scope
     private readonly System.Text.StringBuilder _prelude = new();
-
-    // Verhindert doppeltes Einfügen desselben Prelude-Inhalts
     private bool _preludeFlushed = false;
 
     public LambdaLifter(TranspilerContext ctx, IExpressionWriter expr)
@@ -46,19 +52,18 @@ public sealed class LambdaLifter
         string? hintType = null,
         string? elementTypeHint = null)
     {
-        var id = _lambdaCounter++;
+        // FIX: _ctx.NextLambdaId() statt lokalem _lambdaCounter++
+        // NextLambdaId() ist in TranspilerContext definiert und gibt pro
+        // Klassen-Transpilierung eindeutig aufsteigende IDs zurück.
+        var id = _ctx.NextLambdaId();
         var name = "_lambda_" + id;
         var caps = FindCaptures(lambda);
         var parms = ExtractParams(lambda, elementTypeHint);
         var retCs = hintType != null ? ExtractReturnType(hintType, parms.Count) : "int";
 
-        // Struct-Definition in Prelude
         WriteStructToPrelude(id, caps);
-
-        // Lambda-Funktion in Prelude
         WriteFunctionToPrelude(id, name, lambda, parms, retCs, caps);
 
-        // Nur Capture-Befüllung in ctx.Out (Methodenkörper)
         if (caps.Count > 0)
         {
             var capStruct = "_cap_" + id;
@@ -71,9 +76,9 @@ public sealed class LambdaLifter
         return name;
     }
 
-    // Für Kompatibilität — nicht mehr nötig
     public void FlushPending()
     {
+        // Nicht mehr nötig — Prelude wird extern eingefügt
     }
 
     // ── Typedef-Generierung ──────────────────────────────────────────────
@@ -149,7 +154,6 @@ public sealed class LambdaLifter
         var retC = TypeRegistry.MapType(retCs);
         var capStructName = "_cap_" + id;
 
-        // Parameter-Liste
         var paramList = new List<string> { "void* _ctx_arg" };
         foreach (var p in parms)
         {
@@ -165,7 +169,6 @@ public sealed class LambdaLifter
             _prelude.AppendLine("    struct " + capStructName
                               + "* _c = (struct " + capStructName + "*)_ctx_arg;");
 
-        // Capture-Variablen
         foreach (var cap in caps)
         {
             if (cap.CapName == "self" && !string.IsNullOrEmpty(_ctx.CurrentClass))
@@ -179,7 +182,6 @@ public sealed class LambdaLifter
             }
         }
 
-        // Body in tempCtx transpilieren
         var bodyContent = TranspileBody(lambda, retCs, caps, parms);
         _prelude.Append(bodyContent);
         _prelude.AppendLine("}");
@@ -209,15 +211,17 @@ public sealed class LambdaLifter
         tempCtx.SemanticModel = _ctx.SemanticModel;
         tempCtx.CurrentFile = _ctx.CurrentFile;
         tempCtx.TmpCounter = _ctx.TmpCounter;
+        // FIX: LambdaCounter NICHT in tempCtx kopieren — der tempCtx ist für
+        // den Body-Code, nicht für weitere Lambda-Lifts. Würde ein Lambda im
+        // Body wieder ein Lambda enthalten (verschachtelt), müsste das über
+        // den originalen _ctx gezählt werden.
 
-        // Captures registrieren — BEIDE Schreibweisen damit _currentPath → currentPath
         foreach (var cap in caps)
         {
             tempCtx.LocalTypes[cap.CapName] = cap.CsType;
             tempCtx.LocalTypes["_" + cap.CapName] = cap.CsType;
         }
 
-        // Parameter registrieren mit korrektem Typ
         foreach (var p in parms)
             tempCtx.LocalTypes[p.Name] = p.CsType;
 
@@ -307,7 +311,6 @@ public sealed class LambdaLifter
             captures.Add(new CaptureInfo(capName, csType!, cExpr));
         }
 
-        // Eigene Methoden-Aufrufe erkennen → brauchen self
         if (!needsSelf && !string.IsNullOrEmpty(_ctx.CurrentClass))
         {
             needsSelf = lambda.DescendantNodes()
@@ -369,8 +372,6 @@ public sealed class LambdaLifter
         csType != "string"
         && (TypeRegistry.NeedsPointerSuffix(csType) || TypeRegistry.IsList(csType));
 
-    // ── SplitGenericArgs ─────────────────────────────────────────────────
-
     private static List<string> SplitGenericArgs(string s)
     {
         var result = new List<string>();
@@ -391,8 +392,4 @@ public sealed class LambdaLifter
 
     private sealed record ParamInfo(string Name, string CsType);
     private sealed record CaptureInfo(string CapName, string CsType, string CExpr);
-
-    private record LambdaInfo(
-        int Id, string Name, LambdaExpressionSyntax Lambda,
-        List<ParamInfo> Params, string ReturnTypeCSharp, List<CaptureInfo> Captures);
 }

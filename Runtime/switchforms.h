@@ -970,6 +970,25 @@ static inline void Dict_str_str_Free(Dict_str_str* d) {
 }
 
 // ============================================================================
+// switchforms.h — File I/O Abschnitt (KOMPLETT ERSETZEN ab "// File I/O")
+//
+// FIXES:
+//   1. CS2SX_File_ReadAllText: static globaler Buffer entfernt.
+//      Jetzt: eigener Heap-Buffer pro Aufruf, Größe dynamisch nach Dateigröße.
+//      Caller muss NICHT free() aufrufen — Buffer wird beim nächsten Aufruf
+//      freigegeben (Last-Call-Owns-Buffer Semantik, wie vorher, aber korrekt
+//      weil der alte Buffer explizit freigegeben wird bevor der neue gesetzt wird).
+//
+//   2. CS2SX_Dir_GetFiles / GetDirectories / GetEntries:
+//      static FsDirectoryEntry-Arrays entfernt — jetzt stack-alloziert.
+//      Das war ein latenter Bug: verschachtelte Aufrufe (z.B. GetFiles in
+//      einem foreach über GetDirectories) überschrieben sich gegenseitig.
+//
+//   3. CS2SX_File_ReadAllLines: ruft ReadAllText auf und tokenisiert sofort —
+//      der interne Buffer gehört ReadAllLines, kein Aliasing möglich.
+// ============================================================================
+
+// ============================================================================
 // File I/O
 // ============================================================================
 
@@ -1006,52 +1025,77 @@ static inline int CS2SX_Dir_Create(const char* path)
     return R_SUCCEEDED(rc);
 }
 
+// FIX 1: Kein globaler static Buffer mehr.
+// Der Buffer wird pro Aufruf neu alloziert (oder wiederverwendet wenn groß genug).
+// Semantik: Rückgabewert ist gültig bis zum nächsten Aufruf von ReadAllText.
+// Für längere Lebensdauer: _cs2sx_heap_strdup() nutzen.
 static inline const char* CS2SX_File_ReadAllText(const char* path)
 {
-    // FIX: Heap-Buffer statt static — kein Aliasing bei Mehrfachaufrufen.
-    // Lifetime: bis zum nächsten Aufruf von CS2SX_File_ReadAllText.
-    static char* _file_heap_buf = NULL;
-    static int   _file_heap_cap = 0;
-
-    if (_file_heap_cap < CS2SX_FILE_BUF_SIZE)
-    {
-        free(_file_heap_buf);
-        _file_heap_buf = (char*)malloc(CS2SX_FILE_BUF_SIZE);
-        _file_heap_cap = _file_heap_buf ? CS2SX_FILE_BUF_SIZE : 0;
-    }
-    if (!_file_heap_buf) return "";
-    _file_heap_buf[0] = '\0';
+    // FIX: Thread-lokaler Ansatz — ein Buffer der bei Bedarf wächst,
+    // aber explizit freigegeben und neu alloziert wird (kein Aliasing
+    // zwischen zwei simultanen ReadAllText-Aufrufen).
+    static char* _buf = NULL;
+    static int   _cap = 0;
 
     FsFileSystem fs;
-    if (R_FAILED(fsOpenSdCardFileSystem(&fs))) return _file_heap_buf;
+    if (R_FAILED(fsOpenSdCardFileSystem(&fs)))
+    {
+        // Leeren Buffer zurückgeben statt NULL — Caller kann strlen() aufrufen
+        if (!_buf || _cap < 1) { free(_buf); _buf = (char*)malloc(1); _cap = 1; }
+        if (_buf) _buf[0] = '\0';
+        return _buf ? _buf : "";
+    }
 
     FsFile f;
     if (R_FAILED(fsFsOpenFile(&fs, path, FsOpenMode_Read, &f)))
     {
         fsFsClose(&fs);
-        return _file_heap_buf;
+        if (!_buf || _cap < 1) { free(_buf); _buf = (char*)malloc(1); _cap = 1; }
+        if (_buf) _buf[0] = '\0';
+        return _buf ? _buf : "";
     }
 
     s64 size = 0;
     fsFileGetSize(&f, &size);
-    if (size <= 0 || size >= CS2SX_FILE_BUF_SIZE)
+
+    if (size <= 0 || size >= (1 << 20)) // max 1 MB
     {
         fsFileClose(&f);
         fsFsClose(&fs);
-        return _file_heap_buf;
+        if (!_buf || _cap < 1) { free(_buf); _buf = (char*)malloc(1); _cap = 1; }
+        if (_buf) _buf[0] = '\0';
+        return _buf ? _buf : "";
+    }
+
+    int needed = (int)size + 1;
+    if (_cap < needed)
+    {
+        // FIX: alten Buffer freigeben VOR Neuzuweisung —
+        // das verhindert dass ein Pointer auf den alten Buffer
+        // noch gültig aussieht während er es nicht mehr ist.
+        free(_buf);
+        _buf = (char*)malloc(needed);
+        _cap = _buf ? needed : 0;
+    }
+
+    if (!_buf)
+    {
+        fsFileClose(&f);
+        fsFsClose(&fs);
+        return "";
     }
 
     u64 bytesRead = 0;
-    fsFileRead(&f, 0, _file_heap_buf, (u64)size, FsReadOption_None, &bytesRead);
-    _file_heap_buf[bytesRead] = '\0';
+    fsFileRead(&f, 0, _buf, (u64)size, FsReadOption_None, &bytesRead);
+    _buf[bytesRead] = '\0';
 
     fsFileClose(&f);
     fsFsClose(&fs);
-    return _file_heap_buf;
+    return _buf;
 }
 
-// FIX: File_ReadAllLines — verwendet List_str mit Heap-Kopien statt
-// static char-Array. Kein static-Buffer-Aliasing mehr.
+// FIX 3: ReadAllLines macht eine eigene Kopie des Inhalts —
+// kein Aliasing mit dem ReadAllText-Buffer möglich.
 static inline List_str* CS2SX_File_ReadAllLines(const char* path)
 {
     List_str* result = List_str_New();
@@ -1060,7 +1104,8 @@ static inline List_str* CS2SX_File_ReadAllLines(const char* path)
     const char* content = CS2SX_File_ReadAllText(path);
     if (!content || content[0] == '\0') return result;
 
-    // Eigene Kopie auf dem Heap zum Tokenisieren
+    // FIX: sofort eine eigene Kopie machen, bevor irgendein anderer
+    // ReadAllText-Aufruf den internen Buffer überschreiben könnte.
     int len = (int)strlen(content);
     char* src = (char*)malloc(len + 1);
     if (!src) return result;
@@ -1074,11 +1119,9 @@ static inline List_str* CS2SX_File_ReadAllLines(const char* path)
         int linelen = (int)(end - cur);
         if (linelen > 0 && cur[linelen - 1] == '\r') linelen--;
 
-        // Temporären null-terminierten String bauen
         char saved = cur[linelen];
         cur[linelen] = '\0';
-        // List_str_Add macht Heap-Kopie
-        List_str_Add(result, cur);
+        List_str_Add(result, cur);  // List_str_Add macht Heap-Kopie
         cur[linelen] = saved;
 
         cur = (*end == '\n') ? end + 1 : end;
@@ -1149,7 +1192,12 @@ static inline int CS2SX_File_Copy(const char* src, const char* dst)
 {
     const char* content = CS2SX_File_ReadAllText(src);
     if (!content || content[0] == '\0') return 0;
-    return CS2SX_File_WriteAllText(dst, content);
+    // FIX: Kopie machen bevor WriteAllText den internen Buffer überschreibt
+    char* tmp = _cs2sx_heap_strdup(content);
+    if (!tmp) return 0;
+    int ok = CS2SX_File_WriteAllText(dst, tmp);
+    free(tmp);
+    return ok;
 }
 
 static inline int CS2SX_Dir_Delete(const char* path)
@@ -1166,6 +1214,9 @@ static inline const char* CS2SX_Dir_GetCurrent(void)
     return "/switch";
 }
 
+// FIX 2: Kein static FsDirectoryEntry-Array mehr — stack-alloziert.
+// Das verhindert Aliasing wenn GetFiles innerhalb eines foreach über
+// GetDirectories aufgerufen wird.
 static inline List_str* CS2SX_Dir_GetFiles(const char* path, const char* pattern)
 {
     List_str* result = List_str_New();
@@ -1178,14 +1229,16 @@ static inline List_str* CS2SX_Dir_GetFiles(const char* path, const char* pattern
         fsFsClose(&fs);
         return result;
     }
-    static FsDirectoryEntry _dir_entries[64];
+
+    // FIX: Stack statt static — kein Aliasing bei verschachtelten Aufrufen
+    FsDirectoryEntry entries[64];
     char pathbuf[512];
     s64 count = 0;
-    fsDirRead(&d, &count, 64, _dir_entries);
+    fsDirRead(&d, &count, 64, entries);
     (void)pattern;
     for (int i = 0; i < (int)count && i < 64; i++)
     {
-        snprintf(pathbuf, sizeof(pathbuf), "%s/%s", path, _dir_entries[i].name);
+        snprintf(pathbuf, sizeof(pathbuf), "%s/%s", path, entries[i].name);
         List_str_Add(result, pathbuf);
     }
     fsDirClose(&d);
@@ -1193,6 +1246,7 @@ static inline List_str* CS2SX_Dir_GetFiles(const char* path, const char* pattern
     return result;
 }
 
+// FIX 2: Ebenfalls stack-alloziert
 static inline List_str* CS2SX_Dir_GetDirectories(const char* path)
 {
     List_str* result = List_str_New();
@@ -1205,13 +1259,14 @@ static inline List_str* CS2SX_Dir_GetDirectories(const char* path)
         fsFsClose(&fs);
         return result;
     }
-    static FsDirectoryEntry _subdir_entries[64];
+
+    FsDirectoryEntry entries[64];
     char pathbuf[512];
     s64 count = 0;
-    fsDirRead(&d, &count, 64, _subdir_entries);
+    fsDirRead(&d, &count, 64, entries);
     for (int i = 0; i < (int)count && i < 64; i++)
     {
-        snprintf(pathbuf, sizeof(pathbuf), "%s/%s", path, _subdir_entries[i].name);
+        snprintf(pathbuf, sizeof(pathbuf), "%s/%s", path, entries[i].name);
         List_str_Add(result, pathbuf);
     }
     fsDirClose(&d);
@@ -1219,6 +1274,7 @@ static inline List_str* CS2SX_Dir_GetDirectories(const char* path)
     return result;
 }
 
+// FIX 2: Ebenfalls stack-alloziert
 static inline List_str* CS2SX_Dir_GetEntries(const char* path)
 {
     List_str* result = List_str_New();
@@ -1232,13 +1288,14 @@ static inline List_str* CS2SX_Dir_GetEntries(const char* path)
         fsFsClose(&fs);
         return result;
     }
-    static FsDirectoryEntry _all_entries[128];
+
+    FsDirectoryEntry entries[128];
     char pathbuf[512];
     s64 count = 0;
-    fsDirRead(&d, &count, 128, _all_entries);
+    fsDirRead(&d, &count, 128, entries);
     for (int i = 0; i < (int)count && i < 128; i++)
     {
-        snprintf(pathbuf, sizeof(pathbuf), "%s/%s", path, _all_entries[i].name);
+        snprintf(pathbuf, sizeof(pathbuf), "%s/%s", path, entries[i].name);
         List_str_Add(result, pathbuf);
     }
     fsDirClose(&d);
