@@ -51,7 +51,7 @@ cs2sx genstubs <libnx-include> <output>
 
 Die fertige `.nro`-Datei liegt danach im Projektverzeichnis und kann direkt auf die Switch SD-Karte kopiert werden.
 
-> Der Build ist **inkrementell** — nur geänderte `.cs`-Dateien werden neu transpiliert. Unveränderte Dateien werden übersprungen. Header-Abhängigkeiten (z.B. Änderungen an `_generics.h` oder `_interfaces.h`) werden automatisch berücksichtigt und triggern bei Bedarf einen vollständigen Rebuild der abhängigen Dateien.
+> Der Build ist **inkrementell** — nur geänderte `.cs`-Dateien werden neu transpiliert. Unveränderte Dateien werden übersprungen. Header-Abhängigkeiten (z.B. Änderungen an `_generics.h` oder `_interfaces.h`) werden automatisch berücksichtigt und triggern bei Bedarf einen vollständigen Rebuild der abhängigen Dateien. Wird eine neuere Version von `cs2sx` selbst erkannt, wird automatisch ein vollständiger Rebuild ausgelöst.
 
 ---
 
@@ -59,7 +59,7 @@ Die fertige `.nro`-Datei liegt danach im Projektverzeichnis und kann direkt auf 
 
 | Befehl | Beschreibung |
 |---|---|
-| `cs2sx new <AppName>` | Erstellt ein neues Projekt mit Vorlage |
+| `cs2sx new <AppName>` | Erstellt ein neues Projekt mit Vorlage, Platzhalter-Icon und README |
 | `cs2sx build <csproj\|folder>` | Vollständiger Build → `.nro` |
 | `cs2sx check <csproj>` | Transpile-only, kein GCC — schnelle Fehlerprüfung |
 | `cs2sx watch <csproj\|folder>` | Datei-Watcher mit automatischem Rebuild (500ms Debounce) |
@@ -77,6 +77,8 @@ transpile → C#-Dateien zu .h/.c transpilieren (inkrementell)
 compile   → GCC (aarch64-none-elf) kompilieren
 package   → nacptool + elf2nro → .nro
 ```
+
+Beim `clean`-Befehl werden auch verwaiste `.c`/`.h`-Dateien entfernt, die nach dem Umbenennen einer Klasse entstanden sind.
 
 ---
 
@@ -146,33 +148,6 @@ public class MyApp : SwitchApp
 }
 ```
 
-### Zufall & Mathematik
-
-```csharp
-public class MyApp : SwitchApp
-{
-    public override void OnInit()
-    {
-        Graphics.Init(1280, 720);
-    }
-
-    public override void OnFrame()
-    {
-        int r1 = Random.Shared.Next(0, 100);
-        int r2 = System.Random.Shared.Next(50);
-        float rf = Random.Shared.NextSingle();
-
-        float d = System.Math.Sqrt(r1 * r1 + r2 * r2);
-        float angle = Math.Atan2(r2, r1);
-        int clamped = Math.Clamp(r1, 0, 10);
-
-        Graphics.FillScreen(Color.Black);
-        Graphics.DrawText(10, 10, "r1=" + r1.ToString(), Color.White, 2);
-        Graphics.DrawText(10, 50, "dist=" + d.ToString(), Color.Cyan, 2);
-    }
-}
-```
-
 ### Multi-File-App mit statischer Hilfsklasse
 
 ```csharp
@@ -204,18 +179,18 @@ public class MinUiColorPreset
 // Program.cs
 public class MyApp : SwitchApp
 {
-    public MinUiColorPreset uiPreset;
+    private MinUiColorPreset _uiPreset;
 
     public override void OnInit()
     {
         Graphics.Init(1280, 720);
-        uiPreset = new MinUiColorPreset(Color.Gray, Color.White, Color.Cyan);
+        _uiPreset = new MinUiColorPreset(Color.Gray, Color.White, Color.Cyan);
     }
 
     public override void OnFrame()
     {
         Graphics.FillScreen(Color.Black);
-        MinUI.DrawHeader("Meine App", uiPreset);
+        MinUI.DrawHeader("Meine App", _uiPreset);
     }
 }
 ```
@@ -244,6 +219,43 @@ public class MyApp : SwitchApp
 
 > **Hinweis:** libnx verwendet intern immer 48000 Hz. Der `sampleRate`-Parameter von `Audio.Init()` wird akzeptiert aber ignoriert.
 
+### SwitchAppEx — erweiterter App-Loop
+
+`SwitchAppEx` ist eine Erweiterung von `SwitchApp` die Analog-Sticks, Touch und Akku automatisch pro Frame aktualisiert:
+
+```csharp
+public class MyApp : SwitchAppEx
+{
+    public override void OnInit()
+    {
+        Graphics.Init(1280, 720);
+    }
+
+    public override void OnFrame()
+    {
+        Graphics.FillScreen(Color.Black);
+
+        // Sticks direkt verfügbar (automatisch aktualisiert)
+        if (stickL.x > 5000)
+            Graphics.DrawText(100, 100, "Stick rechts", Color.Green, 2);
+
+        // Touch direkt verfügbar
+        for (int i = 0; i < touch.count; i++)
+            Graphics.FillCircle(touch.x[i], touch.y[i], 20, Color.Red);
+
+        // Akku (wird alle ~300 Frames aktualisiert)
+        Graphics.DrawText(10, 680, $"Akku: {battery.percent}%", Color.White, 1);
+    }
+}
+```
+
+| Feld | Typ | Beschreibung |
+|---|---|---|
+| `stickL` | `StickPos` | Linker Analog-Stick (automatisch pro Frame) |
+| `stickR` | `StickPos` | Rechter Analog-Stick (automatisch pro Frame) |
+| `touch` | `TouchState` | Touch-Screen-Zustand (automatisch pro Frame) |
+| `battery` | `BatteryInfo` | Akkustand (alle ~300 Frames aktualisiert) |
+
 ---
 
 ## Unterstützte Features
@@ -264,6 +276,8 @@ public class MyApp : SwitchApp
 | `int[]`, `float[]`, `string[]` | ✅ | Stack-Arrays mit Initializer |
 | `int[,]` mehrdimensionale Arrays | ✅ | wird als flaches 1D-Array transpiliert |
 | `IEnumerable<T>`, `IReadOnlyList<T>` | ✅ | wird als `List<T>*` behandelt |
+| `params T[]` | ✅ | wird als Pointer + Count-Parameter transpiliert |
+| Tuple-Return `(int, string)` | ✅ | wird als generierter C-Struct transpiliert |
 | `StickPos` | ✅ | Analog-Stick-Position (`x`, `y`) |
 | `TouchState` | ✅ | Touch-Screen-Zustand (`count`, `x[]`, `y[]`, `id[]`) |
 | `BatteryInfo` | ✅ | Akkustand (`percent`, `charging`, `connected`) |
@@ -294,6 +308,20 @@ int v = x ?? 0;            // → (x != NULL ? *x : 0)
 x?.ToString();             // → (x != NULL ? Int_ToString(*x) : NULL)
 ```
 
+### Tuple-Rückgabe
+
+```csharp
+public (int x, int y) GetPos()
+{
+    return (100, 200);
+}
+
+var pos = GetPos();
+// pos.x, pos.y direkt verfügbar
+```
+
+→ Wird als generierter C-Struct `_Tuple2_int_int` transpiliert.
+
 ### String-Methoden
 
 | Methode | Status |
@@ -310,6 +338,7 @@ x?.ToString();             // → (x != NULL ? Int_ToString(*x) : NULL)
 | `IsNullOrEmpty`, `IsNullOrWhiteSpace` | ✅ |
 | String-Interpolation `$"..."` | ✅ |
 | `String.Length` | ✅ | → `strlen()` |
+| `string.Compare` mit `StringComparison` | ✅ | `OrdinalIgnoreCase` wird korrekt erkannt |
 
 ### Parsing
 
@@ -341,6 +370,21 @@ if (int.TryParse(input, out var n))
     Console.WriteLine($"Parsed: {n}");
 ```
 
+### params-Parameter
+
+```csharp
+public static void Log(string prefix, params string[] messages)
+{
+    for (int i = 0; i < messages_count; i++)
+        Console.WriteLine(prefix + messages[i]);
+}
+
+Log("INFO", "Start", "Ready");
+// → MyClass_Log("INFO", args, 2)
+```
+
+`params`-Parameter werden als Pointer + automatisch generierter `_count`-Parameter transpiliert.
+
 ---
 
 ## Zufall
@@ -348,15 +392,13 @@ if (int.TryParse(input, out var n))
 CS2SX verwendet einen eingebauten LCG-Zufallsgenerator ohne externe Abhängigkeiten.
 
 ```csharp
-// Alle folgenden Schreibweisen funktionieren:
-int n  = Random.Shared.Next(0, 100);     // Zahl zwischen 0 und 99
-int n2 = Random.Shared.Next(50);         // Zahl zwischen 0 und 49
-int n3 = System.Random.Shared.Next();    // Beliebige positive Zahl
-float f = Random.Shared.NextSingle();    // Float zwischen 0.0 und 1.0
+int n  = Random.Shared.Next(0, 100);
+int n2 = Random.Shared.Next(50);
+int n3 = System.Random.Shared.Next();
+float f = Random.Shared.NextSingle();
 
-// Instanz-Aufrufe werden ebenso unterstützt:
 var rng = new Random();
-int n4 = rng.Next(1, 7);                 // Würfelwurf
+int n4 = rng.Next(1, 7);
 ```
 
 | Methode | C-Ausgabe |
@@ -371,19 +413,19 @@ int n4 = rng.Next(1, 7);                 // Würfelwurf
 
 ## Mathematik
 
-Alle Methoden unterstützen sowohl die Kurzform `Math.X` als auch die vollständig qualifizierte Form `System.Math.X`.
+Alle Methoden unterstützen sowohl die Kurzform `Math.X` als auch `System.Math.X`.
 
 ```csharp
 float d    = Math.Sqrt(x * x + y * y);
 float s    = System.Math.Sin(angle);
 int   v    = Math.Clamp(value, 0, 100);
 int   sign = Math.Sign(delta);
-float r    = Math.Round(3.7f);     // → 4.0f
+float r    = Math.Round(3.7f);
 ```
 
 | C#-Methode | C-Ausgabe |
 |---|---|
-| `Math.Abs` / `System.Math.Abs` | `abs(x)` |
+| `Math.Abs` | `abs(x)` |
 | `Math.Min` / `Max` | `MIN(a,b)` / `MAX(a,b)` |
 | `Math.Clamp` | `CLAMP(v,lo,hi)` |
 | `Math.Sqrt` | `sqrtf(x)` |
@@ -411,7 +453,7 @@ uint myColor  = Color.RGB(255, 128, 0);
 uint myColorA = Color.RGBA(255, 128, 0, 200);
 
 // Alpha-Variante einer bestehenden Farbe
-uint halfBlack = Color.Black.WithAlpha(128);  // → Color_WithAlpha(COLOR_BLACK, 128)
+uint halfBlack = Color.Black.WithAlpha(128);
 uint semiRed   = Color.Red.WithAlpha(200);
 ```
 
@@ -451,7 +493,7 @@ Aktivierung: `Graphics.Init(1280, 720)` in `OnInit()` aufrufen.
 | `Graphics.FillRoundedRect(x, y, w, h, r, color)` | Gefülltes abgerundetes Rechteck |
 | `Graphics.DrawGrid(x, y, w, h, cellW, cellH, color)` | Gitter |
 | `Graphics.DrawTextShadow(x, y, text, color, shadow, scale)` | Text mit 1px-Schatten |
-| `Graphics.DrawPolygon(xs[], ys[], count, color)` | Beliebiges konvexes Polygon |
+| `Graphics.DrawPolygon(xs[], ys[], count, color)` | Beliebiges Polygon |
 
 ### Alpha-Blending
 
@@ -466,22 +508,22 @@ Aktivierung: `Graphics.Init(1280, 720)` in `OnInit()` aufrufen.
 ## Audio
 
 ```csharp
-Audio.Init(44100);                    // Initialisieren
-Audio.PlayTone(440.0f, 0.5f, 500);   // Frequenz (Hz), Lautstärke (0-1), Dauer (ms)
-Audio.SetVolume(0.8f);               // Master-Lautstärke setzen (0.0–1.0)
-Audio.Stop();                         // Wiedergabe stoppen
-Audio.Exit();                         // Audio-System freigeben
+Audio.Init(44100);
+Audio.PlayTone(440.0f, 0.5f, 500);
+Audio.SetVolume(0.8f);
+Audio.Stop();
+Audio.Exit();
 ```
 
-| Methode | C-Ausgabe | Beschreibung |
-|---|---|---|
-| `Audio.Init(sampleRate)` | `CS2SX_Audio_Init(sampleRate)` | PCM-Audio initialisieren |
-| `Audio.PlayTone(freq, amp, ms)` | `CS2SX_Audio_PlayTone(freq, amp, ms)` | Sinuston erzeugen |
-| `Audio.SetVolume(vol)` | `CS2SX_Audio_SetVolume(vol)` | Master-Lautstärke |
-| `Audio.Stop()` | `CS2SX_Audio_Stop()` | Wiedergabe stoppen |
-| `Audio.Exit()` | `CS2SX_Audio_Exit()` | Puffer freigeben |
+| Methode | Beschreibung |
+|---|---|
+| `Audio.Init(sampleRate)` | PCM-Audio initialisieren |
+| `Audio.PlayTone(freq, amp, ms)` | Sinuston erzeugen (Frequenz Hz, Amplitude 0–1, Dauer ms) |
+| `Audio.SetVolume(vol)` | Master-Lautstärke setzen (0.0–1.0) |
+| `Audio.Stop()` | Wiedergabe stoppen |
+| `Audio.Exit()` | Audio-System und Puffer freigeben |
 
-> `PlayTone` gibt den Puffer asynchron ab und blockiert nicht beim ersten Aufruf. Intern werden 4 zirkuläre PCM-Puffer à 4096 Samples verwendet (Stereo, 16-bit).
+> Intern werden 4 zirkuläre PCM-Puffer à 4096 Samples verwendet (Stereo, 16-bit, 48000 Hz).
 
 ---
 
@@ -516,13 +558,8 @@ TouchState touch = Input.GetTouch();
 
 if (touch.count > 0)
 {
-    int x = touch.x[0];
-    int y = touch.y[0];
-    Graphics.FillCircle(x, y, 20, Color.Red);
+    Graphics.FillCircle(touch.x[0], touch.y[0], 20, Color.Red);
 }
-
-for (int i = 0; i < touch.count && i < 10; i++)
-    Graphics.FillCircle(touch.x[i], touch.y[i], 15, Color.Green);
 ```
 
 | Feld | Typ | Beschreibung |
@@ -551,8 +588,8 @@ Graphics.DrawText(10, 10, $"Akku: {battery.percent}%", Color.White, 1);
 ### App beenden
 
 ```csharp
-Environment.Exit(0);   // Beendet die App sauber (→ exit(0))
-Environment.Exit(1);   // Beendet mit Fehlercode
+Environment.Exit(0);
+Environment.Exit(1);
 ```
 
 ---
@@ -565,7 +602,7 @@ Alle Pfade müssen absolut sein und mit `/switch/` beginnen.
 
 | Methode | Beschreibung |
 |---|---|
-| `File.ReadAllText(path)` | Datei lesen (max. 32768 Bytes) |
+| `File.ReadAllText(path)` | Datei lesen (max. 1 MB) |
 | `File.ReadAllLines(path)` | Datei zeilenweise lesen → `List<string>` |
 | `File.WriteAllText(path, content)` | Datei schreiben (überschreibt) |
 | `File.AppendAllText(path, content)` | An Datei anhängen |
@@ -608,7 +645,7 @@ Alle Pfade müssen absolut sein und mit `/switch/` beginnen.
 | `switch` (Wert und Pattern) | ✅ |
 | `switch` mit `const`-Feldern als case-Labels | ✅ |
 | `break`, `continue`, `return` | ✅ |
-| `try` / `catch` | ✅ (via `setjmp`) |
+| `try` / `catch` | ✅ (via `setjmp/longjmp`) |
 | `using` (mit `IDisposable`) | ✅ |
 | `??` Null-Coalescing | ✅ |
 | `??=` Null-Coalescing-Zuweisung | ✅ |
@@ -628,8 +665,6 @@ foreach (var kvp in scores)
 }
 ```
 
-→ wird als Index-Iteration über `keys[]` und `vals[]` transpiliert.
-
 ### const-Felder als case-Labels
 
 ```csharp
@@ -643,7 +678,7 @@ public class Grid
     {
         switch (cell)
         {
-            case WALL:  Graphics.SetPixel(x, y, Color.Gray); break;
+            case WALL:  Graphics.SetPixel(x, y, Color.Gray);  break;
             case FOOD:  Graphics.SetPixel(x, y, Color.Green); break;
             case EMPTY: break;
         }
@@ -651,7 +686,7 @@ public class Grid
 }
 ```
 
-`const`-Felder werden via Roslyn SemanticModel erkannt und zu `ClassName_WALL` etc. aufgelöst, was in C als `static const int` gültig ist.
+`const`-Felder werden via Roslyn SemanticModel erkannt und zu `ClassName_WALL` etc. aufgelöst.
 
 ---
 
@@ -692,22 +727,23 @@ if (x is not null) { ... }
 | `static readonly` Array-Felder | ✅ | → `static const T ClassName_Feld[] = {...}` |
 | Auto-Properties `{ get; set; }` | ✅ | → `f_`-prefixed Struct-Felder |
 | Properties mit Body (Getter/Setter) | ✅ | → `ClassName_get_X()` / `ClassName_set_X()` |
+| Expression-body Properties (`=> expr`) | ✅ | → Getter-Funktion |
 | `IDisposable` / `using` | ✅ | → `Dispose()`-Aufruf am Blockende |
 | Enums mit Werten | ✅ | |
 | Value-type `struct` | ✅ | → C Stack-Struct, kein `malloc` |
+| `IEquatable<T>` auf Structs | ✅ | → `StructName_Equals(a, b)` via `memcmp` |
 | Explizite Konstruktoren mit Parametern | ✅ | → `ClassName_New(params...)` |
-| Generics | ✅ | Klassen-Expansion zur Build-Zeit (z.B. `Stack<int>` → `Stack_int`) |
-| `interface` | ✅ | → vtable-Wrapper-Struct mit `as_IFace()`-Konverter |
-| Extension-Methoden | ✅ | → freie C-Funktionen mit erweitertem Receiver |
-| `async` / `await` | ⚠️ | Synchroner Fallback mit Transpiler-Warning — kein echtes Threading |
+| Generics | ✅ | Klassen-Expansion zur Build-Zeit |
+| `interface` | ✅ | → vtable-Wrapper-Struct |
+| Extension-Methoden | ✅ | → freie C-Funktionen |
+| `using static` | ✅ | wird via `UsingStaticResolver` aufgelöst |
+| `async` / `await` | ⚠️ | Synchroner Fallback mit Warning |
 
 ### Felder: mit und ohne `_` Prefix
 
-Beide Konventionen werden korrekt transpiliert:
-
 ```csharp
-private uint _bgColor;       // → self->f_bgColor
-public  uint Background;     // → self->f_Background
+private uint _bgColor;   // → self->f_bgColor
+public  uint Background; // → self->f_Background
 ```
 
 ### static readonly Array-Felder
@@ -719,24 +755,6 @@ public class Snake
     private static readonly int[] DY = { 0, 1,  0, -1 };
 }
 // → static const int Snake_DX[] = {1, 0, -1, 0};
-//   static const int Snake_DY[] = {0, 1, 0, -1};
-```
-
-### static class
-
-```csharp
-// MinUI.cs
-public static class MinUI
-{
-    public static void DrawHeader(string title, MinUiColorPreset preset)
-    {
-        Graphics.FillRect(1, 1, 1278, 50, preset.Background);
-        Graphics.DrawText(10, 20, title, preset.Foreground, 2);
-    }
-}
-
-// Aufruf in Program.cs:
-MinUI.DrawHeader("Titel", myPreset);  // → MinUI_DrawHeader("Titel", myPreset)
 ```
 
 ### Value-type Structs
@@ -748,35 +766,13 @@ public struct Vec2
     public float Y;
 }
 
-Vec2 pos = new Vec2 { X = 1.0f, Y = 2.0f };  // → Vec2 pos = { .X = 1.0f, .Y = 2.0f };
-Vec2 arr = new Vec2[10];                        // → Vec2 arr[10] = {0};  (Stack-Array!)
+Vec2 pos = new Vec2 { X = 1.0f, Y = 2.0f };
+Vec2 arr = new Vec2[10];   // → Vec2 arr[10] = {0};
 ```
 
-Structs werden als C Stack-Structs erzeugt — kein `malloc`, kein Pointer. Methoden auf Structs werden als freie C-Funktionen mit `StructName* self`-Parameter transpiliert.
-
-### Explizite Konstruktoren
-
-```csharp
-public class MinUiColorPreset
-{
-    public uint Background { get; set; }
-    public uint Foreground { get; set; }
-
-    public MinUiColorPreset(uint background, uint foreground)
-    {
-        Background = background;
-        Foreground = foreground;
-    }
-}
-
-// Aufruf:
-var preset = new MinUiColorPreset(Color.Gray, Color.White);
-// → MinUiColorPreset_New(COLOR_GRAY, COLOR_WHITE)
-```
+Structs werden als C Stack-Structs erzeugt — kein `malloc`. Methoden auf Structs werden als freie C-Funktionen mit `StructName* self`-Parameter transpiliert. `IEquatable<T>` wird automatisch als `memcmp`-basierte `Equals`-Funktion implementiert.
 
 ### Generics
-
-Generische Klassen werden zur Build-Zeit für jede verwendete Typ-Kombination expandiert:
 
 ```csharp
 public class Stack<T>
@@ -788,7 +784,6 @@ public class Stack<T>
     public T Pop() { return _items[--_top]; }
 }
 
-// Verwendung:
 var intStack = new Stack<int>();
 var strStack = new Stack<string>();
 // → Stack_int_New() / Stack_str_New() in _generics.h
@@ -803,17 +798,15 @@ public interface IRenderable
     int GetWidth();
 }
 
-public class Button : IRenderable
+public class MyButton : IRenderable
 {
     public void Draw() { /* ... */ }
     public int GetWidth() { return 100; }
 }
 
-IRenderable r = button.as_IRenderable();
+IRenderable r = myButton.as_IRenderable();
 r.Draw();  // → r->vtable->Draw(r->obj)
 ```
-
-Interfaces werden als vtable-Wrapper-Structs expandiert (`IRenderable_vtable` + `IRenderable`). Jede implementierende Klasse erhält eine `ClassName_as_IFace()`-Konverter-Funktion.
 
 ### Extension-Methoden
 
@@ -824,10 +817,20 @@ public static class IntExtensions
     public static int Clamp(this int x, int min, int max) => Math.Clamp(x, min, max);
 }
 
-// Verwendung:
-if (score.IsEven()) { ... }      // → IntExtensions_IsEven(score)
-int v = speed.Clamp(0, 100);    // → IntExtensions_Clamp(speed, 0, 100)
+if (score.IsEven()) { ... }   // → IntExtensions_IsEven(score)
+int v = speed.Clamp(0, 100); // → IntExtensions_Clamp(speed, 0, 100)
 ```
+
+### using static
+
+```csharp
+using static System.Math;
+
+float d = Sqrt(x * x + y * y);  // → sqrtf(...)
+float s = Sin(angle);            // → sinf(...)
+```
+
+`using static`-Importe werden via `UsingStaticResolver` aufgelöst und korrekt an die zuständigen Handler weitergeleitet.
 
 ### Eigene Controls
 
@@ -838,14 +841,10 @@ public class ValueMeter : Control
     private int _maxValue;
     private int _width;
 
-    public void SetValue(int v)  { _value    = v; }
-    public void SetMax(int max)  { _maxValue = max; }
-    public void SetWidth(int w)  { _width    = w; }
-
     public override void Draw()
     {
         int filled = _maxValue > 0 ? (_value * _width) / _maxValue : 0;
-        Console.Write(string.Format("\x1b[{0};{1}H[", base.Y, base.X));
+        Console.Write($"\x1b[{base.Y};{base.X}H[");
         for (int i = 0; i < _width; i++)
             Console.Write(i < filled ? "#" : "-");
         Console.Write("]");
@@ -853,33 +852,6 @@ public class ValueMeter : Control
 
     public override void Update(ulong kDown, ulong kHeld) { }
 }
-```
-
-### Vererbung & vtable
-
-```csharp
-public abstract class Animal
-{
-    public abstract void Speak();
-    public virtual void Update() { }
-}
-
-public class Dog : Animal
-{
-    public override void Speak() { Console.WriteLine("Woof!"); }
-    public override void Update() { }
-}
-```
-
-→ Generiert `Animal_vtable`-Struct mit Funktionszeigern + `Dog_vtable_instance`. Virtuelle Aufrufe werden zu `animal->vtable->Speak(animal)` transpiliert.
-
-### Methoden-Naming
-
-Eigene Methoden werden unabhängig von Groß-/Kleinschreibung korrekt transpiliert:
-
-```csharp
-public void buildHeader(string title) { }   // → MyApp_buildHeader(self, title)
-public void UpdateScore(int s) { }          // → MyApp_UpdateScore(self, s)
 ```
 
 ---
@@ -901,20 +873,21 @@ Im Framebuffer-Modus sind Console-Controls nicht sichtbar. Im Console-Modus steh
 MeinProjekt/
 ├── MeinProjekt.csproj
 ├── cs2sx.json
-├── icon.jpg                    — App-Icon (256x256 JPEG, wird beim Erstellen automatisch angelegt)
-├── README.md                   — wird beim Erstellen automatisch generiert
-├── Program.cs                  — Haupt-App (eine Klasse pro Datei!)
+├── icon.jpg                    — App-Icon (256x256 JPEG)
+├── README.md
+├── Program.cs
 ├── MeineKlasse.cs
 └── cs2sx_out/                  — generierter C-Code (nicht manuell bearbeiten)
-    ├── _forward.h              — Forward-Declarations aller Typen (inkl. expandierter Generics)
+    ├── _forward.h              — Forward-Declarations aller Typen
     ├── _generics.h / .c        — expandierte Generic-Klassen
     ├── _interfaces.h           — vtable-Structs für Interfaces
-    ├── switchforms.c           — Runtime-Globals (String-Pool, Audio-State, Framebuffer)
+    ├── switchforms.c           — Runtime-Globals
     ├── switchforms.h           — Runtime: UI, Collections, String-Utils, File I/O
     ├── switchapp.h             — Runtime: SwitchApp-Loop, Grafik, Input, Audio
+    ├── switchapp_ext.h         — SwitchAppEx + DrawPolygon
     ├── main.c                  — Auto-generierter Einstiegspunkt
     ├── MeineKlasse.h/.c        — Transpilierter Code
-    └── MeinProjekt.elf         — Intermediate ELF
+    └── MeinProjekt.elf
 ```
 
 `cs2sx.json`:
@@ -928,8 +901,6 @@ MeinProjekt/
     "icon": "icon.jpg"
 }
 ```
-
-> `icon.jpg` wird beim `cs2sx new` automatisch als Platzhalter angelegt. Ersetze ihn mit deinem eigenen 256×256 JPEG-Icon.
 
 ---
 
@@ -956,82 +927,81 @@ Game.c:88:5: error: 'foo' undeclared
 ```
 CS2SX/
 ├── Core/
-│   ├── TypeRegistry.cs         — einzige Quelle aller Typ-Mappings
-│   ├── TranspilerContext.cs    — geteilter Zustand, kein globaler State
-│   ├── TranspileResult.cs      — Rückgabeobjekt mit Code + Diagnostics
-│   └── DiagnosticReporter.cs   — Warnings/Errors + GCC Source-Mapping
+│   ├── TypeRegistry.cs              — einzige Quelle aller Typ-Mappings
+│   ├── TranspilerContext.cs         — geteilter Zustand, kein globaler State
+│   ├── TranspileResult.cs           — Rückgabeobjekt mit Code + Diagnostics
+│   └── DiagnosticReporter.cs        — Warnings/Errors + GCC Source-Mapping
 ├── Transpiler/
 │   ├── Handlers/
-│   │   ├── InvocationDispatcher.cs   — orchestriert alle Handler, Warning bei unbekannten Calls
-│   │   ├── AsyncHandler.cs           — Task.Run/Delay → synchroner Fallback
-│   │   ├── LibNxHandler.cs           — LibNX.X() Aufrufe
-│   │   ├── InputHandler.cs           — Input.IsDown/IsHeld/IsUp
-│   │   ├── InputExtHandler.cs        — Sticks, Touch
-│   │   ├── ConsoleHandler.cs         — Console.Write/WriteLine
-│   │   ├── EnvironmentHandler.cs     — Environment.Exit, Console.Clear
-│   │   ├── FormHandler.cs            — Form.Add
-│   │   ├── GraphicsHandler.cs        — Graphics.X Basis-Primitiven
-│   │   ├── GraphicsExtHandler.cs     — Dreieck, Ellipse, Alpha, Grid
-│   │   ├── ColorHandler.cs           — Color.RGB, Color.WithAlpha
-│   │   ├── AudioHandler.cs           — Audio.Init/PlayTone/Stop
-│   │   ├── RandomHandler.cs          — Random.Shared.Next, NextSingle
-│   │   ├── MathHandler.cs            — Math.X + System.Math.X
-│   │   ├── FileHandler.cs            — File.X + Directory.X
-│   │   ├── DirectoryExtHandler.cs    — GetDirectories, GetEntries
-│   │   ├── PathHandler.cs            — Path.GetFileName, Combine
-│   │   ├── SystemExtHandler.cs       — System.GetBattery
-│   │   ├── ParseHandler.cs           — int.Parse, float.TryParse
-│   │   ├── ListHandler.cs            — List<T> Methoden
-│   │   ├── DictionaryHandler.cs      — Dictionary<K,V> Methoden
-│   │   ├── StringBuilderHandler.cs   — StringBuilder Methoden
-│   │   ├── StringMethodHandler.cs    — String.X + Instanz-Methoden
-│   │   ├── StringConcatHandler.cs    — "string" + variable → snprintf
-│   │   ├── FieldMethodHandler.cs     — _field.Method() Aufrufe
-│   │   ├── ExtensionMethodHandler.cs — Extension-Methoden via SemanticModel
-│   │   ├── StaticClassHandler.cs     — static class Aufrufe (MinUI.X)
-│   │   └── OwnMethodHandler.cs       — eigene Methoden
+│   │   ├── InvocationDispatcher.cs  — orchestriert alle Handler
+│   │   ├── AsyncHandler.cs          — Task.Run/Delay → synchroner Fallback
+│   │   ├── AudioHandler.cs          — Audio.Init/PlayTone/Stop
+│   │   ├── ColorHandler.cs          — Color.RGB, Color.WithAlpha
+│   │   ├── ConsoleHandler.cs        — Console.Write/WriteLine
+│   │   ├── DictionaryHandler.cs     — Dictionary<K,V> Methoden
+│   │   ├── DirectoryExtHandler.cs   — GetDirectories, GetEntries
+│   │   ├── EnvironmentHandler.cs    — Environment.Exit, Console.Clear
+│   │   ├── ExtensionMethodHandler.cs— Extension-Methoden via SemanticModel
+│   │   ├── FieldMethodHandler.cs    — _field.Method() Aufrufe
+│   │   ├── FileHandler.cs           — File.X + Directory.X
+│   │   ├── FormHandler.cs           — Form.Add
+│   │   ├── GraphicsExtHandler.cs    — Dreieck, Ellipse, Alpha, Grid
+│   │   ├── GraphicsHandler.cs       — Graphics.X Basis-Primitiven
+│   │   ├── InputExtHandler.cs       — Sticks, Touch
+│   │   ├── InputHandler.cs          — Input.IsDown/IsHeld/IsUp
+│   │   ├── LibNxHandler.cs          — LibNX.X() Aufrufe
+│   │   ├── ListHandler.cs           — List<T> Methoden
+│   │   ├── MathHandler.cs           — Math.X + System.Math.X
+│   │   ├── OwnMethodHandler.cs      — eigene Methoden
+│   │   ├── ParseHandler.cs          — int.Parse, float.TryParse
+│   │   ├── PathHandler.cs           — Path.GetFileName, Combine
+│   │   ├── RandomHandler.cs         — Random.Shared.Next, NextSingle
+│   │   ├── StaticClassHandler.cs    — static class Aufrufe
+│   │   ├── StringBuilderHandler.cs  — StringBuilder Methoden
+│   │   ├── StringConcatHandler.cs   — "string" + variable → snprintf
+│   │   ├── StringMethodHandler.cs   — String.X + Instanz-Methoden
+│   │   └── SystemExtHandler.cs      — System.GetBattery
 │   ├── Strategies/
 │   │   ├── SwitchAppConstructorStrategy.cs
 │   │   ├── ControlSubclassConstructorStrategy.cs
 │   │   └── DefaultConstructorStrategy.cs
 │   ├── Writers/
 │   │   ├── ExpressionWriter.cs
-│   │   ├── StatementWriter.cs
 │   │   ├── FormatStringBuilder.cs
+│   │   ├── NullableAndPatternWriter.cs
+│   │   ├── StatementWriter.cs
 │   │   ├── StringEscaper.cs
-│   │   ├── TypeInferrer.cs
 │   │   ├── StructWriter.cs
-│   │   └── NullableAndPatternWriter.cs
+│   │   └── TypeInferrer.cs
 │   ├── CSharpToC.cs
-│   ├── GenericExpander.cs          — Generics zur Build-Zeit expandieren
-│   ├── GenericInstantiationCollector.cs — Instantiierungen sammeln
-│   ├── InterfaceExpander.cs        — Interface → vtable-Wrapper
+│   ├── GenericExpander.cs
+│   ├── GenericInstantiationCollector.cs
+│   ├── InterfaceExpander.cs
 │   ├── LambdaLifter.cs
 │   ├── PropertyWriter.cs
+│   ├── UsingStaticResolver.cs
 │   └── VTableBuilder.cs
 ├── Build/
-│   ├── BuildPipeline.cs        — 7-Stage Build-Pipeline mit Live-Renderer
-│   ├── CCompiler.cs            — GCC-Wrapper
-│   ├── CheckCommand.cs         — Transpile-only Check
-│   ├── CleanCommand.cs         — cs2sx clean
-│   ├── WatchCommand.cs         — Datei-Watcher mit Debounce + Terminal-Restore
-│   ├── EntryPointGenerator.cs  — main.c generieren
-│   ├── NacpBuilder.cs          — nacptool-Wrapper
-│   ├── NroBuilder.cs           — elf2nro-Wrapper
-│   ├── ProjectConfig.cs        — cs2sx.json lesen
-│   ├── ProjectCreator.cs       — cs2sx new (mit Default-Icon + README)
-│   ├── ProjectReader.cs        — .csproj parsen
-│   ├── RuntimeExporter.cs      — eingebettete Runtime-Dateien exportieren
-│   ├── SemanticModelBuilder.cs — Roslyn Compilation + SemanticModels
-│   └── StubGenerator.cs        — LibNX-Stubs aus .h-Dateien generieren
-├── Cli/
-│   ├── CliArgs.cs
-│   └── CliParser.cs
+│   ├── BuildPipeline.cs
+│   ├── CCompiler.cs
+│   ├── CheckCommand.cs
+│   ├── CleanCommand.cs
+│   ├── EntryPointGenerator.cs
+│   ├── NacpBuilder.cs
+│   ├── NroBuilder.cs
+│   ├── ProjectConfig.cs
+│   ├── ProjectCreator.cs
+│   ├── ProjectReader.cs
+│   ├── RuntimeExporter.cs
+│   ├── SemanticModelBuilder.cs
+│   ├── StubGenerator.cs
+│   └── WatchCommand.cs
 └── Runtime/
-    ├── switchforms.h    — UI-Controls, Collections, String-Utils, File I/O
-    ├── switchforms.c    — ODR-sichere Globaldefinitionen (Pool, Audio-State, Framebuffer)
-    ├── switchapp.h      — SwitchApp-Loop, Framebuffer, Graphics, Input, System
-    └── AudioStub.h      — PCM-Audio via libnx audout
+    ├── switchforms.h      — UI-Controls, Collections, String-Utils, File I/O
+    ├── switchforms.c      — ODR-sichere Globaldefinitionen
+    ├── switchapp.h        — SwitchApp-Loop, Framebuffer, Graphics, Input, System
+    ├── switchapp_ext.h    — SwitchAppEx, DrawPolygon
+    └── AudioStub.h        — PCM-Audio via libnx audout
 ```
 
 ### Neuen Feature-Handler hinzufügen
@@ -1060,36 +1030,25 @@ new MeinHandler(),
 
 Eintrag in `Core/TypeRegistry.cs` ergänzen — `s_primitives`, `s_controlTypes` oder `s_libNxStructs`. Für Stack-Struct-Rückgabetypen zusätzlich in `TypeInferrer.cs` → `InferInvocation()`.
 
-### GCC-Fehler auf C#-Quellzeilen zurückverfolgen
-
-`DiagnosticReporter` verwaltet eine Source-Map von generierten C-Zeilen auf Original-C#-Zeilen. GCC-Fehlermeldungen werden automatisch mit dem zugehörigen C#-Snippet angereichert. `CurrentCFile` muss in `BuildPipeline` vor dem Transpile-Pass gesetzt werden (geschieht automatisch).
-
 ---
 
 ## Bekannte Einschränkungen
 
-- **Ein `SwitchApp`-Subtyp pro Projekt**
-- **Eine Klasse pro `.cs`-Datei** — keine verschachtelten Klassen
-- **`string`-Puffer 512 Bytes** — Dateipuffer 32768 Bytes
-- **Bitmap-Font 8×8** — kein Anti-Aliasing, kein TrueType
-- **Kein Heap-GC** — allokierte Objekte (`*_New()`) manuell freigeben
-- **Lambda-Captures** — nur Werttypen und primitive Captures zuverlässig
-- **`is`-Typ-Pattern** — erfordert `TypeName_Is()`-Hilfsfunktion in der Runtime
-- **Mehrdimensionale Arrays** — `int[,]` wird als flaches 1D-Array transpiliert
-- **`async`/`await`** — synchroner Fallback mit Warning, kein echtes Threading
-
----
-
-## Nicht unterstützt
-
-| Feature |
-|---|
-| LINQ |
-| `params`-Parameter (nur teilweise) |
-| Tuple-Return / Dekonstruktion (experimentell) |
-| `Console.ReadLine` / Keyboard-Input |
-| Mehrfachvererbung |
-| `delegate` als vollständiger Typ |
+| Einschränkung | Details |
+|---|---|
+| Ein `SwitchApp`-Subtyp pro Projekt | Nur eine Haupt-App-Klasse |
+| Eine Klasse pro `.cs`-Datei | Keine verschachtelten Klassen |
+| String-Puffer 512 Bytes | Für `snprintf`-basierte Interpolation |
+| Datei-Lesepuffer max. 1 MB | `File.ReadAllText` |
+| Bitmap-Font 8×8 | Kein Anti-Aliasing, kein TrueType |
+| Kein Heap-GC | Allokierte Objekte (`*_New()`) leben bis `_Free()` |
+| Lambda-Captures | Nur Werttypen und primitive Captures zuverlässig |
+| `is`-Typ-Pattern | Erfordert `TypeName_Is()`-Funktion in der Runtime |
+| Mehrdimensionale Arrays | `int[,]` wird als flaches 1D-Array transpiliert |
+| `async`/`await` | Synchroner Fallback mit Warning, kein echtes Threading |
+| LINQ | Nicht unterstützt |
+| Mehrfachvererbung | Nicht unterstützt |
+| `Console.ReadLine` | Nicht unterstützt (kein Keyboard-Input auf Switch) |
 
 ---
 

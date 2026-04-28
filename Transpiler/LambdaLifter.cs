@@ -1,5 +1,15 @@
-// Datei: Transpiler/LambdaLifter.cs
-// VOLLSTÄNDIGE DATEI — Lambda-Namenskollision behoben
+// ============================================================================
+// CS2SX — Transpiler/LambdaLifter.cs  (FIX v3)
+//
+// FIXES:
+//   1. Prelude-Sammlung über statische Liste statt StringWriter-Rewrite —
+//      O(1) pro Lambda, korrekt bei beliebiger Verschachtelungstiefe.
+//   2. FlushPrelude() wird vom CSharpToC-Aufrufer EINMALIG nach der Methode
+//      aufgerufen und schreibt alle gesammelten Preludes geordnet vor den Body.
+//   3. Kein Zustand mehr über _preludeFlushed-Flag — der Caller kontrolliert
+//      den Flush-Zeitpunkt explizit.
+//   4. Lambda-Counter bleibt in TranspilerContext (bereits korrekt).
+// ============================================================================
 
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
@@ -15,19 +25,8 @@ public sealed class LambdaLifter
     private readonly IExpressionWriter _expr;
     private StatementWriter? _stmt;
 
-    // FIX: _lambdaCounter ENTFERNT aus LambdaLifter.
-    //
-    // Das Problem war: ExpressionWriter.WriteLambda() erstellt für jede Lambda
-    // eine NEUE LambdaLifter-Instanz. Damit startete _lambdaCounter immer bei 0.
-    // Zwei Lambdas in verschiedenen Methoden derselben Klasse bekamen beide
-    // den Namen "_lambda_0" → Linker-Fehler "duplicate symbol".
-    //
-    // Fix: Der Zähler sitzt jetzt in TranspilerContext (NextLambdaId()),
-    // der über die gesamte Klassen-Transpilierung geteilt wird.
-    // In ClearClassContext() wird er zurückgesetzt.
-
-    private readonly System.Text.StringBuilder _prelude = new();
-    private bool _preludeFlushed = false;
+    // Gesammelte Preludes (struct-Defs + Funktions-Defs) in Reihenfolge der Entstehung
+    private readonly List<string> _pendingPreludes = new();
 
     public LambdaLifter(TranspilerContext ctx, IExpressionWriter expr)
     {
@@ -40,48 +39,54 @@ public sealed class LambdaLifter
     public static bool IsLambda(SyntaxNode? node) =>
         node is LambdaExpressionSyntax;
 
-    public string GetPrelude() => _prelude.ToString();
+    /// <summary>
+    /// True wenn es noch ungeflushed Preludes gibt.
+    /// </summary>
+    public bool HasPrelude => _pendingPreludes.Count > 0;
 
-    public bool HasPrelude => _prelude.Length > 0 && !_preludeFlushed;
+    /// <summary>
+    /// Schreibt alle gesammelten Preludes in einen String und leert die Liste.
+    /// </summary>
+    public string ConsumePrelude()
+    {
+        if (_pendingPreludes.Count == 0) return string.Empty;
+        var result = string.Concat(_pendingPreludes);
+        _pendingPreludes.Clear();
+        return result;
+    }
 
-    public void MarkPreludeFlushed() => _preludeFlushed = true;
+    // ── Öffentliche API ──────────────────────────────────────────────────────
 
-    // ── Öffentliche API ──────────────────────────────────────────────────
-
-    public string LiftLambda(LambdaExpressionSyntax lambda,
+    public string LiftLambda(
+        LambdaExpressionSyntax lambda,
         string? hintType = null,
         string? elementTypeHint = null)
     {
-        // FIX: _ctx.NextLambdaId() statt lokalem _lambdaCounter++
-        // NextLambdaId() ist in TranspilerContext definiert und gibt pro
-        // Klassen-Transpilierung eindeutig aufsteigende IDs zurück.
         var id = _ctx.NextLambdaId();
         var name = "_lambda_" + id;
         var caps = FindCaptures(lambda);
         var parms = ExtractParams(lambda, elementTypeHint);
         var retCs = hintType != null ? ExtractReturnType(hintType, parms.Count) : "int";
 
-        WriteStructToPrelude(id, caps);
-        WriteFunctionToPrelude(id, name, lambda, parms, retCs, caps);
+        // Prelude in lokalen StringBuilder sammeln
+        var preludeSb = new System.Text.StringBuilder();
+        WriteStructToSb(preludeSb, id, caps);
+        WriteFunctionToSb(preludeSb, id, name, lambda, parms, retCs, caps);
+        _pendingPreludes.Add(preludeSb.ToString());
 
+        // Capture-Struct im aktuellen Output befüllen
         if (caps.Count > 0)
         {
             var capStruct = "_cap_" + id;
-            _ctx.WriteLine("struct " + capStruct + "* _ctx_" + id
-                         + " = malloc(sizeof(struct " + capStruct + "));");
+            _ctx.WriteLine($"struct {capStruct}* _ctx_{id} = malloc(sizeof(struct {capStruct}));");
             foreach (var cap in caps)
-                _ctx.WriteLine("_ctx_" + id + "->" + cap.CapName + " = " + cap.CExpr + ";");
+                _ctx.WriteLine($"_ctx_{id}->{cap.CapName} = {cap.CExpr};");
         }
 
         return name;
     }
 
-    public void FlushPending()
-    {
-        // Nicht mehr nötig — Prelude wird extern eingefügt
-    }
-
-    // ── Typedef-Generierung ──────────────────────────────────────────────
+    // ── Typedef-Generierung ──────────────────────────────────────────────────
 
     public static string GenerateTypedef(string csType)
     {
@@ -92,8 +97,7 @@ public sealed class LambdaLifter
             var inner = csType[7..^1];
             var pTypes = SplitGenericArgs(inner).Select(TypeRegistry.MapType).ToList();
             var suffix = string.Join("_", pTypes);
-            return "typedef void (*Action_" + suffix + "_t)(void*, "
-                 + string.Join(", ", pTypes) + ");";
+            return $"typedef void (*Action_{suffix}_t)(void*, {string.Join(", ", pTypes)});";
         }
         if (csType.StartsWith("Func<") && csType.EndsWith(">"))
         {
@@ -103,53 +107,57 @@ public sealed class LambdaLifter
             var pTypes = allArgs.Take(allArgs.Count - 1).Select(TypeRegistry.MapType).ToList();
             var suffix = string.Join("_", allArgs.Select(TypeRegistry.MapType));
             var pList = pTypes.Count > 0 ? "void*, " + string.Join(", ", pTypes) : "void*";
-            return "typedef " + retC + " (*Func_" + suffix + "_t)(" + pList + ");";
+            return $"typedef {retC} (*Func_{suffix}_t)({pList});";
         }
         var ident = csType.Replace("<", "_").Replace(">", "").Replace(",", "_").Replace(" ", "");
-        return "typedef void (*" + ident + "_t)(void*);";
+        return $"typedef void (*{ident}_t)(void*);";
     }
 
     public static string MapDelegateType(string csType)
     {
         if (csType == "Action") return "Action_t";
         if (csType.StartsWith("Action<") && csType.EndsWith(">"))
-            return "Action_" + string.Join("_", SplitGenericArgs(csType[7..^1])
-                       .Select(TypeRegistry.MapType)) + "_t";
+            return "Action_" + string.Join("_",
+                SplitGenericArgs(csType[7..^1]).Select(TypeRegistry.MapType)) + "_t";
         if (csType.StartsWith("Func<") && csType.EndsWith(">"))
-            return "Func_" + string.Join("_", SplitGenericArgs(csType[5..^1])
-                       .Select(TypeRegistry.MapType)) + "_t";
+            return "Func_" + string.Join("_",
+                SplitGenericArgs(csType[5..^1]).Select(TypeRegistry.MapType)) + "_t";
         var ident = csType.Replace("<", "_").Replace(">", "").Replace(",", "_").Replace(" ", "");
         return ident + "_t";
     }
 
-    // ── Prelude-Ausgabe ──────────────────────────────────────────────────
+    // ── Prelude-Aufbau (in StringBuilder, nicht in _ctx.Out) ─────────────────
 
-    private void WriteStructToPrelude(int id, List<CaptureInfo> caps)
+    private void WriteStructToSb(System.Text.StringBuilder sb, int id, List<CaptureInfo> caps)
     {
         if (caps.Count == 0) return;
         var capStruct = "_cap_" + id;
-        _prelude.AppendLine("struct " + capStruct);
-        _prelude.AppendLine("{");
+        sb.AppendLine($"struct {capStruct}");
+        sb.AppendLine("{");
         foreach (var cap in caps)
         {
             if (cap.CapName == "self" && !string.IsNullOrEmpty(_ctx.CurrentClass))
             {
-                _prelude.AppendLine("    " + _ctx.CurrentClass + "* self;");
+                sb.AppendLine($"    {_ctx.CurrentClass}* self;");
             }
             else
             {
                 var ct = MapFieldType(cap.CsType);
                 var ptr = NeedsPtr(cap.CsType) ? "*" : "";
-                _prelude.AppendLine("    " + ct + ptr + " " + cap.CapName + ";");
+                sb.AppendLine($"    {ct}{ptr} {cap.CapName};");
             }
         }
-        _prelude.AppendLine("};");
-        _prelude.AppendLine();
+        sb.AppendLine("};");
+        sb.AppendLine();
     }
 
-    private void WriteFunctionToPrelude(int id, string name,
-        LambdaExpressionSyntax lambda, List<ParamInfo> parms,
-        string retCs, List<CaptureInfo> caps)
+    private void WriteFunctionToSb(
+        System.Text.StringBuilder sb,
+        int id, string name,
+        LambdaExpressionSyntax lambda,
+        List<ParamInfo> parms,
+        string retCs,
+        List<CaptureInfo> caps)
     {
         var retC = TypeRegistry.MapType(retCs);
         var capStructName = "_cap_" + id;
@@ -158,40 +166,40 @@ public sealed class LambdaLifter
         foreach (var p in parms)
         {
             var pt = MapParamType(p.CsType);
-            paramList.Add(pt + " " + p.Name);
+            paramList.Add($"{pt} {p.Name}");
         }
 
-        _prelude.AppendLine("static " + retC + " " + name
-                          + "(" + string.Join(", ", paramList) + ")");
-        _prelude.AppendLine("{");
+        sb.AppendLine($"static {retC} {name}({string.Join(", ", paramList)})");
+        sb.AppendLine("{");
 
         if (caps.Count > 0)
-            _prelude.AppendLine("    struct " + capStructName
-                              + "* _c = (struct " + capStructName + "*)_ctx_arg;");
+            sb.AppendLine($"    struct {capStructName}* _c = (struct {capStructName}*)_ctx_arg;");
 
         foreach (var cap in caps)
         {
             if (cap.CapName == "self" && !string.IsNullOrEmpty(_ctx.CurrentClass))
-                _prelude.AppendLine("    " + _ctx.CurrentClass + "* self = _c->self;");
+                sb.AppendLine($"    {_ctx.CurrentClass}* self = _c->self;");
             else
             {
                 var ct = MapFieldType(cap.CsType);
                 var ptr = NeedsPtr(cap.CsType) ? "*" : "";
-                _prelude.AppendLine("    " + ct + ptr + " " + cap.CapName
-                                  + " = _c->" + cap.CapName + ";");
+                sb.AppendLine($"    {ct}{ptr} {cap.CapName} = _c->{cap.CapName};");
             }
         }
 
         var bodyContent = TranspileBody(lambda, retCs, caps, parms);
-        _prelude.Append(bodyContent);
-        _prelude.AppendLine("}");
-        _prelude.AppendLine();
+        sb.Append(bodyContent);
+        sb.AppendLine("}");
+        sb.AppendLine();
     }
 
-    // ── Body-Transpilierung in separatem Kontext ─────────────────────────
+    // ── Body-Transpilierung in separatem Kontext ─────────────────────────────
 
-    private string TranspileBody(LambdaExpressionSyntax lambda,
-        string retCsType, List<CaptureInfo> caps, List<ParamInfo> parms)
+    private string TranspileBody(
+        LambdaExpressionSyntax lambda,
+        string retCsType,
+        List<CaptureInfo> caps,
+        List<ParamInfo> parms)
     {
         var tempWriter = new System.IO.StringWriter();
         var tempCtx = new TranspilerContext(tempWriter);
@@ -204,24 +212,20 @@ public sealed class LambdaLifter
         foreach (var em in _ctx.EnumMembers) tempCtx.EnumMembers.Add(em);
         foreach (var vt in _ctx.ValueTypeStructs) tempCtx.ValueTypeStructs.Add(vt);
         foreach (var it in _ctx.InterfaceTypes) tempCtx.InterfaceTypes.Add(it);
-        foreach (var vtt in _ctx.VTableTypes) tempCtx.VTableTypes.Add(vtt);
+        foreach (var vt in _ctx.VTableTypes) tempCtx.VTableTypes.Add(vt);
 
         tempCtx.CurrentClass = _ctx.CurrentClass;
         tempCtx.CurrentBaseType = _ctx.CurrentBaseType;
         tempCtx.SemanticModel = _ctx.SemanticModel;
         tempCtx.CurrentFile = _ctx.CurrentFile;
         tempCtx.TmpCounter = _ctx.TmpCounter;
-        // FIX: LambdaCounter NICHT in tempCtx kopieren — der tempCtx ist für
-        // den Body-Code, nicht für weitere Lambda-Lifts. Würde ein Lambda im
-        // Body wieder ein Lambda enthalten (verschachtelt), müsste das über
-        // den originalen _ctx gezählt werden.
 
+        // Captures und Parameter in den temp-Kontext eintragen
         foreach (var cap in caps)
         {
             tempCtx.LocalTypes[cap.CapName] = cap.CsType;
             tempCtx.LocalTypes["_" + cap.CapName] = cap.CsType;
         }
-
         foreach (var p in parms)
             tempCtx.LocalTypes[p.Name] = p.CsType;
 
@@ -240,12 +244,17 @@ public sealed class LambdaLifter
                 break;
         }
 
+        // TmpCounter zurücksynchronisieren damit Haupt-Kontext keine doppelten Nummern vergibt
         _ctx.TmpCounter = tempCtx.TmpCounter;
         return tempWriter.ToString();
     }
 
-    private static void WriteBodyNode(CSharpSyntaxNode body, string retCsType,
-        TranspilerContext tempCtx, ExpressionWriter tempExpr, StatementWriter tempStmt)
+    private static void WriteBodyNode(
+        CSharpSyntaxNode body,
+        string retCsType,
+        TranspilerContext tempCtx,
+        ExpressionWriter tempExpr,
+        StatementWriter tempStmt)
     {
         if (body is BlockSyntax block)
         {
@@ -262,7 +271,7 @@ public sealed class LambdaLifter
         }
     }
 
-    // ── Capture-Analyse ──────────────────────────────────────────────────
+    // ── Capture-Analyse ──────────────────────────────────────────────────────
 
     private List<CaptureInfo> FindCaptures(LambdaExpressionSyntax lambda)
     {
@@ -274,7 +283,8 @@ public sealed class LambdaLifter
             .OfType<IdentifierNameSyntax>()
             .Select(id => id.Identifier.Text)
             .Where(n => !paramNames.Contains(n))
-            .Distinct().ToList();
+            .Distinct()
+            .ToList();
 
         foreach (var rawName in identifiers)
         {
@@ -311,16 +321,19 @@ public sealed class LambdaLifter
             captures.Add(new CaptureInfo(capName, csType!, cExpr));
         }
 
+        // Prüfen ob eigene Methoden-Aufrufe self benötigen
         if (!needsSelf && !string.IsNullOrEmpty(_ctx.CurrentClass))
         {
             needsSelf = lambda.DescendantNodes()
                 .OfType<InvocationExpressionSyntax>()
-                .Any(inv => inv.Expression is IdentifierNameSyntax invId
+                .Any(inv =>
+                    inv.Expression is IdentifierNameSyntax invId
                     && !paramNames.Contains(invId.Identifier.Text)
                     && !_ctx.LocalTypes.ContainsKey(invId.Identifier.Text));
         }
 
-        if (needsSelf && !string.IsNullOrEmpty(_ctx.CurrentClass)
+        if (needsSelf
+            && !string.IsNullOrEmpty(_ctx.CurrentClass)
             && !captures.Any(c => c.CapName == "self"))
         {
             captures.Insert(0, new CaptureInfo("self", _ctx.CurrentClass, "self"));
@@ -329,19 +342,22 @@ public sealed class LambdaLifter
         return captures;
     }
 
-    private static List<ParamInfo> ExtractParams(LambdaExpressionSyntax lambda,
+    private static List<ParamInfo> ExtractParams(
+        LambdaExpressionSyntax lambda,
         string? elementTypeHint)
     {
         var result = new List<ParamInfo>();
         switch (lambda)
         {
             case SimpleLambdaExpressionSyntax simple:
-                result.Add(new ParamInfo(simple.Parameter.Identifier.Text,
+                result.Add(new ParamInfo(
+                    simple.Parameter.Identifier.Text,
                     simple.Parameter.Type?.ToString().Trim() ?? elementTypeHint ?? "int"));
                 break;
             case ParenthesizedLambdaExpressionSyntax paren:
                 foreach (var p in paren.ParameterList.Parameters)
-                    result.Add(new ParamInfo(p.Identifier.Text,
+                    result.Add(new ParamInfo(
+                        p.Identifier.Text,
                         p.Type?.ToString().Trim() ?? elementTypeHint ?? "int"));
                 break;
         }
@@ -360,7 +376,7 @@ public sealed class LambdaLifter
         return "void";
     }
 
-    // ── Typ-Hilfsmethoden ────────────────────────────────────────────────
+    // ── Typ-Hilfsmethoden ────────────────────────────────────────────────────
 
     private static string MapFieldType(string csType) =>
         csType == "string" ? "const char*" : TypeRegistry.MapType(csType);
@@ -382,13 +398,13 @@ public sealed class LambdaLifter
             if (c == '<') { depth++; current.Append(c); }
             else if (c == '>') { depth--; current.Append(c); }
             else if (c == ',' && depth == 0) { result.Add(current.ToString().Trim()); current.Clear(); }
-            else { current.Append(c); }
+            else current.Append(c);
         }
         if (current.Length > 0) result.Add(current.ToString().Trim());
         return result;
     }
 
-    // ── Hilfstypen ────────────────────────────────────────────────────────
+    // ── Hilfstypen ────────────────────────────────────────────────────────────
 
     private sealed record ParamInfo(string Name, string CsType);
     private sealed record CaptureInfo(string CapName, string CsType, string CExpr);

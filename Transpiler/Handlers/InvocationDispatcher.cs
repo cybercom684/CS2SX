@@ -131,13 +131,22 @@ public sealed class InvocationDispatcher
 
     private string BuildArg(ArgumentSyntax a)
     {
+        // out var x → Deklaration + Adresse
         if (a.RefKindKeyword.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.OutKeyword)
             && a.Expression is DeclarationExpressionSyntax declExpr
             && declExpr.Designation is SingleVariableDesignationSyntax singleDesig)
         {
             var typeName = declExpr.Type.ToString().Trim();
             if (typeName == "var") typeName = "int";
+
+            var cTypeName = TypeRegistry.MapType(typeName);
+            var needsPtr = TypeRegistry.NeedsPointerSuffix(typeName);
+            var ptr = needsPtr ? "*" : "";
+
             _ctx.LocalTypes[singleDesig.Identifier.Text] = typeName;
+
+            // Variable deklarieren falls noch nicht bekannt
+            _ctx.WriteLine($"{cTypeName}{ptr} {singleDesig.Identifier.Text} = {(needsPtr ? "NULL" : "0")};");
             return "&" + singleDesig.Identifier.Text;
         }
 
@@ -149,16 +158,28 @@ public sealed class InvocationDispatcher
 
         var argName = a.Expression.ToString();
 
+        // String-Puffer → kein & (bereits Pointer)
         if (_ctx.LocalTypes.TryGetValue(argName, out var lt) && lt == "char[]")
             return expr;
 
+        // LibNX-Structs → mit &
         if (_ctx.LocalTypes.TryGetValue(argName, out var lst)
             && TypeRegistry.IsLibNxStruct(lst))
             return "&" + expr;
 
+        // String-Felder → kein & (const char* ist bereits Pointer)
         var fieldKey = argName.TrimStart('_');
         if (_ctx.FieldTypes.TryGetValue(fieldKey, out var ft) && ft == "string")
             return expr;
+
+        // FIX: Für out-Parameter bei eigenen Methoden: & nur wenn nicht schon Pointer
+        // Prüfe ob der Ausdruck bereits ein Pointer-Typ ist
+        var resolvedType = lt ?? (_ctx.FieldTypes.TryGetValue(fieldKey, out var ft2) ? ft2 : null);
+        if (resolvedType != null && TypeRegistry.NeedsPointerSuffix(resolvedType))
+        {
+            // Ist bereits Pointer → direkt übergeben (kein &)
+            return expr;
+        }
 
         return "&" + expr;
     }

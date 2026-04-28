@@ -215,45 +215,94 @@ public static class TypeRegistry
         if (csType.EndsWith("[]"))
             return MapType(csType[..^2]) + "*";
 
+        // FIX: Verschachtelte List<List<T>> → List_List_T_ptr*
         if (csType.StartsWith("List<") && csType.EndsWith(">"))
         {
             var inner = csType[5..^1].Trim();
-            var cInner = inner == "string" ? "str" : MapType(inner);
-            return "List_" + cInner + "*";
+            var cInner = MapListInnerType(inner);
+            return $"List_{cInner}*";
+        }
+
+        // FIX: Verschachtelte Dictionary<K, List<V>> etc.
+        if (csType.StartsWith("Dictionary<") && csType.EndsWith(">"))
+        {
+            var inner = csType[11..^1].Trim();
+            var comma = FindTopLevelComma(inner);
+            if (comma >= 0)
+            {
+                var kType = inner[..comma].Trim();
+                var vType = inner[(comma + 1)..].Trim();
+                var cKey = MapListInnerType(kType);
+                var cVal = MapListInnerType(vType);
+                return $"Dict_{cKey}_{cVal}*";
+            }
+        }
+
+        if (csType.StartsWith("(") && csType.EndsWith(")") && csType.Contains(","))
+            return "void*";
+
+        if (csType.StartsWith("IEnumerable<") && csType.EndsWith(">"))
+        {
+            var inner = csType[12..^1].Trim();
+            var cInner = MapListInnerType(inner);
+            return $"List_{cInner}*";
+        }
+
+        if (csType.StartsWith("IReadOnlyList<") && csType.EndsWith(">"))
+        {
+            var inner = csType[14..^1].Trim();
+            var cInner = MapListInnerType(inner);
+            return $"List_{cInner}*";
+        }
+
+        return s_primitives.TryGetValue(csType, out var c) ? c : csType;
+    }
+
+    /// <summary>
+    /// Mappt den inneren Typ einer generischen Collection auf einen C-Suffix.
+    /// Behandelt verschachtelte Generics rekursiv.
+    /// </summary>
+    private static string MapListInnerType(string csType)
+    {
+        csType = csType.Trim();
+
+        if (csType == "string") return "str";
+
+        // Verschachtelter generischer Typ → rekursiv auflösen
+        if (csType.StartsWith("List<") && csType.EndsWith(">"))
+        {
+            var inner = csType[5..^1].Trim();
+            return "List_" + MapListInnerType(inner) + "_ptr";
         }
 
         if (csType.StartsWith("Dictionary<") && csType.EndsWith(">"))
         {
             var inner = csType[11..^1].Trim();
-            var comma = inner.IndexOf(',');
-            var kType = inner[..comma].Trim();
-            var vType = inner[(comma + 1)..].Trim();
-            var cKey = kType == "string" ? "str" : MapType(kType);
-            var cVal = vType == "string" ? "str" : MapType(vType);
-            return "Dict_" + cKey + "_" + cVal + "*";
+            var comma = FindTopLevelComma(inner);
+            if (comma >= 0)
+            {
+                var k = MapListInnerType(inner[..comma].Trim());
+                var v = MapListInnerType(inner[(comma + 1)..].Trim());
+                return $"Dict_{k}_{v}_ptr";
+            }
         }
 
-        // PHASE 2: Tuple-Typen → anonyme Structs
-        if (csType.StartsWith("(") && csType.EndsWith(")") && csType.Contains(","))
-            return "void*"; // Tuple wird als void* behandelt
+        return MapType(csType).Replace(" ", "_").Replace("*", "ptr");
+    }
 
-        // PHASE 2: IEnumerable<T> → List<T>*
-        if (csType.StartsWith("IEnumerable<") && csType.EndsWith(">"))
+    /// <summary>
+    /// Findet das erste Komma auf der obersten Ebene (nicht in &lt;&gt; verschachtelt).
+    /// </summary>
+    private static int FindTopLevelComma(string s)
+    {
+        int depth = 0;
+        for (int i = 0; i < s.Length; i++)
         {
-            var inner = csType[12..^1].Trim();
-            var cInner = inner == "string" ? "str" : MapType(inner);
-            return "List_" + cInner + "*";
+            if (s[i] == '<' || s[i] == '(') depth++;
+            else if (s[i] == '>' || s[i] == ')') depth--;
+            else if (s[i] == ',' && depth == 0) return i;
         }
-
-        // PHASE 2: IReadOnlyList<T> → List<T>*
-        if (csType.StartsWith("IReadOnlyList<") && csType.EndsWith(">"))
-        {
-            var inner = csType[14..^1].Trim();
-            var cInner = inner == "string" ? "str" : MapType(inner);
-            return "List_" + cInner + "*";
-        }
-
-        return s_primitives.TryGetValue(csType, out var c) ? c : csType;
+        return -1;
     }
 
     public static string MapEnum(string csEnum) =>
@@ -324,6 +373,77 @@ public static class TypeRegistry
     {
         csType = csType.Trim();
         return csType.StartsWith("(") && csType.EndsWith(")") && csType.Contains(",");
+    }
+
+    /// <summary>
+    /// Generiert den C-Struct-Namen für einen Tuple-Typ.
+    /// (int, string) → _Tuple2_int_str
+    /// </summary>
+    public static string GetTupleStructName(string csType)
+    {
+        if (!IsTuple(csType)) return "void*";
+        var inner = csType.Trim()[1..^1];
+        var elements = SplitTupleArgs(inner);
+        var suffix = string.Join("_", elements.Select(e =>
+        {
+            var clean = e.Trim();
+            // Optionaler Name: "(int x, string y)" → nur Typ nehmen
+            var spaceIdx = clean.LastIndexOf(' ');
+            if (spaceIdx >= 0) clean = clean[..spaceIdx].Trim();
+            return clean == "string" ? "str" : MapType(clean).Replace(" ", "_");
+        }));
+        return $"_Tuple{elements.Count}_{suffix}";
+    }
+
+    /// <summary>
+    /// Generiert die C-Struct-Definition für einen Tuple-Typ.
+    /// </summary>
+    public static string GenerateTupleStruct(string csType)
+    {
+        if (!IsTuple(csType)) return "";
+        var inner = csType.Trim()[1..^1];
+        var elements = SplitTupleArgs(inner);
+        var name = GetTupleStructName(csType);
+        var fields = new[] { "item1", "item2", "item3", "item4", "item5", "item6", "item7" };
+
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine($"typedef struct {name} {{");
+        for (int i = 0; i < elements.Count; i++)
+        {
+            var elem = elements[i].Trim();
+            var spaceIdx = elem.LastIndexOf(' ');
+            string cType;
+            if (spaceIdx >= 0)
+            {
+                // Named tuple: "(int score, string name)" → int, const char*
+                var typePart = elem[..spaceIdx].Trim();
+                cType = typePart == "string" ? "const char*" : MapType(typePart);
+            }
+            else
+            {
+                cType = elem == "string" ? "const char*" : MapType(elem);
+            }
+            var needPtr = cType != "const char*" && NeedsPointerSuffix(elem);
+            sb.AppendLine($"    {cType}{(needPtr ? "*" : "")} {fields[i]};");
+        }
+        sb.AppendLine($"}} {name};");
+        return sb.ToString();
+    }
+
+    private static List<string> SplitTupleArgs(string s)
+    {
+        var result = new List<string>();
+        var current = new System.Text.StringBuilder();
+        int depth = 0;
+        foreach (char c in s)
+        {
+            if (c == '(' || c == '<') { depth++; current.Append(c); }
+            else if (c == ')' || c == '>') { depth--; current.Append(c); }
+            else if (c == ',' && depth == 0) { result.Add(current.ToString()); current.Clear(); }
+            else current.Append(c);
+        }
+        if (current.Length > 0) result.Add(current.ToString());
+        return result;
     }
 
     // PHASE 2: params-Array-Erkennung

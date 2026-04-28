@@ -80,9 +80,9 @@ public sealed class CSharpToC : CSharpSyntaxWalker
     // ── Öffentliche API ───────────────────────────────────────────────────────
 
     public TranspileResult Transpile(
-        string csharpSource,
-        string? filePath = null,
-        SemanticModel? semanticModel = null)
+    string csharpSource,
+    string? filePath = null,
+    SemanticModel? semanticModel = null)
     {
         _sourceFilePath = filePath ?? string.Empty;
         _ctx.CurrentFile = System.IO.Path.GetFileName(_sourceFilePath);
@@ -90,6 +90,9 @@ public sealed class CSharpToC : CSharpSyntaxWalker
 
         var tree = semanticModel?.SyntaxTree
             ?? CSharpSyntaxTree.ParseText(csharpSource);
+
+        // FIX: "using static" Direktiven einsammeln
+        _ctx.UsingStaticResolver.Collect(tree.GetRoot());
 
         var diags = tree.GetDiagnostics()
             .Where(d => d.Severity == Microsoft.CodeAnalysis.DiagnosticSeverity.Error)
@@ -206,6 +209,9 @@ public sealed class CSharpToC : CSharpSyntaxWalker
 
             WriteFunctionSignatures(node, isSwitchAppChild, isStaticClass);
 
+            if (!isStaticClass)
+                WriteDestructor(node, _ctx.CurrentClass, baseType);
+
             foreach (var prop in node.Members.OfType<PropertyDeclarationSyntax>())
                 if (!PropertyWriter.IsAutoProperty(prop))
                     PropertyWriter.WriteSignatures(prop, node.Identifier.Text, _ctx.Out);
@@ -224,6 +230,9 @@ public sealed class CSharpToC : CSharpSyntaxWalker
                 WriteConstructor(node);
 
             WriteMethodBodies(node);
+
+            if (!isStaticClass)
+                WriteDestructor(node, _ctx.CurrentClass, baseType);
 
             foreach (var prop in node.Members.OfType<PropertyDeclarationSyntax>())
                 if (!PropertyWriter.IsAutoProperty(prop))
@@ -248,6 +257,90 @@ public sealed class CSharpToC : CSharpSyntaxWalker
         }
 
         _ctx.ClearClassContext();
+    }
+
+    /// <summary>
+    /// Generiert eine _Free()-Funktion für jede Klasse.
+    /// Gibt Felder frei die mit _New() alloziert wurden.
+    /// Wird im Header deklariert und in der .c-Datei implementiert.
+    /// </summary>
+    private void WriteDestructor(ClassDeclarationSyntax node, string name, string baseType)
+    {
+        if (_mode == TranspileMode.HeaderOnly)
+        {
+            _ctx.Out.WriteLine($"void {name}_Free({name}* self);");
+            return;
+        }
+
+        _ctx.Out.WriteLine($"void {name}_Free({name}* self)");
+        _ctx.Out.WriteLine("{");
+        _ctx.Indent();
+        _ctx.WriteLine("if (!self) return;");
+
+        // Felder die auf allozierte Objekte zeigen freigeben
+        foreach (var field in node.Members.OfType<FieldDeclarationSyntax>())
+        {
+            if (field.Modifiers.Any(m => m.IsKind(SyntaxKind.StaticKeyword))) continue;
+
+            var csType = ResolveFieldType(field);
+            var needsFree = TypeRegistry.NeedsPointerSuffix(csType)
+                         && !TypeRegistry.IsPrimitive(csType)
+                         && csType != "string"
+                         && !TypeRegistry.IsLibNxStruct(csType);
+
+            if (!needsFree) continue;
+
+            foreach (var v in field.Declaration.Variables)
+            {
+                var fieldName = v.Identifier.Text.TrimStart('_');
+                var prefix = TypeRegistry.HasNoPrefix(fieldName) ? "" : "f_";
+                var fieldExpr = $"self->{prefix}{fieldName}";
+
+                if (TypeRegistry.IsList(csType))
+                {
+                    var inner = TypeRegistry.GetListInnerType(csType) ?? "int";
+                    var cInner = inner == "string" ? "str" : TypeRegistry.MapType(inner);
+                    _ctx.WriteLine($"if ({fieldExpr}) List_{cInner}_Free({fieldExpr});");
+                }
+                else if (TypeRegistry.IsDictionary(csType))
+                {
+                    var types = TypeRegistry.GetDictionaryTypes(csType);
+                    if (types.HasValue)
+                    {
+                        var ck = types.Value.key == "string" ? "str" : TypeRegistry.MapType(types.Value.key);
+                        var cv = types.Value.val == "string" ? "str" : TypeRegistry.MapType(types.Value.val);
+                        _ctx.WriteLine($"if ({fieldExpr}) Dict_{ck}_{cv}_Free({fieldExpr});");
+                    }
+                }
+                else if (TypeRegistry.IsStringBuilder(csType))
+                {
+                    _ctx.WriteLine($"if ({fieldExpr}) StringBuilder_Free({fieldExpr});");
+                }
+                else if (TypeRegistry.IsDisposable(csType))
+                {
+                    _ctx.WriteLine($"if ({fieldExpr}) {csType}_Dispose({fieldExpr});");
+                }
+                else
+                {
+                    // Generischer Pointer → _Free() aufrufen wenn vorhanden
+                    var cType = TypeRegistry.MapType(csType);
+                    _ctx.WriteLine($"if ({fieldExpr}) {cType}_Free({fieldExpr});");
+                }
+            }
+        }
+
+        // Basis-Klassen-Cleanup
+        if (!string.IsNullOrEmpty(baseType)
+            && baseType != "SwitchApp"
+            && !IsControlSubclass(baseType))
+        {
+            _ctx.WriteLine($"{baseType}_Free(({baseType}*)self);");
+        }
+
+        _ctx.WriteLine("free(self);");
+        _ctx.Dedent();
+        _ctx.Out.WriteLine("}");
+        _ctx.Out.WriteLine();
     }
 
     public override void VisitStructDeclaration(StructDeclarationSyntax node)
@@ -521,21 +614,38 @@ public sealed class CSharpToC : CSharpSyntaxWalker
         foreach (var field in node.Members.OfType<FieldDeclarationSyntax>())
         {
             bool isConst = field.Modifiers.Any(m => m.IsKind(SyntaxKind.ConstKeyword));
-            bool isExplicitlyStatic = field.Modifiers.Any(m => m.IsKind(SyntaxKind.StaticKeyword));
+            bool isStatic = field.Modifiers.Any(m => m.IsKind(SyntaxKind.StaticKeyword));
+            bool isReadOnly = field.Modifiers.Any(m => m.IsKind(SyntaxKind.ReadOnlyKeyword));
 
-            if (isConst) continue;
-            if (!isExplicitlyStatic) continue;
-
-            var csType = ResolveFieldType(field);
-
-            if (csType.EndsWith("[]"))
+            if (isConst || isReadOnly)
             {
-                WriteStaticArrayFieldDef(field, name, csType);
+                var csType = ResolveFieldType(field);
+                if (csType == "string")
+                {
+                    foreach (var v in field.Declaration.Variables)
+                    {
+                        if (v.Initializer == null) continue;
+                        var fieldName = v.Identifier.Text.TrimStart('_');
+                        var initVal = _exprWriter.Write(v.Initializer.Value);
+                        _ctx.Out.WriteLine(
+                            $"const char* const {name}_{fieldName} = {initVal};");
+                    }
+                }
                 continue;
             }
 
-            var cType = TypeRegistry.MapType(csType);
-            var needPtr = NeedsPtr(csType);
+            if (!isStatic) continue;
+
+            var csTypeFinal = ResolveFieldType(field);
+
+            if (csTypeFinal.EndsWith("[]"))
+            {
+                WriteStaticArrayFieldDef(field, name, csTypeFinal);
+                continue;
+            }
+
+            var cType = TypeRegistry.MapType(csTypeFinal);
+            var needPtr = NeedsPtr(csTypeFinal);
             var ptr = needPtr ? "*" : "";
 
             foreach (var v in field.Declaration.Variables)
@@ -544,7 +654,7 @@ public sealed class CSharpToC : CSharpSyntaxWalker
                 var init = v.Initializer != null
                     ? " = " + _exprWriter.Write(v.Initializer.Value)
                     : "";
-                _ctx.Out.WriteLine("static " + cType + ptr + " " + name + "_" + fieldName + init + ";");
+                _ctx.Out.WriteLine($"{cType}{ptr} {name}_{fieldName}{init};");
             }
         }
     }
@@ -592,22 +702,37 @@ public sealed class CSharpToC : CSharpSyntaxWalker
         foreach (var field in node.Members.OfType<FieldDeclarationSyntax>())
         {
             bool isConst = field.Modifiers.Any(m => m.IsKind(SyntaxKind.ConstKeyword));
-            bool isExplicitlyStatic = field.Modifiers.Any(m => m.IsKind(SyntaxKind.StaticKeyword));
+            bool isStatic = field.Modifiers.Any(m => m.IsKind(SyntaxKind.StaticKeyword));
             bool isReadOnly = field.Modifiers.Any(m => m.IsKind(SyntaxKind.ReadOnlyKeyword));
 
-            if (!isExplicitlyStatic && !isConst) continue;
+            if (!isStatic && !isConst) continue;
 
             var csType = ResolveFieldType(field);
 
-            if (isConst || (isExplicitlyStatic && isReadOnly))
+            if (isConst || (isStatic && isReadOnly))
             {
                 foreach (var v in field.Declaration.Variables)
                 {
                     var fieldName = v.Identifier.Text.TrimStart('_');
-                    if (v.Initializer != null)
+                    if (v.Initializer == null) continue;
+
+                    var initVal = _exprWriter.Write(v.Initializer.Value);
+
+                    if (csType == "string")
                     {
-                        var initVal = _exprWriter.Write(v.Initializer.Value);
-                        _ctx.Out.WriteLine("#define " + name + "_" + fieldName + " (" + initVal + ")");
+                        _ctx.Out.WriteLine(
+                            $"extern const char* const {name}_{fieldName};");
+                    }
+                    else if (TypeRegistry.IsPrimitive(csType))
+                    {
+                        _ctx.Out.WriteLine(
+                            $"#define {name}_{fieldName} ({initVal})");
+                    }
+                    else
+                    {
+                        var cType = TypeRegistry.MapType(csType);
+                        _ctx.Out.WriteLine(
+                            $"extern const {cType} {name}_{fieldName};");
                     }
                 }
                 continue;
@@ -620,7 +745,7 @@ public sealed class CSharpToC : CSharpSyntaxWalker
                 foreach (var v in field.Declaration.Variables)
                 {
                     var fieldName = v.Identifier.Text.TrimStart('_');
-                    _ctx.Out.WriteLine("extern " + cType + " " + name + "_" + fieldName + "[];");
+                    _ctx.Out.WriteLine($"extern {cType} {name}_{fieldName}[];");
                 }
                 continue;
             }
@@ -631,11 +756,10 @@ public sealed class CSharpToC : CSharpSyntaxWalker
             foreach (var v in field.Declaration.Variables)
             {
                 var fieldName = v.Identifier.Text.TrimStart('_');
-                _ctx.Out.WriteLine("extern " + cTypeNorm + ptr + " " + name + "_" + fieldName + ";");
+                _ctx.Out.WriteLine($"extern {cTypeNorm}{ptr} {name}_{fieldName};");
             }
         }
     }
-
     // ── Feld-Initializer ─────────────────────────────────────────────────────
 
     internal void WriteInstanceFieldInitializers(ClassDeclarationSyntax node)
@@ -776,11 +900,31 @@ public sealed class CSharpToC : CSharpSyntaxWalker
 
         var isAbstract = node.Modifiers.Any(m => m.IsKind(SyntaxKind.AbstractKeyword));
         var isStatic = node.Modifiers.Any(m => m.IsKind(SyntaxKind.StaticKeyword));
-        var returnType = TypeRegistry.MapType(csReturnType);
 
-        // NEU: Extension-Methoden erkennen
         bool isExtension = node.ParameterList.Parameters.FirstOrDefault()?.Modifiers
             .Any(m => m.IsKind(SyntaxKind.ThisKeyword)) == true;
+
+        // FIX: Tuple-Rückgabetyp → Struct generieren und als C-Rückgabetyp verwenden
+        string cReturnType;
+        if (TypeRegistry.IsTuple(csReturnType))
+        {
+            var tupleStructName = TypeRegistry.GetTupleStructName(csReturnType);
+            _ctx.CurrentTupleReturnType = tupleStructName;
+            cReturnType = tupleStructName;
+
+            // Struct-Definition in den Output einmalig emittieren (Header-Modus)
+            if (_mode == TranspileMode.HeaderOnly)
+            {
+                var structDef = TypeRegistry.GenerateTupleStruct(csReturnType);
+                if (!string.IsNullOrEmpty(structDef))
+                    _ctx.Out.WriteLine(structDef);
+            }
+        }
+        else
+        {
+            _ctx.CurrentTupleReturnType = null;
+            cReturnType = TypeRegistry.MapType(csReturnType);
+        }
 
         var name = string.IsNullOrEmpty(_ctx.CurrentClass)
             ? node.Identifier.Text
@@ -790,7 +934,6 @@ public sealed class CSharpToC : CSharpSyntaxWalker
         if (!string.IsNullOrEmpty(_ctx.CurrentClass) && !isStatic && !isExtension)
             parameters.Add(_ctx.CurrentClass + "* self");
 
-        // Extension-Methode: this-Parameter wird erster normaler Parameter
         if (isExtension && node.ParameterList.Parameters.Count > 0)
         {
             var thisParam = node.ParameterList.Parameters[0];
@@ -803,7 +946,7 @@ public sealed class CSharpToC : CSharpSyntaxWalker
             parameters.Add(BuildParamDecl(p));
         }
 
-        var sig = returnType + " " + name + "(" + string.Join(", ", parameters) + ")";
+        var sig = cReturnType + " " + name + "(" + string.Join(", ", parameters) + ")";
 
         if (_mode == TranspileMode.HeaderOnly)
         {
@@ -848,7 +991,8 @@ public sealed class CSharpToC : CSharpSyntaxWalker
 
             var isRefParam = p.Modifiers.Any(m =>
                 m.IsKind(SyntaxKind.RefKeyword) || m.IsKind(SyntaxKind.OutKeyword));
-            _ctx.LocalTypes[p.Identifier.Text] = isRefParam ? "@ref:" + paramType : paramType;
+            _ctx.LocalTypes[p.Identifier.Text] =
+                isRefParam ? "@ref:" + paramType : paramType;
 
             if (isParams && paramType.EndsWith("[]"))
             {
@@ -863,7 +1007,6 @@ public sealed class CSharpToC : CSharpSyntaxWalker
 
         if (_ctx.CurrentReturnBuffer != null)
             _ctx.WriteLine("static char _ret_buf[CS2SX_RETURN_BUF_SIZE];");
-
 
         if (node.Body != null)
             foreach (var stmt in node.Body.Statements)
@@ -946,48 +1089,52 @@ public sealed class CSharpToC : CSharpSyntaxWalker
             catch { }
         }
 
-        // NEU: Generische Typ-Parameter auflösen wenn Collector vorhanden
-        // (z.B. T → int bei expandierten Methoden)
+        // FIX: ref/out Parameter immer als Pointer deklarieren
+        bool isRef = p.Modifiers.Any(m =>
+            m.IsKind(SyntaxKind.RefKeyword) || m.IsKind(SyntaxKind.OutKeyword));
+
         if (_genericCollector != null && _genericCollector.GenericClasses.ContainsKey(csType))
-        {
-            // Generische Klasse als Parameter → Pointer
             return csType + "* " + p.Identifier;
-        }
 
         var isParams = p.Modifiers.Any(m => m.IsKind(SyntaxKind.ParamsKeyword));
         if (isParams && csType.EndsWith("[]"))
         {
             var baseType = csType[..^2].Trim();
             var cBaseType = baseType == "string" ? "const char*" : TypeRegistry.MapType(baseType);
-            return cBaseType + "* " + p.Identifier + ", int " + p.Identifier + "_count";
+            return $"{cBaseType}* {p.Identifier}, int {p.Identifier}_count";
         }
 
         if (NullableHandler.IsNullable(csType))
         {
             var inner = NullableHandler.GetInnerType(csType);
             var cInner = TypeRegistry.MapType(inner);
-            return cInner + "* " + p.Identifier;
+            // out nullable → double pointer
+            return isRef ? $"{cInner}** {p.Identifier}" : $"{cInner}* {p.Identifier}";
         }
 
         if (csType.EndsWith("[]"))
         {
             var baseType = csType[..^2].Trim();
             var cBase = baseType == "string" ? "const char*" : TypeRegistry.MapType(baseType);
-            return cBase + "* " + p.Identifier;
+            return $"{cBase}* {p.Identifier}";
         }
 
-        // NEU: Interface-Typ als Parameter → Pointer
-        if (_genericCollector != null
-            && _genericCollector.Interfaces.ContainsKey(csType))
-        {
+        if (_genericCollector != null && _genericCollector.Interfaces.ContainsKey(csType))
             return csType + "* " + p.Identifier;
-        }
 
         var cType = TypeRegistry.MapType(csType);
         var isPrim = TypeRegistry.IsPrimitive(csType) || csType == "string";
-        var isRef = p.Modifiers.Any(m =>
-            m.IsKind(SyntaxKind.RefKeyword) || m.IsKind(SyntaxKind.OutKeyword));
-        var ptr = (!isPrim || isRef) ? "*" : "";
-        return cType + ptr + " " + p.Identifier;
+
+        if (isRef)
+        {
+            // out/ref → immer Pointer, auch bei primitiven Typen
+            // Sonderfall: string out → const char** (Pointer auf Pointer)
+            if (csType == "string")
+                return $"const char** {p.Identifier}";
+            return $"{cType}* {p.Identifier}";
+        }
+
+        var ptr = (!isPrim) ? "*" : "";
+        return $"{cType}{ptr} {p.Identifier}";
     }
 }

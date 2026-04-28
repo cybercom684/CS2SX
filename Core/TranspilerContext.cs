@@ -5,6 +5,7 @@
 // FIX: NextLambdaId() hinzugefügt — Lambda-Zähler gehört in den Context,
 // nicht in LambdaLifter (der pro Lambda neu instanziiert wird).
 
+using CS2SX.Transpiler;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 
@@ -42,6 +43,7 @@ public sealed class TranspilerContext
     }
     public string CurrentClass { get; set; } = string.Empty;
     public string CurrentBaseType { get; set; } = string.Empty;
+    public string? CurrentTupleReturnType { get; set; }
 
     public Dictionary<string, string> FieldTypes { get; } = new(StringComparer.Ordinal);
     public Dictionary<string, string> BaseFieldTypes { get; } = new(StringComparer.Ordinal);
@@ -69,7 +71,8 @@ public sealed class TranspilerContext
     public string Tab => new(' ', _indent * 4);
     public void Indent() => _indent++;
     public void Dedent() => _indent--;
-
+    // Löst "using static"-Importe auf
+    public UsingStaticResolver UsingStaticResolver { get; } = new();
     // ── Zähler ────────────────────────────────────────────────────────────────
 
     public int TmpCounter
@@ -126,6 +129,10 @@ public sealed class TranspilerContext
 
     public void WriteRaw(string s) => Out.Write(s);
 
+    /// <summary>
+    /// Schreibt eine Zeile und registriert das Source-Mapping C-Zeile → C#-Zeile.
+    /// Sollte für alle transpilierten Statements genutzt werden.
+    /// </summary>
     public void WriteLineWithMapping(string line, int csLine, string csSnippet)
     {
         if (!string.IsNullOrEmpty(CurrentCFile) && !string.IsNullOrEmpty(CurrentFile))
@@ -137,6 +144,15 @@ public sealed class TranspilerContext
         WriteLine(line);
     }
 
+    /// <summary>
+    /// Schreibt eine Zeile mit automatischer Source-Map aus dem aktuellen CurrentLine.
+    /// </summary>
+    public void WriteLineMapped(string line)
+    {
+        WriteLineWithMapping(line, CurrentLine,
+            line.Trim().Length > 60 ? line.Trim()[..60] + "…" : line.Trim());
+    }
+
     public void ClearMethodContext()
     {
         LocalTypes.Clear();
@@ -144,6 +160,7 @@ public sealed class TranspilerContext
         TmpCounter = 0;
         TmpStringCounter = 0;
         CurrentLine = 0;
+        CurrentTupleReturnType = null;
         CurrentReturnBuffer = null;
         // FIX: _lambdaCounter wird NICHT hier zurückgesetzt — er gilt pro
         // Klasse, nicht pro Methode. Zwei Lambdas in verschiedenen Methoden

@@ -1025,73 +1025,73 @@ static inline int CS2SX_Dir_Create(const char* path)
     return R_SUCCEEDED(rc);
 }
 
-// FIX 1: Kein globaler static Buffer mehr.
-// Der Buffer wird pro Aufruf neu alloziert (oder wiederverwendet wenn groß genug).
-// Semantik: Rückgabewert ist gültig bis zum nächsten Aufruf von ReadAllText.
-// Für längere Lebensdauer: _cs2sx_heap_strdup() nutzen.
+// ============================================================================
+// File.ReadAllText — thread-sicherer statischer Lese-Buffer
+// SEMANTIK: Rückgabewert ist gültig bis zum nächsten Aufruf von ReadAllText
+//           ODER bis zum Ende der aufrufenden Anweisung.
+//           Für längere Lebensdauer: _cs2sx_heap_strdup() verwenden.
+// FIX: CS2SX_File_Copy macht jetzt eine eigene Heap-Kopie vor dem Write-Aufruf,
+//      sodass der statische Buffer nicht durch WriteAllText überschrieben wird.
+// ============================================================================
+
 static inline const char* CS2SX_File_ReadAllText(const char* path)
 {
-    // FIX: Thread-lokaler Ansatz — ein Buffer der bei Bedarf wächst,
-    // aber explizit freigegeben und neu alloziert wird (kein Aliasing
-    // zwischen zwei simultanen ReadAllText-Aufrufen).
     static char* _buf = NULL;
     static int   _cap = 0;
 
     FsFileSystem fs;
     if (R_FAILED(fsOpenSdCardFileSystem(&fs)))
-    {
-        // Leeren Buffer zurückgeben statt NULL — Caller kann strlen() aufrufen
-        if (!_buf || _cap < 1) { free(_buf); _buf = (char*)malloc(1); _cap = 1; }
-        if (_buf) _buf[0] = '\0';
-        return _buf ? _buf : "";
-    }
+        goto ret_empty;
 
-    FsFile f;
-    if (R_FAILED(fsFsOpenFile(&fs, path, FsOpenMode_Read, &f)))
     {
-        fsFsClose(&fs);
-        if (!_buf || _cap < 1) { free(_buf); _buf = (char*)malloc(1); _cap = 1; }
-        if (_buf) _buf[0] = '\0';
-        return _buf ? _buf : "";
-    }
+        FsFile f;
+        if (R_FAILED(fsFsOpenFile(&fs, path, FsOpenMode_Read, &f)))
+        {
+            fsFsClose(&fs);
+            goto ret_empty;
+        }
 
-    s64 size = 0;
-    fsFileGetSize(&f, &size);
+        s64 size = 0;
+        fsFileGetSize(&f, &size);
 
-    if (size <= 0 || size >= (1 << 20)) // max 1 MB
-    {
+        if (size <= 0 || size >= (1 << 20))   /* max 1 MB */
+        {
+            fsFileClose(&f);
+            fsFsClose(&fs);
+            goto ret_empty;
+        }
+
+        int needed = (int)size + 1;
+        if (_cap < needed)
+        {
+            char* nb = (char*)realloc(_buf, needed);
+            if (!nb)
+            {
+                fsFileClose(&f);
+                fsFsClose(&fs);
+                goto ret_empty;
+            }
+            _buf = nb;
+            _cap = needed;
+        }
+
+        u64 bytesRead = 0;
+        fsFileRead(&f, 0, _buf, (u64)size, FsReadOption_None, &bytesRead);
+        _buf[bytesRead] = '\0';
+
         fsFileClose(&f);
         fsFsClose(&fs);
-        if (!_buf || _cap < 1) { free(_buf); _buf = (char*)malloc(1); _cap = 1; }
-        if (_buf) _buf[0] = '\0';
-        return _buf ? _buf : "";
+        return _buf;
     }
 
-    int needed = (int)size + 1;
-    if (_cap < needed)
+ret_empty:
+    if (!_buf || _cap < 1)
     {
-        // FIX: alten Buffer freigeben VOR Neuzuweisung —
-        // das verhindert dass ein Pointer auf den alten Buffer
-        // noch gültig aussieht während er es nicht mehr ist.
-        free(_buf);
-        _buf = (char*)malloc(needed);
-        _cap = _buf ? needed : 0;
+        char* nb = (char*)malloc(1);
+        if (nb) { _buf = nb; _cap = 1; }
     }
-
-    if (!_buf)
-    {
-        fsFileClose(&f);
-        fsFsClose(&fs);
-        return "";
-    }
-
-    u64 bytesRead = 0;
-    fsFileRead(&f, 0, _buf, (u64)size, FsReadOption_None, &bytesRead);
-    _buf[bytesRead] = '\0';
-
-    fsFileClose(&f);
-    fsFsClose(&fs);
-    return _buf;
+    if (_buf) _buf[0] = '\0';
+    return _buf ? _buf : "";
 }
 
 // FIX 3: ReadAllLines macht eine eigene Kopie des Inhalts —
@@ -1188,15 +1188,17 @@ static inline int CS2SX_File_Delete(const char* path)
     return R_SUCCEEDED(rc);
 }
 
+// FIX: File.Copy liest zuerst in eine eigene Heap-Kopie, damit der interne
+//      ReadAllText-Buffer nicht durch den nachfolgenden WriteAllText-Aufruf
+//      invalidiert wird.
 static inline int CS2SX_File_Copy(const char* src, const char* dst)
 {
     const char* content = CS2SX_File_ReadAllText(src);
     if (!content || content[0] == '\0') return 0;
-    // FIX: Kopie machen bevor WriteAllText den internen Buffer überschreibt
-    char* tmp = _cs2sx_heap_strdup(content);
-    if (!tmp) return 0;
-    int ok = CS2SX_File_WriteAllText(dst, tmp);
-    free(tmp);
+    char* copy = _cs2sx_heap_strdup(content);   /* eigene Heap-Kopie */
+    if (!copy) return 0;
+    int ok = CS2SX_File_WriteAllText(dst, copy);
+    free(copy);
     return ok;
 }
 

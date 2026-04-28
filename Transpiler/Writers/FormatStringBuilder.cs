@@ -1,5 +1,6 @@
-using Microsoft.CodeAnalysis.CSharp.Syntax;
 using CS2SX.Core;
+using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp.Syntax;
 
 namespace CS2SX.Transpiler.Writers;
 
@@ -87,13 +88,53 @@ public static class FormatStringBuilder
         foreach (var part in interp.Contents)
         {
             if (part is InterpolatedStringTextSyntax text)
+            {
                 fmt.Append(StringEscaper.EscapeFormat(text.TextToken.ValueText));
+            }
             else if (part is InterpolationSyntax hole)
             {
-                fmt.Append(TypeInferrer.FormatSpecifier(hole.Expression, ctx));
+                // FIX: Bei bedingten Ausdrücken (ternär) den Typ beider Zweige prüfen
+                //      und den "sichersten" Specifier wählen:
+                //      Wenn einer der Zweige string ist → %s für alles.
+                var specifier = InferHoleSpecifier(hole.Expression, ctx);
+                fmt.Append(specifier);
                 args.Add(writeExpr(hole.Expression));
             }
         }
         return (fmt.ToString(), args);
+    }
+
+    /// <summary>
+    /// Inferiert den Format-Specifier für einen Interpolations-Ausdruck.
+    /// Behandelt ternäre Ausdrücke korrekt indem beide Zweige geprüft werden.
+    /// </summary>
+    private static string InferHoleSpecifier(
+        Microsoft.CodeAnalysis.SyntaxNode expr,
+        TranspilerContext ctx)
+    {
+        // Ternärer Ausdruck: beide Zweige müssen kompatibel sein
+        if (expr is Microsoft.CodeAnalysis.CSharp.Syntax.ConditionalExpressionSyntax cond)
+        {
+            var thenSpec = InferHoleSpecifier(cond.WhenTrue, ctx);
+            var elseSpec = InferHoleSpecifier(cond.WhenFalse, ctx);
+            // Wenn einer %s ist, muss der gesamte Ausdruck %s sein
+            if (thenSpec == "%s" || elseSpec == "%s") return "%s";
+            // Wenn einer float ist → float
+            if (thenSpec == "%f" || elseSpec == "%f") return "%f";
+            // Sonst: WhenTrue-Typ nehmen
+            return thenSpec;
+        }
+
+        // Null-coalescing: rechte Seite als Typ verwenden
+        if (expr is Microsoft.CodeAnalysis.CSharp.Syntax.BinaryExpressionSyntax bin
+            && bin.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.CoalesceExpression))
+        {
+            var leftSpec = InferHoleSpecifier(bin.Left, ctx);
+            var rightSpec = InferHoleSpecifier(bin.Right, ctx);
+            if (leftSpec == "%s" || rightSpec == "%s") return "%s";
+            return leftSpec;
+        }
+
+        return TypeInferrer.FormatSpecifier(expr, ctx);
     }
 }

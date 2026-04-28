@@ -6,44 +6,32 @@ using Microsoft.CodeAnalysis;
 
 namespace CS2SX.Transpiler;
 
-/// <summary>
-/// Transpiliert C# Properties zu C Getter/Setter-Funktionen.
-///
-/// C#                             → C
-/// ───────────────────────────────────────────────────────────────────
-/// public int Speed { get; set; } → int f_Speed;          (einfaches Backing-Feld)
-///
-/// public int Speed               → int Player_get_Speed(Player* self);
-/// {                                 void Player_set_Speed(Player* self, int value);
-///     get => f_speed * 2;
-///     set => f_speed = value / 2;
-/// }
-///
-/// public string Name             → const char* Player_get_Name(Player* self);
-/// {                                 (kein Setter → const)
-///     get => f_name;
-/// }
-///
-/// Auto-Properties (get; set; ohne Body) werden als einfaches struct-Feld behandelt.
-/// Properties mit Body bekommen explizite Getter/Setter-Funktionen.
-/// </summary>
 public static class PropertyWriter
 {
     /// <summary>
-    /// True wenn die Property auto-implementiert ist (kein Body).
+    /// True wenn die Property auto-implementiert ist (kein expliziter Body).
     /// Auto-Properties werden zu struct-Feldern — keine Funktionen nötig.
+    ///
+    /// FIX: Expression-Body Properties (=> expr) sind KEINE Auto-Properties —
+    ///      sie haben keinen AccessorList sondern einen ExpressionBody und brauchen
+    ///      eine Getter-Funktion.
     /// </summary>
     public static bool IsAutoProperty(PropertyDeclarationSyntax prop)
     {
+        // Expression-body: public int X => _x;  → KEIN Auto-Property
+        if (prop.ExpressionBody != null) return false;
+
+        // Kein AccessorList → weder auto noch expression body → ignorieren
         if (prop.AccessorList == null) return false;
 
+        // Alle Accessoren ohne Body → Auto-Property
         return prop.AccessorList.Accessors.All(a =>
             a.Body == null && a.ExpressionBody == null);
     }
 
     /// <summary>
     /// Schreibt Getter/Setter-Signaturen in den Header.
-    /// Nur für Properties mit explizitem Body aufrufen.
+    /// Für Properties mit explizitem Body oder Expression-Body aufrufen.
     /// </summary>
     public static void WriteSignatures(
         PropertyDeclarationSyntax prop,
@@ -52,16 +40,24 @@ public static class PropertyWriter
     {
         if (IsAutoProperty(prop)) return;
 
-        var cType  = TypeRegistry.MapType(prop.Type.ToString().Trim());
-        var name   = prop.Identifier.Text;
+        var csType = prop.Type.ToString().Trim();
+        var cType = TypeRegistry.MapType(csType);
+        var name = prop.Identifier.Text;
+        var ptr = NeedsPtr(csType) ? "*" : "";
+        var self = className + "* self";
+
+        // Expression-body Property → nur Getter
+        if (prop.ExpressionBody != null)
+        {
+            output.WriteLine($"{cType}{ptr} {className}_get_{name}({self});");
+            return;
+        }
+
         var hasGet = HasAccessor(prop, SyntaxKind.GetAccessorDeclaration);
         var hasSet = HasAccessor(prop, SyntaxKind.SetAccessorDeclaration);
 
-        var ptr  = NeedsPtr(prop.Type.ToString().Trim()) ? "*" : "";
-        var self = className + "* self";
-
-        if (hasGet) output.WriteLine(cType + ptr + " " + className + "_get_" + name + "(" + self + ");");
-        if (hasSet) output.WriteLine("void " + className + "_set_" + name + "(" + self + ", " + cType + ptr + " value);");
+        if (hasGet) output.WriteLine($"{cType}{ptr} {className}_get_{name}({self});");
+        if (hasSet) output.WriteLine($"void {className}_set_{name}({self}, {cType}{ptr} value);");
     }
 
     /// <summary>
@@ -77,18 +73,33 @@ public static class PropertyWriter
         if (IsAutoProperty(prop)) return;
 
         var csType = prop.Type.ToString().Trim();
-        var cType  = TypeRegistry.MapType(csType);
-        var name   = prop.Identifier.Text;
-        var ptr    = NeedsPtr(csType) ? "*" : "";
-        var self   = className + "* self";
+        var cType = TypeRegistry.MapType(csType);
+        var name = prop.Identifier.Text;
+        var ptr = NeedsPtr(csType) ? "*" : "";
+        var self = className + "* self";
 
         ctx.CurrentClass = className;
+
+        // FIX: Expression-body Property → Getter generieren
+        // public int Speed => _speed * 2;
+        if (prop.ExpressionBody != null)
+        {
+            ctx.Out.WriteLine($"{cType}{ptr} {className}_get_{name}({self})");
+            ctx.Out.WriteLine("{");
+            ctx.Indent();
+            var val = expr.Write(prop.ExpressionBody.Expression);
+            ctx.WriteLine($"return {val};");
+            ctx.Dedent();
+            ctx.Out.WriteLine("}");
+            ctx.Out.WriteLine();
+            return;
+        }
 
         // Getter
         var getter = GetAccessor(prop, SyntaxKind.GetAccessorDeclaration);
         if (getter != null)
         {
-            ctx.Out.WriteLine(cType + ptr + " " + className + "_get_" + name + "(" + self + ")");
+            ctx.Out.WriteLine($"{cType}{ptr} {className}_get_{name}({self})");
             ctx.Out.WriteLine("{");
             ctx.Indent();
             WriteAccessorBody(getter, ctx, expr, stmt, isVoid: false);
@@ -101,10 +112,9 @@ public static class PropertyWriter
         var setter = GetAccessor(prop, SyntaxKind.SetAccessorDeclaration);
         if (setter != null)
         {
-            ctx.Out.WriteLine("void " + className + "_set_" + name + "(" + self + ", " + cType + ptr + " value)");
+            ctx.Out.WriteLine($"void {className}_set_{name}({self}, {cType}{ptr} value)");
             ctx.Out.WriteLine("{");
             ctx.Indent();
-            // "value" als lokale Variable registrieren
             ctx.LocalTypes["value"] = csType;
             WriteAccessorBody(setter, ctx, expr, stmt, isVoid: true);
             ctx.Dedent();
@@ -113,23 +123,15 @@ public static class PropertyWriter
         }
     }
 
-    // ── ExpressionWriter-Unterstützung ───────────────────────────────────
+    // ── ExpressionWriter-Unterstützung ───────────────────────────────────────
 
-    /// <summary>
-    /// Rewrites einen Property-Zugriff zu einem Getter-Aufruf.
-    /// myObj.Speed = 5 → Player_set_Speed(myObj, 5)
-    /// x = myObj.Speed → Player_get_Speed(myObj)
-    ///
-    /// Wird von ExpressionWriter.WriteMemberAccess aufgerufen wenn der
-    /// Member als Property im Context registriert ist.
-    /// </summary>
     public static string RewriteGet(string receiver, string className, string propName)
-        => className + "_get_" + propName + "(" + receiver + ")";
+        => $"{className}_get_{propName}({receiver})";
 
     public static string RewriteSet(string receiver, string className, string propName, string value)
-        => className + "_set_" + propName + "(" + receiver + ", " + value + ")";
+        => $"{className}_set_{propName}({receiver}, {value})";
 
-    // ── Private Hilfsmethoden ────────────────────────────────────────────
+    // ── Private Hilfsmethoden ────────────────────────────────────────────────
 
     private static void WriteAccessorBody(
         AccessorDeclarationSyntax accessor,
@@ -141,19 +143,12 @@ public static class PropertyWriter
         if (accessor.ExpressionBody != null)
         {
             var val = exprWriter.Write(accessor.ExpressionBody.Expression);
-            if (isVoid)
-                ctx.WriteLine(val + ";");
-            else
-                ctx.WriteLine("return " + val + ";");
+            ctx.WriteLine(isVoid ? $"{val};" : $"return {val};");
         }
         else if (accessor.Body != null)
         {
             foreach (var s in accessor.Body.Statements)
                 stmtWriter.Write(s);
-        }
-        else
-        {
-            // Leerer Accessor — nichts schreiben
         }
     }
 

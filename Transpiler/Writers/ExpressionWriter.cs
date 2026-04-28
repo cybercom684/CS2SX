@@ -83,15 +83,18 @@ public sealed class ExpressionWriter : IExpressionWriter
 
         var funcName = lifter.LiftLambda(lambda);
 
-        // Prelude einmalig einfügen
+        // FIX: Prelude wird per ConsumePrelude() geholt und VOR den bisherigen
+        //      Output eingefügt — ein einziger O(n)-Rewrite pro Lambda statt
+        //      pro Zeile, und korrekt bei mehreren Lambdas in einer Methode weil
+        //      die Preludes in _pendingPreludes geordnet akkumuliert werden.
         if (lifter.HasPrelude)
         {
+            var prelude = lifter.ConsumePrelude();
             var sb = _ctx.Out.GetStringBuilder();
-            var existingContent = sb.ToString();
+            var existing = sb.ToString();
             sb.Clear();
-            sb.Append(lifter.GetPrelude());
-            sb.Append(existingContent);
-            lifter.MarkPreludeFlushed();
+            sb.Append(prelude);
+            sb.Append(existing);
         }
 
         return funcName;
@@ -161,8 +164,19 @@ public sealed class ExpressionWriter : IExpressionWriter
 
     private string WriteTuple(TupleExpressionSyntax tuple)
     {
-        var elems = tuple.Arguments.Select(a => Write(a.Expression));
-        return "{ " + string.Join(", ", elems) + " }";
+        var elements = tuple.Arguments.Select(a => Write(a.Expression)).ToList();
+
+        if (!string.IsNullOrEmpty(_ctx.CurrentTupleReturnType))
+        {
+            var typeName = _ctx.CurrentTupleReturnType;
+            var fields = new[] { "item1", "item2", "item3", "item4", "item5", "item6", "item7" };
+            var assigns = elements
+                .Select((e, i) => $".{fields[i]} = {e}")
+                .ToList();
+            return $"({typeName}){{{string.Join(", ", assigns)}}}";
+        }
+
+        return $"{{ {string.Join(", ", elements)} }}";
     }
 
     private string WriteLiteral(LiteralExpressionSyntax lit)
@@ -499,8 +513,7 @@ public sealed class ExpressionWriter : IExpressionWriter
     {
         var full = mem.ToString();
 
-        if (IsNumericTypeMember(mem, out var constResult))
-            return constResult;
+        if (IsNumericTypeMember(mem, out var constResult)) return constResult;
 
         var mapped = TypeRegistry.MapEnum(full);
         if (mapped != full) return mapped;
@@ -516,53 +529,77 @@ public sealed class ExpressionWriter : IExpressionWriter
 
         var rawExpr = mem.Expression.ToString();
 
-        // FIX: catch-Variable ex.Message / ex.ToString() → _ex_msg
+        // Exception-Variable: ex.Message / ex.ToString() → _ex_msg
         if (_ctx.LocalTypes.TryGetValue(rawExpr, out var exType) && exType == "__exception__")
             return "_ex_msg";
 
+        // Dictionary KVP-Zugriff
         if (_ctx.LocalTypes.TryGetValue(rawExpr, out var kvpType)
             && kvpType.StartsWith("__kvp__", StringComparison.Ordinal))
-            return rawExpr + "_" + prop;
+        {
+            var baseVar = kvpType["__kvp__".Length..];
+            return prop switch
+            {
+                "Key" => $"{baseVar}_Key",
+                "Value" => $"{baseVar}_Value",
+                _ => $"{baseVar}_{prop}",
+            };
+        }
 
+        // Length / Count
         if (prop == "Length")
         {
             if (IsStringExpr(mem.Expression))
                 return "strlen(" + obj + ")";
-            var receiverRaw2 = mem.Expression.ToString();
-            var receiverKey2 = receiverRaw2.TrimStart('_');
-            if ((_ctx.LocalTypes.TryGetValue(receiverRaw2, out var rlt)
-                 && rlt is "string" or "String" or "char[]" or "const char*")
-             || (_ctx.FieldTypes.TryGetValue(receiverKey2, out var rft)
-                 && rft is "string" or "String" or "char[]" or "const char*"))
+            var rk2 = mem.Expression.ToString();
+            var rkey2 = rk2.TrimStart('_');
+            if ((_ctx.LocalTypes.TryGetValue(rk2, out var rlt) && rlt is "string" or "char[]" or "const char*")
+             || (_ctx.FieldTypes.TryGetValue(rkey2, out var rft) && rft is "string" or "char[]" or "const char*"))
                 return "strlen(" + obj + ")";
         }
-
-        if (prop == "Count" && IsListExpr(mem.Expression))
-            return obj + "->count";
-        if (prop == "Length" && IsStringBuilderExpr(mem.Expression))
-            return obj + "->length";
-        if (prop == "HasValue" && IsNullableExpr(mem.Expression))
-            return NullableHandler.WriteHasValue(obj);
-        if (prop == "Value" && IsNullableExpr(mem.Expression))
-            return NullableHandler.WriteGetValue(obj);
-        if (prop == "Count" && IsDictExpr(mem.Expression))
-            return obj + "->count";
-        if (prop is "Keys" or "Values" && IsDictExpr(mem.Expression))
-            return obj;
+        if (prop == "Count" && IsListExpr(mem.Expression)) return obj + "->count";
+        if (prop == "Length" && IsStringBuilderExpr(mem.Expression)) return obj + "->length";
+        if (prop == "HasValue" && IsNullableExpr(mem.Expression)) return NullableHandler.WriteHasValue(obj);
+        if (prop == "Value" && IsNullableExpr(mem.Expression)) return NullableHandler.WriteGetValue(obj);
+        if (prop == "Count" && IsDictExpr(mem.Expression)) return obj + "->count";
+        if (prop is "Keys" or "Values" && IsDictExpr(mem.Expression)) return obj;
 
         var key = rawExpr.TrimStart('_');
+        var receiverType = ResolveReceiverType(rawExpr);
 
+        // FIX: Zugriff auf Basisklassen-Properties/-Felder korrekt mappen
+        // Beispiel: button.Focused → ((Button*)button)->focused
+        //           label.Text    → korrekt über Label_SetText / Label_Text
+        if (receiverType != null && IsControlSubclassType(receiverType))
+        {
+            var controlProp = prop.ToLowerInvariant();
+            if (TypeRegistry.ControlFields.Contains(controlProp))
+                return $"{obj}->base.{controlProp}";
+
+            // Button-spezifische Felder
+            if (receiverType is "Button" && prop is "Focused" or "focused")
+                return $"{obj}->focused";
+            if (receiverType is "Button" && prop is "Text" or "text")
+                return $"{obj}->text";
+            if (receiverType is "Button" && prop is "OnClick")
+                return $"{obj}->OnClick";
+            if (receiverType is "Label" && prop is "Text" or "text")
+                return $"((Label*){obj})->text";
+            if (receiverType is "ProgressBar" && prop is "Value" or "value")
+                return $"{obj}->value";
+            if (receiverType is "ProgressBar" && prop is "WidthChars" or "width_chars")
+                return $"{obj}->width_chars";
+        }
+
+        // Struct-Typen: . statt ->
         if ((_ctx.LocalTypes.TryGetValue(rawExpr, out var lt) && IsStructType(lt))
          || (_ctx.FieldTypes.TryGetValue(key, out var ft) && IsStructType(ft)))
             return obj + "." + prop;
 
-        if ((_ctx.LocalTypes.TryGetValue(rawExpr, out var vlt)
-             && _ctx.ValueTypeStructs.Contains(vlt))
-         || (_ctx.FieldTypes.TryGetValue(key, out var vft)
-             && _ctx.ValueTypeStructs.Contains(vft)))
+        if ((_ctx.LocalTypes.TryGetValue(rawExpr, out var vlt) && _ctx.ValueTypeStructs.Contains(vlt))
+         || (_ctx.FieldTypes.TryGetValue(key, out var vft) && _ctx.ValueTypeStructs.Contains(vft)))
             return obj + "." + prop;
 
-        var receiverType = ResolveReceiverType(rawExpr);
         if (receiverType != null
             && !TypeRegistry.IsLibNxStruct(receiverType)
             && !TypeRegistry.IsLibNxStruct(TypeRegistry.MapType(receiverType).TrimEnd('*'))
@@ -579,6 +616,10 @@ public sealed class ExpressionWriter : IExpressionWriter
 
         return obj + "->" + prop;
     }
+
+    // Hilfsmethode: prüft ob ein Typ eine bekannte Control-Subklasse ist
+    private static bool IsControlSubclassType(string csType) =>
+        csType is "Button" or "Label" or "ProgressBar" or "Control" or "Form";
 
     private static bool IsNumericTypeMember(MemberAccessExpressionSyntax mem, out string result)
     {

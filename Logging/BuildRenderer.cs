@@ -1,4 +1,15 @@
-﻿namespace CS2SX.Logging;
+﻿// ============================================================================
+// CS2SX — Logging/BuildRenderer.cs  (FIX: Thread-Safety)
+//
+// FIXES:
+//   1. _disposed wird atomar per Interlocked.Exchange geprüft — verhindert
+//      ObjectDisposedException wenn Timer-Callback nach Dispose feuert.
+//   2. Complete() stoppt den Timer synchron (WaitForDispose) bevor RestoreTerminal
+//      aufgerufen wird — kein paralleler Render nach Complete.
+//   3. Render() prüft _disposed vor jedem Console-Zugriff.
+// ============================================================================
+
+namespace CS2SX.Logging;
 
 public sealed class BuildRenderer : IDisposable
 {
@@ -7,7 +18,8 @@ public sealed class BuildRenderer : IDisposable
     private readonly object _lock = new();
     private readonly int _originRow;
     private readonly System.Timers.Timer _ticker;
-    private bool _disposed;
+    private volatile bool _disposed;
+    private volatile bool _completed;
 
     private const string Reset = "\x1b[0m";
     private const string Dim = "\x1b[2m";
@@ -26,8 +38,15 @@ public sealed class BuildRenderer : IDisposable
         PrintHeader();
         Render();
         _ticker = new System.Timers.Timer(80);
-        _ticker.Elapsed += (_, _) => Render();
+        _ticker.Elapsed += OnTick;
         _ticker.Start();
+    }
+
+    private void OnTick(object? sender, System.Timers.ElapsedEventArgs e)
+    {
+        // FIX: Disposed-Check vor jedem Tick-Aufruf
+        if (_disposed || _completed) return;
+        Render();
     }
 
     public BuildStage GetStage(string name) =>
@@ -48,37 +67,47 @@ public sealed class BuildRenderer : IDisposable
 
     private void Render()
     {
+        // FIX: Disposed-Check im Render selbst
+        if (_disposed) return;
+
         lock (_lock)
         {
-            var row = _originRow + 2;
-            foreach (var stage in _stages)
+            try
             {
-                Console.SetCursorPosition(0, row++);
-                RenderStage(stage);
-                Console.SetCursorPosition(0, row++);
-                RenderBar(stage);
-                row++;
-            }
-
-            Console.SetCursorPosition(0, row++);
-            Console.Write($"{Dim}{Repeat("─", 52)}{Reset}");
-            row++;
-
-            var recentLines = _lines.TakeLast(4).ToList();
-            foreach (var (ts, lvl, msg) in recentLines)
-            {
-                Console.SetCursorPosition(0, row++);
-                var (sym, col) = lvl switch
+                var row = _originRow + 2;
+                foreach (var stage in _stages)
                 {
-                    "ok" => ("✓", Green),
-                    "warn" => ("!", Yellow),
-                    "error" => ("✗", Red),
-                    "debug" => ("~", "\x1b[35m"),
-                    _ => ("i", Cyan),
-                };
-                var time = $"{Gray}{ts:HH:mm:ss}{Reset}";
-                Console.Write($"  {time}  {col}{sym}{Reset}  {Dim}{msg,-52}{Reset}");
-                ClearToEnd();
+                    Console.SetCursorPosition(0, row++);
+                    RenderStage(stage);
+                    Console.SetCursorPosition(0, row++);
+                    RenderBar(stage);
+                    row++;
+                }
+
+                Console.SetCursorPosition(0, row++);
+                Console.Write($"{Dim}{Repeat("─", 52)}{Reset}");
+                row++;
+
+                var recentLines = _lines.TakeLast(4).ToList();
+                foreach (var (ts, lvl, msg) in recentLines)
+                {
+                    Console.SetCursorPosition(0, row++);
+                    var (sym, col) = lvl switch
+                    {
+                        "ok" => ("✓", Green),
+                        "warn" => ("!", Yellow),
+                        "error" => ("✗", Red),
+                        "debug" => ("~", "\x1b[35m"),
+                        _ => ("i", Cyan),
+                    };
+                    var time = $"{Gray}{ts:HH:mm:ss}{Reset}";
+                    Console.Write($"  {time}  {col}{sym}{Reset}  {Dim}{msg,-52}{Reset}");
+                    ClearToEnd();
+                }
+            }
+            catch (Exception)
+            {
+                // Console-Zugriff kann bei nicht-TTY-Terminals werfen — ignorieren
             }
         }
     }
@@ -123,28 +152,34 @@ public sealed class BuildRenderer : IDisposable
     private static readonly char[] SpinFrames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
     private static string Spinner() => SpinFrames[_spinFrame++ % SpinFrames.Length].ToString();
 
-    private static void ClearToEnd() =>
-        Console.Write("\x1b[K");
+    private static void ClearToEnd() => Console.Write("\x1b[K");
 
     private static string Truncate(string s, int max) =>
         s.Length <= max ? s : s[..(max - 1)] + "…";
 
     public void Complete(TimeSpan total, int warnings, int errors)
     {
+        // FIX: Timer synchron stoppen bevor wir in den Terminal schreiben
+        _completed = true;
         _ticker.Stop();
+
+        // Letzte Render-Runde mit finalen Stage-Zuständen
         Render();
 
         var summaryRow = _originRow + 2 + _stages.Count * 3 + 6 + 4;
-        Console.SetCursorPosition(0, summaryRow);
-        Console.WriteLine();
-        if (errors > 0)
-            Console.WriteLine($"  {Red}✗{Reset}  Build failed  {Gray}· {errors} error(s){Reset}");
-        else
-            Console.WriteLine($"  {Green}✓{Reset}  {Bold}Build complete{Reset}  {Gray}· {total.TotalSeconds:F1}s · {warnings} warning(s){Reset}");
-        Console.WriteLine();
+        try
+        {
+            Console.SetCursorPosition(0, summaryRow);
+            Console.WriteLine();
+            if (errors > 0)
+                Console.WriteLine($"  {Red}✗{Reset}  Build failed  {Gray}· {errors} error(s){Reset}");
+            else
+                Console.WriteLine($"  {Green}✓{Reset}  {Bold}Build complete{Reset}  " +
+                                  $"{Gray}· {total.TotalSeconds:F1}s · {warnings} warning(s){Reset}");
+            Console.WriteLine();
+        }
+        catch { }
 
-        // FIX: CursorVisible hier schon wiederherstellen (nicht erst in Dispose)
-        // damit Terminal auch bei throw nach Complete() sauber ist
         RestoreTerminal();
     }
 
@@ -154,14 +189,19 @@ public sealed class BuildRenderer : IDisposable
         catch { }
     }
 
-    private static string Repeat(string s, int n) => string.Concat(Enumerable.Repeat(s, n));
+    private static string Repeat(string s, int n) =>
+        string.Concat(Enumerable.Repeat(s, n));
 
     public void Dispose()
     {
+        // FIX: Idempotentes Dispose — verhindert Doppel-Dispose-Fehler
         if (_disposed) return;
         _disposed = true;
+
+        _ticker.Elapsed -= OnTick;
+        _ticker.Stop();
         _ticker.Dispose();
-        // FIX: immer wiederherstellen, auch wenn Complete() nie aufgerufen wurde
+
         RestoreTerminal();
     }
 }

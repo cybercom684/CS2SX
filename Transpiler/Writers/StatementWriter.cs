@@ -43,17 +43,32 @@ public sealed class StatementWriter
 
     private void WriteReturn(ReturnStatementSyntax ret)
     {
+        var line = ret.GetLocation().GetLineSpan().StartLinePosition.Line + 1;
+        _ctx.CurrentLine = line;
+
         if (ret.Expression == null)
-            _ctx.WriteLine("return;");
+            _ctx.WriteLineWithMapping("return;", line, "return;");
         else
-            _ctx.WriteLine("return " + _expr.Write(ret.Expression) + ";");
+        {
+            var val = _expr.Write(ret.Expression);
+            _ctx.WriteLineWithMapping($"return {val};", line,
+                ret.ToString().Trim().Length > 60
+                    ? ret.ToString().Trim()[..60] + "…"
+                    : ret.ToString().Trim());
+        }
     }
 
     private void WriteExprStmt(ExpressionStatementSyntax expr)
     {
+        var line = expr.GetLocation().GetLineSpan().StartLinePosition.Line + 1;
+        _ctx.CurrentLine = line;
+
         var result = _expr.Write(expr.Expression);
         if (!string.IsNullOrEmpty(result))
-            _ctx.WriteLine(result + ";");
+            _ctx.WriteLineWithMapping(result + ";", line,
+                expr.ToString().Trim().Length > 60
+                    ? expr.ToString().Trim()[..60] + "…"
+                    : expr.ToString().Trim());
     }
 
     private void WriteLocal(LocalDeclarationStatementSyntax local)
@@ -724,7 +739,25 @@ public sealed class StatementWriter
         else if (isRawArray)
             lenExpr = ResolveArrayLength(colRaw, colKey, colExpr);
         else
+        {
+            // FIX: Warnung ausgeben statt still falschen Code zu generieren.
+            //      Versuche über SemanticModel den Typ nachzuschlagen.
+            if (!string.IsNullOrEmpty(colType))
+            {
+                // Bekannter Typ aber nicht Collection → Warning
+                _ctx.Warn($"foreach: Typ '{colType}' ist keine bekannte Collection — " +
+                          $"Fallback auf '{colExpr}_count'. Bitte expliziten Typ verwenden.",
+                          colType);
+            }
+            else
+            {
+                _ctx.Warn($"foreach: Collection-Typ von '{colRaw}' nicht bekannt — " +
+                          $"Fallback auf '{colExpr}_count'. Stelle sicher dass die Variable " +
+                          $"vor dem foreach deklariert ist.",
+                          colRaw);
+            }
             lenExpr = colExpr + "_count";
+        }
 
         var rawElemType = forEach.Type.ToString().Trim();
         if (rawElemType == "var")
@@ -732,11 +765,10 @@ public sealed class StatementWriter
             if (isList) rawElemType = TypeRegistry.GetListInnerType(colType) ?? "int";
             else if (isString) rawElemType = "char";
             else if (isRawArray) rawElemType = colType[..^2].Trim();
+            else rawElemType = "int";
         }
 
-        _ctx.WriteLine("for (int " + idxVar + " = 0; "
-                     + idxVar + " < (int)(" + lenExpr + "); "
-                     + idxVar + "++)");
+        _ctx.WriteLine($"for (int {idxVar} = 0; {idxVar} < (int)({lenExpr}); {idxVar}++)");
         _ctx.WriteLine("{");
         _ctx.Indent();
 
@@ -762,18 +794,29 @@ public sealed class StatementWriter
         var cVal = types.val == "string" ? "const char*" : TypeRegistry.MapType(types.val);
         var idxVar = "_i_" + varName;
 
-        _ctx.WriteLine("for (int " + idxVar + " = 0; "
-                     + idxVar + " < (int)(" + colExpr + "->count); "
-                     + idxVar + "++)");
+        _ctx.WriteLine($"for (int {idxVar} = 0; {idxVar} < (int)({colExpr}->count); {idxVar}++)");
         _ctx.WriteLine("{");
         _ctx.Indent();
 
-        _ctx.WriteLine(cKey + " " + varName + "_Key = " + colExpr + "->keys[" + idxVar + "];");
-        _ctx.WriteLine(cVal + " " + varName + "_Value = " + colExpr + "->vals[" + idxVar + "];");
+        // FIX: Wir registrieren BEIDE Varianten-Namen damit dot-access in jedem Fall klappt:
+        //   foreach(var kv in dict) → kv.Key, kv.Value (MemberAccess)
+        //   foreach(var (k, v) in dict) → k, v (Deconstruction — separat behandelt)
+        //
+        // Der MemberAccess-Handler in ExpressionWriter prüft auf __kvp__-Marker
+        // und gibt dann varName_Key / varName_Value zurück.
+        // Zusätzlich deklarieren wir die C-Variablen direkt damit der generierte Code
+        // sie auch ohne MemberAccess-Rewrite nutzen kann.
 
-        _ctx.LocalTypes[varName + "_Key"] = types.key;
-        _ctx.LocalTypes[varName + "_Value"] = types.val;
-        _ctx.LocalTypes[varName] = "__kvp__" + varName;
+        _ctx.WriteLine($"{cKey} {varName}_Key = {colExpr}->keys[{idxVar}];");
+        _ctx.WriteLine($"{cVal} {varName}_Value = {colExpr}->vals[{idxVar}];");
+
+        // Registrierung: sowohl "kv" als __kvp__ als auch "kv_Key"/"kv_Value" direkt
+        _ctx.LocalTypes[$"{varName}_Key"] = types.key;
+        _ctx.LocalTypes[$"{varName}_Value"] = types.val;
+
+        // FIX: varName selbst als __kvp__varName registrieren damit WriteMemberAccess
+        //      "kv.Key" → "kv_Key" und "kv.Value" → "kv_Value" umschreibt.
+        _ctx.LocalTypes[varName] = $"__kvp__{varName}";
 
         var bodyStmts = forEach.Statement is BlockSyntax b
             ? b.Statements.Cast<StatementSyntax>()

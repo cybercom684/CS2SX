@@ -72,7 +72,6 @@ public sealed class ListHandler : InvocationHandlerBase
 
         if (lambdaNode != null)
         {
-            // Eigenen ExpressionWriter mit dem geteilten ctx erstellen
             var adapter = new ExpressionWriter(ctx);
             var lifter = new LambdaLifter(ctx, adapter);
             lifter.SetStatementWriter(new StatementWriter(ctx, adapter));
@@ -81,15 +80,15 @@ public sealed class ListHandler : InvocationHandlerBase
                 hintType: null,
                 elementTypeHint: inner);
 
-            // Prelude einmalig einfügen — NUR wenn noch nicht eingefügt
+            // FIX: Prelude vor den bisherigen Output einfügen
             if (lifter.HasPrelude)
             {
+                var prelude = lifter.ConsumePrelude();
                 var sb = ctx.Out.GetStringBuilder();
-                var existingContent = sb.ToString();
+                var existing = sb.ToString();
                 sb.Clear();
-                sb.Append(lifter.GetPrelude());
-                sb.Append(existingContent);
-                lifter.MarkPreludeFlushed();
+                sb.Append(prelude);
+                sb.Append(existing);
             }
         }
 
@@ -102,8 +101,7 @@ public sealed class ListHandler : InvocationHandlerBase
         ctx.Indent();
         ctx.WriteLine($"{cInner} {tmpVar} = {listExpr}->data[{idxI}];");
         ctx.WriteLine($"int {idxJ} = {idxI} - 1;");
-        ctx.WriteLine(
-            $"while ({idxJ} >= 0 && {resolvedComparer}({listExpr}->data[{idxJ}], {tmpVar}) > 0)");
+        ctx.WriteLine($"while ({idxJ} >= 0 && {resolvedComparer}({listExpr}->data[{idxJ}], {tmpVar}) > 0)");
         ctx.WriteLine("{");
         ctx.Indent();
         ctx.WriteLine($"{listExpr}->data[{idxJ}+1] = {listExpr}->data[{idxJ}];");

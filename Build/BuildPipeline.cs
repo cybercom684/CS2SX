@@ -452,15 +452,29 @@ public sealed class BuildPipeline
 
         if (hTime < csTime || cTime < csTime) return false;
 
+        // FIX: Transpiler-Binary selbst als Invalidierungs-Quelle nutzen.
+        //      Wenn cs2sx.exe neuer ist als der generierte Output, muss neu transpiliert werden.
+        var transpilerPath = System.Reflection.Assembly.GetExecutingAssembly().Location;
+        if (!string.IsNullOrEmpty(transpilerPath) && File.Exists(transpilerPath))
+        {
+            var transpilerTime = File.GetLastWriteTimeUtc(transpilerPath);
+            if (transpilerTime > hTime || transpilerTime > cTime)
+                return false;
+        }
+
         var switchformsH = Path.Combine(_buildDir, "switchforms.h");
-        if (File.Exists(switchformsH) && (File.GetLastWriteTimeUtc(switchformsH) > hTime
-                                       || File.GetLastWriteTimeUtc(switchformsH) > cTime))
-            return false;
+        if (File.Exists(switchformsH))
+        {
+            var t = File.GetLastWriteTimeUtc(switchformsH);
+            if (t > hTime || t > cTime) return false;
+        }
 
         var forwardH = Path.Combine(_buildDir, "_forward.h");
-        if (File.Exists(forwardH) && (File.GetLastWriteTimeUtc(forwardH) > hTime
-                                   || File.GetLastWriteTimeUtc(forwardH) > cTime))
-            return false;
+        if (File.Exists(forwardH))
+        {
+            var t = File.GetLastWriteTimeUtc(forwardH);
+            if (t > hTime || t > cTime) return false;
+        }
 
         var genericsH = Path.Combine(_buildDir, "_generics.h");
         if (File.Exists(genericsH) && File.GetLastWriteTimeUtc(genericsH) > hTime)
