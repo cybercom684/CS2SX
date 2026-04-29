@@ -1,13 +1,20 @@
-﻿// ============================================================================
-// CS2SX — Logging/BuildRenderer.cs  (FIX: Thread-Safety)
+﻿// Datei: Logging/BuildRenderer.cs
 //
-// FIXES:
-//   1. _disposed wird atomar per Interlocked.Exchange geprüft — verhindert
-//      ObjectDisposedException wenn Timer-Callback nach Dispose feuert.
-//   2. Complete() stoppt den Timer synchron (WaitForDispose) bevor RestoreTerminal
-//      aufgerufen wird — kein paralleler Render nach Complete.
-//   3. Render() prüft _disposed vor jedem Console-Zugriff.
-// ============================================================================
+// FIXES in dieser Version:
+//   FIX-1: MarkFirstRunningAsFailed() als öffentliche Methode eingeführt.
+//          BuildPipeline.Run() muss nicht mehr eine hartcodierte String-Liste
+//          der Stage-Namen pflegen. Der catch-Block ruft einfach diese Methode
+//          auf und der Renderer findet den fehlgeschlagenen Stage selbst.
+//          Vorher: neue Stage hinzufügen → String-Liste vergessen → Stage bleibt
+//          auf "Running" → Terminal-Renderer hängt nach dem Build.
+//
+//   FIX-2: _disposed-Check in OnTick() vor jedem Console-Zugriff, und
+//          Dispose() ist jetzt idempotent via Interlocked.Exchange (war volatile
+//          bool mit potenziellem TOCTOU zwischen Check und Dispose-Ablauf).
+//
+//   FIX-3: Complete() stoppt den Timer via _ticker.Stop() + kurze Wartezeit
+//          bevor RestoreTerminal() aufgerufen wird, damit kein paralleler
+//          Render-Tick mehr auf die Console schreibt.
 
 namespace CS2SX.Logging;
 
@@ -18,7 +25,9 @@ public sealed class BuildRenderer : IDisposable
     private readonly object _lock = new();
     private readonly int _originRow;
     private readonly System.Timers.Timer _ticker;
-    private volatile bool _disposed;
+
+    // FIX-2: int statt bool, damit Interlocked.Exchange verwendet werden kann.
+    private int _disposed;   // 0 = live, 1 = disposed
     private volatile bool _completed;
 
     private const string Reset = "\x1b[0m";
@@ -44,13 +53,26 @@ public sealed class BuildRenderer : IDisposable
 
     private void OnTick(object? sender, System.Timers.ElapsedEventArgs e)
     {
-        // FIX: Disposed-Check vor jedem Tick-Aufruf
-        if (_disposed || _completed) return;
+        // FIX-2: Disposed-Check atomar — kein TOCTOU
+        if (Volatile.Read(ref _disposed) == 1 || _completed) return;
         Render();
     }
 
     public BuildStage GetStage(string name) =>
         _stages.First(s => s.Name == name);
+
+    // FIX-1: Neue Methode — findet den ersten laufenden Stage und markiert ihn
+    // als fehlgeschlagen. BuildPipeline.Run() ruft diese im catch-Block auf
+    // statt eine hartcodierte String-Liste zu durchlaufen.
+    public void MarkFirstRunningAsFailed()
+    {
+        lock (_lock)
+        {
+            var running = _stages.FirstOrDefault(s => s.Status == StageStatus.Running);
+            if (running != null)
+                running.Status = StageStatus.Failed;
+        }
+    }
 
     public void Log(string level, string message)
     {
@@ -67,8 +89,8 @@ public sealed class BuildRenderer : IDisposable
 
     private void Render()
     {
-        // FIX: Disposed-Check im Render selbst
-        if (_disposed) return;
+        // FIX-2: Disposed-Check vor jedem Console-Zugriff
+        if (Volatile.Read(ref _disposed) == 1) return;
 
         lock (_lock)
         {
@@ -159,7 +181,7 @@ public sealed class BuildRenderer : IDisposable
 
     public void Complete(TimeSpan total, int warnings, int errors)
     {
-        // FIX: Timer synchron stoppen bevor wir in den Terminal schreiben
+        // FIX-3: Timer synchron stoppen bevor wir in den Terminal schreiben.
         _completed = true;
         _ticker.Stop();
 
@@ -194,9 +216,9 @@ public sealed class BuildRenderer : IDisposable
 
     public void Dispose()
     {
-        // FIX: Idempotentes Dispose — verhindert Doppel-Dispose-Fehler
-        if (_disposed) return;
-        _disposed = true;
+        // FIX-2: Idempotentes Dispose via Interlocked — thread-safe, kein TOCTOU.
+        if (Interlocked.Exchange(ref _disposed, 1) != 0)
+            return;
 
         _ticker.Elapsed -= OnTick;
         _ticker.Stop();

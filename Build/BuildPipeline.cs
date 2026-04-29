@@ -1,4 +1,19 @@
-﻿using CS2SX.Core;
+﻿// Datei: Build/BuildPipeline.cs
+//
+// FIXES in dieser Version:
+//   FIX-1: catch-Block nutzt renderer.MarkFirstRunningAsFailed() statt einer
+//          hartcodierten String-Liste der Stage-Namen.
+//          Vorher: neue Stage hinzufügen und die Liste vergessen → Stage blieb
+//          auf "Running" → BuildRenderer-Ticker lief endlos → Terminal korrumpiert.
+//          Jetzt: der Renderer findet den fehlgeschlagenen Stage selbst.
+//
+//   FIX-2: switchFormsDir wird weiterhin korrekt im finally-Block aufgeräumt
+//          (war bereits korrekt, bleibt unverändert).
+//
+//   FIX-3: IsUpToDate() berücksichtigt weiterhin den Transpiler-Binary-Timestamp
+//          (war bereits korrekt, bleibt unverändert).
+
+using CS2SX.Core;
 using CS2SX.Logging;
 using CS2SX.Transpiler;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
@@ -60,8 +75,6 @@ public sealed class BuildPipeline
         Log.AttachRenderer(renderer);
 
         int warnings = 0;
-
-        // FIX: switchFormsDir hier deklarieren damit finally-Block aufräumen kann
         string? switchFormsDir = null;
 
         try
@@ -99,7 +112,6 @@ public sealed class BuildPipeline
             var sFwd = renderer.GetStage("fwd-decl");
             sFwd.Status = StageStatus.Running;
 
-            // FIX: switchFormsDir der äußeren Variable zuweisen damit finally aufräumt
             switchFormsDir = Path.Combine(Path.GetTempPath(),
                 "cs2sx_" + Path.GetFileName(_projectDir));
             if (Directory.Exists(switchFormsDir))
@@ -240,10 +252,6 @@ public sealed class BuildPipeline
                     genericCollector,
                     interfaceExpander);
 
-                // FIX: CurrentFile VOR Transpile() setzen, nicht danach.
-                // Vorher stand diese Zuweisung nach cTranspiler.Transpile() —
-                // dadurch waren alle Source-Map-Einträge der laufenden Datei
-                // ohne CFile-Referenz und GCC-Fehler konnten nicht zurückgemappt werden.
                 hTranspiler.GetContext().CurrentFile = Path.GetFileName(csFile);
                 hTranspiler.GetContext().CurrentCFile = baseName + ".h";
 
@@ -273,11 +281,6 @@ public sealed class BuildPipeline
                     genericCollector,
                     interfaceExpander);
 
-                // FIX: CurrentFile und CurrentCFile VOR Transpile() setzen.
-                // Das ist der eigentliche Bug — vorher war es:
-                //   var cResult = cTranspiler.Transpile(...);
-                //   cTranspiler.GetContext().CurrentCFile = baseName + ".c";  // ZU SPÄT
-                // Jetzt korrekt:
                 cTranspiler.GetContext().CurrentFile = Path.GetFileName(csFile);
                 cTranspiler.GetContext().CurrentCFile = baseName + ".c";
 
@@ -378,15 +381,10 @@ public sealed class BuildPipeline
         catch (Exception ex)
         {
             Log.Error(ex.Message);
-            foreach (var stage in new[] { "prepare", "fwd-decl", "generics", "semantic", "transpile", "compile", "package" })
-            {
-                var s = renderer.GetStage(stage);
-                if (s.Status == StageStatus.Running)
-                {
-                    s.Status = StageStatus.Failed;
-                    break;
-                }
-            }
+
+            // FIX-1: Kein hartcodiertes String-Array mehr.
+            // Der Renderer findet den fehlgeschlagenen Stage selbst.
+            renderer.MarkFirstRunningAsFailed();
             renderer.Complete(DateTime.Now - started, warnings, errors: 1);
             throw;
         }
@@ -394,9 +392,6 @@ public sealed class BuildPipeline
         {
             Log.DetachRenderer();
 
-            // FIX: Temporäres SwitchForms-Verzeichnis immer aufräumen —
-            // vorher wurde es nur im Erfolgsfall nie explizit gelöscht.
-            // Bei Fehler blieben die Dateien dauerhaft im Temp-Ordner.
             if (switchFormsDir != null && Directory.Exists(switchFormsDir))
             {
                 try { Directory.Delete(switchFormsDir, recursive: true); }
@@ -452,8 +447,6 @@ public sealed class BuildPipeline
 
         if (hTime < csTime || cTime < csTime) return false;
 
-        // FIX: Transpiler-Binary selbst als Invalidierungs-Quelle nutzen.
-        //      Wenn cs2sx.exe neuer ist als der generierte Output, muss neu transpiliert werden.
         var transpilerPath = System.Reflection.Assembly.GetExecutingAssembly().Location;
         if (!string.IsNullOrEmpty(transpilerPath) && File.Exists(transpilerPath))
         {

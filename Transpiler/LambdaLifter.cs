@@ -1,15 +1,20 @@
-// ============================================================================
-// CS2SX — Transpiler/LambdaLifter.cs  (FIX v3)
+// Datei: Transpiler/LambdaLifter.cs
 //
-// FIXES:
-//   1. Prelude-Sammlung über statische Liste statt StringWriter-Rewrite —
-//      O(1) pro Lambda, korrekt bei beliebiger Verschachtelungstiefe.
-//   2. FlushPrelude() wird vom CSharpToC-Aufrufer EINMALIG nach der Methode
-//      aufgerufen und schreibt alle gesammelten Preludes geordnet vor den Body.
-//   3. Kein Zustand mehr über _preludeFlushed-Flag — der Caller kontrolliert
-//      den Flush-Zeitpunkt explizit.
-//   4. Lambda-Counter bleibt in TranspilerContext (bereits korrekt).
-// ============================================================================
+// FIXES in dieser Version:
+//   FIX-1: O(n²) StringWriter-Rewrite entfernt.
+//          Vorher: LiftLambda() schrieb Preludes (Struct-Defs + Funktionsdefs) per
+//          sb.Clear() + sb.Append(prelude) + sb.Append(existing) in den Output —
+//          O(n) pro Lambda, O(n²) für eine Klasse mit n Lambdas.
+//          Neu: Preludes werden in _ctx.PendingLambdaPreludes gesammelt.
+//          CSharpToC.VisitMethodDeclaration() ruft _ctx.FlushLambdaPreludes() auf,
+//          bevor die Methodensignatur geschrieben wird — einmaliger O(k)-Flush.
+//
+//   FIX-2: HasPrelude / ConsumePrelude sind intern geblieben (werden von
+//          ExpressionWriter nicht mehr für den Rewrite genutzt), aber als
+//          interne Hilfsmethoden für LambdaLifter selbst behalten.
+//
+//   HINWEIS: ExpressionWriter.WriteLambda() muss ebenfalls angepasst werden
+//            (siehe ExpressionWriter.cs) — der Rewrite-Block dort entfällt.
 
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
@@ -25,9 +30,6 @@ public sealed class LambdaLifter
     private readonly IExpressionWriter _expr;
     private StatementWriter? _stmt;
 
-    // Gesammelte Preludes (struct-Defs + Funktions-Defs) in Reihenfolge der Entstehung
-    private readonly List<string> _pendingPreludes = new();
-
     public LambdaLifter(TranspilerContext ctx, IExpressionWriter expr)
     {
         _ctx = ctx;
@@ -39,24 +41,14 @@ public sealed class LambdaLifter
     public static bool IsLambda(SyntaxNode? node) =>
         node is LambdaExpressionSyntax;
 
-    /// <summary>
-    /// True wenn es noch ungeflushed Preludes gibt.
-    /// </summary>
-    public bool HasPrelude => _pendingPreludes.Count > 0;
-
-    /// <summary>
-    /// Schreibt alle gesammelten Preludes in einen String und leert die Liste.
-    /// </summary>
-    public string ConsumePrelude()
-    {
-        if (_pendingPreludes.Count == 0) return string.Empty;
-        var result = string.Concat(_pendingPreludes);
-        _pendingPreludes.Clear();
-        return result;
-    }
-
     // ── Öffentliche API ──────────────────────────────────────────────────────
 
+    /// <summary>
+    /// Hebt ein Lambda in eine statische C-Funktion und schreibt das Prelude
+    /// (Struct-Def + Funktionsdefinition) in _ctx.PendingLambdaPreludes.
+    /// CSharpToC.VisitMethodDeclaration() flusht diese VOR der Methodensignatur.
+    /// Gibt den C-Funktionsnamen zurück.
+    /// </summary>
     public string LiftLambda(
         LambdaExpressionSyntax lambda,
         string? hintType = null,
@@ -68,13 +60,14 @@ public sealed class LambdaLifter
         var parms = ExtractParams(lambda, elementTypeHint);
         var retCs = hintType != null ? ExtractReturnType(hintType, parms.Count) : "int";
 
-        // Prelude in lokalen StringBuilder sammeln
+        // FIX-1: Prelude in einem lokalen StringBuilder sammeln und dann
+        // in _ctx.PendingLambdaPreludes eintragen — kein StringWriter-Rewrite.
         var preludeSb = new System.Text.StringBuilder();
         WriteStructToSb(preludeSb, id, caps);
         WriteFunctionToSb(preludeSb, id, name, lambda, parms, retCs, caps);
-        _pendingPreludes.Add(preludeSb.ToString());
+        _ctx.PendingLambdaPreludes.Add(preludeSb.ToString());
 
-        // Capture-Struct im aktuellen Output befüllen
+        // Capture-Struct im aktuellen Output befüllen (nach dem Lambda-Ausdruck)
         if (caps.Count > 0)
         {
             var capStruct = "_cap_" + id;
@@ -126,7 +119,7 @@ public sealed class LambdaLifter
         return ident + "_t";
     }
 
-    // ── Prelude-Aufbau (in StringBuilder, nicht in _ctx.Out) ─────────────────
+    // ── Prelude-Aufbau (in StringBuilder) ────────────────────────────────────
 
     private void WriteStructToSb(System.Text.StringBuilder sb, int id, List<CaptureInfo> caps)
     {

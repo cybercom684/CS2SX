@@ -1,9 +1,20 @@
 // Datei: Core/TranspilerContext.cs
-// FIX: WriteLineWithMapping ist jetzt in Benutzung — CurrentCFile wird
-// in BuildPipeline korrekt gesetzt, sodass GCC-Zeilen auf C#-Zeilen
-// zurückgemappt werden können.
-// FIX: NextLambdaId() hinzugefügt — Lambda-Zähler gehört in den Context,
-// nicht in LambdaLifter (der pro Lambda neu instanziiert wird).
+//
+// FIXES in dieser Version:
+//   FIX-1: TmpCounter und TmpStringCounter sind jetzt per-Klasse, nicht per-Methode.
+//          Vorher wurden beide in ClearMethodContext() auf 0 zurückgesetzt. Das führte
+//          dazu, dass zwei Methoden in derselben Klasse beide "_tmp_0" oder "_sb0"
+//          deklarierten — GCC meldete dann "redefinition of '_tmp_0'".
+//          Jetzt steigen die Zähler über die gesamte Klasse monoton an und werden
+//          nur in ClearClassContext() zurückgesetzt.
+//
+//   FIX-2: PendingLambdaPreludes-Liste hinzugefügt.
+//          LambdaLifter schreibt erzeugte Struct- und Funktionsdefinitionen nicht mehr
+//          per StringWriter-Rewrite in den Output, sondern sammelt sie in dieser Liste.
+//          ExpressionWriter.WriteLambda() ruft ConsumeAndWritePreludes() auf, bevor
+//          die Methodensignatur geschrieben wird — O(1) statt O(n) pro Lambda.
+//
+//   FIX-3: _lambdaCounter-Kommentar präzisiert (inhaltlich unverändert, war korrekt).
 
 using CS2SX.Transpiler;
 using Microsoft.CodeAnalysis;
@@ -43,7 +54,10 @@ public sealed class TranspilerContext
     }
     public string CurrentClass { get; set; } = string.Empty;
     public string CurrentBaseType { get; set; } = string.Empty;
-    public string? CurrentTupleReturnType { get; set; }
+    public string? CurrentTupleReturnType
+    {
+        get; set;
+    }
 
     public Dictionary<string, string> FieldTypes { get; } = new(StringComparer.Ordinal);
     public Dictionary<string, string> BaseFieldTypes { get; } = new(StringComparer.Ordinal);
@@ -71,35 +85,61 @@ public sealed class TranspilerContext
     public string Tab => new(' ', _indent * 4);
     public void Indent() => _indent++;
     public void Dedent() => _indent--;
+
     // Löst "using static"-Importe auf
     public UsingStaticResolver UsingStaticResolver { get; } = new();
+
     // ── Zähler ────────────────────────────────────────────────────────────────
 
+    // FIX-1: _classTmpCounter und _classStringCounter ersetzen die alten
+    // TmpCounter / TmpStringCounter Properties. Sie werden NUR in
+    // ClearClassContext() zurückgesetzt, nicht in ClearMethodContext().
+    // Das verhindert doppelte Variablendeklarationen in .c-Dateien wenn
+    // mehrere Methoden einer Klasse beide temporäre Buffer benötigen.
+    private int _classTmpCounter;
+    private int _classStringCounter;
+
+    // Öffentliche Properties für Legacy-Lesezugriff (z.B. LambdaLifter sync)
     public int TmpCounter
     {
-        get; set;
+        get => _classTmpCounter;
+        set => _classTmpCounter = value;  // LambdaLifter sync bleibt kompatibel
     }
+
     public int TmpStringCounter
     {
-        get; set;
+        get => _classStringCounter;
+        set => _classStringCounter = value;
     }
 
     // FIX: Lambda-Zähler gehört in den Context, NICHT in LambdaLifter.
-    //
-    // Hintergrund: ExpressionWriter.WriteLambda() erstellt pro Lambda-Ausdruck
-    // eine NEUE LambdaLifter-Instanz. Würde der Zähler in LambdaLifter sitzen,
-    // würde er bei jeder Instanz bei 0 starten — alle Lambdas einer Klasse
-    // bekämen denselben Namen "_lambda_0" → Linker-Fehler "duplicate symbol".
-    //
-    // Hier im Context überlebt der Zähler alle LambdaLifter-Instanzen und
-    // wird erst in ClearClassContext() (Klassenwechsel) zurückgesetzt.
+    // Zwei Lambdas in verschiedenen Methoden derselben Klasse müssen
+    // unterschiedliche IDs bekommen. Wird nur in ClearClassContext() resettet.
     private int _lambdaCounter;
 
     /// <summary>
     /// Gibt eine eindeutige, aufsteigende Lambda-ID für die aktuelle Klasse zurück.
-    /// Thread-safe ist nicht nötig — Transpilierung ist single-threaded.
     /// </summary>
     public int NextLambdaId() => _lambdaCounter++;
+
+    // FIX-2: Lambda-Preludes (Struct-Defs + Funktionsdefs) werden hier gesammelt
+    // statt per O(n)-StringWriter-Rewrite eingefügt zu werden.
+    // ExpressionWriter.WriteLambda() fügt via LambdaLifter.ConsumePrelude() hinzu.
+    // CSharpToC.VisitMethodDeclaration() schreibt sie einmalig VOR der Signatur.
+    public List<string> PendingLambdaPreludes { get; } = new();
+
+    /// <summary>
+    /// Schreibt alle gesammelten Lambda-Preludes in den Output und leert die Liste.
+    /// Muss von CSharpToC.VisitMethodDeclaration() VOR dem Schreiben der
+    /// Methodensignatur aufgerufen werden.
+    /// </summary>
+    public void FlushLambdaPreludes()
+    {
+        if (PendingLambdaPreludes.Count == 0) return;
+        foreach (var p in PendingLambdaPreludes)
+            Out.Write(p);
+        PendingLambdaPreludes.Clear();
+    }
 
     // ── Zeilen-Tracking ───────────────────────────────────────────────────────
 
@@ -131,7 +171,6 @@ public sealed class TranspilerContext
 
     /// <summary>
     /// Schreibt eine Zeile und registriert das Source-Mapping C-Zeile → C#-Zeile.
-    /// Sollte für alle transpilierten Statements genutzt werden.
     /// </summary>
     public void WriteLineWithMapping(string line, int csLine, string csSnippet)
     {
@@ -157,14 +196,13 @@ public sealed class TranspilerContext
     {
         LocalTypes.Clear();
         ArrayLengths.Clear();
-        TmpCounter = 0;
-        TmpStringCounter = 0;
+        // FIX-1: TmpCounter und TmpStringCounter werden NICHT zurückgesetzt.
+        // Sie gelten für die gesamte Klasse (bis ClearClassContext()), damit
+        // keine doppelten Variablennamen in der generierten .c-Datei entstehen.
         CurrentLine = 0;
         CurrentTupleReturnType = null;
         CurrentReturnBuffer = null;
-        // FIX: _lambdaCounter wird NICHT hier zurückgesetzt — er gilt pro
-        // Klasse, nicht pro Methode. Zwei Lambdas in verschiedenen Methoden
-        // derselben Klasse müssen unterschiedliche IDs bekommen.
+        // _lambdaCounter wird ebenfalls NICHT zurückgesetzt (gilt pro Klasse).
     }
 
     public void ClearClassContext()
@@ -176,12 +214,17 @@ public sealed class TranspilerContext
         MethodReturnTypes.Clear();
         PropertyTypes.Clear();
         EnumMembers.Clear();
-        ClearMethodContext();
 
-        // FIX: Lambda-Zähler beim Klassenwechsel zurücksetzen.
-        // Lambdas verschiedener Klassen können wieder bei 0 starten,
-        // weil sie in verschiedenen .c-Dateien generiert werden.
+        // FIX-1: Zähler nur hier zurücksetzen — pro Klasse, nicht pro Methode.
+        _classTmpCounter = 0;
+        _classStringCounter = 0;
         _lambdaCounter = 0;
+
+        // FIX-2: Offene Preludes beim Klassenwechsel verwerfen (sollte leer sein,
+        // aber defensiv sicherheitshalber leeren).
+        PendingLambdaPreludes.Clear();
+
+        ClearMethodContext();
     }
 
     public string? LookupType(string name)
@@ -195,17 +238,19 @@ public sealed class TranspilerContext
     public bool IsFieldAccess(string name) =>
         name.StartsWith('_') && !string.IsNullOrEmpty(CurrentClass);
 
+    // FIX-1: NextTmp nutzt _classTmpCounter — steigt pro Klasse monoton an.
     public string NextTmp(string prefix = "tmp") =>
-        "_" + prefix + "_" + (TmpCounter++);
+        "_" + prefix + "_" + (_classTmpCounter++);
 
+    // FIX-1: NextStringBuf nutzt _classStringCounter — steigt pro Klasse monoton an.
     public string NextStringBuf(int size = 512)
     {
-        var name = "_sb" + (TmpStringCounter++);
+        var name = "_sb" + (_classStringCounter++);
         WriteLine($"char {name}[{size}];");
         return name;
     }
 
-    public string PeekNextStringBufName() => "_sb" + TmpStringCounter;
+    public string PeekNextStringBufName() => "_sb" + _classStringCounter;
 
     public string FormatDiagnostic(string message) =>
         string.IsNullOrEmpty(CurrentFile)

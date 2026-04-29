@@ -1,6 +1,11 @@
 ﻿// Datei: Transpiler/Handlers/ListHandler.cs
-// VOLLSTÄNDIGE DATEI
-// BuildCustomSort ohne StringWriter-Swap — LambdaLifter macht das intern
+//
+// FIX: BuildCustomSort() nutzt nicht mehr lifter.HasPrelude / lifter.ConsumePrelude.
+//      Diese Methoden existieren im neuen LambdaLifter nicht mehr.
+//      Stattdessen: LiftLambda() schreibt Preludes direkt in _ctx.PendingLambdaPreludes.
+//      CSharpToC.VisitMethodDeclaration() flusht diese vor der Methodensignatur.
+//      Hier in BuildCustomSort() ist kein manueller Flush nötig — die Preludes
+//      werden automatisch beim nächsten Methoden-Flush ausgegeben.
 
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
@@ -40,7 +45,7 @@ public sealed class ListHandler : InvocationHandlerBase
             if (inv.ArgumentList.Arguments[0].Expression is LambdaExpressionSyntax lam)
                 lambdaNode = lam;
 
-            result = BuildCustomSort(listExpr, listType, args[0], ctx, lambdaNode);
+            result = BuildCustomSort(listExpr, listType, args[0], ctx, lambdaNode, writeExpr);
             return true;
         }
 
@@ -63,7 +68,8 @@ public sealed class ListHandler : InvocationHandlerBase
     private static string BuildCustomSort(
         string listExpr, string listType,
         string comparerExpr, TranspilerContext ctx,
-        LambdaExpressionSyntax? lambdaNode)
+        LambdaExpressionSyntax? lambdaNode,
+        Func<SyntaxNode?, string> writeExpr)
     {
         var inner = TypeRegistry.GetListInnerType(listType) ?? "int";
         var cInner = inner == "string" ? "const char*" : TypeRegistry.MapType(inner);
@@ -76,20 +82,13 @@ public sealed class ListHandler : InvocationHandlerBase
             var lifter = new LambdaLifter(ctx, adapter);
             lifter.SetStatementWriter(new StatementWriter(ctx, adapter));
 
+            // FIX: LiftLambda() schreibt das Prelude (Struct-Def + Hilfsfunktion)
+            // direkt in ctx.PendingLambdaPreludes. Es gibt kein HasPrelude /
+            // ConsumePrelude mehr. Der Flush passiert automatisch in
+            // CSharpToC.VisitMethodDeclaration() vor der nächsten Methodensignatur.
             resolvedComparer = lifter.LiftLambda(lambdaNode,
                 hintType: null,
                 elementTypeHint: inner);
-
-            // FIX: Prelude vor den bisherigen Output einfügen
-            if (lifter.HasPrelude)
-            {
-                var prelude = lifter.ConsumePrelude();
-                var sb = ctx.Out.GetStringBuilder();
-                var existing = sb.ToString();
-                sb.Clear();
-                sb.Append(prelude);
-                sb.Append(existing);
-            }
         }
 
         var idxI = ctx.NextTmp("si");

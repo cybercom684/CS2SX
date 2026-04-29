@@ -1,3 +1,19 @@
+// Datei: Transpiler/CSharpToC.cs
+//
+// FIX: VisitMethodDeclaration() ruft _ctx.FlushLambdaPreludes() auf,
+//      BEVOR die Methodensignatur in den Output geschrieben wird.
+//      Das ist der zentrale Flush-Punkt für alle Lambda-Preludes
+//      (Struct-Defs + statische Hilfsfunktionen), die LambdaLifter
+//      während der Transpilierung des Methoden-Bodys gesammelt hat.
+//
+//      Ablauf:
+//        1. Methoden-Body wird transpiliert → Lambdas erzeugen Preludes
+//           in _ctx.PendingLambdaPreludes (via LambdaLifter.LiftLambda())
+//        2. FlushLambdaPreludes() schreibt alle Preludes VOR die Signatur
+//        3. Signatur + Body werden normal geschrieben
+//
+//      Das ersetzt den alten O(n²)-StringWriter-Rewrite in ExpressionWriter.
+
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
@@ -26,16 +42,12 @@ public sealed class CSharpToC : CSharpSyntaxWalker
 
     private readonly IConstructorStrategy[] _constructorStrategies;
 
-    // ── NEU: Generic/Interface/Extension-Support ──────────────────────────────
     private readonly GenericInstantiationCollector? _genericCollector;
     private readonly InterfaceExpander? _interfaceExpander;
     private readonly ExtensionMethodHandler _extensionHandler;
 
     // ── Konstruktoren ─────────────────────────────────────────────────────────
 
-    /// <summary>
-    /// Original-Konstruktor (Rückwärtskompatibilität).
-    /// </summary>
     public CSharpToC(TranspileMode mode = TranspileMode.Implementation)
     {
         _mode = mode;
@@ -46,10 +58,6 @@ public sealed class CSharpToC : CSharpSyntaxWalker
         _constructorStrategies = BuildStrategies();
     }
 
-    /// <summary>
-    /// NEU: Konstruktor mit vollständigem Generic/Interface/Extension-Support.
-    /// Wird von BuildPipeline nach dem GenericInstantiationCollector-Pass genutzt.
-    /// </summary>
     public CSharpToC(
         TranspileMode mode,
         GenericInstantiationCollector collector,
@@ -64,8 +72,6 @@ public sealed class CSharpToC : CSharpSyntaxWalker
         _stmtWriter = new StatementWriter(_ctx, _exprWriter);
         _constructorStrategies = BuildStrategies();
 
-        // Interface-Namen in den Context laden damit ExpressionWriter.TryWriteVirtualCall
-        // Interface-Variablen korrekt als vtable-Wrapper dispatcht.
         foreach (var ifaceName in collector.Interfaces.Keys)
             _ctx.InterfaceTypes.Add(ifaceName);
     }
@@ -80,9 +86,9 @@ public sealed class CSharpToC : CSharpSyntaxWalker
     // ── Öffentliche API ───────────────────────────────────────────────────────
 
     public TranspileResult Transpile(
-    string csharpSource,
-    string? filePath = null,
-    SemanticModel? semanticModel = null)
+        string csharpSource,
+        string? filePath = null,
+        SemanticModel? semanticModel = null)
     {
         _sourceFilePath = filePath ?? string.Empty;
         _ctx.CurrentFile = System.IO.Path.GetFileName(_sourceFilePath);
@@ -91,7 +97,6 @@ public sealed class CSharpToC : CSharpSyntaxWalker
         var tree = semanticModel?.SyntaxTree
             ?? CSharpSyntaxTree.ParseText(csharpSource);
 
-        // FIX: "using static" Direktiven einsammeln
         _ctx.UsingStaticResolver.Collect(tree.GetRoot());
 
         var diags = tree.GetDiagnostics()
@@ -156,17 +161,13 @@ public sealed class CSharpToC : CSharpSyntaxWalker
         var lineSpan = node.GetLocation().GetLineSpan();
         _ctx.CurrentLine = lineSpan.StartLinePosition.Line + 1;
 
-        // NEU: Generische Klassen überspringen wenn ein Collector vorhanden ist
-        // Sie werden vom GenericExpander separat behandelt
         if (_genericCollector != null
             && node.TypeParameterList?.Parameters.Count > 0)
         {
-            Log.Debug($"CSharpToC: Generische Klasse '{node.Identifier.Text}' übersprungen (wird von GenericExpander behandelt)");
+            Log.Debug($"CSharpToC: Generische Klasse '{node.Identifier.Text}' übersprungen");
             return;
         }
 
-        // NEU: Extension-Klassen (static class mit extension methods) im Header
-        // als Funktions-Signaturen ausgeben
         bool isExtensionClass = node.Modifiers.Any(m => m.IsKind(SyntaxKind.StaticKeyword))
             && node.Members.OfType<MethodDeclarationSyntax>().Any(m =>
                 m.ParameterList.Parameters.FirstOrDefault()?.Modifiers
@@ -192,7 +193,6 @@ public sealed class CSharpToC : CSharpSyntaxWalker
             _ctx.VTableTypes.Add(node.Identifier.Text);
         }
 
-        // NEU: Interface-Implementierungen in VTableTypes registrieren
         if (_interfaceExpander != null
             && _interfaceExpander.ClassInterfaces.ContainsKey(node.Identifier.Text))
         {
@@ -216,7 +216,6 @@ public sealed class CSharpToC : CSharpSyntaxWalker
                 if (!PropertyWriter.IsAutoProperty(prop))
                     PropertyWriter.WriteSignatures(prop, node.Identifier.Text, _ctx.Out);
 
-            // NEU: Interface-vtable-Deklarationen im Header
             if (_interfaceExpander != null)
             {
                 var ifaceDecls = _interfaceExpander.ExpandClassVTableDeclarations(node.Identifier.Text);
@@ -246,7 +245,6 @@ public sealed class CSharpToC : CSharpSyntaxWalker
                 VTableBuilder.WriteVTableInstance(node, node.Identifier.Text, baseType, _ctx.Out);
             }
 
-            // NEU: Interface-vtable-Instanzen nach den Methoden ausgeben
             if (_interfaceExpander != null)
             {
                 var ifaceImpls = _interfaceExpander.ExpandClassVTableInstances(
@@ -259,11 +257,6 @@ public sealed class CSharpToC : CSharpSyntaxWalker
         _ctx.ClearClassContext();
     }
 
-    /// <summary>
-    /// Generiert eine _Free()-Funktion für jede Klasse.
-    /// Gibt Felder frei die mit _New() alloziert wurden.
-    /// Wird im Header deklariert und in der .c-Datei implementiert.
-    /// </summary>
     private void WriteDestructor(ClassDeclarationSyntax node, string name, string baseType)
     {
         if (_mode == TranspileMode.HeaderOnly)
@@ -277,7 +270,6 @@ public sealed class CSharpToC : CSharpSyntaxWalker
         _ctx.Indent();
         _ctx.WriteLine("if (!self) return;");
 
-        // Felder die auf allozierte Objekte zeigen freigeben
         foreach (var field in node.Members.OfType<FieldDeclarationSyntax>())
         {
             if (field.Modifiers.Any(m => m.IsKind(SyntaxKind.StaticKeyword))) continue;
@@ -322,14 +314,12 @@ public sealed class CSharpToC : CSharpSyntaxWalker
                 }
                 else
                 {
-                    // Generischer Pointer → _Free() aufrufen wenn vorhanden
                     var cType = TypeRegistry.MapType(csType);
                     _ctx.WriteLine($"if ({fieldExpr}) {cType}_Free({fieldExpr});");
                 }
             }
         }
 
-        // Basis-Klassen-Cleanup
         if (!string.IsNullOrEmpty(baseType)
             && baseType != "SwitchApp"
             && !IsControlSubclass(baseType))
@@ -346,7 +336,6 @@ public sealed class CSharpToC : CSharpSyntaxWalker
     public override void VisitStructDeclaration(StructDeclarationSyntax node)
     {
         var structName = node.Identifier.Text;
-
         _ctx.ValueTypeStructs.Add(structName);
 
         if (_mode == TranspileMode.HeaderOnly)
@@ -457,7 +446,6 @@ public sealed class CSharpToC : CSharpSyntaxWalker
             _ctx.WriteLine(embedType + " base;");
         }
 
-        // NEU: Interface-Pointer wenn Klasse Interface implementiert
         if (_interfaceExpander != null
             && _interfaceExpander.ClassInterfaces.TryGetValue(name, out var ifaces))
         {
@@ -486,10 +474,6 @@ public sealed class CSharpToC : CSharpSyntaxWalker
             if (field.Modifiers.Any(m => m.IsKind(SyntaxKind.StaticKeyword))) continue;
 
             var csType = ResolveFieldType(field);
-
-            // NEU: Generische Typ-Parameter durch konkreten Typ ersetzen
-            // (passiert wenn die Klasse selbst generisch ist — sollte nicht vorkommen
-            //  weil generische Klassen übersprungen werden, aber zur Sicherheit)
             var cType = ResolveConcreteType(csType);
             var needPtr = TypeRegistry.NeedsPointerSuffix(csType)
                        || TypeRegistry.IsStringBuilder(csType)
@@ -517,15 +501,10 @@ public sealed class CSharpToC : CSharpSyntaxWalker
         }
     }
 
-    /// <summary>
-    /// NEU: Löst generische Typ-Namen wie Stack&lt;int&gt; zu Stack_int auf.
-    /// </summary>
     private string ResolveConcreteType(string csType)
     {
-        // Ist es ein generischer Typ der durch den Collector bekannt ist?
         if (_genericCollector != null && csType.Contains('<'))
         {
-            // Einfache Heuristik: Foo<Bar> → Foo_Bar wenn Foo generisch ist
             var angleBracket = csType.IndexOf('<');
             var baseName = csType[..angleBracket].Trim();
             if (_genericCollector.GenericClasses.ContainsKey(baseName))
@@ -664,7 +643,7 @@ public sealed class CSharpToC : CSharpSyntaxWalker
         var baseType = csType[..^2].Trim();
         var cType = baseType == "string" ? "const char*" : TypeRegistry.MapType(baseType);
         var isConst = field.Modifiers.Any(m => m.IsKind(SyntaxKind.ReadOnlyKeyword))
-                   || field.Modifiers.Any(m => m.IsKind(SyntaxKind.ConstKeyword));
+                    || field.Modifiers.Any(m => m.IsKind(SyntaxKind.ConstKeyword));
 
         foreach (var v in field.Declaration.Variables)
         {
@@ -719,21 +698,11 @@ public sealed class CSharpToC : CSharpSyntaxWalker
                     var initVal = _exprWriter.Write(v.Initializer.Value);
 
                     if (csType == "string")
-                    {
-                        _ctx.Out.WriteLine(
-                            $"extern const char* const {name}_{fieldName};");
-                    }
+                        _ctx.Out.WriteLine($"extern const char* const {name}_{fieldName};");
                     else if (TypeRegistry.IsPrimitive(csType))
-                    {
-                        _ctx.Out.WriteLine(
-                            $"#define {name}_{fieldName} ({initVal})");
-                    }
+                        _ctx.Out.WriteLine($"#define {name}_{fieldName} ({initVal})");
                     else
-                    {
-                        var cType = TypeRegistry.MapType(csType);
-                        _ctx.Out.WriteLine(
-                            $"extern const {cType} {name}_{fieldName};");
-                    }
+                        _ctx.Out.WriteLine($"extern const {TypeRegistry.MapType(csType)} {name}_{fieldName};");
                 }
                 continue;
             }
@@ -760,6 +729,7 @@ public sealed class CSharpToC : CSharpSyntaxWalker
             }
         }
     }
+
     // ── Feld-Initializer ─────────────────────────────────────────────────────
 
     internal void WriteInstanceFieldInitializers(ClassDeclarationSyntax node)
@@ -842,7 +812,6 @@ public sealed class CSharpToC : CSharpSyntaxWalker
         var isStatic = method.Modifiers.Any(m => m.IsKind(SyntaxKind.StaticKeyword))
                       || isStaticClass;
 
-        // NEU: Extension-Methoden korrekt signieren (ohne this-Parameter in C)
         bool isExtension = method.ParameterList.Parameters.FirstOrDefault()?.Modifiers
             .Any(m => m.IsKind(SyntaxKind.ThisKeyword)) == true;
 
@@ -854,12 +823,10 @@ public sealed class CSharpToC : CSharpSyntaxWalker
 
         foreach (var p in method.ParameterList.Parameters)
         {
-            // NEU: this-Parameter bei Extension-Methoden überspringen (wird erster Arg)
             if (p.Modifiers.Any(m => m.IsKind(SyntaxKind.ThisKeyword))) continue;
             parameters.Add(BuildParamDecl(p));
         }
 
-        // Extension-Methoden: erster Param (this) wird zum ersten normalen Param
         if (isExtension && method.ParameterList.Parameters.Count > 0)
         {
             var thisParam = method.ParameterList.Parameters[0];
@@ -904,7 +871,6 @@ public sealed class CSharpToC : CSharpSyntaxWalker
         bool isExtension = node.ParameterList.Parameters.FirstOrDefault()?.Modifiers
             .Any(m => m.IsKind(SyntaxKind.ThisKeyword)) == true;
 
-        // FIX: Tuple-Rückgabetyp → Struct generieren und als C-Rückgabetyp verwenden
         string cReturnType;
         if (TypeRegistry.IsTuple(csReturnType))
         {
@@ -912,7 +878,6 @@ public sealed class CSharpToC : CSharpSyntaxWalker
             _ctx.CurrentTupleReturnType = tupleStructName;
             cReturnType = tupleStructName;
 
-            // Struct-Definition in den Output einmalig emittieren (Header-Modus)
             if (_mode == TranspileMode.HeaderOnly)
             {
                 var structDef = TypeRegistry.GenerateTupleStruct(csReturnType);
@@ -1001,6 +966,14 @@ public sealed class CSharpToC : CSharpSyntaxWalker
             }
         }
 
+        // FIX: Lambda-Preludes VOR der Signatur flushen.
+        // LambdaLifter.LiftLambda() sammelt Preludes in _ctx.PendingLambdaPreludes.
+        // Sie müssen VOR der Methodensignatur in den Output, damit GCC sie bei der
+        // Verwendung des Funktionsnamens als Argument bereits kennt.
+        // Der Flush hier ist der einzige Flush-Punkt — ExpressionWriter macht keinen
+        // StringWriter-Rewrite mehr.
+        _ctx.FlushLambdaPreludes();
+
         _ctx.Out.WriteLine(sig);
         _ctx.Out.WriteLine("{");
         _ctx.Indent();
@@ -1017,6 +990,11 @@ public sealed class CSharpToC : CSharpSyntaxWalker
         _ctx.Dedent();
         _ctx.Out.WriteLine("}");
         _ctx.Out.WriteLine();
+
+        // Sicherheits-Flush: Falls ein Lambda direkt im ExpressionBody war und
+        // Preludes erst nach der Signatur gesammelt wurden (sollte nicht passieren,
+        // aber defensive Programmierung).
+        _ctx.FlushLambdaPreludes();
     }
 
     // ── Property ─────────────────────────────────────────────────────────────
@@ -1063,15 +1041,9 @@ public sealed class CSharpToC : CSharpSyntaxWalker
      || TypeRegistry.IsControlType(csType)
      || NullableHandler.IsNullable(csType);
 
-    /// <summary>
-    /// Original BuildParamDecl (Rückwärtskompatibilität).
-    /// </summary>
     internal string BuildParamDecl(ParameterSyntax p) =>
         BuildParamDecl(p, skipThis: false);
 
-    /// <summary>
-    /// NEU: BuildParamDecl mit skipThis-Option für Extension-Methoden.
-    /// </summary>
     internal string BuildParamDecl(ParameterSyntax p, bool skipThis)
     {
         if (p.Type == null) return p.Identifier.Text;
@@ -1089,7 +1061,6 @@ public sealed class CSharpToC : CSharpSyntaxWalker
             catch { }
         }
 
-        // FIX: ref/out Parameter immer als Pointer deklarieren
         bool isRef = p.Modifiers.Any(m =>
             m.IsKind(SyntaxKind.RefKeyword) || m.IsKind(SyntaxKind.OutKeyword));
 
@@ -1108,7 +1079,6 @@ public sealed class CSharpToC : CSharpSyntaxWalker
         {
             var inner = NullableHandler.GetInnerType(csType);
             var cInner = TypeRegistry.MapType(inner);
-            // out nullable → double pointer
             return isRef ? $"{cInner}** {p.Identifier}" : $"{cInner}* {p.Identifier}";
         }
 
@@ -1127,8 +1097,6 @@ public sealed class CSharpToC : CSharpSyntaxWalker
 
         if (isRef)
         {
-            // out/ref → immer Pointer, auch bei primitiven Typen
-            // Sonderfall: string out → const char** (Pointer auf Pointer)
             if (csType == "string")
                 return $"const char** {p.Identifier}";
             return $"{cType}* {p.Identifier}";

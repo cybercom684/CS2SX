@@ -1,3 +1,20 @@
+// Datei: Transpiler/Writers/ExpressionWriter.cs
+//
+// FIX: WriteLambda() macht keinen O(n)-StringWriter-Rewrite mehr.
+//      Vorher:
+//        var prelude = lifter.ConsumePrelude();
+//        var sb = _ctx.Out.GetStringBuilder();
+//        var existing = sb.ToString();   // kopiert ALLES bisherige
+//        sb.Clear();
+//        sb.Append(prelude);             // schreibt Prelude vorne
+//        sb.Append(existing);            // schreibt Rest dahinter — O(n) pro Lambda
+//
+//      Jetzt:
+//        LambdaLifter.LiftLambda() schreibt Preludes in _ctx.PendingLambdaPreludes.
+//        CSharpToC.VisitMethodDeclaration() ruft _ctx.FlushLambdaPreludes() einmalig
+//        VOR der Methodensignatur auf. WriteLambda() hier tut nichts weiter als
+//        LiftLambda() aufrufen und den Funktionsnamen zurückzugeben.
+
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
@@ -72,33 +89,21 @@ public sealed class ExpressionWriter : IExpressionWriter
         };
     }
 
-    // Datei: Transpiler/Writers/ExpressionWriter.cs
-    // NUR WriteLambda UND WriteIdentifier ERSETZEN
+    // ── Lambda ────────────────────────────────────────────────────────────────
 
     private string WriteLambda(LambdaExpressionSyntax lambda)
     {
+        // FIX: Kein StringWriter-Rewrite mehr.
+        // LambdaLifter.LiftLambda() schreibt das Prelude (Struct-Def + Funktionsdef)
+        // in _ctx.PendingLambdaPreludes. CSharpToC.VisitMethodDeclaration() flusht
+        // diese einmalig VOR der Methodensignatur via _ctx.FlushLambdaPreludes().
         var lifter = new LambdaLifter(_ctx, this);
         var stmtWriter = new StatementWriter(_ctx, this);
         lifter.SetStatementWriter(stmtWriter);
-
-        var funcName = lifter.LiftLambda(lambda);
-
-        // FIX: Prelude wird per ConsumePrelude() geholt und VOR den bisherigen
-        //      Output eingefügt — ein einziger O(n)-Rewrite pro Lambda statt
-        //      pro Zeile, und korrekt bei mehreren Lambdas in einer Methode weil
-        //      die Preludes in _pendingPreludes geordnet akkumuliert werden.
-        if (lifter.HasPrelude)
-        {
-            var prelude = lifter.ConsumePrelude();
-            var sb = _ctx.Out.GetStringBuilder();
-            var existing = sb.ToString();
-            sb.Clear();
-            sb.Append(prelude);
-            sb.Append(existing);
-        }
-
-        return funcName;
+        return lifter.LiftLambda(lambda);
     }
+
+    // ── Identifier ────────────────────────────────────────────────────────────
 
     private string WriteIdentifier(IdentifierNameSyntax id)
     {
@@ -110,7 +115,6 @@ public sealed class ExpressionWriter : IExpressionWriter
         if (_ctx.EnumMembers.Contains(name)) return name;
         if (name == "_cs2sx_strbuf") return "_cs2sx_strbuf";
 
-        // LocalTypes VOR IsFieldAccess
         if (_ctx.LocalTypes.TryGetValue(name, out var localType))
         {
             if (localType.StartsWith("@ref:", StringComparison.Ordinal))
@@ -119,7 +123,6 @@ public sealed class ExpressionWriter : IExpressionWriter
                 return name + "_Key";
             if (localType == "__exception__")
                 return "_ex_msg";
-            // _-prefixed Capture: "_currentPath" → "currentPath"
             if (name.StartsWith('_') && !name.StartsWith("__"))
             {
                 var clean = name.TrimStart('_');
@@ -162,6 +165,8 @@ public sealed class ExpressionWriter : IExpressionWriter
         return name;
     }
 
+    // ── Tuple ─────────────────────────────────────────────────────────────────
+
     private string WriteTuple(TupleExpressionSyntax tuple)
     {
         var elements = tuple.Arguments.Select(a => Write(a.Expression)).ToList();
@@ -178,6 +183,8 @@ public sealed class ExpressionWriter : IExpressionWriter
 
         return $"{{ {string.Join(", ", elements)} }}";
     }
+
+    // ── Literal ───────────────────────────────────────────────────────────────
 
     private string WriteLiteral(LiteralExpressionSyntax lit)
     {
@@ -198,6 +205,8 @@ public sealed class ExpressionWriter : IExpressionWriter
         return text;
     }
 
+    // ── Binary ────────────────────────────────────────────────────────────────
+
     private string WriteBinary(BinaryExpressionSyntax bin)
     {
         if (bin.IsKind(SyntaxKind.AddExpression))
@@ -210,11 +219,9 @@ public sealed class ExpressionWriter : IExpressionWriter
         var right = Write(bin.Right);
         var op = bin.OperatorToken.Text;
 
-        // String-Vergleich mit strcmp
         if ((op == "==" || op == "!=") && IsStringExpr(bin.Left))
             return "strcmp(" + left + ", " + right + ") " + op + " 0";
 
-        // FIX: string != null / == null → IsNullOrEmpty statt strcmp(..., NULL)
         if (op == "==" && IsNullLiteral(bin.Right) && IsStringType(bin.Left))
             return "String_IsNullOrEmpty(" + left + ")";
         if (op == "!=" && IsNullLiteral(bin.Right) && IsStringType(bin.Left))
@@ -266,6 +273,8 @@ public sealed class ExpressionWriter : IExpressionWriter
             accessExpr = receiver + "->(" + Write(condAccess.WhenNotNull) + ")";
         return NullableHandler.WriteNullConditional(receiver, accessExpr);
     }
+
+    // ── Assignment ────────────────────────────────────────────────────────────
 
     private string WriteAssignment(AssignmentExpressionSyntax assign)
     {
@@ -357,6 +366,8 @@ public sealed class ExpressionWriter : IExpressionWriter
         return "NULL";
     }
 
+    // ── Invocation ────────────────────────────────────────────────────────────
+
     private string WriteInvocation(InvocationExpressionSyntax inv)
     {
         var result = _dispatcher.Dispatch(inv);
@@ -432,7 +443,6 @@ public sealed class ExpressionWriter : IExpressionWriter
         var objRaw = mem.Expression.ToString();
         var objKey = objRaw.TrimStart('_');
 
-        // FIX: ex.Message = ... → _ex_msg = ...
         if (_ctx.LocalTypes.TryGetValue(objRaw, out var exType) && exType == "__exception__")
             return "_ex_msg " + op + " " + right;
 
@@ -509,6 +519,8 @@ public sealed class ExpressionWriter : IExpressionWriter
         return obj + "[" + key + "] = " + right;
     }
 
+    // ── MemberAccess ──────────────────────────────────────────────────────────
+
     private string WriteMemberAccess(MemberAccessExpressionSyntax mem)
     {
         var full = mem.ToString();
@@ -529,11 +541,9 @@ public sealed class ExpressionWriter : IExpressionWriter
 
         var rawExpr = mem.Expression.ToString();
 
-        // Exception-Variable: ex.Message / ex.ToString() → _ex_msg
         if (_ctx.LocalTypes.TryGetValue(rawExpr, out var exType) && exType == "__exception__")
             return "_ex_msg";
 
-        // Dictionary KVP-Zugriff
         if (_ctx.LocalTypes.TryGetValue(rawExpr, out var kvpType)
             && kvpType.StartsWith("__kvp__", StringComparison.Ordinal))
         {
@@ -546,7 +556,6 @@ public sealed class ExpressionWriter : IExpressionWriter
             };
         }
 
-        // Length / Count
         if (prop == "Length")
         {
             if (IsStringExpr(mem.Expression))
@@ -567,16 +576,12 @@ public sealed class ExpressionWriter : IExpressionWriter
         var key = rawExpr.TrimStart('_');
         var receiverType = ResolveReceiverType(rawExpr);
 
-        // FIX: Zugriff auf Basisklassen-Properties/-Felder korrekt mappen
-        // Beispiel: button.Focused → ((Button*)button)->focused
-        //           label.Text    → korrekt über Label_SetText / Label_Text
         if (receiverType != null && IsControlSubclassType(receiverType))
         {
             var controlProp = prop.ToLowerInvariant();
             if (TypeRegistry.ControlFields.Contains(controlProp))
                 return $"{obj}->base.{controlProp}";
 
-            // Button-spezifische Felder
             if (receiverType is "Button" && prop is "Focused" or "focused")
                 return $"{obj}->focused";
             if (receiverType is "Button" && prop is "Text" or "text")
@@ -591,7 +596,6 @@ public sealed class ExpressionWriter : IExpressionWriter
                 return $"{obj}->width_chars";
         }
 
-        // Struct-Typen: . statt ->
         if ((_ctx.LocalTypes.TryGetValue(rawExpr, out var lt) && IsStructType(lt))
          || (_ctx.FieldTypes.TryGetValue(key, out var ft) && IsStructType(ft)))
             return obj + "." + prop;
@@ -617,7 +621,6 @@ public sealed class ExpressionWriter : IExpressionWriter
         return obj + "->" + prop;
     }
 
-    // Hilfsmethode: prüft ob ein Typ eine bekannte Control-Subklasse ist
     private static bool IsControlSubclassType(string csType) =>
         csType is "Button" or "Label" or "ProgressBar" or "Control" or "Form";
 
@@ -664,6 +667,8 @@ public sealed class ExpressionWriter : IExpressionWriter
         if (_ctx.FieldTypes.TryGetValue(rawExpr, out var ft2)) return ft2;
         return null;
     }
+
+    // ── ObjectCreation ────────────────────────────────────────────────────────
 
     private string WriteObjectCreation(ObjectCreationExpressionSyntax obj)
     {
@@ -724,7 +729,7 @@ public sealed class ExpressionWriter : IExpressionWriter
         }
 
         var args = obj.ArgumentList?.Arguments.Select(a => Write(a.Expression))
-                          ?? Enumerable.Empty<string>();
+                              ?? Enumerable.Empty<string>();
         var creation = typeName + "_New(" + string.Join(", ", args) + ")";
 
         if (obj.Initializer?.Expressions.Count > 0)
@@ -756,6 +761,8 @@ public sealed class ExpressionWriter : IExpressionWriter
         return creation;
     }
 
+    // ── Array ─────────────────────────────────────────────────────────────────
+
     private string WriteArrayCreation(ArrayCreationExpressionSyntax arr)
     {
         var elemType = arr.Type.ElementType.ToString().Trim();
@@ -779,6 +786,8 @@ public sealed class ExpressionWriter : IExpressionWriter
         var elems = implArr.Initializer.Expressions.Select(e => Write(e));
         return "{ " + string.Join(", ", elems) + " }";
     }
+
+    // ── Helpers ───────────────────────────────────────────────────────────────
 
     private static bool IsStructType(string csType) =>
         TypeRegistry.IsLibNxStruct(csType)
@@ -833,8 +842,6 @@ public sealed class ExpressionWriter : IExpressionWriter
         return objExpr + "[" + index + "]";
     }
 
-    // ── Hilfsmethoden ─────────────────────────────────────────────────────────
-
     private bool IsStringExpr(SyntaxNode node)
     {
         if (node is LiteralExpressionSyntax lit
@@ -848,14 +855,12 @@ public sealed class ExpressionWriter : IExpressionWriter
         return false;
     }
 
-    // FIX: string-Typ-Erkennung für != null Check
     private bool IsStringType(SyntaxNode node)
     {
         var t = TypeInferrer.InferCSharpType(node, _ctx);
         return t == "string";
     }
 
-    // FIX: null-Literal-Erkennung
     private static bool IsNullLiteral(SyntaxNode node) =>
         node is LiteralExpressionSyntax lit
         && lit.IsKind(SyntaxKind.NullLiteralExpression);
