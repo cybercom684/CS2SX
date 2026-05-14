@@ -24,6 +24,17 @@ public sealed class GraphicsHandler : InvocationHandlerBase
             ["Graphics.MeasureTextWidth"] = "Graphics_MeasureTextWidth",
             ["Graphics.MeasureTextHeight"] = "Graphics_MeasureTextHeight",
             ["Graphics.DrawTexture"] = "Graphics_DrawTexture",
+            ["Graphics.DrawTriangle"] = "Graphics_DrawTriangle",
+            ["Graphics.FillTriangle"] = "Graphics_FillTriangle",
+            ["Graphics.DrawEllipse"] = "Graphics_DrawEllipse",
+            ["Graphics.FillEllipse"] = "Graphics_FillEllipse",
+            ["Graphics.DrawRoundedRect"] = "Graphics_DrawRoundedRect",
+            ["Graphics.FillRoundedRect"] = "Graphics_FillRoundedRect",
+            ["Graphics.SetPixelAlpha"] = "Graphics_SetPixelAlpha",
+            ["Graphics.FillRectAlpha"] = "Graphics_FillRectAlpha",
+            ["Graphics.DrawTextAlpha"] = "Graphics_DrawTextAlpha",
+            ["Graphics.DrawTextShadow"] = "Graphics_DrawTextShadow",
+            ["Graphics.DrawGrid"] = "Graphics_DrawGrid",
         };
 
     public override bool TryHandle(InvocationExpressionSyntax inv, string calleeStr,

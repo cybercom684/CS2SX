@@ -217,8 +217,11 @@ public static class PatternMatchingWriter
         if (bindingVar != null)
             ctx.LocalTypes[bindingVar] = typeName;
 
-        // Erzeugt: (TypeName_Is(subject)) — erfordert TypeName_Is() Hilfsfunktion in Runtime
-        return typeName + "_Is(" + subject + ")";
+        // Ohne RTTI-System: Typ-Check wird als Null-Check approximiert.
+        // Für Primitive (int, float, ...) ist die Bedingung immer wahr.
+        if (TypeRegistry.IsPrimitive(typeName) && typeName != "string")
+            return "1";
+        return "(" + subject + " != NULL)";
     }
 
     /// <summary>

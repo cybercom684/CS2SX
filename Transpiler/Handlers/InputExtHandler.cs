@@ -28,8 +28,6 @@ public sealed class InputExtHandler : InvocationHandlerBase
             // Wir generieren einen direkten Funktionsaufruf mit Dummy-Pad-Arg
             // der durch den Runtime-Wrapper aufgelöst wird.
             case "Input.GetStickLeft":
-                result = "CS2SX_Input_GetStickLeft((PadState*)((SwitchAppEx*)self)->f_padPtr)";
-                // Einfachere Alternative: globale Pad-Variable
                 result = "_cs2sx_get_stick_left()";
                 return true;
 

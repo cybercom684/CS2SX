@@ -44,7 +44,6 @@ public sealed class DictionaryHandler : InvocationHandlerBase
                 ? inv.ArgumentList.Arguments[1]
                 : null;
 
-            bool needsLocalDecl = false;
             if (secondArg != null
                 && secondArg.RefKindKeyword.IsKind(
                     Microsoft.CodeAnalysis.CSharp.SyntaxKind.OutKeyword)
@@ -54,7 +53,6 @@ public sealed class DictionaryHandler : InvocationHandlerBase
                     Microsoft.CodeAnalysis.CSharp.Syntax.SingleVariableDesignationSyntax desig)
             {
                 outVarName = desig.Identifier.Text;
-                needsLocalDecl = true;
 
                 // Typ aus dem Dict ableiten
                 if (types.HasValue)

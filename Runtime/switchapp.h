@@ -83,6 +83,20 @@ static inline int CS2SX_Rand_NextMax(int max_val)
     return CS2SX_Rand_Next(0, max_val);
 }
 
+static inline long long CS2SX_Rand_NextInt64(void)
+{
+    // Combine four 15-bit LCG outputs for a ~60-bit random value
+    _cs2sx_rand_state = _cs2sx_rand_state * 1664525u + 1013904223u;
+    long long a = (long long)((_cs2sx_rand_state >> 16) & 0x7FFF);
+    _cs2sx_rand_state = _cs2sx_rand_state * 1664525u + 1013904223u;
+    long long b = (long long)((_cs2sx_rand_state >> 16) & 0x7FFF);
+    _cs2sx_rand_state = _cs2sx_rand_state * 1664525u + 1013904223u;
+    long long c = (long long)((_cs2sx_rand_state >> 16) & 0x7FFF);
+    _cs2sx_rand_state = _cs2sx_rand_state * 1664525u + 1013904223u;
+    long long d = (long long)((_cs2sx_rand_state >> 16) & 0x7FFF);
+    return (a << 45) | (b << 30) | (c << 15) | d;
+}
+
 static inline float CS2SX_Rand_Float(void)
 {
     _cs2sx_rand_state = _cs2sx_rand_state * 1664525u + 1013904223u;

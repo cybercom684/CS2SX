@@ -587,6 +587,11 @@ public sealed class StatementWriter
             if (callee is "double.TryParse" or "Double.TryParse") return "double";
             if (callee is "long.TryParse" or "Int64.TryParse") return "long";
             if (callee is "uint.TryParse" or "UInt32.TryParse") return "uint";
+            if (callee is "ulong.TryParse" or "UInt64.TryParse") return "ulong";
+            if (callee is "short.TryParse" or "Int16.TryParse") return "short";
+            if (callee is "ushort.TryParse" or "UInt16.TryParse") return "ushort";
+            if (callee is "byte.TryParse" or "Byte.TryParse") return "byte";
+            if (callee is "sbyte.TryParse" or "SByte.TryParse") return "sbyte";
             if (callee is "bool.TryParse" or "Boolean.TryParse") return "bool";
         }
         return "int";

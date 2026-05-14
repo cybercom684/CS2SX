@@ -51,7 +51,10 @@ public sealed class StringBuilderHandler : InvocationHandlerBase
         {
             "int" or "s32" or "s16" or "s8" => "StringBuilder_AppendInt(" + sbExpr + ", " + args[0] + ")",
             "uint" or "u32" or "u16" or "u8" => "StringBuilder_AppendUInt(" + sbExpr + ", " + args[0] + ")",
+            "long" or "s64" => "StringBuilder_AppendLong(" + sbExpr + ", " + args[0] + ")",
+            "ulong" or "u64" => "StringBuilder_AppendULong(" + sbExpr + ", " + args[0] + ")",
             "float" => "StringBuilder_AppendFloat(" + sbExpr + ", " + args[0] + ")",
+            "double" => "StringBuilder_AppendDouble(" + sbExpr + ", " + args[0] + ")",
             "char" => "StringBuilder_AppendChar(" + sbExpr + ", " + args[0] + ")",
             _ => "StringBuilder_AppendStr(" + sbExpr + ", " + args[0] + ")",
         };
@@ -66,9 +69,13 @@ public sealed class StringBuilderHandler : InvocationHandlerBase
         var argType = TypeInferrer.InferCSharpType(argExpr, ctx);
         return argType switch
         {
-            "int" => "StringBuilder_AppendLineInt(" + sbExpr + ", " + args[0] + ")",
-            "uint" => "StringBuilder_AppendUInt(" + sbExpr + ", " + args[0]
-                    + "); StringBuilder_AppendChar(" + sbExpr + ", '\\n')",
+            "int" or "s32" or "s16" or "s8" => "StringBuilder_AppendLineInt(" + sbExpr + ", " + args[0] + ")",
+            "uint" or "u32" or "u16" or "u8" => "StringBuilder_AppendLineUInt(" + sbExpr + ", " + args[0] + ")",
+            "long" or "s64" => "StringBuilder_AppendLineLong(" + sbExpr + ", " + args[0] + ")",
+            "ulong" or "u64" => "StringBuilder_AppendLineULong(" + sbExpr + ", " + args[0] + ")",
+            "float" => "StringBuilder_AppendLineFloat(" + sbExpr + ", " + args[0] + ")",
+            "double" => "StringBuilder_AppendLineDouble(" + sbExpr + ", " + args[0] + ")",
+            "char" => "StringBuilder_AppendLineChar(" + sbExpr + ", " + args[0] + ")",
             _ => "StringBuilder_AppendLine(" + sbExpr + ", " + args[0] + ")",
         };
     }

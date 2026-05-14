@@ -272,7 +272,7 @@ public class MyApp : SwitchAppEx
 | `List<T>` | ✅ | `Add`, `Remove`, `Clear`, `Contains`, `Sort`, `Reverse`, `IndexOf` |
 | `List<string>` | ✅ | `foreach`, `string.Join`, `string.Split` |
 | `Dictionary<K,V>` | ✅ | `Add`, `Remove`, `ContainsKey`, `TryGetValue`, Indexer, `foreach` |
-| `StringBuilder` | ✅ | `Append`, `AppendLine`, `Clear`, `ToString`, `Insert`, `Replace`, `IndexOf` |
+| `StringBuilder` | ✅ | `Append`, `AppendLine`, `Clear`, `ToString`, `Insert`, `Replace`, `IndexOf` — typisiert für `int`, `uint`, `long`, `ulong`, `float`, `double`, `char`, `string` |
 | `int[]`, `float[]`, `string[]` | ✅ | Stack-Arrays mit Initializer |
 | `int[,]` mehrdimensionale Arrays | ✅ | wird als flaches 1D-Array transpiliert |
 | `IEnumerable<T>`, `IReadOnlyList<T>` | ✅ | wird als `List<T>*` behandelt |
@@ -344,10 +344,19 @@ var pos = GetPos();
 
 | Methode | Status |
 |---|---|
-| `int.Parse(s)` | ✅ |
-| `int.TryParse(s, out val)` | ✅ |
-| `float.Parse(s)` | ✅ |
-| `float.TryParse(s, out val)` | ✅ |
+| `int.Parse(s)` / `int.TryParse(s, out val)` | ✅ |
+| `float.Parse(s)` / `float.TryParse(s, out val)` | ✅ |
+| `double.Parse(s)` / `double.TryParse(s, out val)` | ✅ |
+| `long.Parse(s)` / `long.TryParse(s, out val)` | ✅ |
+| `ulong.Parse(s)` / `ulong.TryParse(s, out val)` | ✅ |
+| `uint.Parse(s)` / `uint.TryParse(s, out val)` | ✅ |
+| `short.Parse(s)` / `short.TryParse(s, out val)` | ✅ |
+| `ushort.Parse(s)` / `ushort.TryParse(s, out val)` | ✅ |
+| `byte.Parse(s)` / `byte.TryParse(s, out val)` | ✅ |
+| `sbyte.Parse(s)` / `sbyte.TryParse(s, out val)` | ✅ |
+| `bool.Parse(s)` / `bool.TryParse(s, out val)` | ✅ |
+
+Alle `TryParse`-Varianten unterstützen `out var` in `if`-Bedingungen für alle obigen Typen.
 
 ### ref / out Parameter
 
@@ -406,6 +415,7 @@ int n4 = rng.Next(1, 7);
 | `Next(min, max)` | `CS2SX_Rand_Next(min, max)` |
 | `Next(max)` | `CS2SX_Rand_NextMax(max)` |
 | `Next()` | `CS2SX_Rand_Next(0, 32767)` |
+| `NextInt64()` | `CS2SX_Rand_NextInt64()` (~60-bit LCG) |
 | `NextSingle()` / `NextFloat()` | `CS2SX_Rand_Float()` |
 | `NextDouble()` | `(double)CS2SX_Rand_Float()` |
 
@@ -1043,7 +1053,7 @@ Eintrag in `Core/TypeRegistry.cs` ergänzen — `s_primitives`, `s_controlTypes`
 | Bitmap-Font 8×8 | Kein Anti-Aliasing, kein TrueType |
 | Kein Heap-GC | Allokierte Objekte (`*_New()`) leben bis `_Free()` |
 | Lambda-Captures | Nur Werttypen und primitive Captures zuverlässig |
-| `is`-Typ-Pattern | Erfordert `TypeName_Is()`-Funktion in der Runtime |
+| `is`-Typ-Pattern mit Klassen | Wird als Null-Check approximiert (kein RTTI in C) |
 | Mehrdimensionale Arrays | `int[,]` wird als flaches 1D-Array transpiliert |
 | `async`/`await` | Synchroner Fallback mit Warning, kein echtes Threading |
 | LINQ | Nicht unterstützt |

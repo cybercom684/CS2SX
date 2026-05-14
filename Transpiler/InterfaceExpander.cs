@@ -216,20 +216,55 @@ public sealed class InterfaceExpander
             if (!_collector.Interfaces.TryGetValue(ifaceName, out var iface)) continue;
 
             var instanceName = $"{className}_{ifaceName}_vtable_instance";
+
+            // Pass 1: Stub-Funktionen für nicht-implementierte Methoden vorab generieren.
+            // NULL-Vtable-Slots würden beim Aufruf zu einem Segfault führen.
+            foreach (var method in iface.Members.OfType<MethodDeclarationSyntax>())
+            {
+                var mName = method.Identifier.Text;
+                bool implemented = cls.Members.OfType<MethodDeclarationSyntax>()
+                    .Any(m => m.Identifier.Text == mName);
+
+                if (!implemented)
+                {
+                    var retType = TypeRegistry.MapType(method.ReturnType.ToString().Trim());
+                    var stubName = $"_cs2sx_{className}_{mName}_not_impl";
+                    var parms = new List<string> { "void* self" };
+                    foreach (var p in method.ParameterList.Parameters)
+                    {
+                        var pt = TypeRegistry.MapType(p.Type?.ToString().Trim() ?? "int");
+                        var isRef = p.Modifiers.Any(m =>
+                            m.IsKind(SyntaxKind.RefKeyword) || m.IsKind(SyntaxKind.OutKeyword));
+                        parms.Add(pt + (isRef ? "*" : "") + " " + p.Identifier.Text);
+                    }
+                    sb.AppendLine($"static {retType} {stubName}({string.Join(", ", parms)})");
+                    sb.AppendLine("{");
+                    sb.AppendLine($"    /* Interface method '{mName}' not implemented by '{className}' */");
+                    if (retType != "void")
+                        sb.AppendLine($"    return ({retType})0;");
+                    sb.AppendLine("}");
+                    sb.AppendLine();
+                    Log.Warning($"InterfaceExpander: '{className}' implementiert '{ifaceName}', aber Methode '{mName}' fehlt — Stub generiert");
+                }
+            }
+
+            // Pass 2: vtable-Initialisierer
             sb.AppendLine($"static {ifaceName}_vtable {instanceName} =");
             sb.AppendLine("{");
 
             foreach (var method in iface.Members.OfType<MethodDeclarationSyntax>())
             {
                 var mName = method.Identifier.Text;
-                // Prüfen ob die Klasse diese Methode implementiert
                 bool implemented = cls.Members.OfType<MethodDeclarationSyntax>()
                     .Any(m => m.Identifier.Text == mName);
 
                 if (implemented)
                     sb.AppendLine($"    .{mName} = {className}_{mName},");
                 else
-                    sb.AppendLine($"    .{mName} = NULL, /* not implemented */");
+                {
+                    var stubName = $"_cs2sx_{className}_{mName}_not_impl";
+                    sb.AppendLine($"    .{mName} = {stubName},");
+                }
             }
 
             foreach (var prop in iface.Members.OfType<PropertyDeclarationSyntax>())

@@ -62,7 +62,7 @@ public sealed class RandomHandler : InvocationHandlerBase
             "Next" when args.Count == 2 => "CS2SX_Rand_Next(" + args[0] + ", " + args[1] + ")",
             "Next" when args.Count == 1 => "CS2SX_Rand_NextMax(" + args[0] + ")",
             "Next" => "CS2SX_Rand_Next(0, 32767)",
-            "NextInt64" => "(long long)CS2SX_Rand_Next(0, 32767)",
+            "NextInt64" => "CS2SX_Rand_NextInt64()",
             "NextDouble" => "(double)CS2SX_Rand_Float()",
             "NextSingle" => "CS2SX_Rand_Float()",
             "NextFloat" => "CS2SX_Rand_Float()",

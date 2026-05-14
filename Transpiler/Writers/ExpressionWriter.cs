@@ -219,20 +219,27 @@ public sealed class ExpressionWriter : IExpressionWriter
         var right = Write(bin.Right);
         var op = bin.OperatorToken.Text;
 
-        if ((op == "==" || op == "!=") && IsStringExpr(bin.Left))
-            return "strcmp(" + left + ", " + right + ") " + op + " 0";
-
-        if (op == "==" && IsNullLiteral(bin.Right) && IsStringType(bin.Left))
-            return "String_IsNullOrEmpty(" + left + ")";
-        if (op == "!=" && IsNullLiteral(bin.Right) && IsStringType(bin.Left))
-            return "!String_IsNullOrEmpty(" + left + ")";
-        if (op == "==" && IsNullLiteral(bin.Left) && IsStringType(bin.Right))
-            return "String_IsNullOrEmpty(" + right + ")";
-        if (op == "!=" && IsNullLiteral(bin.Left) && IsStringType(bin.Right))
-            return "!String_IsNullOrEmpty(" + right + ")";
+        if (op == "==" || op == "!=")
+        {
+            bool lIsStr = IsStringExpr(bin.Left) || IsStringType(bin.Left);
+            bool rIsStr = IsStringExpr(bin.Right) || IsStringType(bin.Right);
+            if (lIsStr || rIsStr)
+            {
+                if (IsNullLiteral(bin.Right))
+                    return op == "==" ? "String_IsNullOrEmpty(" + left + ")" : "!String_IsNullOrEmpty(" + left + ")";
+                if (IsNullLiteral(bin.Left))
+                    return op == "==" ? "String_IsNullOrEmpty(" + right + ")" : "!String_IsNullOrEmpty(" + right + ")";
+                return "strcmp(" + left + ", " + right + ") " + op + " 0";
+            }
+        }
 
         if (bin.IsKind(SyntaxKind.IsExpression))
-            return "/* is-check: " + bin + " */ 1";
+        {
+            var isTypeName = bin.Right.ToString().Trim();
+            if (TypeRegistry.IsPrimitive(isTypeName) && isTypeName != "string")
+                return "1";
+            return "(" + left + " != NULL)";
+        }
 
         return left + " " + op + " " + right;
     }

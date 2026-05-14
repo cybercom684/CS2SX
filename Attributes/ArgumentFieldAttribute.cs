@@ -15,6 +15,7 @@ public sealed class ArgAttribute : Attribute
 
     public ArgAttribute(int position)
     {
+        Flag = string.Empty;
         Position = position;
         IsPositional = true;
     }

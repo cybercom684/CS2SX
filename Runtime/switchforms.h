@@ -267,9 +267,66 @@ static inline void StringBuilder_AppendLine(StringBuilder* sb, const char* s)
     StringBuilder_AppendChar(sb, '\n');
 }
 
+static inline void StringBuilder_AppendLong(StringBuilder* sb, long long val)
+{
+    char tmp[32];
+    snprintf(tmp, sizeof(tmp), "%lld", val);
+    StringBuilder_AppendStr(sb, tmp);
+}
+
+static inline void StringBuilder_AppendULong(StringBuilder* sb, unsigned long long val)
+{
+    char tmp[32];
+    snprintf(tmp, sizeof(tmp), "%llu", val);
+    StringBuilder_AppendStr(sb, tmp);
+}
+
+static inline void StringBuilder_AppendDouble(StringBuilder* sb, double val)
+{
+    char tmp[32];
+    snprintf(tmp, sizeof(tmp), "%g", val);
+    StringBuilder_AppendStr(sb, tmp);
+}
+
 static inline void StringBuilder_AppendLineInt(StringBuilder* sb, int val)
 {
     StringBuilder_AppendInt(sb, val);
+    StringBuilder_AppendChar(sb, '\n');
+}
+
+static inline void StringBuilder_AppendLineUInt(StringBuilder* sb, unsigned int val)
+{
+    StringBuilder_AppendUInt(sb, val);
+    StringBuilder_AppendChar(sb, '\n');
+}
+
+static inline void StringBuilder_AppendLineLong(StringBuilder* sb, long long val)
+{
+    StringBuilder_AppendLong(sb, val);
+    StringBuilder_AppendChar(sb, '\n');
+}
+
+static inline void StringBuilder_AppendLineULong(StringBuilder* sb, unsigned long long val)
+{
+    StringBuilder_AppendULong(sb, val);
+    StringBuilder_AppendChar(sb, '\n');
+}
+
+static inline void StringBuilder_AppendLineFloat(StringBuilder* sb, float val)
+{
+    StringBuilder_AppendFloat(sb, val);
+    StringBuilder_AppendChar(sb, '\n');
+}
+
+static inline void StringBuilder_AppendLineDouble(StringBuilder* sb, double val)
+{
+    StringBuilder_AppendDouble(sb, val);
+    StringBuilder_AppendChar(sb, '\n');
+}
+
+static inline void StringBuilder_AppendLineChar(StringBuilder* sb, char c)
+{
+    StringBuilder_AppendChar(sb, c);
     StringBuilder_AppendChar(sb, '\n');
 }
 
@@ -620,6 +677,167 @@ static inline int CS2SX_Float_TryParse(const char* s, float* out_val)
 {
     if (!s || s[0] == '\0') return 0;
     *out_val = CS2SX_Float_Parse(s);
+    return 1;
+}
+
+static inline double CS2SX_Double_Parse(const char* s)
+{
+    if (!s || s[0] == '\0') return 0.0;
+    char* end;
+    double v = strtod(s, &end);
+    return (end != s) ? v : 0.0;
+}
+
+static inline int CS2SX_Double_TryParse(const char* s, double* out_val)
+{
+    if (!s || s[0] == '\0') return 0;
+    char* end;
+    double v = strtod(s, &end);
+    if (end == s) return 0;
+    *out_val = v;
+    return 1;
+}
+
+static inline long long CS2SX_Long_Parse(const char* s)
+{
+    if (!s || s[0] == '\0') return 0;
+    char* end;
+    long long v = strtoll(s, &end, 10);
+    return (end != s) ? v : 0;
+}
+
+static inline int CS2SX_Long_TryParse(const char* s, long long* out_val)
+{
+    if (!s || s[0] == '\0') return 0;
+    char* end;
+    long long v = strtoll(s, &end, 10);
+    if (end == s) return 0;
+    *out_val = v;
+    return 1;
+}
+
+static inline unsigned long long CS2SX_ULong_Parse(const char* s)
+{
+    if (!s || s[0] == '\0') return 0;
+    char* end;
+    unsigned long long v = strtoull(s, &end, 10);
+    return (end != s) ? v : 0;
+}
+
+static inline int CS2SX_ULong_TryParse(const char* s, unsigned long long* out_val)
+{
+    if (!s || s[0] == '\0') return 0;
+    char* end;
+    unsigned long long v = strtoull(s, &end, 10);
+    if (end == s) return 0;
+    *out_val = v;
+    return 1;
+}
+
+static inline unsigned int CS2SX_UInt_Parse(const char* s)
+{
+    if (!s || s[0] == '\0') return 0;
+    char* end;
+    unsigned long v = strtoul(s, &end, 10);
+    return (end != s) ? (unsigned int)v : 0u;
+}
+
+static inline int CS2SX_UInt_TryParse(const char* s, unsigned int* out_val)
+{
+    if (!s || s[0] == '\0') return 0;
+    char* end;
+    unsigned long v = strtoul(s, &end, 10);
+    if (end == s) return 0;
+    *out_val = (unsigned int)v;
+    return 1;
+}
+
+static inline int CS2SX_Bool_Parse(const char* s)
+{
+    if (!s) return 0;
+    if (strcmp(s, "true") == 0 || strcmp(s, "True") == 0 || strcmp(s, "1") == 0) return 1;
+    return 0;
+}
+
+static inline int CS2SX_Bool_TryParse(const char* s, int* out_val)
+{
+    if (!s) return 0;
+    if (strcmp(s, "true") == 0 || strcmp(s, "True") == 0 || strcmp(s, "1") == 0)
+        { *out_val = 1; return 1; }
+    if (strcmp(s, "false") == 0 || strcmp(s, "False") == 0 || strcmp(s, "0") == 0)
+        { *out_val = 0; return 1; }
+    return 0;
+}
+
+static inline short CS2SX_Short_Parse(const char* s)
+{
+    if (!s || s[0] == '\0') return 0;
+    char* end;
+    long v = strtol(s, &end, 10);
+    return (end != s) ? (short)v : (short)0;
+}
+
+static inline int CS2SX_Short_TryParse(const char* s, short* out_val)
+{
+    if (!s || s[0] == '\0') return 0;
+    char* end;
+    long v = strtol(s, &end, 10);
+    if (end == s) return 0;
+    *out_val = (short)v;
+    return 1;
+}
+
+static inline unsigned short CS2SX_UShort_Parse(const char* s)
+{
+    if (!s || s[0] == '\0') return 0;
+    char* end;
+    unsigned long v = strtoul(s, &end, 10);
+    return (end != s) ? (unsigned short)v : (unsigned short)0;
+}
+
+static inline int CS2SX_UShort_TryParse(const char* s, unsigned short* out_val)
+{
+    if (!s || s[0] == '\0') return 0;
+    char* end;
+    unsigned long v = strtoul(s, &end, 10);
+    if (end == s) return 0;
+    *out_val = (unsigned short)v;
+    return 1;
+}
+
+static inline unsigned char CS2SX_Byte_Parse(const char* s)
+{
+    if (!s || s[0] == '\0') return 0;
+    char* end;
+    unsigned long v = strtoul(s, &end, 10);
+    return (end != s) ? (unsigned char)v : (unsigned char)0;
+}
+
+static inline int CS2SX_Byte_TryParse(const char* s, unsigned char* out_val)
+{
+    if (!s || s[0] == '\0') return 0;
+    char* end;
+    unsigned long v = strtoul(s, &end, 10);
+    if (end == s) return 0;
+    *out_val = (unsigned char)v;
+    return 1;
+}
+
+static inline signed char CS2SX_SByte_Parse(const char* s)
+{
+    if (!s || s[0] == '\0') return 0;
+    char* end;
+    long v = strtol(s, &end, 10);
+    return (end != s) ? (signed char)v : (signed char)0;
+}
+
+static inline int CS2SX_SByte_TryParse(const char* s, signed char* out_val)
+{
+    if (!s || s[0] == '\0') return 0;
+    char* end;
+    long v = strtol(s, &end, 10);
+    if (end == s) return 0;
+    *out_val = (signed char)v;
     return 1;
 }
 
