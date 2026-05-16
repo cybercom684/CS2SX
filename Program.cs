@@ -49,6 +49,14 @@ switch (cli.Command)
         new StubGenerator().Generate(cli.LibnxInclude, cli.StubOutput);
         return 0;
 
+    case "addlib":
+        if (string.IsNullOrEmpty(cli.AddLibName))
+        {
+            Log.Error("Usage: cs2sx addLib <libName> [project.csproj]");
+            return 1;
+        }
+        return new AddLibCommand(cli.AddLibName, cli.BuildTarget).Run();
+
     case "":
         return Usage();
 

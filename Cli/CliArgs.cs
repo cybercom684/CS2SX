@@ -20,6 +20,9 @@ public sealed class CliArgs
     public string LibnxInclude { get; init; } = string.Empty;
     public string StubOutput { get; init; } = string.Empty;
 
+    // --- addlib ---
+    public string AddLibName { get; init; } = string.Empty;
+
     // --- flags ---
     public bool Verbose
     {

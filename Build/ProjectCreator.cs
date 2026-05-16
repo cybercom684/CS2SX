@@ -13,6 +13,10 @@ public class ProjectCreator
         }
 
         Directory.CreateDirectory(projectDir);
+
+        // FIX: ExternLibs-Ordner anlegen (wird für zusätzliche native Bibliotheken benötigt)
+        Directory.CreateDirectory(Path.Combine(projectDir, "externLibs"));
+
         Console.WriteLine($"[CS2SX] Creating project '{appName}'...");
 
         File.WriteAllText(Path.Combine(projectDir, $"{appName}.csproj"), $"""

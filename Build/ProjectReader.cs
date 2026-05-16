@@ -4,6 +4,12 @@ namespace CS2SX.Build;
 
 /// <summary>
 /// Liest ein .csproj-Projekt und sammelt alle zu transpilierenden .cs-Quelldateien.
+///
+/// FIX (addLib): Alle Ordner die mit "Stubs" enden werden ausgeschlossen.
+/// cs2sx addLib generiert IDE-Stubs in "<LibName>Stubs/" — diese sollen von
+/// Roslyn/IDE gesehen werden, aber NICHT transpiliert werden, weil sie
+/// "extern"-Deklarationen ohne Body enthalten.
+/// Die eigentliche C-Library wird direkt aus externLibs/ mitcompiliert.
 /// </summary>
 public sealed class ProjectReader
 {
@@ -42,19 +48,15 @@ public sealed class ProjectReader
 
         if (explicitFiles.Count > 0)
         {
-            // FIX: Reihenfolge aus der .csproj-Datei beibehalten (bereits deterministisch)
             SourceFiles = explicitFiles;
             return;
         }
 
-        // FIX: OrderBy(f => f) war schon vorhanden aber nur auf string-Ebene.
-        // Auf Windows und Linux unterscheidet sich die Groß-/Kleinschreibung —
-        // OrdinalIgnoreCase für konsistente Reihenfolge auf beiden Plattformen.
         SourceFiles = Directory
             .EnumerateFiles(ProjectDirectory, "*.cs", SearchOption.AllDirectories)
             .Select(f => Path.GetFullPath(f))
             .Where(f => IsIncluded(f))
-            .OrderBy(f => f, StringComparer.OrdinalIgnoreCase)  // FIX: plattformkonsistent
+            .OrderBy(f => f, StringComparer.OrdinalIgnoreCase)
             .ToList();
     }
 
@@ -69,7 +71,17 @@ public sealed class ProjectReader
 
         for (int i = 0; i < segments.Length - 1; i++)
         {
-            if (s_excludedDirNames.Contains(segments[i]))
+            var seg = segments[i];
+
+            // Exakter Match gegen die Ausschluss-Liste (obj, bin, Stubs, LibNX)
+            if (s_excludedDirNames.Contains(seg))
+                return false;
+
+            // FIX (addLib): Alle Ordner die mit "Stubs" enden ausschließen.
+            // cs2sx addLib erstellt "<LibName>Stubs/" — z.B. "MylibStubs/", "ImGuiStubs/".
+            // Diese Ordner enthalten nur IDE-Stubs (extern-Deklarationen ohne Body)
+            // und dürfen NICHT transpiliert werden.
+            if (seg.EndsWith("Stubs", StringComparison.OrdinalIgnoreCase))
                 return false;
         }
         return true;

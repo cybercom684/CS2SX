@@ -336,14 +336,47 @@ public sealed class BuildPipeline
 
             foreach (var hFile in Directory.GetFiles(_projectDir, "*.h"))
             {
-                var dest = Path.Combine(_buildDir, Path.GetFileName(hFile));
+                var fileName = Path.GetFileName(hFile);
+                var dest = Path.Combine(_buildDir, fileName);
                 System.IO.File.Copy(hFile, dest, overwrite: true);
-                Log.Info($"Custom header: {Path.GetFileName(hFile)}");
+                Log.Info($"Custom header: {fileName}");
+
+                // FIX: Custom-Header am Ende von allHeaders eintragen
+                // → wird in jede .c-Datei als #include eingezogen
+                // Reihenfolge: erst die transpilierten Header, dann die Custom-Header
+                // (damit Custom-Header auf die Transpiler-Typen zugreifen können)
+                if (!allHeaders.Contains(fileName))
+                    allHeaders.Add(fileName);
             }
 
             sCompile.Detail = $"{cFiles.Count} translation unit(s)";
             var elfPath = Path.Combine(_buildDir, _config.Name + ".elf");
-            new CCompiler().Compile(cFiles, elfPath, _buildDir, _projectDir);
+
+
+            // ExternLibs aus Config laden — FIX: ExtraIncludeDirs + Defines weitergeben
+            var externLibs = _config.ExternLibs
+                .Select(lib => new CCompiler.ExternLib(
+                    lib.Name,
+                    lib.Sources
+                        .Select(s => Path.GetFullPath(Path.Combine(_projectDir, s)))
+                        .Where(File.Exists)
+                        .ToList(),
+                    lib.IncludeDir != null
+                        ? Path.GetFullPath(Path.Combine(_projectDir, lib.IncludeDir))
+                        : null,
+                    lib.ExtraIncludeDirs
+                        .Select(d => Path.GetFullPath(Path.Combine(_projectDir, d)))
+                        .Where(Directory.Exists)
+                        .ToList(),
+                    lib.Defines.ToList()))
+                .Where(lib => lib.Sources.Count > 0)
+                .ToList();
+
+            if (externLibs.Count > 0)
+                Log.Info($"ExternLibs: {string.Join(", ", externLibs.Select(l => l.Name))}");
+
+            new CCompiler().Compile(cFiles, elfPath, _buildDir, _projectDir,
+                externLibs: externLibs);
 
             sCompile.Progress = 100;
             sCompile.Status = StageStatus.Done;
@@ -421,6 +454,15 @@ public sealed class BuildPipeline
         validBases.Add("switchapp");
         validBases.Add("switchforms_globals");
 
+        // FIX: Custom-Header aus dem Projektverzeichnis nicht löschen.
+        // freetype_main.h, freetype_shim.h etc. werden von BuildPipeline
+        // in cs2sx_out/ kopiert — CleanOrphanedFiles darf sie nicht entfernen.
+        var customHeaderBases = Directory
+            .GetFiles(_projectDir, "*.h")
+            .Select(f => Path.GetFileNameWithoutExtension(f));
+        foreach (var ch in customHeaderBases)
+            validBases.Add(ch);
+
         int removed = 0;
         foreach (var file in Directory.GetFiles(buildDir, "*.c")
             .Concat(Directory.GetFiles(buildDir, "*.h")))
@@ -483,7 +525,8 @@ public sealed class BuildPipeline
         return true;
     }
 
-    private static void WriteForwardDeclarations(
+    // FIX: "static" entfernt → Zugriff auf _projectDir möglich
+    private void WriteForwardDeclarations(
         IReadOnlyList<string> sourceFiles,
         string outputPath,
         IEnumerable<string>? expandedTypeNames = null)
@@ -556,8 +599,27 @@ public sealed class BuildPipeline
             }
         }
 
+        // FIX: Custom-Header aus dem Projektverzeichnis anhängen.
+        // _forward.h wird von JEDEM generierten .h includiert → Custom-Funktionen
+        // (z.B. Freetype_FT_Init_FreeType aus freetype_main.h) sind damit in
+        // jeder Translation Unit sichtbar ohne manuelles #include.
+        var customHeaders = Directory
+            .GetFiles(_projectDir, "*.h")
+            .Select(Path.GetFileName)
+            .OrderBy(n => n)
+            .ToList();
+
+        if (customHeaders.Count > 0)
+        {
+            sb.AppendLine();
+            sb.AppendLine("// Custom project headers");
+            foreach (var ch in customHeaders)
+                sb.AppendLine($"#include \"{ch}\"");
+        }
+
         System.IO.File.WriteAllText(outputPath, sb.ToString());
     }
+
 
     private static string WrapHeader(string baseName, string content)
     {

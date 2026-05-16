@@ -1,10 +1,14 @@
 ﻿// ============================================================================
-// CS2SX — Build/CCompiler.cs  (VERBESSERT)
+// CS2SX — Build/CCompiler.cs
 //
-// Änderungen:
-//   • GCC-Fehlerausgabe wird auf C#-Quellzeilen zurückgemappt
-//   • Bessere Fehlermeldung wenn DEVKITPRO nicht gesetzt
-//   • Compile() gibt jetzt die Anzahl der Errors zurück
+// FIX (Freetype / komplexe Libs):
+//   ExternLib bekommt ExtraIncludeDirs und Defines.
+//   Freetype braucht z.B.:
+//     -I externLibs/freetype/include
+//     -I externLibs/freetype/include/freetype
+//     -I externLibs/freetype/src
+//     -DFT2_BUILD_LIBRARY
+//   Das war vorher nicht möglich — nur ein einziges IncludeDir pro Lib.
 // ============================================================================
 
 using CS2SX.Core;
@@ -25,7 +29,8 @@ public sealed class CCompiler
         string outputElf,
         string includeDir,
         string? projectDir = null,
-        DiagnosticReporter? diagnostics = null)
+        DiagnosticReporter? diagnostics = null,
+        IEnumerable<ExternLib>? externLibs = null)
     {
         var gcc = Path.Combine(_devkitPath, "devkitA64", "bin", "aarch64-none-elf-gcc");
         var libnxInc = Path.Combine(_devkitPath, "libnx", "include");
@@ -34,13 +39,40 @@ public sealed class CCompiler
 
         gcc = ProcessRunner.ResolveTool(gcc);
 
-        var fileArgs = string.Join(" ", cFiles.Select(f => "\"" + f + "\""));
+        var allCFiles = cFiles.ToList();
+        var extraIncludeArgs = new System.Text.StringBuilder();
+        var defineArgs = new System.Text.StringBuilder();
+
+        if (externLibs != null)
+        {
+            foreach (var lib in externLibs)
+            {
+                // .c-Dateien anhängen
+                allCFiles.AddRange(lib.Sources);
+
+                // Haupt-IncludeDir
+                if (!string.IsNullOrEmpty(lib.IncludeDir))
+                    extraIncludeArgs.Append($" -I\"{lib.IncludeDir}\"");
+
+                // FIX: Zusätzliche Include-Verzeichnisse (für Freetype, libpng etc.)
+                foreach (var extraDir in lib.ExtraIncludeDirs)
+                    extraIncludeArgs.Append($" -I\"{extraDir}\"");
+
+                // FIX: Präprozessor-Defines (-D flags)
+                foreach (var define in lib.Defines)
+                    defineArgs.Append($" -D{define}");
+            }
+        }
+
+        var fileArgs = string.Join(" ", allCFiles.Select(f => $"\"{f}\""));
 
         var args = fileArgs
-                 + " -o \"" + outputElf + "\""
-                 + " -I\"" + includeDir + "\""
-                 + (projectDir != null ? " -I\"" + projectDir + "\"" : "")
-                 + " -I\"" + libnxInc + "\""
+                 + $" -o \"{outputElf}\""
+                 + $" -I\"{includeDir}\""
+                 + (projectDir != null ? $" -I\"{projectDir}\"" : "")
+                 + $" -I\"{libnxInc}\""
+                 + extraIncludeArgs
+                 + defineArgs
                  + " -march=armv8-a+crc+crypto -mtune=cortex-a57 -mtp=soft -fPIE"
                  + " -ffunction-sections -fdata-sections"
                  + " -std=c11"
@@ -48,8 +80,8 @@ public sealed class CCompiler
                  + " -Wno-format-truncation"
                  + " -Wno-unused-function"
                  + " -Wno-misleading-indentation"
-                 + " -specs=\"" + switchSpecs + "\""
-                 + " -L\"" + libnxLib + "\" -lnx -lm"
+                 + $" -specs=\"{switchSpecs}\""
+                 + $" -L\"{libnxLib}\" -lnx -lm"
                  + " -Wl,--gc-sections";
 
         try
@@ -58,18 +90,22 @@ public sealed class CCompiler
         }
         catch (Exception ex) when (diagnostics != null)
         {
-            // GCC-Fehler aufbereiten und mit Source-Map verknüpfen
             var enhanced = diagnostics.MapGccErrors(ex.Message, includeDir);
             throw new GccCompileException(enhanced, ex);
         }
     }
+
+    /// <summary>
+    /// Repräsentiert eine externe C-Library für den Build.
+    /// </summary>
+    public sealed record ExternLib(
+        string Name,
+        List<string> Sources,
+        string? IncludeDir,
+        List<string> ExtraIncludeDirs,
+        List<string> Defines);
 }
 
-/// <summary>
-/// GCC-Kompilierungsfehler mit aufbereiteter Fehlermeldung.
-/// Enthält sowohl den originalen GCC-Output als auch
-/// die zurückgemappten C#-Quellzeilen.
-/// </summary>
 public sealed class GccCompileException : Exception
 {
     public GccCompileException(string message, Exception inner)
