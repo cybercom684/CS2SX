@@ -143,15 +143,8 @@ public sealed class InvocationDispatcher
                 return result;
         }
 
-        // FIX: Warning bei unbekanntem Call ausgeben (außer bekannte C-Builtins)
-        if (!s_silentPassthrough.Contains(calleeStr)
-            && !calleeStr.StartsWith("CS2SX_", StringComparison.Ordinal)
-            && !calleeStr.StartsWith("_cs2sx_", StringComparison.Ordinal))
-        {
-            _ctx.Warn($"unknown call '{calleeStr}' — passed through as-is, verify generated C",
-                calleeStr);
-        }
-
+        // Return null — WriteInvocation will try TryWriteDirectUserClassCall next,
+        // and only warn if it truly falls through to the raw-passthrough fallback.
         return null;
     }
 
@@ -166,7 +159,7 @@ public sealed class InvocationDispatcher
             if (typeName == "var") typeName = "int";
 
             var cTypeName = TypeRegistry.MapType(typeName);
-            var needsPtr = TypeRegistry.NeedsPointerSuffix(typeName);
+            var needsPtr = !cTypeName.EndsWith("*") && TypeRegistry.NeedsPointerSuffix(typeName);
             var ptr = needsPtr ? "*" : "";
 
             _ctx.LocalTypes[singleDesig.Identifier.Text] = typeName;

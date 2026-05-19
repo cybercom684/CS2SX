@@ -150,9 +150,10 @@ public sealed class BuildPipeline
             var (genericHeaderPath, genericImplPath) = genericExpander.WriteToFiles(_buildDir);
 
             var expandedNames = genericExpander.GetExpandedTypeNames().ToList();
-            if (expandedNames.Count > 0)
+            var listUserClasses = genericCollector.ListOfUserClassInstantiations;
+            if (expandedNames.Count > 0 || listUserClasses.Count > 0)
             {
-                WriteForwardDeclarations(allForFwd, forwardPath, expandedNames);
+                WriteForwardDeclarations(allForFwd, forwardPath, expandedNames, listUserClasses);
                 Log.Info($"_forward.h aktualisiert mit {expandedNames.Count} expanded type(s)");
             }
 
@@ -165,6 +166,8 @@ public sealed class BuildPipeline
                 genericsInfo.Add($"{genericCollector.ExtensionMethods.Values.SelectMany(v => v).Count()} extension method(s)");
             if (genericCollector.Instantiations.Count > 0)
                 genericsInfo.Add($"{genericCollector.Instantiations.Count} instantiation(s)");
+            if (genericCollector.ListOfUserClassInstantiations.Count > 0)
+                genericsInfo.Add($"{genericCollector.ListOfUserClassInstantiations.Count} List<UserClass>(es)");
 
             sGenerics.Detail = genericsInfo.Count > 0
                 ? string.Join(", ", genericsInfo)
@@ -338,7 +341,12 @@ public sealed class BuildPipeline
             foreach (var hFile in Directory.GetFiles(_projectDir, "*.h"))
             {
                 var fileName = Path.GetFileName(hFile);
-                var dest = Path.Combine(_buildDir, fileName);
+                if (fileName != null && IsListOnlyHeader(fileName, listUserClasses))
+                {
+                    Log.Warning($"Skipping '{fileName}' — defines List<UserClass> types that are now auto-generated. Remove this file from your project.");
+                    continue;
+                }
+                var dest = Path.Combine(_buildDir, fileName!);
                 System.IO.File.Copy(hFile, dest, overwrite: true);
                 Log.Info($"Custom header: {fileName}");
 
@@ -346,7 +354,7 @@ public sealed class BuildPipeline
                 // → wird in jede .c-Datei als #include eingezogen
                 // Reihenfolge: erst die transpilierten Header, dann die Custom-Header
                 // (damit Custom-Header auf die Transpiler-Typen zugreifen können)
-                if (!allHeaders.Contains(fileName))
+                if (fileName != null && !allHeaders.Contains(fileName))
                     allHeaders.Add(fileName);
             }
 
@@ -529,11 +537,22 @@ public sealed class BuildPipeline
         return true;
     }
 
+    private bool IsListOnlyHeader(string headerFileName, IReadOnlySet<string> listUserClassTypes)
+    {
+        var fullPath = Path.Combine(_projectDir, headerFileName);
+        if (!File.Exists(fullPath)) return false;
+        var content = File.ReadAllText(fullPath);
+        foreach (var type in listUserClassTypes)
+            if (content.Contains("List_" + type)) return true;
+        return false;
+    }
+
     // FIX: "static" entfernt → Zugriff auf _projectDir möglich
     private void WriteForwardDeclarations(
         IReadOnlyList<string> sourceFiles,
         string outputPath,
-        IEnumerable<string>? expandedTypeNames = null)
+        IEnumerable<string>? expandedTypeNames = null,
+        IReadOnlySet<string>? listUserClassTypes = null)
     {
         var sb = new StringBuilder();
         sb.AppendLine("#pragma once");
@@ -618,7 +637,14 @@ public sealed class BuildPipeline
             sb.AppendLine();
             sb.AppendLine("// Custom project headers");
             foreach (var ch in customHeaders)
+            {
+                if (listUserClassTypes != null && ch != null && IsListOnlyHeader(ch, listUserClassTypes))
+                {
+                    Log.Warning($"Skipping '{ch}' — defines List<UserClass> types that are now auto-generated in _generics.h. Remove this file from your project.");
+                    continue;
+                }
                 sb.AppendLine($"#include \"{ch}\"");
+            }
         }
 
         System.IO.File.WriteAllText(outputPath, sb.ToString());

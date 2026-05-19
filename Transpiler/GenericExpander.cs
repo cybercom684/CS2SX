@@ -25,7 +25,8 @@ public sealed class GenericExpander
 
     public (string headerPath, string implPath) WriteToFiles(string buildDir)
     {
-        if (_collector.Instantiations.Count == 0)
+        if (_collector.Instantiations.Count == 0
+            && _collector.ListOfUserClassInstantiations.Count == 0)
             return (string.Empty, string.Empty);
 
         var headerSb = new System.Text.StringBuilder();
@@ -70,6 +71,22 @@ public sealed class GenericExpander
             {
                 Log.Warning($"GenericExpander: Expansion von {inst} fehlgeschlagen: {ex.Message}");
                 headerSb.AppendLine($"/* expansion failed: {inst} — {ex.Message} */");
+            }
+        }
+
+        // CS2SX_LIST_DEFINE_PTR für alle List<UserClass>-Nutzungen emittieren
+        if (_collector.ListOfUserClassInstantiations.Count > 0)
+        {
+            headerSb.AppendLine();
+            headerSb.AppendLine("// ── List<UserClass> Instantiierungen ─────────────────────────────────");
+            foreach (var userClass in _collector.ListOfUserClassInstantiations.OrderBy(s => s))
+            {
+                var guard = "CS2SX_LIST_PTR_" + userClass + "_DEFINED";
+                headerSb.AppendLine($"#ifndef {guard}");
+                headerSb.AppendLine($"#define {guard}");
+                headerSb.AppendLine($"CS2SX_LIST_DEFINE_PTR({userClass})");
+                headerSb.AppendLine($"#endif");
+                Log.Info($"GenericExpander: List<{userClass}> → CS2SX_LIST_DEFINE_PTR({userClass})");
             }
         }
 

@@ -332,7 +332,7 @@ public static class TypeRegistry
     {
         if (!IsDictionary(csType)) return null;
         var inner = csType.Trim()[11..^1].Trim();
-        var comma = inner.IndexOf(',');
+        var comma = FindTopLevelComma(inner);
         if (comma < 0) return null;
         return (inner[..comma].Trim(), inner[(comma + 1)..].Trim());
     }

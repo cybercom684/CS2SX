@@ -115,7 +115,7 @@ public sealed class StructWriter
         bool isConst = field.Modifiers.Any(m => m.IsKind(SyntaxKind.ReadOnlyKeyword)
                                              || m.IsKind(SyntaxKind.ConstKeyword));
         var constKw = isConst ? "const " : "";
-        var ptr = TypeRegistry.NeedsPointerSuffix(csType) ? "*" : "";
+        var ptr = !cType.EndsWith("*") && TypeRegistry.NeedsPointerSuffix(csType) ? "*" : "";
 
         foreach (var v in field.Declaration.Variables)
         {
@@ -132,7 +132,7 @@ public sealed class StructWriter
     {
         var csType = prop.Type.ToString().Trim();
         var cType = TypeRegistry.MapType(csType);
-        var ptr = TypeRegistry.NeedsPointerSuffix(csType) ? "*" : "";
+        var ptr = !cType.EndsWith("*") && TypeRegistry.NeedsPointerSuffix(csType) ? "*" : "";
         _ctx.WriteLine(cType + ptr + " " + prop.Identifier + ";");
         _ctx.FieldTypes[prop.Identifier.Text] = csType;
     }
@@ -249,8 +249,8 @@ public sealed class StructWriter
         {
             var csType = p.Type?.ToString().Trim() ?? "int";
             var cType = TypeRegistry.MapType(csType);
-            var ptr = TypeRegistry.NeedsPointerSuffix(csType)
-                      || TypeRegistry.IsList(csType) ? "*" : "";
+            var ptr = !cType.EndsWith("*") && (TypeRegistry.NeedsPointerSuffix(csType)
+                      || TypeRegistry.IsList(csType)) ? "*" : "";
 
             if (p.Modifiers.Any(m => m.IsKind(SyntaxKind.RefKeyword)
                                   || m.IsKind(SyntaxKind.OutKeyword)))
@@ -268,8 +268,8 @@ public sealed class StructWriter
     {
         if (csRetType == "void") return "void";
         var cType = TypeRegistry.MapType(csRetType);
-        var ptr = TypeRegistry.NeedsPointerSuffix(csRetType)
-                 || TypeRegistry.IsList(csRetType) ? "*" : "";
+        var ptr = !cType.EndsWith("*") && (TypeRegistry.NeedsPointerSuffix(csRetType)
+                 || TypeRegistry.IsList(csRetType)) ? "*" : "";
         return cType + ptr;
     }
 }

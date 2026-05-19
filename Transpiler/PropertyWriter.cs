@@ -159,8 +159,12 @@ public static class PropertyWriter
         => prop.AccessorList?.Accessors.FirstOrDefault(a => a.IsKind(kind));
 
     private static bool NeedsPtr(string csType)
-        => TypeRegistry.NeedsPointerSuffix(csType)
-        || TypeRegistry.IsStringBuilder(csType)
-        || TypeRegistry.IsList(csType)
-        || TypeRegistry.IsDictionary(csType);
+    {
+        var cMapped = TypeRegistry.MapType(csType);
+        if (cMapped.EndsWith("*")) return false;
+        return TypeRegistry.NeedsPointerSuffix(csType)
+            || TypeRegistry.IsStringBuilder(csType)
+            || TypeRegistry.IsList(csType)
+            || TypeRegistry.IsDictionary(csType);
+    }
 }

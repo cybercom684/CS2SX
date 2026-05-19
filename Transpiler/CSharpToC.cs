@@ -550,10 +550,11 @@ public sealed class CSharpToC : CSharpSyntaxWalker
 
             var csType = ResolveFieldType(field);
             var cType = ResolveConcreteType(csType);
-            var needPtr = TypeRegistry.NeedsPointerSuffix(csType)
+            var needPtr = !cType.EndsWith("*")
+                       && (TypeRegistry.NeedsPointerSuffix(csType)
                        || TypeRegistry.IsStringBuilder(csType)
                        || TypeRegistry.IsControlType(csType)
-                       || NullableHandler.IsNullable(csType);
+                       || NullableHandler.IsNullable(csType));
             var ptr = needPtr ? "*" : "";
 
             foreach (var v in field.Declaration.Variables)
@@ -821,6 +822,17 @@ public sealed class CSharpToC : CSharpSyntaxWalker
                 _ctx.WriteLine("self->" + prefix + fieldName + " = "
                     + _exprWriter.Write(v.Initializer.Value) + ";");
             }
+        }
+
+        // Auto-Property-Initializer: public string Value { get; set; } = "x";
+        foreach (var prop in node.Members.OfType<PropertyDeclarationSyntax>())
+        {
+            if (prop.Modifiers.Any(m => m.IsKind(SyntaxKind.StaticKeyword))) continue;
+            if (!PropertyWriter.IsAutoProperty(prop)) continue;
+            if (prop.Initializer == null) continue;
+
+            _ctx.WriteLine("self->f_" + prop.Identifier.Text + " = "
+                + _exprWriter.Write(prop.Initializer.Value) + ";");
         }
     }
 
@@ -1119,13 +1131,17 @@ public sealed class CSharpToC : CSharpSyntaxWalker
     internal static bool IsControlSubclass(string baseType) =>
         baseType is "Control" or "Label" or "Button" or "ProgressBar";
 
-    internal static bool NeedsPtr(string csType) =>
-        TypeRegistry.NeedsPointerSuffix(csType)
-     || TypeRegistry.IsStringBuilder(csType)
-     || TypeRegistry.IsList(csType)
-     || TypeRegistry.IsDictionary(csType)
-     || TypeRegistry.IsControlType(csType)
-     || NullableHandler.IsNullable(csType);
+    internal static bool NeedsPtr(string csType)
+    {
+        var cMapped = TypeRegistry.MapType(csType);
+        if (cMapped.EndsWith("*")) return false; // MapType already added pointer
+        return TypeRegistry.NeedsPointerSuffix(csType)
+            || TypeRegistry.IsStringBuilder(csType)
+            || TypeRegistry.IsList(csType)
+            || TypeRegistry.IsDictionary(csType)
+            || TypeRegistry.IsControlType(csType)
+            || NullableHandler.IsNullable(csType);
+    }
 
     internal string BuildParamDecl(ParameterSyntax p) =>
         BuildParamDecl(p, skipThis: false);

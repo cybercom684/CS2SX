@@ -169,6 +169,13 @@ public sealed class GenericInstantiationCollector
 
     public IReadOnlyList<GenericInstantiation> Instantiations => _instantiations;
 
+    /// <summary>
+    /// Alle List&lt;T&gt;-Nutzungen wo T ein User-Typ ist (kein Primitiv, kein string).
+    /// Für jedes T wird CS2SX_LIST_DEFINE_PTR(T) in _generics.h emittiert.
+    /// </summary>
+    public IReadOnlySet<string> ListOfUserClassInstantiations => _listUserClasses;
+    private readonly HashSet<string> _listUserClasses = new(StringComparer.Ordinal);
+
     // ── Öffentliche API ───────────────────────────────────────────────────────
 
     public void Collect(IReadOnlyList<string> sourceFiles, IReadOnlyList<string>? stubFiles = null)
@@ -311,6 +318,27 @@ public sealed class GenericInstantiationCollector
 
         foreach (var cast in root.DescendantNodes().OfType<CastExpressionSyntax>())
             if (cast.Type is GenericNameSyntax gn) TryRegister(gn);
+
+        // List<UserClass>-Instantiierungen sammeln (für CS2SX_LIST_DEFINE_PTR)
+        foreach (var gn in root.DescendantNodes().OfType<GenericNameSyntax>())
+            TryRegisterListUserClass(gn);
+    }
+
+    private void TryRegisterListUserClass(GenericNameSyntax gn)
+    {
+        if (gn.Identifier.Text != "List") return;
+        if (gn.TypeArgumentList.Arguments.Count != 1) return;
+
+        var arg = gn.TypeArgumentList.Arguments[0].ToString().Trim();
+
+        // Primitiv oder string → bereits via CS2SX_LIST_DEFINE in switchforms.h abgedeckt
+        if (TypeRegistry.IsPrimitive(arg) || arg == "string") return;
+
+        // Verschachtelte Generics / Nullable vorerst überspringen
+        if (arg.Contains('<') || arg.EndsWith('?')) return;
+
+        if (_listUserClasses.Add(arg))
+            Log.Debug($"GenericCollector: List<{arg}> → CS2SX_LIST_DEFINE_PTR({arg}) vorgemerkt");
     }
 
     // ── Registrierung ──────────────────────────────────────────────────────────

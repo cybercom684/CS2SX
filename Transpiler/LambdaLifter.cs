@@ -382,9 +382,13 @@ public sealed class LambdaLifter
     private static string MapParamType(string csType) =>
         csType == "string" ? "const char*" : TypeRegistry.MapType(csType);
 
-    private static bool NeedsPtr(string csType) =>
-        csType != "string"
-        && (TypeRegistry.NeedsPointerSuffix(csType) || TypeRegistry.IsList(csType));
+    private static bool NeedsPtr(string csType)
+    {
+        if (csType == "string") return false;
+        var cMapped = TypeRegistry.MapType(csType);
+        if (cMapped.EndsWith("*")) return false; // already a pointer from MapType
+        return TypeRegistry.NeedsPointerSuffix(csType) || TypeRegistry.IsList(csType);
+    }
 
     private static List<string> SplitGenericArgs(string s)
     {

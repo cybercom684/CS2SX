@@ -438,6 +438,10 @@ public sealed class StatementWriter
             return InferVarType(v);
         if (declType == "bool") return ("int", false);
         var cType = TypeRegistry.MapType(declType);
+        // MapType already appends '*' for List<T>, Dictionary<K,V>, string (const char*) etc.
+        // Returning isPtr=true on top of that would produce a double-pointer.
+        if (cType.EndsWith("*"))
+            return (cType, false);
         var isPtr = TypeRegistry.NeedsPointerSuffix(declType)
                  || TypeRegistry.IsStringBuilder(declType)
                  || TypeRegistry.IsList(declType)
