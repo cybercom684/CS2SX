@@ -105,8 +105,7 @@ public sealed class InvocationDispatcher
         //  aber manche Aufrufe wie Task.Run kommen hier an)
         if (calleeStr is "Task.Run" or "Task.Delay" or "Task.WhenAll" or "Task.WhenAny")
         {
-            _ctx.Warn($"async/Task call '{calleeStr}' — executed synchronously (no threading on Switch)",
-                calleeStr);
+            _ctx.Warn(inv, $"async/Task call '{calleeStr}' — executed synchronously (no threading on Switch)");
             // Task.Run(action) → einfach action() ausführen
             if (inv.ArgumentList.Arguments.Count > 0)
                 return _writeExpr(inv.ArgumentList.Arguments[0].Expression) + "()";

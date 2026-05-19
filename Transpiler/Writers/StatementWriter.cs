@@ -36,8 +36,7 @@ public sealed class StatementWriter
             case UsingStatementSyntax usingStmt: WriteUsing(usingStmt); break;
             case EmptyStatementSyntax: break;
             default:
-                _ctx.Warn($"unsupported statement '{stmt.GetType().Name}' — check generated C",
-                    stmt.GetType().Name);
+                _ctx.Warn(stmt, $"unsupported statement '{stmt.GetType().Name}' — check generated C");
                 _ctx.WriteLine("/* UNSUPPORTED: " + stmt.GetType().Name + " */");
                 break;
         }

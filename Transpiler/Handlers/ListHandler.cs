@@ -38,6 +38,28 @@ public sealed class ListHandler : InvocationHandlerBase
 
         var cList = ListFuncPrefix(listType);
         var method = mem.Name.Identifier.Text;
+        var inner = TypeRegistry.GetListInnerType(listType) ?? "int";
+        bool isUserClass = !TypeRegistry.IsPrimitive(inner) && inner != "string";
+
+        // For user-class lists: free elements before Clear / on RemoveAt
+        if (method == "Clear" && isUserClass)
+        {
+            var idxVar = ctx.NextTmp("fi");
+            var cInner = TypeRegistry.MapType(inner);
+            ctx.WriteLine($"for (int {idxVar} = 0; {idxVar} < {listExpr}->count; {idxVar}++)");
+            ctx.WriteLine($"    if ({listExpr}->data[{idxVar}]) {cInner}_Free({listExpr}->data[{idxVar}]);");
+            result = cList + "_Clear(" + listExpr + ")";
+            return true;
+        }
+
+        if (method == "RemoveAt" && isUserClass && args.Count > 0)
+        {
+            var cInner = TypeRegistry.MapType(inner);
+            ctx.WriteLine($"if ({args[0]} >= 0 && {args[0]} < {listExpr}->count && {listExpr}->data[{args[0]}])");
+            ctx.WriteLine($"    {cInner}_Free({listExpr}->data[{args[0]}]);");
+            result = cList + "_Remove(" + listExpr + ", " + args[0] + ")";
+            return true;
+        }
 
         if (method == "Sort" && inv.ArgumentList.Arguments.Count > 0)
         {

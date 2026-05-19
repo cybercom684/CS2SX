@@ -469,7 +469,7 @@ public sealed class ExpressionWriter : IExpressionWriter
         var calleeStr = inv.Expression.ToString();
         if (!calleeStr.StartsWith("CS2SX_", StringComparison.Ordinal)
             && !calleeStr.StartsWith("_cs2sx_", StringComparison.Ordinal))
-            _ctx.Warn($"unknown call '{calleeStr}' — passed through as-is, verify generated C", calleeStr);
+            _ctx.Warn(inv, $"unknown call '{calleeStr}' — passed through as-is, verify generated C");
         return calleeStr + "(" + string.Join(", ", args) + ")";
     }
 
@@ -484,6 +484,8 @@ public sealed class ExpressionWriter : IExpressionWriter
         _ctx.LocalTypes.TryGetValue(receiverRaw, out receiverType);
         if (receiverType == null)
             _ctx.FieldTypes.TryGetValue(receiverKey, out receiverType);
+        if (receiverType == null)
+            receiverType = _ctx.GetSemanticType(mem.Expression);
 
         if (receiverType != null && receiverType.EndsWith("*"))
             receiverType = receiverType.TrimEnd('*').Trim();
@@ -525,6 +527,8 @@ public sealed class ExpressionWriter : IExpressionWriter
         _ctx.LocalTypes.TryGetValue(receiverRaw, out receiverType);
         if (receiverType == null)
             _ctx.FieldTypes.TryGetValue(receiverKey, out receiverType);
+        if (receiverType == null)
+            receiverType = _ctx.GetSemanticType(mem.Expression);
 
         if (receiverType != null && receiverType.EndsWith("*"))
             receiverType = receiverType.TrimEnd('*').Trim();
@@ -573,6 +577,12 @@ public sealed class ExpressionWriter : IExpressionWriter
         string? lt = null, ft = null;
         _ctx.LocalTypes.TryGetValue(objRaw, out lt);
         _ctx.FieldTypes.TryGetValue(objKey, out ft);
+        // SemanticModel fallback for multi-level receivers (e.g. player.Stats.Health = 5)
+        if (lt == null && ft == null)
+        {
+            var semType = _ctx.GetSemanticType(mem.Expression);
+            if (semType != null) lt = semType;
+        }
 
         bool isStruct = (lt != null && TypeRegistry.IsLibNxStruct(lt))
                      || (ft != null && TypeRegistry.IsLibNxStruct(ft));
@@ -664,7 +674,24 @@ public sealed class ExpressionWriter : IExpressionWriter
             cProp = TypeRegistry.HasNoPrefix(prop) ? prop : "f_" + prop;
         else
             cProp = TypeRegistry.MapProperty(prop);
-        return obj + arrow + cProp + " " + op + " " + right;
+
+        // Interpolated strings produce a stack snprintf-buffer → dangling pointer if stored in a field.
+        // Wrap with _cs2sx_heap_strdup() so the field gets a heap copy.
+        // Only applies to user-class fields (Control.Text uses Label_SetText, already handled above).
+        var finalRight = right;
+        if (assign.Right is InterpolatedStringExpressionSyntax
+            && assignReceiverType != null
+            && !TypeRegistry.IsLibNxStruct(assignReceiverType)
+            && !TypeRegistry.IsControlType(assignReceiverType)
+            && assignReceiverType is not ("string" or "int" or "uint" or "float"
+                                       or "bool" or "char" or "long" or "ulong"
+                                       or "short" or "ushort" or "byte" or "sbyte"
+                                       or "double"))
+        {
+            finalRight = "_cs2sx_heap_strdup(" + right + ")";
+        }
+
+        return obj + arrow + cProp + " " + op + " " + finalRight;
     }
 
     private string WriteIndexerAssignment(ElementAccessExpressionSyntax elemLeft, string op, string right)
@@ -758,7 +785,7 @@ public sealed class ExpressionWriter : IExpressionWriter
         if (prop is "Keys" or "Values" && IsDictExpr(mem.Expression)) return obj;
 
         var key = rawExpr.TrimStart('_');
-        var receiverType = ResolveReceiverType(rawExpr);
+        var receiverType = ResolveReceiverType(rawExpr, mem.Expression);
 
         if (receiverType != null && IsControlSubclassType(receiverType))
         {
@@ -843,12 +870,18 @@ public sealed class ExpressionWriter : IExpressionWriter
         return result != null;
     }
 
-    private string? ResolveReceiverType(string rawExpr)
+    private string? ResolveReceiverType(string rawExpr, ExpressionSyntax? node = null)
     {
         var key = rawExpr.TrimStart('_');
         if (_ctx.LocalTypes.TryGetValue(rawExpr, out var lt)) return lt;
         if (_ctx.FieldTypes.TryGetValue(key, out var ft)) return ft;
         if (_ctx.FieldTypes.TryGetValue(rawExpr, out var ft2)) return ft2;
+        // SemanticModel fallback — handles multi-level access like player.Position.X
+        if (node != null)
+        {
+            var semType = _ctx.GetSemanticType(node);
+            if (semType != null) return semType;
+        }
         return null;
     }
 
