@@ -1,4 +1,4 @@
-﻿# CS2SX — C# to Nintendo Switch Transpiler
+# CS2SX — C# to Nintendo Switch Transpiler
 
 CS2SX transpiliert C#-Quellcode zu C und kompiliert ihn via DevkitPro zu einer Nintendo Switch Homebrew `.nro`-Datei.
 
@@ -367,6 +367,49 @@ public class MyApp : SwitchApp
 }
 ```
 
+### App mit List\<UserClass\>
+
+```csharp
+// Item.cs
+public class Item
+{
+    public string Name { get; set; }
+    public int Value  { get; set; }
+
+    public Item(string name, int value)
+    {
+        Name  = name;
+        Value = value;
+    }
+
+    public string Label() => $"{Name}: {Value}";
+}
+
+// Program.cs
+public class MyApp : SwitchApp
+{
+    private List<Item> _items;
+
+    public override void OnInit()
+    {
+        Graphics.Init(1280, 720);
+        _items = new List<Item>();
+        _items.Add(new Item("Schwert", 50));
+        _items.Add(new Item("Schild", 30));
+    }
+
+    public override void OnFrame()
+    {
+        Graphics.FillScreen(Color.Black);
+        for (int i = 0; i < _items.Count; i++)
+        {
+            Item it = _items[i];
+            Graphics.DrawText(50, 50 + i * 30, it.Label(), Color.White, 1);
+        }
+    }
+}
+```
+
 ### Audio
 
 ```csharp
@@ -437,7 +480,8 @@ public class MyApp : SwitchAppEx
 | `u8`, `u16`, `u32`, `u64`, `s8`–`s64` | ✅ | libnx-Typen |
 | `Result`, `Handle` | ✅ | libnx-Typen |
 | `T?` Nullable-Typen | ✅ | `HasValue`, `Value`, `??`, `?.` |
-| `List<T>` | ✅ | `Add`, `Remove`, `Clear`, `Contains`, `Sort`, `Reverse`, `IndexOf` |
+| `List<T>` mit Primitiven / Strings | ✅ | `Add`, `Remove`, `Clear`, `Contains`, `Sort`, `Reverse`, `IndexOf`, `Insert` |
+| `List<UserClass>` | ✅ | Listen eigener Klassen — Instanzen werden heap-allokiert (`CS2SX_LIST_DEFINE_PTR`) |
 | `List<string>` | ✅ | `foreach`, `string.Join`, `string.Split` |
 | `Dictionary<K,V>` | ✅ | `Add`, `Remove`, `ContainsKey`, `TryGetValue`, Indexer, `foreach` |
 | `StringBuilder` | ✅ | `Append`, `AppendLine`, `Clear`, `ToString`, `Insert`, `Replace`, `IndexOf` |
@@ -483,6 +527,20 @@ public (int x, int y) GetPos() { return (100, 200); }
 var pos = GetPos();
 // pos.x, pos.y direkt verfügbar
 ```
+
+### Generic Methods
+
+Benutzerdefinierte generische Methoden werden am Aufruf-Punkt zu typisierten C-Funktionen spezialisiert:
+
+```csharp
+public static T Clamp<T>(T val, T min, T max)
+    => val < min ? min : val > max ? max : val;
+
+float speed = Clamp<float>(speed, 0f, 100f);
+// → MyClass_Clamp_float(speed, 0.0f, 100.0f)
+```
+
+Unterstützt werden generische Methoden mit einem oder mehreren Typ-Parametern und optionalen `where`-Constraints. Die Spezialisierungen werden automatisch in `_generics.h/.c` emittiert.
 
 ### String-Methoden
 
@@ -534,6 +592,48 @@ public static void Log(string prefix, params string[] messages)
         Console.WriteLine(prefix + messages[i]);
 }
 Log("INFO", "Start", "Ready");
+```
+
+---
+
+## LINQ
+
+LINQ-Methodenketten werden in äquivalente C-Schleifen expandiert. Alle Ergebnis-Listen werden heap-allokiert und stehen als normale `List<T>*` zur Verfügung.
+
+| Methode | Beschreibung |
+|---|---|
+| `.Where(pred)` | Gefilterte neue Liste |
+| `.Select(proj)` | Projizierte neue Liste |
+| `.First(pred?)` | Erstes Element (optional mit Bedingung) |
+| `.FirstOrDefault(pred?)` | Erstes Element oder `0`/`NULL` |
+| `.Last()` / `.LastOrDefault()` | Letztes Element |
+| `.Single(pred?)` / `.SingleOrDefault(pred?)` | Erstes Element (semantisch wie `First`) |
+| `.Any(pred?)` | `1` wenn mindestens ein Element (optional) die Bedingung erfüllt |
+| `.All(pred)` | `1` wenn alle Elemente die Bedingung erfüllen |
+| `.Count(pred?)` | Anzahl (optional mit Bedingung) |
+| `.Sum(proj?)` | Summe (optional mit Projektor) |
+| `.Min(proj?)` / `.Max(proj?)` | Minimum/Maximum (optional mit Projektor) |
+| `.Average(proj?)` | Durchschnitt (optional mit Projektor) |
+| `.Aggregate(seed, func)` | Fold mit Akkumulator |
+| `.ToList()` / `.ToArray()` | Kopie als neue Liste |
+| `.OrderBy(key)` / `.OrderByDescending(key)` | Sortierte Kopie (Insertion-Sort) |
+| `.ThenBy(key)` / `.ThenByDescending(key)` | Nachsortierung (neue Kopie) |
+| `.Contains(val)` | Enthält-Prüfung |
+| `.Distinct()` | Deduplizierte Kopie |
+| `.Skip(n)` / `.Take(n)` | Teilmenge |
+| `.Concat(other)` | Zusammengeführte Liste |
+| `.Reverse()` | Umgekehrte Kopie |
+| `.ElementAt(i)` / `.ElementAtOrDefault(i)` | Element per Index |
+
+```csharp
+List<int> scores = new List<int>();
+scores.Add(42); scores.Add(7); scores.Add(99);
+
+var high  = scores.Where(s => s > 40).ToList();
+var top   = scores.OrderByDescending(s => s).First();
+int total = scores.Sum();
+double avg = scores.Average();
+bool any  = scores.Any(s => s > 90);
 ```
 
 ---
@@ -606,19 +706,28 @@ Aktivierung: `Graphics.Init(1280, 720)` in `OnInit()`.
 | `Graphics.DrawCircle(cx, cy, r, color)` | Kreis-Outline |
 | `Graphics.FillCircle(cx, cy, r, color)` | Gefüllter Kreis |
 | `Graphics.DrawText(x, y, text, color, scale)` | Text (8×8 Bitmap-Font) |
+| `Graphics.DrawChar(x, y, c, color, scale)` | Einzelnes Zeichen |
+| `Graphics.MeasureTextWidth(text, scale)` | Text-Breite in Pixeln |
+| `Graphics.MeasureTextHeight(scale)` | Text-Höhe in Pixeln |
 | `Graphics.DrawTexture(tex, x, y)` | Texture rendern |
+| `Graphics.BeginFrame()` / `Graphics.EndFrame()` | Manuelles Frame-Management |
 
 ### Erweiterte Primitiven
 
 | Methode | Beschreibung |
 |---|---|
+| `Graphics.DrawTriangle(x0,y0, x1,y1, x2,y2, color)` | Dreieck-Outline |
 | `Graphics.FillTriangle(x0,y0, x1,y1, x2,y2, color)` | Gefülltes Dreieck |
+| `Graphics.DrawEllipse(cx, cy, rx, ry, color)` | Ellipse-Outline |
 | `Graphics.FillEllipse(cx, cy, rx, ry, color)` | Gefüllte Ellipse |
-| `Graphics.FillRoundedRect(x, y, w, h, r, color)` | Abgerundetes Rechteck |
+| `Graphics.DrawRoundedRect(x, y, w, h, r, color)` | Abgerundetes Rechteck-Outline |
+| `Graphics.FillRoundedRect(x, y, w, h, r, color)` | Gefülltes abgerundetes Rechteck |
 | `Graphics.DrawTextShadow(x, y, text, color, shadow, scale)` | Text mit Schatten |
 | `Graphics.SetPixelAlpha(x, y, color, alpha)` | Pixel mit Alpha-Blending |
 | `Graphics.FillRectAlpha(x, y, w, h, color, alpha)` | Rechteck mit Alpha |
 | `Graphics.DrawTextAlpha(x, y, text, color, scale, alpha)` | Text mit Alpha |
+| `Graphics.DrawGrid(x, y, w, h, cols, rows, color)` | Raster zeichnen |
+| `Graphics.DrawPolygon(points, count, color)` | Polygon-Outline |
 
 ---
 
@@ -640,8 +749,13 @@ if (Input.IsDown(NpadButton.A))  { /* einmalig beim Drücken  */ }
 if (Input.IsHeld(NpadButton.ZR)) { /* solange gehalten       */ }
 if (Input.IsUp(NpadButton.B))    { /* einmalig beim Loslassen */ }
 
-StickPos left = Input.GetStickLeft();
+StickPos left  = Input.GetStickLeft();
+StickPos right = Input.GetStickRight();
 TouchState touch = Input.GetTouch();
+
+// Touch-Treffer-Test
+if (touch.HitRect(100, 200, 80, 40))  // x, y, width, height
+    DoSomething();
 ```
 
 ---
@@ -706,7 +820,8 @@ if (obj is Dog d) { d.Bark(); }
 | Auto-Properties / Properties mit Body | ✅ |
 | Enums | ✅ |
 | Value-type `struct` | ✅ |
-| Generics | ✅ |
+| Generics (Klassen) | ✅ |
+| Generics (Methoden) | ✅ — Typ-Spezialisierung am Aufruf-Punkt |
 | `interface` | ✅ |
 | Extension-Methoden | ✅ |
 | `using static` | ✅ |
@@ -725,7 +840,7 @@ MeinProjekt/
 ├── mylib_main.h           ← optionaler Shim für externe Libraries
 ├── cs2sx_out/             ← generierter C-Code
 │   ├── _forward.h         ← Forward-Declarations + Custom-Header-Includes
-│   ├── _generics.h / .c
+│   ├── _generics.h / .c   ← expandierte Generics + List<UserClass>-Typen
 │   ├── _interfaces.h
 │   ├── switchforms.c / .h
 │   ├── switchapp.h
@@ -774,7 +889,6 @@ MeinProjekt/
 | Bitmap-Font 8×8 | Kein Anti-Aliasing, kein TrueType (Freetype via `addLib` als Alternative) |
 | Kein Heap-GC | Allokierte Objekte (`*_New()`) leben bis `_Free()` |
 | `async`/`await` | Synchroner Fallback mit Warning |
-| LINQ | Nicht unterstützt |
 | Mehrfachvererbung | Nicht unterstützt |
 
 ---
