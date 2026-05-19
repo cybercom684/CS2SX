@@ -190,6 +190,7 @@ public sealed class BuildPipeline
             // ── transpile (incremental) ───────────────────────────────────
             var sTranspile = renderer.GetStage("transpile");
             sTranspile.Status = StageStatus.Running;
+            CS2SX.Transpiler.Writers.OperatorOverloadWriter.Reset();
 
             var allHeaders = transpiledFiles
                 .Select(f => Path.GetFileNameWithoutExtension(f) + ".h")
@@ -479,7 +480,7 @@ public sealed class BuildPipeline
     }
 
     private bool IsUpToDate(string csFile, string hPath, string cPath,
-        DateTime latestHeaderTime = default)
+    DateTime latestHeaderTime = default)
     {
         if (!File.Exists(hPath) || !File.Exists(cPath)) return false;
 
@@ -487,8 +488,10 @@ public sealed class BuildPipeline
         var hTime = File.GetLastWriteTimeUtc(hPath);
         var cTime = File.GetLastWriteTimeUtc(cPath);
 
+        // Source file newer than either output → rebuild
         if (hTime < csTime || cTime < csTime) return false;
 
+        // Transpiler binary newer → rebuild all
         var transpilerPath = System.Reflection.Assembly.GetExecutingAssembly().Location;
         if (!string.IsNullOrEmpty(transpilerPath) && File.Exists(transpilerPath))
         {
@@ -497,28 +500,29 @@ public sealed class BuildPipeline
                 return false;
         }
 
-        var switchformsH = Path.Combine(_buildDir, "switchforms.h");
-        if (File.Exists(switchformsH))
+        // Check every generated header individually (not just the latest)
+        // This ensures that a change to _generics.h triggers recompile of every
+        // dependent .c file, even when other headers are unchanged.
+        var generatedHeaderNames = new[]
         {
-            var t = File.GetLastWriteTimeUtc(switchformsH);
-            if (t > hTime || t > cTime) return false;
+        "_forward.h",
+        "_generics.h",
+        "_interfaces.h",
+        "switchforms.h",
+        "switchapp.h",
+        "AudioStub.h",
+    };
+
+        foreach (var headerName in generatedHeaderNames)
+        {
+            var headerPath = Path.Combine(_buildDir, headerName);
+            if (!File.Exists(headerPath)) continue;
+            var ht = File.GetLastWriteTimeUtc(headerPath);
+            if (ht > hTime || ht > cTime) return false;
         }
 
-        var forwardH = Path.Combine(_buildDir, "_forward.h");
-        if (File.Exists(forwardH))
-        {
-            var t = File.GetLastWriteTimeUtc(forwardH);
-            if (t > hTime || t > cTime) return false;
-        }
-
-        var genericsH = Path.Combine(_buildDir, "_generics.h");
-        if (File.Exists(genericsH) && File.GetLastWriteTimeUtc(genericsH) > hTime)
-            return false;
-
-        var ifacesH = Path.Combine(_buildDir, "_interfaces.h");
-        if (File.Exists(ifacesH) && File.GetLastWriteTimeUtc(ifacesH) > hTime)
-            return false;
-
+        // Any transpiled header newer than this file's output → rebuild
+        // (a struct definition change in AnyOther.h may affect this .c)
         if (latestHeaderTime != default && latestHeaderTime > hTime)
             return false;
 

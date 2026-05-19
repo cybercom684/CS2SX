@@ -67,13 +67,18 @@ public sealed class LambdaLifter
         WriteFunctionToSb(preludeSb, id, name, lambda, parms, retCs, caps);
         _ctx.PendingLambdaPreludes.Add(preludeSb.ToString());
 
-        // Capture-Struct im aktuellen Output befüllen (nach dem Lambda-Ausdruck)
+        // FIX: Stack-allokierter Closure-Struct statt malloc → kein Heap-Leak.
+        // Für Callbacks die den umgebenden Scope überleben (z.B. Event-Handler), darf
+        // die Variable nicht auf dem Stack liegen — in dem Fall muss der Caller
+        // das Lambda-Prelude manuell heap-allokieren. Für sofortige Nutzung (Sort,
+        // Task.Run-Fallback usw.) ist Stack-Allokation korrekt und sicher.
         if (caps.Count > 0)
         {
             var capStruct = "_cap_" + id;
-            _ctx.WriteLine($"struct {capStruct}* _ctx_{id} = malloc(sizeof(struct {capStruct}));");
+            _ctx.WriteLine($"struct {capStruct} _ctx_val_{id};");
             foreach (var cap in caps)
-                _ctx.WriteLine($"_ctx_{id}->{cap.CapName} = {cap.CExpr};");
+                _ctx.WriteLine($"_ctx_val_{id}.{cap.CapName} = {cap.CExpr};");
+            _ctx.WriteLine($"struct {capStruct}* _ctx_{id} = &_ctx_val_{id};");
         }
 
         return name;

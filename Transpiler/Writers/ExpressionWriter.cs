@@ -31,7 +31,7 @@ public sealed class ExpressionWriter : IExpressionWriter
     public ExpressionWriter(TranspilerContext ctx)
     {
         _ctx = ctx;
-        _dispatcher = new InvocationDispatcher(ctx, Write);
+        _dispatcher = new InvocationDispatcher(ctx, Write, new ExtensionMethodHandler());
     }
 
     public ExpressionWriter(TranspilerContext ctx, ExtensionMethodHandler extensionHandler)
@@ -85,8 +85,17 @@ public sealed class ExpressionWriter : IExpressionWriter
             ConditionalAccessExpressionSyntax condAccess => WriteConditionalAccess(condAccess),
             LambdaExpressionSyntax lambda => WriteLambda(lambda),
             TupleExpressionSyntax tuple => WriteTuple(tuple),
-            _ => node.ToString(),
+            _ => WriteFallback(node),
         };
+    }
+
+    private string WriteFallback(SyntaxNode node)
+    {
+        var text = node.ToString();
+        var typeName = node.GetType().Name.Replace("Syntax", "");
+        _ctx.Warn($"unsupported expression '{typeName}' — passed through as-is: {(text.Length > 40 ? text[..40] + "…" : text)}",
+            typeName);
+        return text;
     }
 
     // ── Lambda ────────────────────────────────────────────────────────────────
@@ -165,6 +174,14 @@ public sealed class ExpressionWriter : IExpressionWriter
         return name;
     }
 
+    private List<string> WriteArguments(SeparatedSyntaxList<ArgumentSyntax> args)
+    {
+        return args
+            .Select(a => a.Expression is null ? string.Empty : Write(a.Expression))
+            .Where(s => !string.IsNullOrEmpty(s))
+            .ToList();
+    }
+
     // ── Tuple ─────────────────────────────────────────────────────────────────
 
     private string WriteTuple(TupleExpressionSyntax tuple)
@@ -219,6 +236,15 @@ public sealed class ExpressionWriter : IExpressionWriter
         var right = Write(bin.Right);
         var op = bin.OperatorToken.Text;
 
+        // Operator overload check — try left type first
+        var leftCsType = TypeInferrer.InferCSharpType(bin.Left, _ctx);
+        var overloaded = OperatorOverloadWriter.TryRewriteBinary(bin, leftCsType, left, right);
+        if (overloaded != null) return overloaded;
+        // Try right type (for symmetric operators like == on value types)
+        var rightCsType = TypeInferrer.InferCSharpType(bin.Right, _ctx);
+        overloaded = OperatorOverloadWriter.TryRewriteBinary(bin, rightCsType, left, right);
+        if (overloaded != null) return overloaded;
+
         if (op == "==" || op == "!=")
         {
             bool lIsStr = IsStringExpr(bin.Left) || IsStringType(bin.Left);
@@ -272,7 +298,7 @@ public sealed class ExpressionWriter : IExpressionWriter
         else if (condAccess.WhenNotNull is InvocationExpressionSyntax inv
             && inv.Expression is MemberBindingExpressionSyntax invMember)
         {
-            var args = inv.ArgumentList.Arguments.Select(a => Write(a.Expression));
+            var args = WriteArguments(inv.ArgumentList.Arguments);
             accessExpr = receiver + "->" + invMember.Name.Identifier.Text
                        + "(" + string.Join(", ", args) + ")";
         }
@@ -287,6 +313,35 @@ public sealed class ExpressionWriter : IExpressionWriter
     {
         var op = assign.OperatorToken.Text;
         var right = Write(assign.Right);
+
+        // Add at the start of WriteAssignment, before existing op checks:
+        if (op == "+=" || op == "-=")
+        {
+            var leftRaw = assign.Left.ToString().Trim();
+            var leftKey = leftRaw.TrimStart('_');
+
+            string? fieldType = null;
+            _ctx.LocalTypes.TryGetValue(leftRaw, out fieldType);
+            if (fieldType == null) _ctx.FieldTypes.TryGetValue(leftKey, out fieldType);
+
+            if (fieldType != null
+                && (fieldType == "Action" || fieldType.StartsWith("Action<")
+                    || fieldType.StartsWith("Func<") || fieldType == "EventHandler"))
+            {
+                // Delegate combine/remove — emit a simple assignment for single subscriber,
+                // or use a handler list for multiple subscribers.
+                // Simple approach: last subscriber wins for single delegates (+=),
+                // clear for -=. Emit a warning that multicast is simplified.
+                _ctx.Warn($"Delegate {op} on '{leftRaw}': multicast simplified to last-subscriber-wins",
+                          leftRaw);
+
+                var leftExpr = Write(assign.Left);
+                if (op == "+=")
+                    return leftExpr + " = (Action)" + right;
+                else // -=
+                    return leftExpr + " = NULL /* unsubscribed */";
+            }
+        }
 
         if (op == "??=")
             return WriteNullCoalescingAssignment(assign, right);
@@ -339,20 +394,27 @@ public sealed class ExpressionWriter : IExpressionWriter
     private string WriteTupleDeconstruction(TupleExpressionSyntax tupleLeft, string right)
     {
         var names = tupleLeft.Arguments.Select(a => a.Expression.ToString()).ToList();
-        _ctx.Out.WriteLine(_ctx.Tab + "/* tuple deconstruction */");
+        var tmpName = _ctx.NextTmp("tup");
+        // FIX: __auto_type speichert das Tuple-Ergebnis ohne den exakten C-Struct-Typ zu kennen.
+        // Zuvor wurde nur int=0 deklariert und der eigentliche Aufruf/Zuweisung nie emittiert.
+        _ctx.Out.WriteLine(_ctx.Tab + "__auto_type " + tmpName + " = " + right + ";");
+        var fields = new[] { "item1", "item2", "item3", "item4", "item5", "item6", "item7" };
         for (int i = 0; i < names.Count; i++)
         {
             var varName = names[i];
-            if (varName != "_")
+            if (varName == "_") continue;
+            var fieldName = i < fields.Length ? fields[i] : "item" + (i + 1);
+            if (!_ctx.LocalTypes.ContainsKey(varName))
             {
-                if (!_ctx.LocalTypes.ContainsKey(varName))
-                {
-                    _ctx.WriteLine("int " + varName + " = 0;");
-                    _ctx.LocalTypes[varName] = "int";
-                }
+                _ctx.Out.WriteLine(_ctx.Tab + "__auto_type " + varName + " = " + tmpName + "." + fieldName + ";");
+                _ctx.LocalTypes[varName] = "var";
+            }
+            else
+            {
+                _ctx.Out.WriteLine(_ctx.Tab + varName + " = " + tmpName + "." + fieldName + ";");
             }
         }
-        return "/* tuple: " + string.Join(", ", names) + " = " + right + " */";
+        return "";
     }
 
     private static string WriteNameOf(InvocationExpressionSyntax inv)
@@ -379,6 +441,19 @@ public sealed class ExpressionWriter : IExpressionWriter
     {
         var result = _dispatcher.Dispatch(inv);
         if (result != null) return result;
+
+        // FIX: base.Method(args) → BaseType_Method((BaseType*)self, args)
+        // Zuvor: ((Control*)self)->methodname — hardcodet Control* und lowercaset den Namen
+        if (inv.Expression is MemberAccessExpressionSyntax baseMem
+            && baseMem.Expression is BaseExpressionSyntax)
+        {
+            var baseType = string.IsNullOrEmpty(_ctx.CurrentBaseType) ? "Control" : _ctx.CurrentBaseType;
+            var methodName = baseMem.Name.Identifier.Text;
+            var callArgs = WriteArguments(inv.ArgumentList.Arguments);
+            var allArgs = new List<string> { "((" + baseType + "*)self)" };
+            allArgs.AddRange(callArgs);
+            return baseType + "_" + methodName + "(" + string.Join(", ", allArgs) + ")";
+        }
 
         if (inv.Expression is MemberAccessExpressionSyntax vtableMem)
         {
@@ -412,7 +487,7 @@ public sealed class ExpressionWriter : IExpressionWriter
         if (TypeRegistry.IsControlType(receiverType)) return null;
         if (receiverType is "string" or "StringBuilder") return null;
 
-        var callArgs = inv.ArgumentList.Arguments.Select(a => Write(a.Expression)).ToList();
+        var callArgs = WriteArguments(inv.ArgumentList.Arguments);
 
         if (_ctx.InterfaceTypes.Contains(receiverType))
         {
@@ -482,20 +557,64 @@ public sealed class ExpressionWriter : IExpressionWriter
             return "Label_SetText(" + obj + ", " + right + ")";
         }
 
+        // Replace just the OnClick block in WriteMemberAssignment:
         if (prop == "OnClick")
         {
-            var methodName = assign.Right.ToString().Trim();
-            return obj + "->OnClick = (void(*)(void*))" + _ctx.CurrentClass + "_" + methodName;
+            var methodRaw = assign.Right.ToString().Trim();
+            // Resolve the actual containing class of the method — could be CurrentClass,
+            // or a static class, or a lambda-lifted function.
+            string methodExpr;
+            if (assign.Right is LambdaExpressionSyntax lambdaRight)
+            {
+                var lifter = new LambdaLifter(_ctx, this);
+                var stmtWriter = new StatementWriter(_ctx, this);
+                lifter.SetStatementWriter(stmtWriter);
+                methodExpr = lifter.LiftLambda(lambdaRight, hintType: "Action");
+            }
+            else if (methodRaw.Contains('.'))
+            {
+                // Fully qualified: SomeClass.Method → SomeClass_Method
+                methodExpr = methodRaw.Replace('.', '_');
+            }
+            else if (_ctx.SemanticModel != null && assign.Right is IdentifierNameSyntax idRight)
+            {
+                try
+                {
+                    var sym = _ctx.SemanticModel.GetSymbolInfo(idRight).Symbol;
+                    if (sym is IMethodSymbol ms)
+                        methodExpr = ms.ContainingType.Name + "_" + ms.Name;
+                    else
+                        methodExpr = string.IsNullOrEmpty(_ctx.CurrentClass)
+                            ? methodRaw
+                            : _ctx.CurrentClass + "_" + methodRaw;
+                }
+                catch
+                {
+                    methodExpr = string.IsNullOrEmpty(_ctx.CurrentClass)
+                        ? methodRaw
+                        : _ctx.CurrentClass + "_" + methodRaw;
+                }
+            }
+            else
+            {
+                methodExpr = string.IsNullOrEmpty(_ctx.CurrentClass)
+                    ? methodRaw
+                    : _ctx.CurrentClass + "_" + methodRaw;
+            }
+            return obj + "->OnClick = (void(*)(void*))" + methodExpr;
         }
 
         var fieldType = lt ?? ft;
         if (fieldType != null && NullableHandler.IsNullable(fieldType) && right != "NULL")
         {
-            var tmp = _ctx.NextTmp("nval");
             var inner = NullableHandler.GetInnerType(fieldType);
             var innerC = TypeRegistry.MapType(inner);
-            _ctx.Out.WriteLine(_ctx.Tab + "static " + innerC + " " + tmp + " = " + right + ";");
-            return obj + arrow + "f_" + objKey + " = &" + tmp;
+            var fieldExpr = obj + arrow + "f_" + objKey;
+            // FIX: heap-allokiert pro Instanz statt static (alle Instanzen teilten denselben Speicher)
+            _ctx.Out.WriteLine(_ctx.Tab + "if (!" + fieldExpr + ")");
+            _ctx.Out.WriteLine(_ctx.Tab + "    " + fieldExpr + " = (" + innerC + "*)malloc(sizeof(" + innerC + "));");
+            _ctx.Out.WriteLine(_ctx.Tab + "*(" + fieldExpr + ") = " + right + ";");
+            return "";
         }
 
         var cProp = TypeRegistry.MapProperty(prop);
@@ -543,8 +662,13 @@ public sealed class ExpressionWriter : IExpressionWriter
         var obj = Write(mem.Expression);
         var prop = mem.Name.Identifier.Text;
 
+        // FIX: base.Prop → ((BaseType*)self)->Prop
+        // Zuvor: hardcodet ((Control*)self)->prop.toLower() — falsch für alle Nicht-Control-Hierarchien
         if (mem.Expression is BaseExpressionSyntax)
-            return "((Control*)self)->" + prop.ToLowerInvariant();
+        {
+            var baseType = string.IsNullOrEmpty(_ctx.CurrentBaseType) ? "Control" : _ctx.CurrentBaseType;
+            return "((" + baseType + "*)self)->" + prop;
+        }
 
         var rawExpr = mem.Expression.ToString();
 
@@ -817,13 +941,31 @@ public sealed class ExpressionWriter : IExpressionWriter
     private string WriteElementAccess(ElementAccessExpressionSyntax elem)
     {
         var objExpr = Write(elem.Expression);
-        var index = Write(elem.ArgumentList.Arguments[0].Expression);
         var objRaw = elem.Expression.ToString();
         var objKey = objRaw.TrimStart('_');
 
         string? lt = null, ft = null;
         _ctx.LocalTypes.TryGetValue(objRaw, out lt);
         _ctx.FieldTypes.TryGetValue(objKey, out ft);
+
+        // Multi-dimensional array: arr[i, j] → arr[i * cols + j]
+        if (elem.ArgumentList.Arguments.Count >= 2)
+        {
+            var strideKey = "__stride__" + objRaw;
+            if (_ctx.LocalTypes.TryGetValue(strideKey, out var stride))
+            {
+                var idx0 = Write(elem.ArgumentList.Arguments[0].Expression);
+                var idx1 = Write(elem.ArgumentList.Arguments[1].Expression);
+                return objExpr + "[" + idx0 + " * " + stride + " + " + idx1 + "]";
+            }
+            // Fallback: emit a warning and use flat index
+            _ctx.Warn($"Multi-dim array access on '{objRaw}' without known stride — using flat index",
+                      elem.ToString());
+            var flatParts = elem.ArgumentList.Arguments.Select(a => Write(a.Expression)).ToList();
+            return objExpr + "[" + string.Join("][", flatParts) + "]";
+        }
+
+        var index = Write(elem.ArgumentList.Arguments[0].Expression);
 
         bool isDict = (lt != null && TypeRegistry.IsDictionary(lt))
                    || (ft != null && TypeRegistry.IsDictionary(ft));

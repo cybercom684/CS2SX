@@ -15,9 +15,10 @@
 //           updateScore() korrekt als eigene Methode
 // ============================================================================
 
+using CS2SX.Core;
+using CS2SX.Transpiler.Writers;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
-using CS2SX.Core;
 
 namespace CS2SX.Transpiler.Handlers;
 
@@ -49,12 +50,12 @@ public sealed class OwnMethodHandler : InvocationHandlerBase
     };
 
     public override bool TryHandle(
-    InvocationExpressionSyntax inv,
-    string calleeStr,
-    List<string> args,
-    TranspilerContext ctx,
-    Func<Microsoft.CodeAnalysis.SyntaxNode?, string> writeExpr,
-    out string result)
+     InvocationExpressionSyntax inv,
+     string calleeStr,
+     List<string> args,
+     TranspilerContext ctx,
+     Func<Microsoft.CodeAnalysis.SyntaxNode?, string> writeExpr,
+     out string result)
     {
         if (inv.Expression is not IdentifierNameSyntax idNode)
             return NotHandled(out result);
@@ -71,23 +72,16 @@ public sealed class OwnMethodHandler : InvocationHandlerBase
         if (s_cBuiltins.Contains(calleeStr))
             return NotHandled(out result);
 
-        // FIX: "using static" prüfen — wenn der Name aus einem static-Import kommt,
-        //      wird er von den zuständigen Handlern (Math, Console etc.) aufgelöst,
-        //      NICHT als eigene Methode behandelt.
+        // "using static" resolution
         var resolvedPrefix = ctx.UsingStaticResolver.TryResolveStaticMethod(calleeStr);
         if (resolvedPrefix != null && resolvedPrefix != ctx.CurrentClass)
         {
-            // Umschreiben als "ClassName.MethodName" und an Dispatcher zurückgeben
-            // indem wir einen synthetischen calleeStr bauen — der entsprechende Handler
-            // (MathHandler, etc.) greift dann.
             var syntheticCallee = resolvedPrefix + "." + calleeStr;
-            // Prüfen ob ein bekannter Handler den synth. Call behandeln würde
-            // Wenn ja: direkt weiterleiten
             result = syntheticCallee + "(" + string.Join(", ", args) + ")";
             return true;
         }
 
-        // SemanticModel-Prüfung
+        // SemanticModel check
         if (ctx.SemanticModel != null)
         {
             try
@@ -100,10 +94,16 @@ public sealed class OwnMethodHandler : InvocationHandlerBase
                     && method.ContainingType?.Name == ctx.CurrentClass)
                 {
                     var isStatic = method.IsStatic;
-                    var allArgs = isStatic
-                        ? args
-                        : new List<string> { "self" }.Concat(args).ToList();
-                    result = $"{ctx.CurrentClass}_{calleeStr}({string.Join(", ", allArgs)})";
+
+                    // Build args with correct ref/out handling based on method signature
+                    var callArgs = BuildArgsWithRefOut(inv, method, args, ctx, writeExpr);
+
+                    if (isStatic)
+                        result = $"{ctx.CurrentClass}_{calleeStr}({string.Join(", ", callArgs)})";
+                    else if (callArgs.Count > 0)
+                        result = $"{ctx.CurrentClass}_{calleeStr}(self, {string.Join(", ", callArgs)})";
+                    else
+                        result = $"{ctx.CurrentClass}_{calleeStr}(self)";
                     return true;
                 }
 
@@ -118,7 +118,7 @@ public sealed class OwnMethodHandler : InvocationHandlerBase
             catch { }
         }
 
-        // Heuristik: Kleinbuchstabe → eigene Methode
+        // Heuristic: lowercase = own method
         if (char.IsUpper(calleeStr[0]))
             return NotHandled(out result);
 
@@ -126,5 +126,47 @@ public sealed class OwnMethodHandler : InvocationHandlerBase
         selfArgs.AddRange(args);
         result = $"{ctx.CurrentClass}_{calleeStr}({string.Join(", ", selfArgs)})";
         return true;
+    }
+
+    private static List<string> BuildArgsWithRefOut(
+        InvocationExpressionSyntax inv,
+        IMethodSymbol method,
+        List<string> alreadyBuiltArgs,
+        TranspilerContext ctx,
+        Func<SyntaxNode?, string> writeExpr)
+    {
+        // The args list was already built by InvocationDispatcher.BuildArg which handles
+        // out/ref keywords. We just need to ensure consistency with method parameter kinds.
+        var result = new List<string>();
+        var invArgs = inv.ArgumentList.Arguments;
+
+        for (int i = 0; i < invArgs.Count && i < method.Parameters.Length; i++)
+        {
+            var param = method.Parameters[i];
+            var arg = invArgs[i];
+            var built = i < alreadyBuiltArgs.Count ? alreadyBuiltArgs[i] : writeExpr(arg.Expression);
+
+            if (param.RefKind is RefKind.Ref or RefKind.Out)
+            {
+                // Ensure & prefix for value types not already having it
+                if (!built.StartsWith("&") && !built.StartsWith("(*"))
+                {
+                    var exprStr = arg.Expression.ToString();
+                    var csType = TypeInferrer.InferCSharpType(arg.Expression, ctx);
+                    if (TypeRegistry.IsPrimitive(csType) && csType != "string")
+                        result.Add("&" + built);
+                    else
+                        result.Add(built);
+                }
+                else
+                    result.Add(built);
+            }
+            else
+            {
+                result.Add(built);
+            }
+        }
+
+        return result;
     }
 }

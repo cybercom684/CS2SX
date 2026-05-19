@@ -14,14 +14,15 @@
 //
 //      Das ersetzt den alten O(n²)-StringWriter-Rewrite in ExpressionWriter.
 
+using System.Xml.Linq;
+using CS2SX.Core;
+using CS2SX.Logging;
+using CS2SX.Transpiler.Handlers;
+using CS2SX.Transpiler.Strategies;
+using CS2SX.Transpiler.Writers;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
-using CS2SX.Core;
-using CS2SX.Transpiler.Writers;
-using CS2SX.Transpiler.Strategies;
-using CS2SX.Transpiler.Handlers;
-using CS2SX.Logging;
 
 namespace CS2SX.Transpiler;
 
@@ -180,6 +181,15 @@ public sealed class CSharpToC : CSharpSyntaxWalker
         if (!string.IsNullOrEmpty(baseType) && baseType != SwitchAppBase)
             LoadBaseFields(baseType);
 
+        // VTable override validation
+        if (!string.IsNullOrEmpty(_ctx.CurrentBaseType)
+            && _ctx.CurrentBaseType != SwitchAppBase
+            && !IsControlSubclass(_ctx.CurrentBaseType)
+            && _mode == TranspileMode.Implementation)
+        {
+            VTableBuilder.ValidateOverrides(node, _ctx.CurrentBaseType, _ctx);
+        }
+
         CollectFieldTypes(node);
 
         if (VTableBuilder.HasVirtualMethods(node))
@@ -208,6 +218,11 @@ public sealed class CSharpToC : CSharpSyntaxWalker
                 WriteStructDefinition(node, baseType);
 
             WriteFunctionSignatures(node, isSwitchAppChild, isStaticClass);
+
+      
+
+            // In WriteMethodBodies, also write operator bodies:
+            
 
             if (!isStaticClass)
                 WriteDestructor(node, _ctx.CurrentClass, baseType);
@@ -275,6 +290,35 @@ public sealed class CSharpToC : CSharpSyntaxWalker
             if (field.Modifiers.Any(m => m.IsKind(SyntaxKind.StaticKeyword))) continue;
 
             var csType = ResolveFieldType(field);
+
+            // FIX: Nullable-Felder (int? → int*) werden heap-allokiert → müssen free'd werden
+            if (NullableHandler.IsNullable(csType))
+            {
+                foreach (var v in field.Declaration.Variables)
+                {
+                    var fieldName = v.Identifier.Text.TrimStart('_');
+                    var prefix = TypeRegistry.HasNoPrefix(fieldName) ? "" : "f_";
+                    _ctx.WriteLine($"if (self->{prefix}{fieldName}) {{ free(self->{prefix}{fieldName}); self->{prefix}{fieldName} = NULL; }}");
+                }
+                continue;
+            }
+
+            // FIX: Array-Felder (T[]) werden per calloc/malloc allokiert → müssen free'd werden
+            if (csType.EndsWith("[]"))
+            {
+                var innerType = csType[..^2].Trim();
+                if (!TypeRegistry.IsLibNxStruct(innerType))
+                {
+                    foreach (var v in field.Declaration.Variables)
+                    {
+                        var fieldName = v.Identifier.Text.TrimStart('_');
+                        var prefix = TypeRegistry.HasNoPrefix(fieldName) ? "" : "f_";
+                        _ctx.WriteLine($"if (self->{prefix}{fieldName}) {{ free(self->{prefix}{fieldName}); self->{prefix}{fieldName} = NULL; }}");
+                    }
+                }
+                continue;
+            }
+
             var needsFree = TypeRegistry.NeedsPointerSuffix(csType)
                          && !TypeRegistry.IsPrimitive(csType)
                          && csType != "string"
@@ -405,6 +449,37 @@ public sealed class CSharpToC : CSharpSyntaxWalker
             catch { }
         }
         return field.Declaration.Type.ToString().Trim();
+    }
+
+    private void WriteOperatorBody(OperatorDeclarationSyntax op, string className)
+    {
+        var opToken = op.OperatorToken.Text;
+        if (!OperatorOverloadWriter.s_opNames.TryGetValue(opToken, out var suffix))
+            suffix = "op_unknown";
+
+        var retType = TypeRegistry.MapType(op.ReturnType.ToString().Trim());
+        var paramList = string.Join(", ",
+            op.ParameterList.Parameters.Select(p =>
+            {
+                var decl = BuildParamDecl(p);
+                _ctx.LocalTypes[p.Identifier.Text] = p.Type?.ToString().Trim() ?? "int";
+                return decl;
+            }));
+
+        _ctx.ClearMethodContext();
+        _ctx.Out.WriteLine($"{retType} {className}_{suffix}({paramList})");
+        _ctx.Out.WriteLine("{");
+        _ctx.Indent();
+
+        if (op.Body != null)
+            foreach (var stmt in op.Body.Statements)
+                _stmtWriter.Write(stmt);
+        else if (op.ExpressionBody != null)
+            _ctx.WriteLine($"return {_exprWriter.Write(op.ExpressionBody.Expression)};");
+
+        _ctx.Dedent();
+        _ctx.Out.WriteLine("}");
+        _ctx.Out.WriteLine();
     }
 
     private string ResolvePropertyType(PropertyDeclarationSyntax prop)
@@ -800,6 +875,13 @@ public sealed class CSharpToC : CSharpSyntaxWalker
         foreach (var method in node.Members.OfType<MethodDeclarationSyntax>())
             WriteMethodSignature(method, name, isStaticClass);
 
+        // Write operator overload signatures
+        foreach (var opDecl in node.Members.OfType<OperatorDeclarationSyntax>())
+        {
+            var sig = OperatorOverloadWriter.BuildSignature(opDecl, name, BuildParamDecl);
+            _ctx.Out.WriteLine(sig + ";");
+        }
+
         _ctx.Out.WriteLine();
     }
 
@@ -840,9 +922,12 @@ public sealed class CSharpToC : CSharpSyntaxWalker
     }
 
     // ── Methoden-Bodies ───────────────────────────────────────────────────────
-
     private void WriteMethodBodies(ClassDeclarationSyntax node)
     {
+        var className = node.Identifier.Text;
+        foreach (var opDecl in node.Members.OfType<OperatorDeclarationSyntax>())
+            WriteOperatorBody(opDecl, className);
+
         foreach (var method in node.Members.OfType<MethodDeclarationSyntax>())
             VisitMethodDeclaration(method);
     }
@@ -923,6 +1008,7 @@ public sealed class CSharpToC : CSharpSyntaxWalker
         if (isAbstract) return;
 
         _ctx.ClearMethodContext();
+        _ctx.IsStaticMethod = isStatic;
         _ctx.CurrentReturnBuffer = null;
         if (csReturnType == "string"
             && ReturnStringFixHelper.HasInterpolatedStringReturn(node))

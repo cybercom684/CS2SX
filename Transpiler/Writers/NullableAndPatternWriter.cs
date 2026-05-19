@@ -165,10 +165,10 @@ public static class PatternMatchingWriter
     /// BinaryPattern      and/or  → (a && b) / (a || b)
     /// </summary>
     public static string WritePattern(
-        PatternSyntax pattern,
-        string subject,
-        TranspilerContext ctx,
-        Func<SyntaxNode?, string> writeExpr)
+    PatternSyntax pattern,
+    string subject,
+    TranspilerContext ctx,
+    Func<SyntaxNode?, string> writeExpr)
     {
         return pattern switch
         {
@@ -194,14 +194,66 @@ public static class PatternMatchingWriter
             DeclarationPatternSyntax dp =>
                 WriteTypePattern(dp, subject, ctx),
 
-            TypePatternSyntax tp =>
+            TypePatternSyntax =>
                 "(" + subject + " != NULL)",
 
             DiscardPatternSyntax =>
                 "1 /* _ */",
 
-            _ => subject + " /* pattern? */"
+            ListPatternSyntax lp =>
+                WriteListPattern(lp, subject, ctx, writeExpr),
+
+            RecursivePatternSyntax rp when rp.PropertyPatternClause != null =>
+                WritePropertyPattern(rp, subject, ctx, writeExpr),
+
+            _ => FallbackPattern(pattern, subject, ctx),
         };
+    }
+
+    // Roslyn represents { Prop: Pattern } as RecursivePatternSyntax with PropertyPatternClause
+    private static string WritePropertyPattern(
+        RecursivePatternSyntax rp,
+        string subject,
+        TranspilerContext ctx,
+        Func<SyntaxNode?, string> writeExpr)
+    {
+        // Dog { Name: "Rex", Age: > 2 }  →  (subject != NULL && subject->f_Name == "Rex" && subject->Age > 2)
+        var conditions = new List<string>();
+
+        // Optional type check before property access
+        if (rp.Type != null)
+        {
+            var typeName = rp.Type.ToString().Trim();
+            if (!TypeRegistry.IsPrimitive(typeName))
+                conditions.Add($"({subject} != NULL)");
+        }
+        else
+        {
+            conditions.Add($"({subject} != NULL)");
+        }
+
+        if (rp.PropertyPatternClause != null)
+        {
+            foreach (var sub in rp.PropertyPatternClause.Subpatterns)
+            {
+                var propName = sub.NameColon?.Name.Identifier.Text
+                            ?? sub.ExpressionColon?.Expression.ToString().Trim();
+                if (propName == null) continue;
+
+                var cProp = TypeRegistry.HasNoPrefix(propName) ? propName : "f_" + propName;
+                var access = $"{subject}->{cProp}";
+                conditions.Add(WritePattern(sub.Pattern, access, ctx, writeExpr));
+            }
+        }
+
+        return "(" + string.Join(" && ", conditions) + ")";
+    }
+
+    private static string FallbackPattern(PatternSyntax pattern, string subject, TranspilerContext ctx)
+    {
+        ctx.Warn($"Unsupported pattern type: {pattern.GetType().Name} — falling back to null check",
+            pattern.ToString());
+        return "(" + subject + " != NULL) /* unsupported pattern: " + pattern.GetType().Name + " */";
     }
 
     private static string WriteTypePattern(
@@ -224,6 +276,64 @@ public static class PatternMatchingWriter
         return "(" + subject + " != NULL)";
     }
 
+
+    private static string WriteListPattern(
+        ListPatternSyntax lp,
+        string subject,
+        TranspilerContext ctx,
+        Func<SyntaxNode?, string> writeExpr)
+    {
+        // C has no built-in list patterns; we emit a length + element check.
+        // Works for arrays and List<T>* where we know the count.
+        // Determine whether subject is a list or array via LocalTypes/FieldTypes.
+        var subjectKey = subject.TrimStart('_').Replace("self->f_", "").Replace("self->", "");
+        string? colType = null;
+        ctx.LocalTypes.TryGetValue(subject, out colType);
+        if (colType == null) ctx.FieldTypes.TryGetValue(subjectKey, out colType);
+
+        var patterns = lp.Patterns.ToList();
+        var hasRest = lp.Patterns.OfType<SlicePatternSyntax>().Any();
+        var fixedPatterns = patterns.Where(p => p is not SlicePatternSyntax).ToList();
+
+        var conditions = new List<string>();
+
+        // Length check (only when there's no slice pattern, or slice is at end)
+        if (!hasRest)
+        {
+            var countExpr = TypeRegistry.IsList(colType ?? "")
+                ? subject + "->count"
+                : "(sizeof(" + subject + ")/sizeof(" + subject + "[0]))";
+            conditions.Add(countExpr + " == " + patterns.Count);
+        }
+        else
+        {
+            var countExpr = TypeRegistry.IsList(colType ?? "")
+                ? subject + "->count"
+                : "(sizeof(" + subject + ")/sizeof(" + subject + "[0]))";
+            // At least fixedPatterns.Count elements needed
+            if (fixedPatterns.Count > 0)
+                conditions.Add(countExpr + " >= " + fixedPatterns.Count);
+        }
+
+        // Element checks (skip discard and slice patterns)
+        int elemIdx = 0;
+        foreach (var p in patterns)
+        {
+            if (p is SlicePatternSyntax or DiscardPatternSyntax) { elemIdx++; continue; }
+
+            var elemAccess = TypeRegistry.IsList(colType ?? "")
+                ? "List_" + GetListInnerCType(colType!) + "_Get(" + subject + ", " + elemIdx + ")"
+                : subject + "[" + elemIdx + "]";
+
+            conditions.Add(WritePattern(p, elemAccess, ctx, writeExpr));
+            elemIdx++;
+        }
+
+        return conditions.Count == 0
+            ? "1 /* empty list pattern */"
+            : "(" + string.Join(" && ", conditions) + ")";
+    }
+
     /// <summary>
     /// Gibt C-Code aus der eine is-Pattern-Prüfung + Binding-Variable deklariert.
     /// Wird von StatementWriter für `if (obj is Dog d)` Statements aufgerufen.
@@ -235,5 +345,11 @@ public static class PatternMatchingWriter
     {
         var subject = writeExpr(isExpr.Expression);
         return WritePattern(isExpr.Pattern, subject, ctx, writeExpr);
+    }
+
+    private static string GetListInnerCType(string listType)
+    {
+        var inner = TypeRegistry.GetListInnerType(listType) ?? "int";
+        return inner == "string" ? "str" : TypeRegistry.MapType(inner);
     }
 }

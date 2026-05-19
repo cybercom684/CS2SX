@@ -19,6 +19,7 @@ public sealed class InvocationDispatcher
     private readonly IReadOnlyList<IInvocationHandler> _handlers;
     private readonly TranspilerContext _ctx;
     private readonly Func<SyntaxNode?, string> _writeExpr;
+    private GenericMethodExpander? _genericMethodExpander;
 
     // Bekannte C-Builtins die NICHT gewarnt werden sollen
     private static readonly HashSet<string> s_silentPassthrough = new(StringComparer.Ordinal)
@@ -55,6 +56,7 @@ public sealed class InvocationDispatcher
             new ColorHandler(),
             new StringBuilderHandler(),
             new ListHandler(),
+            new LinqHandler(),
             new DictionaryHandler(),
             new StringMethodHandler(),
             new FieldMethodHandler(),
@@ -72,13 +74,17 @@ public sealed class InvocationDispatcher
     }
 
     public InvocationDispatcher(
-        TranspilerContext ctx,
-        Func<SyntaxNode?, string> writeExpr)
+     TranspilerContext ctx,
+     Func<SyntaxNode?, string> writeExpr,
+     ExtensionMethodHandler extensionHandler,
+     GenericMethodExpander? genericMethodExpander = null)
     {
         _ctx = ctx;
         _writeExpr = writeExpr;
-        _handlers = BuildHandlers(null);
+        _handlers = BuildHandlers(extensionHandler);
+        _genericMethodExpander = genericMethodExpander;
     }
+
 
     public InvocationDispatcher(
         TranspilerContext ctx,
@@ -110,6 +116,26 @@ public sealed class InvocationDispatcher
         var args = inv.ArgumentList.Arguments
             .Select(a => BuildArg(a))
             .ToList();
+
+        if (inv.Expression is GenericNameSyntax genName && _genericMethodExpander != null)
+        {
+            var typeArgs = genName.TypeArgumentList.Arguments
+                .Select(a => a.ToString().Trim())
+                .ToList();
+            var parts = calleeStr.Split('.');
+            var cn = parts.Length > 1 ? string.Join(".", parts[..^1]) : _ctx.CurrentClass;
+            var mn = parts[^1].Contains('<') ? parts[^1][..parts[^1].IndexOf('<')] : parts[^1];
+
+            var resolved = _genericMethodExpander.TryResolve(cn, mn, typeArgs,
+                out var specCode);
+            if (resolved != null)
+            {
+                if (!string.IsNullOrEmpty(specCode))
+                    _ctx.PendingLambdaPreludes.Add(specCode);
+                var argStr = string.Join(", ", args);
+                return resolved + "(" + argStr + ")";
+            }
+        }
 
         foreach (var handler in _handlers)
         {

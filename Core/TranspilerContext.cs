@@ -44,16 +44,19 @@ public sealed class TranspilerContext
 
     // ── Klassen-Kontext ───────────────────────────────────────────────────────
 
-    public string? CurrentJumpBuf
-    {
-        get; set;
-    }
+    // FIX: Stack statt single field — geschachtelte try/catch überschreiben sich nicht gegenseitig
+    private readonly Stack<string> _jumpBufStack = new();
+    public string? CurrentJumpBuf => _jumpBufStack.Count > 0 ? _jumpBufStack.Peek() : null;
+    public void PushJumpBuf(string name) => _jumpBufStack.Push(name);
+    public void PopJumpBuf() { if (_jumpBufStack.Count > 0) _jumpBufStack.Pop(); }
+
     public string? CurrentReturnBuffer
     {
         get; set;
     }
     public string CurrentClass { get; set; } = string.Empty;
     public string CurrentBaseType { get; set; } = string.Empty;
+    public bool IsStaticMethod { get; set; }
     public string? CurrentTupleReturnType
     {
         get; set;
@@ -196,6 +199,7 @@ public sealed class TranspilerContext
     {
         LocalTypes.Clear();
         ArrayLengths.Clear();
+        IsStaticMethod = false;
         // FIX-1: TmpCounter und TmpStringCounter werden NICHT zurückgesetzt.
         // Sie gelten für die gesamte Klasse (bis ClearClassContext()), damit
         // keine doppelten Variablennamen in der generierten .c-Datei entstehen.
@@ -203,6 +207,7 @@ public sealed class TranspilerContext
         CurrentTupleReturnType = null;
         CurrentReturnBuffer = null;
         // _lambdaCounter wird ebenfalls NICHT zurückgesetzt (gilt pro Klasse).
+        _jumpBufStack.Clear();
     }
 
     public void ClearClassContext()

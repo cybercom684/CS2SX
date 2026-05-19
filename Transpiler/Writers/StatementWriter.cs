@@ -36,6 +36,8 @@ public sealed class StatementWriter
             case UsingStatementSyntax usingStmt: WriteUsing(usingStmt); break;
             case EmptyStatementSyntax: break;
             default:
+                _ctx.Warn($"unsupported statement '{stmt.GetType().Name}' — check generated C",
+                    stmt.GetType().Name);
                 _ctx.WriteLine("/* UNSUPPORTED: " + stmt.GetType().Name + " */");
                 break;
         }
@@ -258,39 +260,81 @@ public sealed class StatementWriter
 
         foreach (var v in local.Declaration.Variables)
         {
-            if (v.Initializer?.Value is ArrayCreationExpressionSyntax arr
-                && arr.Initializer != null)
+            var varName = v.Identifier.Text;
+
+            if (v.Initializer?.Value is ArrayCreationExpressionSyntax arr)
             {
-                var flatElems = new List<string>();
-                foreach (var row in arr.Initializer.Expressions)
+                // Extract dimension sizes for stride calculation
+                var dimSizes = new List<string>();
+                if (arr.Type.RankSpecifiers.Count > 0)
                 {
-                    if (row is ImplicitArrayCreationExpressionSyntax rowArr)
-                        foreach (var elem in rowArr.Initializer.Expressions)
-                            flatElems.Add(_expr.Write(elem));
-                    else if (row is InitializerExpressionSyntax initRow)
-                        foreach (var elem in initRow.Expressions)
-                            flatElems.Add(_expr.Write(elem));
-                    else
-                        flatElems.Add(_expr.Write(row));
+                    foreach (var size in arr.Type.RankSpecifiers[0].Sizes)
+                    {
+                        if (size is not OmittedArraySizeExpressionSyntax)
+                            dimSizes.Add(_expr.Write(size));
+                    }
                 }
-                _ctx.WriteLine(cType + " " + v.Identifier + "[] = { "
-                    + string.Join(", ", flatElems) + " };");
-                _ctx.ArrayLengths[v.Identifier.Text] = flatElems.Count.ToString();
+
+                if (arr.Initializer != null)
+                {
+                    // Flatten nested initializers: { {1,2}, {3,4} } → { 1, 2, 3, 4 }
+                    var flatElems = new List<string>();
+                    foreach (var row in arr.Initializer.Expressions)
+                    {
+                        if (row is ImplicitArrayCreationExpressionSyntax rowArr)
+                            foreach (var elem in rowArr.Initializer.Expressions)
+                                flatElems.Add(_expr.Write(elem));
+                        else if (row is InitializerExpressionSyntax initRow)
+                            foreach (var elem in initRow.Expressions)
+                                flatElems.Add(_expr.Write(elem));
+                        else
+                            flatElems.Add(_expr.Write(row));
+                    }
+
+                    // Infer dimensions from initializer if not explicit
+                    if (dimSizes.Count < 2 && arr.Initializer.Expressions.Count > 0)
+                    {
+                        var rows = arr.Initializer.Expressions.Count;
+                        var cols = flatElems.Count / rows;
+                        if (dimSizes.Count == 0)
+                        {
+                            dimSizes.Add(rows.ToString());
+                            dimSizes.Add(cols.ToString());
+                        }
+                        else if (dimSizes.Count == 1)
+                        {
+                            dimSizes.Add(cols.ToString());
+                        }
+                    }
+
+                    _ctx.WriteLine(cType + " " + varName + "[] = { " + string.Join(", ", flatElems) + " };");
+                    _ctx.ArrayLengths[varName] = flatElems.Count.ToString();
+
+                    // Store stride for [i,j] → [i*cols+j] rewriting
+                    if (dimSizes.Count >= 2)
+                        _ctx.LocalTypes["__stride__" + varName] = dimSizes[1]; // cols
+                }
+                else if (dimSizes.Count >= 2)
+                {
+                    var totalSize = string.Join("*", dimSizes);
+                    _ctx.WriteLine(cType + "* " + varName +
+                        " = (" + cType + "*)calloc(" + totalSize + ", sizeof(" + cType + "));");
+                    _ctx.ArrayLengths[varName] = totalSize;
+                    _ctx.LocalTypes["__stride__" + varName] = dimSizes[1];
+                }
+                else
+                {
+                    _ctx.WriteLine(cType + " " + varName + "[1]; /* multi-dim array, size unknown */");
+                }
             }
             else
             {
-                var dims = "";
-                if (arr_RankSizes(v, out var sizes) && sizes.Count > 0)
-                    dims = string.Join("*", sizes);
-                else
-                    dims = "1";
-                _ctx.WriteLine(cType + " " + v.Identifier + "[" + dims + "];");
-                _ctx.WriteLine("memset(" + v.Identifier + ", 0, sizeof(" + v.Identifier + "));");
+                _ctx.WriteLine(cType + " " + varName + "[1]; /* multi-dim array */");
             }
-            _ctx.LocalTypes[v.Identifier.Text] = baseType + "[]";
+
+            _ctx.LocalTypes[varName] = baseType + "[]";
         }
     }
-
     private static bool arr_RankSizes(VariableDeclaratorSyntax v, out List<string> sizes)
     {
         sizes = new();
@@ -736,6 +780,36 @@ public sealed class StatementWriter
             return;
         }
 
+        // Attempt SemanticModel lookup when colType is unknown
+        if (string.IsNullOrEmpty(colType) && _ctx.SemanticModel != null)
+        {
+            try
+            {
+                var typeInfo = _ctx.SemanticModel.GetTypeInfo(forEach.Expression);
+                var typeSymbol = typeInfo.Type ?? typeInfo.ConvertedType;
+                if (typeSymbol != null && typeSymbol is not Microsoft.CodeAnalysis.IErrorTypeSymbol)
+                {
+                    colType = TranspilerContext.FormatTypeSymbol(typeSymbol);
+                    isList = TypeRegistry.IsList(colType);
+                    isDict = TypeRegistry.IsDictionary(colType);
+                    isString = colType is "string" or "char[]";
+                    isRawArray = colType.EndsWith("[]") && !isList;
+                }
+            }
+            catch { }
+        }
+
+        // Still unknown after semantic lookup → emit a hard compile error so the user notices
+        if (string.IsNullOrEmpty(colType) && !isList && !isDict && !isString && !isRawArray)
+        {
+            _ctx.Warn($"foreach: Collection-Typ von '{colRaw}' nicht bestimmbar. " +
+                      $"Bitte expliziten Typ deklarieren (kein var). " +
+                      $"Im generierten C wurde ein #error eingefügt.",
+                      colRaw);
+            _ctx.WriteLine($"#error \"CS2SX: foreach({varName} in {colRaw}) — collection type unknown. Declare '{colRaw}' with an explicit type.\"");
+            return;
+        }
+
         string lenExpr;
         if (isList)
             lenExpr = colExpr + "->count";
@@ -744,25 +818,7 @@ public sealed class StatementWriter
         else if (isRawArray)
             lenExpr = ResolveArrayLength(colRaw, colKey, colExpr);
         else
-        {
-            // FIX: Warnung ausgeben statt still falschen Code zu generieren.
-            //      Versuche über SemanticModel den Typ nachzuschlagen.
-            if (!string.IsNullOrEmpty(colType))
-            {
-                // Bekannter Typ aber nicht Collection → Warning
-                _ctx.Warn($"foreach: Typ '{colType}' ist keine bekannte Collection — " +
-                          $"Fallback auf '{colExpr}_count'. Bitte expliziten Typ verwenden.",
-                          colType);
-            }
-            else
-            {
-                _ctx.Warn($"foreach: Collection-Typ von '{colRaw}' nicht bekannt — " +
-                          $"Fallback auf '{colExpr}_count'. Stelle sicher dass die Variable " +
-                          $"vor dem foreach deklariert ist.",
-                          colRaw);
-            }
-            lenExpr = colExpr + "_count";
-        }
+            lenExpr = colExpr + "->count";
 
         var rawElemType = forEach.Type.ToString().Trim();
         if (rawElemType == "var")
@@ -984,14 +1040,12 @@ public sealed class StatementWriter
         }
     }
 
-    // ── FIX: TryCatch — catch(Exception ex) mit ex.Message / ex.ToString() ──
-
     private void WriteTryCatch(TryStatementSyntax tryStmt)
     {
         var jmpBufName = "_ex_buf_" + _ctx.NextTmp();
-        _ctx.CurrentJumpBuf = jmpBufName;
+        // FIX: Stack statt single field — geschachtelte try/catch korrekt
+        _ctx.PushJumpBuf(jmpBufName);
 
-        // FIX: statischer Exception-Message-Buffer
         _ctx.WriteLine("char _ex_msg[256] = \"unknown error\";");
         _ctx.WriteLine("jmp_buf " + jmpBufName + ";");
         _ctx.WriteLine("int _ex_val = setjmp(" + jmpBufName + ");");
@@ -1003,37 +1057,57 @@ public sealed class StatementWriter
         _ctx.Dedent();
         _ctx.WriteLine("}");
 
-        foreach (var catchClause in tryStmt.Catches)
+        // FIX: Mehrere catch-Blöcke erzeugten mehrfaches bare `else { }` → C-Syntaxfehler.
+        // Ohne RTTI kann nicht nach Typ dispatched werden; daher nur EIN else-Block.
+        // Erster catch verarbeitet alles; weitere werden als Kommentar emittiert (unreachable).
+        if (tryStmt.Catches.Count > 0)
         {
             _ctx.WriteLine("else");
             _ctx.WriteLine("{");
             _ctx.Indent();
 
-            // FIX: catch(Exception ex) → ex.Message wird zu _ex_msg
-            if (catchClause.Declaration != null)
+            var firstCatch = tryStmt.Catches[0];
+            if (firstCatch.Declaration != null)
             {
-                var exVarName = catchClause.Declaration.Identifier.Text;
+                var exVarName = firstCatch.Declaration.Identifier.Text;
                 if (!string.IsNullOrEmpty(exVarName) && exVarName != "_")
                 {
-                    // Pseudo-Objekt registrieren: ex.Message → _ex_msg
                     _ctx.LocalTypes[exVarName] = "__exception__";
                     _ctx.LocalTypes[exVarName + ".Message"] = "string";
                 }
             }
-
-            foreach (var stmt in catchClause.Block.Statements)
+            foreach (var stmt in firstCatch.Block.Statements)
                 Write(stmt);
+
+            for (int ci = 1; ci < tryStmt.Catches.Count; ci++)
+            {
+                var extra = tryStmt.Catches[ci];
+                var typeName = extra.Declaration?.Type.ToString() ?? "Exception";
+                _ctx.Warn($"catch({typeName}) ist nicht erreichbar — kein RTTI auf Switch. In erstem catch zusammengeführt.", "try/catch");
+                _ctx.WriteLine("/* catch (" + typeName + ") — unreachable without RTTI */");
+            }
 
             _ctx.Dedent();
             _ctx.WriteLine("}");
         }
 
-        _ctx.CurrentJumpBuf = null;
+        // FIX: finally-Blöcke wurden zuvor still gedropt
+        if (tryStmt.Finally != null)
+        {
+            _ctx.WriteLine("/* finally */");
+            _ctx.WriteLine("{");
+            _ctx.Indent();
+            foreach (var stmt in tryStmt.Finally.Block.Statements)
+                Write(stmt);
+            _ctx.Dedent();
+            _ctx.WriteLine("}");
+        }
+
+        _ctx.PopJumpBuf();
     }
 
     private void WriteThrow(ThrowStatementSyntax throwStmt)
     {
-        // FIX: throw new Exception("msg") → _ex_msg setzen + longjmp
         if (throwStmt.Expression is ObjectCreationExpressionSyntax objCreate
             && objCreate.ArgumentList?.Arguments.Count > 0)
         {
@@ -1044,17 +1118,20 @@ public sealed class StatementWriter
                 _ctx.WriteLine("longjmp(" + _ctx.CurrentJumpBuf + ", 1);");
                 return;
             }
+            // FIX: throw ohne aktiven try/catch → Nachricht ausgeben + abort() statt stillem return
+            _ctx.WriteLine("fprintf(stderr, \"Unhandled exception: %s\\n\", " + msg + ");");
+            _ctx.WriteLine("abort();");
+            return;
         }
 
         if (_ctx.CurrentJumpBuf != null)
         {
             _ctx.WriteLine("longjmp(" + _ctx.CurrentJumpBuf + ", 1);");
-            _ctx.WriteLine("return;");
         }
         else
         {
-            _ctx.WriteLine("/* throw ignored (no try/catch) */");
-            _ctx.WriteLine("return;");
+            // FIX: rethrow ohne aktiven Handler → abort() statt stillem return
+            _ctx.WriteLine("abort(); /* unhandled rethrow */");
         }
     }
 
@@ -1062,11 +1139,14 @@ public sealed class StatementWriter
     {
         _ctx.WriteLine("{");
         _ctx.Indent();
+
+        var disposeActions = new List<string>();
+
         if (usingStmt.Declaration != null)
         {
             foreach (var varDecl in usingStmt.Declaration.Variables)
             {
-                var typeName = usingStmt.Declaration.Type.ToString();
+                var typeName = usingStmt.Declaration.Type.ToString().Trim();
                 var varName = varDecl.Identifier.Text;
                 var isValueType = TypeRegistry.IsLibNxStruct(typeName)
                                || TypeRegistry.IsPrimitive(typeName);
@@ -1074,23 +1154,57 @@ public sealed class StatementWriter
                 var ptr = isValueType ? "" : "*";
                 var initStr = varDecl.Initializer != null
                     ? _expr.Write(varDecl.Initializer.Value)
-                    : "";
+                    : (isValueType ? "{0}" : "NULL");
                 _ctx.WriteLine(cType + ptr + " " + varName + " = " + initStr + ";");
-                Write(usingStmt.Statement);
+                _ctx.LocalTypes[varName] = typeName;
+
+                // Build dispose action
                 if (TypeRegistry.IsDisposable(typeName))
                 {
                     var disposeCall = isValueType
                         ? typeName + "_Dispose(&" + varName + ")"
                         : typeName + "_Dispose(" + varName + ")";
-                    _ctx.WriteLine("if (" + varName + ") " + disposeCall + ";");
+                    disposeActions.Add("if (" + varName + ") " + disposeCall + ";");
+                }
+                else if (TypeRegistry.IsStringBuilder(typeName))
+                {
+                    disposeActions.Add("if (" + varName + ") StringBuilder_Free(" + varName + ");");
+                }
+                else if (TypeRegistry.IsList(typeName))
+                {
+                    var inner = TypeRegistry.GetListInnerType(typeName) ?? "int";
+                    var cInner = inner == "string" ? "str" : TypeRegistry.MapType(inner);
+                    disposeActions.Add("if (" + varName + ") List_" + cInner + "_Free(" + varName + ");");
+                }
+                else if (TypeRegistry.IsDictionary(typeName))
+                {
+                    var types = TypeRegistry.GetDictionaryTypes(typeName)!.Value;
+                    var ck = types.key == "string" ? "str" : TypeRegistry.MapType(types.key);
+                    var cv = types.val == "string" ? "str" : TypeRegistry.MapType(types.val);
+                    disposeActions.Add("if (" + varName + ") Dict_" + ck + "_" + cv + "_Free(" + varName + ");");
+                }
+                else if (!isValueType && TypeRegistry.NeedsPointerSuffix(typeName))
+                {
+                    // Generic Dispose convention: TypeName_Free(ptr)
+                    disposeActions.Add("if (" + varName + ") " + cType + "_Free(" + varName + ");");
                 }
             }
+
+            if (usingStmt.Statement != null)
+                Write(usingStmt.Statement);
         }
         else if (usingStmt.Expression != null)
         {
-            _ctx.WriteLine("/* using expression not supported */");
-            Write(usingStmt.Statement);
+            var exprCode = _expr.Write(usingStmt.Expression);
+            _ctx.WriteLine("/* using(" + exprCode + ") */");
+            if (usingStmt.Statement != null)
+                Write(usingStmt.Statement);
         }
+
+        // Emit dispose calls at end of scope (before closing brace)
+        foreach (var action in disposeActions)
+            _ctx.WriteLine(action);
+
         _ctx.Dedent();
         _ctx.WriteLine("}");
     }

@@ -120,6 +120,71 @@ public static class VTableBuilder
     }
 
     /// <summary>
+    /// Validates that all override methods in a derived class have a matching
+    /// virtual/abstract method in the declared base class.
+    /// Emits warnings for mismatches that would cause runtime crashes.
+    /// </summary>
+    public static void ValidateOverrides(
+        ClassDeclarationSyntax derivedClass,
+        string baseClassName,
+        TranspilerContext ctx)
+    {
+        // Collect virtual/abstract methods from bases we know about
+        // (We only have the syntax of the derived class here; we warn conservatively.)
+        var overrides = derivedClass.Members
+            .OfType<MethodDeclarationSyntax>()
+            .Where(m => m.Modifiers.Any(mod => mod.IsKind(SyntaxKind.OverrideKeyword)))
+            .ToList();
+
+        if (overrides.Count == 0) return;
+
+        // Try to find the base class definition via SemanticModel
+        if (ctx.SemanticModel != null)
+        {
+            try
+            {
+                var sym = ctx.SemanticModel.GetDeclaredSymbol(derivedClass);
+                var baseType = sym?.BaseType;
+
+                if (baseType != null)
+                {
+                    var baseVirtualNames = new HashSet<string>(
+                        baseType.GetMembers()
+                            .OfType<Microsoft.CodeAnalysis.IMethodSymbol>()
+                            .Where(m => m.IsVirtual || m.IsAbstract || m.IsOverride)
+                            .Select(m => m.Name),
+                        StringComparer.Ordinal);
+
+                    foreach (var ov in overrides)
+                    {
+                        var methodName = ov.Identifier.Text;
+                        if (!baseVirtualNames.Contains(methodName))
+                        {
+                            ctx.Warn($"'{derivedClass.Identifier.Text}.{methodName}' is marked override " +
+                                     $"but '{baseClassName}' has no matching virtual/abstract method. " +
+                                     $"This will cause a runtime crash if called via vtable.",
+                                     methodName);
+                        }
+                    }
+                }
+            }
+            catch { /* SemanticModel lookup failures are non-fatal */ }
+        }
+        else
+        {
+            // Without SemanticModel, warn generically that we can't validate
+            if (overrides.Count > 0 && !string.IsNullOrEmpty(baseClassName)
+                && baseClassName != "SwitchApp"
+                && !CSharpToC.IsControlSubclass(baseClassName))
+            {
+                ctx.Warn($"Cannot validate vtable overrides for '{derivedClass.Identifier.Text}' " +
+                         $"(no SemanticModel). Ensure '{baseClassName}' declares matching virtual methods.",
+                         baseClassName);
+            }
+        }
+    }
+
+    /// <summary>
     /// Erzeugt den C-Code für einen virtuellen Methodenaufruf.
     /// obj.Speak() → obj->vtable->Speak(obj)
     /// </summary>
