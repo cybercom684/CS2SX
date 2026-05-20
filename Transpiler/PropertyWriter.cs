@@ -84,6 +84,7 @@ public static class PropertyWriter
         // public int Speed => _speed * 2;
         if (prop.ExpressionBody != null)
         {
+            var preSigPos = ctx.Out.GetStringBuilder().Length;
             ctx.Out.WriteLine($"{cType}{ptr} {className}_get_{name}({self})");
             ctx.Out.WriteLine("{");
             ctx.Indent();
@@ -92,6 +93,7 @@ public static class PropertyWriter
             ctx.Dedent();
             ctx.Out.WriteLine("}");
             ctx.Out.WriteLine();
+            FlushPropertyPreludes(ctx, preSigPos);
             return;
         }
 
@@ -99,6 +101,7 @@ public static class PropertyWriter
         var getter = GetAccessor(prop, SyntaxKind.GetAccessorDeclaration);
         if (getter != null)
         {
+            var preSigPos = ctx.Out.GetStringBuilder().Length;
             ctx.Out.WriteLine($"{cType}{ptr} {className}_get_{name}({self})");
             ctx.Out.WriteLine("{");
             ctx.Indent();
@@ -106,12 +109,14 @@ public static class PropertyWriter
             ctx.Dedent();
             ctx.Out.WriteLine("}");
             ctx.Out.WriteLine();
+            FlushPropertyPreludes(ctx, preSigPos);
         }
 
         // Setter
         var setter = GetAccessor(prop, SyntaxKind.SetAccessorDeclaration);
         if (setter != null)
         {
+            var preSigPos = ctx.Out.GetStringBuilder().Length;
             ctx.Out.WriteLine($"void {className}_set_{name}({self}, {cType}{ptr} value)");
             ctx.Out.WriteLine("{");
             ctx.Indent();
@@ -120,7 +125,18 @@ public static class PropertyWriter
             ctx.Dedent();
             ctx.Out.WriteLine("}");
             ctx.Out.WriteLine();
+            FlushPropertyPreludes(ctx, preSigPos);
         }
+    }
+
+    private static void FlushPropertyPreludes(TranspilerContext ctx, int preSigPos)
+    {
+        if (ctx.PendingLambdaPreludes.Count == 0) return;
+        var sb = ctx.Out.GetStringBuilder();
+        var methodText = sb.ToString(preSigPos, sb.Length - preSigPos);
+        sb.Remove(preSigPos, sb.Length - preSigPos);
+        ctx.FlushLambdaPreludes();
+        ctx.Out.Write(methodText);
     }
 
     // ── ExpressionWriter-Unterstützung ───────────────────────────────────────

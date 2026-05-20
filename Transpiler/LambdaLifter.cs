@@ -67,11 +67,9 @@ public sealed class LambdaLifter
         WriteFunctionToSb(preludeSb, id, name, lambda, parms, retCs, caps);
         _ctx.PendingLambdaPreludes.Add(preludeSb.ToString());
 
-        // FIX: Stack-allokierter Closure-Struct statt malloc → kein Heap-Leak.
-        // Für Callbacks die den umgebenden Scope überleben (z.B. Event-Handler), darf
-        // die Variable nicht auf dem Stack liegen — in dem Fall muss der Caller
-        // das Lambda-Prelude manuell heap-allokieren. Für sofortige Nutzung (Sort,
-        // Task.Run-Fallback usw.) ist Stack-Allokation korrekt und sicher.
+        // Stack-allokierter Closure-Struct statt malloc → kein Heap-Leak.
+        // _cs2sx_ctx_N wird VOR dem ersten Aufruf gesetzt und zeigt auf diesen Stack-Struct.
+        // Callers (Sort, LINQ, etc.) rufen die Funktion ohne expliziten Context-Parameter auf.
         if (caps.Count > 0)
         {
             var capStruct = "_cap_" + id;
@@ -79,6 +77,7 @@ public sealed class LambdaLifter
             foreach (var cap in caps)
                 _ctx.WriteLine($"_ctx_val_{id}.{cap.CapName} = {cap.CExpr};");
             _ctx.WriteLine($"struct {capStruct}* _ctx_{id} = &_ctx_val_{id};");
+            _ctx.WriteLine($"_cs2sx_ctx_{id} = _ctx_{id};");
         }
 
         return name;
@@ -89,13 +88,13 @@ public sealed class LambdaLifter
     public static string GenerateTypedef(string csType)
     {
         if (csType == "Action")
-            return "typedef void (*Action_t)(void*);";
+            return "typedef void (*Action_t)(void);";
         if (csType.StartsWith("Action<") && csType.EndsWith(">"))
         {
             var inner = csType[7..^1];
             var pTypes = SplitGenericArgs(inner).Select(TypeRegistry.MapType).ToList();
             var suffix = string.Join("_", pTypes);
-            return $"typedef void (*Action_{suffix}_t)(void*, {string.Join(", ", pTypes)});";
+            return $"typedef void (*Action_{suffix}_t)({string.Join(", ", pTypes)});";
         }
         if (csType.StartsWith("Func<") && csType.EndsWith(">"))
         {
@@ -104,22 +103,21 @@ public sealed class LambdaLifter
             var retC = TypeRegistry.MapType(allArgs.Last());
             var pTypes = allArgs.Take(allArgs.Count - 1).Select(TypeRegistry.MapType).ToList();
             var suffix = string.Join("_", allArgs.Select(TypeRegistry.MapType));
-            var pList = pTypes.Count > 0 ? "void*, " + string.Join(", ", pTypes) : "void*";
+            var pList = pTypes.Count > 0 ? string.Join(", ", pTypes) : "void";
             return $"typedef {retC} (*Func_{suffix}_t)({pList});";
         }
         var ident = csType.Replace("<", "_").Replace(">", "").Replace(",", "_").Replace(" ", "");
-        return $"typedef void (*{ident}_t)(void*);";
+        return $"typedef void (*{ident}_t)(void);";
     }
 
     public static string MapDelegateType(string csType)
     {
-        if (csType == "Action") return "Action_t";
-        if (csType.StartsWith("Action<") && csType.EndsWith(">"))
-            return "Action_" + string.Join("_",
-                SplitGenericArgs(csType[7..^1]).Select(TypeRegistry.MapType)) + "_t";
-        if (csType.StartsWith("Func<") && csType.EndsWith(">"))
-            return "Func_" + string.Join("_",
-                SplitGenericArgs(csType[5..^1]).Select(TypeRegistry.MapType)) + "_t";
+        // Delegate to TypeRegistry which uses MapListInnerType for proper C identifiers
+        // (e.g. Action<string> → Action_str_t, not Action_const char*_t)
+        var mapped = TypeRegistry.MapType(csType);
+        // If MapType returned a known delegate typedef, return it directly
+        if (mapped.EndsWith("_t")) return mapped;
+        // Unknown delegate type — sanitize for use as C identifier
         var ident = csType.Replace("<", "_").Replace(">", "").Replace(",", "_").Replace(" ", "");
         return ident + "_t";
     }
@@ -146,6 +144,10 @@ public sealed class LambdaLifter
             }
         }
         sb.AppendLine("};");
+        // Static global context pointer — avoids passing void* ctx through every
+        // call site (sort comparers, LINQ predicates, etc. only pass the actual
+        // element arguments). Safe because Switch homebrew is single-threaded.
+        sb.AppendLine($"static struct {capStruct}* _cs2sx_ctx_{id} = NULL;");
         sb.AppendLine();
     }
 
@@ -160,7 +162,9 @@ public sealed class LambdaLifter
         var retC = TypeRegistry.MapType(retCs);
         var capStructName = "_cap_" + id;
 
-        var paramList = new List<string> { "void* _ctx_arg" };
+        // No void* ctx parameter — callers (sort, LINQ, etc.) only pass the element
+        // arguments. Captures are accessed via the per-lambda static global pointer.
+        var paramList = new List<string>();
         foreach (var p in parms)
         {
             var pt = MapParamType(p.CsType);
@@ -171,7 +175,7 @@ public sealed class LambdaLifter
         sb.AppendLine("{");
 
         if (caps.Count > 0)
-            sb.AppendLine($"    struct {capStructName}* _c = (struct {capStructName}*)_ctx_arg;");
+            sb.AppendLine($"    struct {capStructName}* _c = _cs2sx_ctx_{id};");
 
         foreach (var cap in caps)
         {

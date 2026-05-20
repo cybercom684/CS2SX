@@ -373,7 +373,10 @@ public sealed class ExpressionWriter : IExpressionWriter
 
                 var leftExpr = Write(assign.Left);
                 if (op == "+=")
-                    return leftExpr + " = (Action)" + right;
+                {
+                    var cDelegateType = LambdaLifter.MapDelegateType(fieldType);
+                    return leftExpr + " = (" + cDelegateType + ")" + right;
+                }
                 else // -=
                     return leftExpr + " = NULL /* unsubscribed */";
             }
@@ -1205,11 +1208,12 @@ public sealed class ExpressionWriter : IExpressionWriter
     private string WriteArrayCreation(ArrayCreationExpressionSyntax arr)
     {
         var elemType = arr.Type.ElementType.ToString().Trim();
-        var cType = TypeRegistry.MapType(elemType);
+        var cType = elemType == "string" ? "const char*" : TypeRegistry.MapType(elemType);
         if (arr.Initializer != null && arr.Initializer.Expressions.Count > 0)
         {
             var elems = arr.Initializer.Expressions.Select(e => Write(e));
-            return "{ " + string.Join(", ", elems) + " }";
+            // C99 compound literal — valid as an expression (assignment, return, argument)
+            return "(" + cType + "[]){ " + string.Join(", ", elems) + " }";
         }
         if (arr.Type.RankSpecifiers.Count > 0
             && arr.Type.RankSpecifiers[0].Sizes.Count > 0)
@@ -1222,8 +1226,15 @@ public sealed class ExpressionWriter : IExpressionWriter
 
     private string WriteImplicitArrayCreation(ImplicitArrayCreationExpressionSyntax implArr)
     {
+        // Infer element type from first element when possible
+        string cType = "int";
+        if (implArr.Initializer.Expressions.Count > 0)
+        {
+            var firstType = TypeInferrer.InferCSharpType(implArr.Initializer.Expressions[0], _ctx);
+            cType = firstType == "string" ? "const char*" : TypeRegistry.MapType(firstType);
+        }
         var elems = implArr.Initializer.Expressions.Select(e => Write(e));
-        return "{ " + string.Join(", ", elems) + " }";
+        return "(" + cType + "[]){ " + string.Join(", ", elems) + " }";
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────

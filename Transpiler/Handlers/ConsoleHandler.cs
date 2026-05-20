@@ -53,18 +53,11 @@ public sealed class ConsoleHandler : InvocationHandlerBase
             && fmtLit.Token.IsKind(SyntaxKind.StringLiteralToken)
             && inv.ArgumentList.Arguments.Count > 1)
         {
-            result = FormatStringBuilder.BuildPrintf(
-                // Baue synthetisch einen InterpolatedString
-                // Fallback: alles als %s ausgeben
-                null!, newline, ctx, writeExpr);
-
-            // Echter Fallback: printf mit %s-Format für jedes Argument
             var fmtArgs = inv.ArgumentList.Arguments
                 .Skip(1)
                 .Select(a => writeExpr(a.Expression))
                 .ToList();
             var fmtStr = StringEscaper.EscapeFormat(fmtLit.Token.ValueText);
-            // Ersetze {0} {1} etc. durch die korrekten Format-Specifier
             fmtStr = ReplaceDotNetPlaceholders(fmtStr, fmtArgs, inv, ctx);
             var argStr = string.Join(", ", fmtArgs);
             result = $"printf(\"{fmtStr}{nl}\", {argStr})";
@@ -81,8 +74,12 @@ public sealed class ConsoleHandler : InvocationHandlerBase
 
         if (specifier == "%s")
         {
-            // String: sicherstellen dass kein NULL übergeben wird
-            result = $"printf(\"{specifier}{nl}\", ({argExpr}) ? ({argExpr}) : \"\")";
+            // String: NULL-sicher ausgeben. argExpr kann ein Funktionsaufruf sein
+            // (z.B. MyClass_GetName(self)) — daher in eine temp-Variable speichern
+            // statt den Ausdruck zweimal auszuwerten (Seiteneffekte / Overhead).
+            var tmpVar = ctx.NextTmp("ps");
+            ctx.WriteLine($"const char* {tmpVar} = {argExpr};");
+            result = $"printf(\"{specifier}{nl}\", {tmpVar} ? {tmpVar} : \"\")";
         }
         else
         {

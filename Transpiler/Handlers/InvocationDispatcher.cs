@@ -107,18 +107,6 @@ public sealed class InvocationDispatcher
     {
         var calleeStr = inv.Expression.ToString();
 
-        // FIX: async/await Erkennung — await Foo() → Foo() mit Warning
-        // (Roslyn parst await als PrefixUnary, nicht als Invocation,
-        //  aber manche Aufrufe wie Task.Run kommen hier an)
-        if (calleeStr is "Task.Run" or "Task.Delay" or "Task.WhenAll" or "Task.WhenAny")
-        {
-            _ctx.Warn(inv, $"async/Task call '{calleeStr}' — executed synchronously (no threading on Switch)");
-            // Task.Run(action) → einfach action() ausführen
-            if (inv.ArgumentList.Arguments.Count > 0)
-                return _writeExpr(inv.ArgumentList.Arguments[0].Expression) + "()";
-            return "/* async not supported */";
-        }
-
         var args = inv.ArgumentList.Arguments
             .Select(a => BuildArg(a))
             .ToList();
@@ -162,15 +150,29 @@ public sealed class InvocationDispatcher
             && declExpr.Designation is SingleVariableDesignationSyntax singleDesig)
         {
             var typeName = declExpr.Type.ToString().Trim();
-            if (typeName == "var") typeName = "int";
+
+            // "var" → Typ aus SemanticModel ableiten; Fallback: int
+            if (typeName == "var")
+            {
+                if (_ctx.SemanticModel != null)
+                {
+                    try
+                    {
+                        var typeInfo = _ctx.SemanticModel.GetTypeInfo(declExpr.Type);
+                        var sym = typeInfo.ConvertedType ?? typeInfo.Type;
+                        if (sym != null && sym is not Microsoft.CodeAnalysis.IErrorTypeSymbol)
+                            typeName = sym.ToDisplayString();
+                    }
+                    catch { }
+                }
+                if (typeName == "var") typeName = "int";
+            }
 
             var cTypeName = TypeRegistry.MapType(typeName);
             var needsPtr = !cTypeName.EndsWith("*") && TypeRegistry.NeedsPointerSuffix(typeName);
             var ptr = needsPtr ? "*" : "";
 
             _ctx.LocalTypes[singleDesig.Identifier.Text] = typeName;
-
-            // Variable deklarieren falls noch nicht bekannt
             _ctx.WriteLine($"{cTypeName}{ptr} {singleDesig.Identifier.Text} = {(needsPtr ? "NULL" : "0")};");
             return "&" + singleDesig.Identifier.Text;
         }
@@ -183,28 +185,24 @@ public sealed class InvocationDispatcher
 
         var argName = a.Expression.ToString();
 
-        // String-Puffer → kein & (bereits Pointer)
-        if (_ctx.LocalTypes.TryGetValue(argName, out var lt) && lt == "char[]")
-            return expr;
+        // Single lookup — covers all three cases below
+        _ctx.LocalTypes.TryGetValue(argName, out var lt);
 
-        // LibNX-Structs → mit &
-        if (_ctx.LocalTypes.TryGetValue(argName, out var lst)
-            && TypeRegistry.IsLibNxStruct(lst))
-            return "&" + expr;
+        // String-Puffer → kein & (char[] ist bereits Pointer)
+        if (lt == "char[]") return expr;
+
+        // LibNX-Structs → mit & (Wert-Typ, muss per Pointer übergeben werden)
+        if (lt != null && TypeRegistry.IsLibNxStruct(lt)) return "&" + expr;
 
         // String-Felder → kein & (const char* ist bereits Pointer)
         var fieldKey = argName.TrimStart('_');
         if (_ctx.FieldTypes.TryGetValue(fieldKey, out var ft) && ft == "string")
             return expr;
 
-        // FIX: Für out-Parameter bei eigenen Methoden: & nur wenn nicht schon Pointer
-        // Prüfe ob der Ausdruck bereits ein Pointer-Typ ist
+        // Für out/ref-Parameter: & nur wenn der Typ kein Pointer ist
         var resolvedType = lt ?? (_ctx.FieldTypes.TryGetValue(fieldKey, out var ft2) ? ft2 : null);
         if (resolvedType != null && TypeRegistry.NeedsPointerSuffix(resolvedType))
-        {
-            // Ist bereits Pointer → direkt übergeben (kein &)
-            return expr;
-        }
+            return expr;  // Ist bereits Pointer → direkt übergeben
 
         return "&" + expr;
     }

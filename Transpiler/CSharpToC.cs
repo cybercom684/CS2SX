@@ -388,7 +388,6 @@ public sealed class CSharpToC : CSharpSyntaxWalker
 
         if (_mode == TranspileMode.HeaderOnly)
         {
-            _ctx.Out.WriteLine("typedef struct " + structName + " " + structName + ";");
             var sw = new StructWriter(_ctx, _exprWriter, _stmtWriter);
             sw.WriteHeaderDecl(node);
         }
@@ -474,6 +473,8 @@ public sealed class CSharpToC : CSharpSyntaxWalker
             }));
 
         _ctx.ClearMethodContext();
+        var preSigPosOp = _ctx.Out.GetStringBuilder().Length;
+
         _ctx.Out.WriteLine($"{retType} {className}_{suffix}({paramList})");
         _ctx.Out.WriteLine("{");
         _ctx.Indent();
@@ -487,6 +488,15 @@ public sealed class CSharpToC : CSharpSyntaxWalker
         _ctx.Dedent();
         _ctx.Out.WriteLine("}");
         _ctx.Out.WriteLine();
+
+        if (_ctx.PendingLambdaPreludes.Count > 0)
+        {
+            var sb = _ctx.Out.GetStringBuilder();
+            var methodText = sb.ToString(preSigPosOp, sb.Length - preSigPosOp);
+            sb.Remove(preSigPosOp, sb.Length - preSigPosOp);
+            _ctx.FlushLambdaPreludes();
+            _ctx.Out.Write(methodText);
+        }
     }
 
     private string ResolvePropertyType(PropertyDeclarationSyntax prop)
@@ -609,7 +619,8 @@ public sealed class CSharpToC : CSharpSyntaxWalker
 
             var csType = ResolvePropertyType(prop);
             var cType = TypeRegistry.MapType(csType);
-            _ctx.WriteLine(cType + " f_" + prop.Identifier + ";");
+            var ptr = !cType.EndsWith("*") && NeedsPtr(csType) ? "*" : "";
+            _ctx.WriteLine(cType + ptr + " f_" + prop.Identifier + ";");
         }
     }
 
@@ -980,6 +991,8 @@ public sealed class CSharpToC : CSharpSyntaxWalker
         OperatorOverloadWriter.RegisterConversion(className, conv.Type.ToString().Trim(), isImplicit);
 
         _ctx.ClearMethodContext();
+        var preSigPosConv = _ctx.Out.GetStringBuilder().Length;
+
         _ctx.Out.WriteLine($"{retType} {className}_{suffix}({paramList})");
         _ctx.Out.WriteLine("{");
         _ctx.Indent();
@@ -993,6 +1006,15 @@ public sealed class CSharpToC : CSharpSyntaxWalker
         _ctx.Dedent();
         _ctx.Out.WriteLine("}");
         _ctx.Out.WriteLine();
+
+        if (_ctx.PendingLambdaPreludes.Count > 0)
+        {
+            var sb = _ctx.Out.GetStringBuilder();
+            var methodText = sb.ToString(preSigPosConv, sb.Length - preSigPosConv);
+            sb.Remove(preSigPosConv, sb.Length - preSigPosConv);
+            _ctx.FlushLambdaPreludes();
+            _ctx.Out.Write(methodText);
+        }
     }
 
     public override void VisitMethodDeclaration(MethodDeclarationSyntax node)
@@ -1115,13 +1137,13 @@ public sealed class CSharpToC : CSharpSyntaxWalker
             }
         }
 
-        // FIX: Lambda-Preludes VOR der Signatur flushen.
-        // LambdaLifter.LiftLambda() sammelt Preludes in _ctx.PendingLambdaPreludes.
-        // Sie müssen VOR der Methodensignatur in den Output, damit GCC sie bei der
-        // Verwendung des Funktionsnamens als Argument bereits kennt.
-        // Der Flush hier ist der einzige Flush-Punkt — ExpressionWriter macht keinen
-        // StringWriter-Rewrite mehr.
-        _ctx.FlushLambdaPreludes();
+        // FIX: Lambda-Preludes (Struct-Defs + statische Funktionen) müssen VOR der
+        // Methodensignatur erscheinen, damit GCC die Funktionsnamen bei ihrer Nutzung
+        // als Argument im Body bereits kennt (C99: kein implizites Function-Decl).
+        // Da Preludes erst WÄHREND der Body-Verarbeitung gesammelt werden, markieren
+        // wir die aktuelle Output-Position und verschieben die Preludes via
+        // StringBuilder-Manipulation nachträglich an die richtige Stelle.
+        var preSigPos = _ctx.Out.GetStringBuilder().Length;
 
         _ctx.Out.WriteLine(sig);
         _ctx.Out.WriteLine("{");
@@ -1140,10 +1162,18 @@ public sealed class CSharpToC : CSharpSyntaxWalker
         _ctx.Out.WriteLine("}");
         _ctx.Out.WriteLine();
 
-        // Sicherheits-Flush: Falls ein Lambda direkt im ExpressionBody war und
-        // Preludes erst nach der Signatur gesammelt wurden (sollte nicht passieren,
-        // aber defensive Programmierung).
-        _ctx.FlushLambdaPreludes();
+        // Falls während der Body-Verarbeitung Lambda-Preludes gesammelt wurden:
+        // Signatur + Body aus dem Buffer extrahieren, Preludes voranstellen, dann
+        // den Method-Text wieder anfügen. So stehen die statischen Lambda-Funktionen
+        // immer vor der Methode, die sie referenziert.
+        if (_ctx.PendingLambdaPreludes.Count > 0)
+        {
+            var sb = _ctx.Out.GetStringBuilder();
+            var methodText = sb.ToString(preSigPos, sb.Length - preSigPos);
+            sb.Remove(preSigPos, sb.Length - preSigPos);
+            _ctx.FlushLambdaPreludes();
+            _ctx.Out.Write(methodText);
+        }
     }
 
     // ── Property ─────────────────────────────────────────────────────────────

@@ -257,6 +257,10 @@ public sealed class ArrayHandler : InvocationHandlerBase
             return lt[..^2];
         if (ctx.FieldTypes.TryGetValue(arrRaw.TrimStart('_'), out var ft) && ft.EndsWith("[]"))
             return ft[..^2];
+
+        // Emit a warning so the user knows the fallback was used instead of silently
+        // producing wrong C code (e.g. int comparisons for float/double arrays).
+        ctx.Warn($"Array element type for '{arrRaw}' could not be inferred — defaulting to int; add explicit type annotation", "ArrayHandler");
         return "int";
     }
 

@@ -281,16 +281,6 @@ public sealed class InterfaceExpander
 
             sb.AppendLine("};");
             sb.AppendLine();
-
-            // Helper-Funktion: Klasse als Interface verpacken
-            sb.AppendLine($"static inline {ifaceName} {className}_as_{ifaceName}({className}* self)");
-            sb.AppendLine("{");
-            sb.AppendLine($"    {ifaceName} _iface;");
-            sb.AppendLine($"    _iface.vtable = &{instanceName};");
-            sb.AppendLine($"    _iface.obj = self;");
-            sb.AppendLine($"    return _iface;");
-            sb.AppendLine("}");
-            sb.AppendLine();
         }
 
         return sb.ToString();
@@ -309,8 +299,17 @@ public sealed class InterfaceExpander
         {
             if (!_collector.Interfaces.ContainsKey(ifaceName)) continue;
             var instanceName = $"{className}_{ifaceName}_vtable_instance";
+            // vtable instance forward declaration
             sb.AppendLine($"extern {ifaceName}_vtable {instanceName};");
-            sb.AppendLine($"{ifaceName} {className}_as_{ifaceName}({className}* self);");
+            // _as_IFace helper: static inline in the header so each TU gets its own
+            // copy and there is no external-linkage/static-linkage mismatch.
+            sb.AppendLine($"static inline {ifaceName} {className}_as_{ifaceName}({className}* self)");
+            sb.AppendLine("{");
+            sb.AppendLine($"    {ifaceName} _iface;");
+            sb.AppendLine($"    _iface.vtable = &{instanceName};");
+            sb.AppendLine($"    _iface.obj = self;");
+            sb.AppendLine($"    return _iface;");
+            sb.AppendLine("}");
         }
         return sb.ToString();
     }

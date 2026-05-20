@@ -226,7 +226,10 @@ public sealed class TranspilerContext
         // FIX-1: Zähler nur hier zurücksetzen — pro Klasse, nicht pro Methode.
         _classTmpCounter = 0;
         _classStringCounter = 0;
-        _lambdaCounter = 0;
+        // NOTE: _lambdaCounter wird NICHT zurückgesetzt. Lambda-Symbole
+        // (_lambda_0, _lambda_1, ...) sind static und müssen innerhalb
+        // der gesamten .c-Datei eindeutig bleiben — mehrere Klassen im
+        // selben TU würden sonst doppelte Definitionen erzeugen.
 
         // FIX-2: Offene Preludes beim Klassenwechsel verwerfen (sollte leer sein,
         // aber defensiv sicherheitshalber leeren).

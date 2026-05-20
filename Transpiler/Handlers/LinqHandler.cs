@@ -113,9 +113,6 @@ public sealed class LinqHandler : InvocationHandlerBase
             && inv.ArgumentList.Arguments[0].Expression is LambdaExpressionSyntax lam)
             lambdaArg = lam;
 
-        // Capture context: pass self for instance methods, NULL for static
-        var captureCtx = ctx.IsStaticMethod ? "NULL" : "self";
-
         // Shared helper to create a lifted lambda
         LambdaLifter MakeLifter() {
             var lifter = new LambdaLifter(ctx, new ExpressionWriter(ctx));
@@ -137,7 +134,7 @@ public sealed class LinqHandler : InvocationHandlerBase
                     ctx.WriteLine("{");
                     ctx.Indent();
                     ctx.WriteLine($"{cInnerType}{elemPtr} _e_{outVar} = {listGet.Replace("_idx", idxVar)};");
-                    ctx.WriteLine($"if ({predFn}({captureCtx}, _e_{outVar})) List_{cInner}_Add({outVar}, _e_{outVar});");
+                    ctx.WriteLine($"if ({predFn}(_e_{outVar})) List_{cInner}_Add({outVar}, _e_{outVar});");
                     ctx.Dedent();
                     ctx.WriteLine("}");
                     result = outVar;
@@ -166,7 +163,7 @@ public sealed class LinqHandler : InvocationHandlerBase
                     ctx.WriteLine("{");
                     ctx.Indent();
                     ctx.WriteLine($"{cInnerType}{elemPtr} _e_{outVar} = {listGet.Replace("_idx", idxVar)};");
-                    ctx.WriteLine($"List_{cProjInner}_Add({outVar}, ({cProjType}{projElemPtr}){projFn}({captureCtx}, _e_{outVar}));");
+                    ctx.WriteLine($"List_{cProjInner}_Add({outVar}, ({cProjType}{projElemPtr}){projFn}(_e_{outVar}));");
                     ctx.Dedent();
                     ctx.WriteLine("}");
                     result = outVar;
@@ -189,7 +186,7 @@ public sealed class LinqHandler : InvocationHandlerBase
                         ctx.WriteLine($"for (int {idxVar} = 0; {idxVar} < {listCount.Replace("_idx", idxVar)}; {idxVar}++)");
                         ctx.WriteLine("{");
                         ctx.Indent();
-                        ctx.WriteLine($"if ({predFn}({captureCtx}, {listGet.Replace("_idx", idxVar)})) {{ {retVar} = {listGet.Replace("_idx", idxVar)}; break; }}");
+                        ctx.WriteLine($"if ({predFn}({listGet.Replace("_idx", idxVar)})) {{ {retVar} = {listGet.Replace("_idx", idxVar)}; break; }}");
                         ctx.Dedent();
                         ctx.WriteLine("}");
                         result = retVar;
@@ -214,7 +211,7 @@ public sealed class LinqHandler : InvocationHandlerBase
                         ctx.WriteLine($"for (int {idxVar} = 0; {idxVar} < {listCount.Replace("_idx", idxVar)}; {idxVar}++)");
                         ctx.WriteLine("{");
                         ctx.Indent();
-                        ctx.WriteLine($"if ({predFn}({captureCtx}, {listGet.Replace("_idx", idxVar)})) {{ {retVar} = {listGet.Replace("_idx", idxVar)}; break; }}");
+                        ctx.WriteLine($"if ({predFn}({listGet.Replace("_idx", idxVar)})) {{ {retVar} = {listGet.Replace("_idx", idxVar)}; break; }}");
                         ctx.Dedent();
                         ctx.WriteLine("}");
                         result = retVar;
@@ -261,7 +258,7 @@ public sealed class LinqHandler : InvocationHandlerBase
                         var retVar = ctx.NextTmp("any");
                         ctx.WriteLine($"int {retVar} = 0;");
                         ctx.WriteLine($"for (int {idxVar} = 0; {idxVar} < {listCount.Replace("_idx", idxVar)}; {idxVar}++)");
-                        ctx.WriteLine($"  if ({predFn}({captureCtx}, {listGet.Replace("_idx", idxVar)})) {{ {retVar} = 1; break; }}");
+                        ctx.WriteLine($"  if ({predFn}({listGet.Replace("_idx", idxVar)})) {{ {retVar} = 1; break; }}");
                         result = retVar;
                     }
                     else
@@ -279,7 +276,7 @@ public sealed class LinqHandler : InvocationHandlerBase
                     var retVar = ctx.NextTmp("all");
                     ctx.WriteLine($"int {retVar} = 1;");
                     ctx.WriteLine($"for (int {idxVar} = 0; {idxVar} < {listCount.Replace("_idx", idxVar)}; {idxVar}++)");
-                    ctx.WriteLine($"  if (!{predFn}({captureCtx}, {listGet.Replace("_idx", idxVar)})) {{ {retVar} = 0; break; }}");
+                    ctx.WriteLine($"  if (!{predFn}({listGet.Replace("_idx", idxVar)})) {{ {retVar} = 0; break; }}");
                     result = retVar;
                     return true;
                 }
@@ -293,7 +290,7 @@ public sealed class LinqHandler : InvocationHandlerBase
                         var retVar = ctx.NextTmp("cnt");
                         ctx.WriteLine($"int {retVar} = 0;");
                         ctx.WriteLine($"for (int {idxVar} = 0; {idxVar} < {listCount.Replace("_idx", idxVar)}; {idxVar}++)");
-                        ctx.WriteLine($"  if ({predFn}({captureCtx}, {listGet.Replace("_idx", idxVar)})) {retVar}++;");
+                        ctx.WriteLine($"  if ({predFn}({listGet.Replace("_idx", idxVar)})) {retVar}++;");
                         result = retVar;
                     }
                     else
@@ -313,7 +310,7 @@ public sealed class LinqHandler : InvocationHandlerBase
                         var sumVar = ctx.NextTmp("sum");
                         ctx.WriteLine($"double {sumVar} = 0.0;");
                         ctx.WriteLine($"for (int {idxVar} = 0; {idxVar} < {listCount.Replace("_idx", idxVar)}; {idxVar}++)");
-                        ctx.WriteLine($"  {sumVar} += (double){projFn}({captureCtx}, {listGet.Replace("_idx", idxVar)});");
+                        ctx.WriteLine($"  {sumVar} += (double){projFn}({listGet.Replace("_idx", idxVar)});");
                         result = sumVar;
                     }
                     else
@@ -336,9 +333,9 @@ public sealed class LinqHandler : InvocationHandlerBase
                         var idxVar = ctx.NextTmp("i");
                         var minVar = ctx.NextTmp("minv");
                         var countExpr = listCount.Replace("_idx", "0");
-                        ctx.WriteLine($"double {minVar} = ({countExpr} > 0) ? (double){projFn}({captureCtx}, {listGet.Replace("_idx", "0")}) : 0.0;");
+                        ctx.WriteLine($"double {minVar} = ({countExpr} > 0) ? (double){projFn}({listGet.Replace("_idx", "0")}) : 0.0;");
                         ctx.WriteLine($"for (int {idxVar} = 1; {idxVar} < {listCount.Replace("_idx", idxVar)}; {idxVar}++)");
-                        ctx.WriteLine($"{{ double _mv = (double){projFn}({captureCtx}, {listGet.Replace("_idx", idxVar)}); if (_mv < {minVar}) {minVar} = _mv; }}");
+                        ctx.WriteLine($"{{ double _mv = (double){projFn}({listGet.Replace("_idx", idxVar)}); if (_mv < {minVar}) {minVar} = _mv; }}");
                         result = minVar;
                     }
                     else
@@ -362,9 +359,9 @@ public sealed class LinqHandler : InvocationHandlerBase
                         var idxVar = ctx.NextTmp("i");
                         var maxVar = ctx.NextTmp("maxv");
                         var countExpr = listCount.Replace("_idx", "0");
-                        ctx.WriteLine($"double {maxVar} = ({countExpr} > 0) ? (double){projFn}({captureCtx}, {listGet.Replace("_idx", "0")}) : 0.0;");
+                        ctx.WriteLine($"double {maxVar} = ({countExpr} > 0) ? (double){projFn}({listGet.Replace("_idx", "0")}) : 0.0;");
                         ctx.WriteLine($"for (int {idxVar} = 1; {idxVar} < {listCount.Replace("_idx", idxVar)}; {idxVar}++)");
-                        ctx.WriteLine($"{{ double _mv = (double){projFn}({captureCtx}, {listGet.Replace("_idx", idxVar)}); if (_mv > {maxVar}) {maxVar} = _mv; }}");
+                        ctx.WriteLine($"{{ double _mv = (double){projFn}({listGet.Replace("_idx", idxVar)}); if (_mv > {maxVar}) {maxVar} = _mv; }}");
                         result = maxVar;
                     }
                     else
@@ -390,7 +387,7 @@ public sealed class LinqHandler : InvocationHandlerBase
                         var cntExpr = listCount.Replace("_idx", idxVar);
                         ctx.WriteLine($"double {sumVar} = 0.0;");
                         ctx.WriteLine($"for (int {idxVar} = 0; {idxVar} < {cntExpr}; {idxVar}++)");
-                        ctx.WriteLine($"  {sumVar} += (double){projFn}({captureCtx}, {listGet.Replace("_idx", idxVar)});");
+                        ctx.WriteLine($"  {sumVar} += (double){projFn}({listGet.Replace("_idx", idxVar)});");
                         var cntVar = listCount.Replace("_idx", "0");
                         result = "(" + cntVar + " > 0 ? " + sumVar + " / " + cntVar + " : 0.0)";
                     }
@@ -451,7 +448,7 @@ public sealed class LinqHandler : InvocationHandlerBase
                     }
 
                     ctx.WriteLine($"for (int {idxVar} = {startIdx}; {idxVar} < {listCount.Replace("_idx", idxVar)}; {idxVar}++)");
-                    ctx.WriteLine($"  {accVar} = {accFn}({captureCtx}, {accVar}, {listGet.Replace("_idx", idxVar)});");
+                    ctx.WriteLine($"  {accVar} = {accFn}({accVar}, {listGet.Replace("_idx", idxVar)});");
                     result = accVar;
                     return true;
                 }
@@ -494,8 +491,8 @@ public sealed class LinqHandler : InvocationHandlerBase
                         ctx.WriteLine($"{cInnerType}{elemPtr} {tmpVar} = {outVar}->data[{idxVar}];");
                         ctx.WriteLine($"int {jVar} = {idxVar} - 1;");
                         var cmp = descending
-                            ? $"{keyFn}({captureCtx}, {outVar}->data[{jVar}]) < {keyFn}({captureCtx}, {tmpVar})"
-                            : $"{keyFn}({captureCtx}, {outVar}->data[{jVar}]) > {keyFn}({captureCtx}, {tmpVar})";
+                            ? $"{keyFn}({outVar}->data[{jVar}]) < {keyFn}({tmpVar})"
+                            : $"{keyFn}({outVar}->data[{jVar}]) > {keyFn}({tmpVar})";
                         ctx.WriteLine($"while ({jVar} >= 0 && ({cmp}))");
                         ctx.WriteLine($"  {{ {outVar}->data[{jVar}+1] = {outVar}->data[{jVar}]; {jVar}--; }}");
                         ctx.WriteLine($"{outVar}->data[{jVar}+1] = {tmpVar};");
@@ -645,9 +642,9 @@ public sealed class LinqHandler : InvocationHandlerBase
                     ctx.Indent();
                     ctx.WriteLine($"{cInnerType}{elemPtr} _td_e = {listGet.Replace("_idx", idxVar)};");
                     var valExpr = valLambda != null
-                        ? $"{valFnName}({captureCtx}, _td_e)"
+                        ? $"{valFnName}(_td_e)"
                         : "_td_e";
-                    ctx.WriteLine($"Dict_{cKey}_{cVal}_Set({outVar}, {keyFn}({captureCtx}, _td_e), {valExpr});");
+                    ctx.WriteLine($"Dict_{cKey}_{cVal}_Set({outVar}, {keyFn}(_td_e), {valExpr});");
                     ctx.Dedent();
                     ctx.WriteLine("}");
                     result = outVar;
@@ -691,7 +688,7 @@ public sealed class LinqHandler : InvocationHandlerBase
                     var srcCount = listCount.Replace("_idx", idxVar);
                     ctx.WriteLine($"List_{cProjInner}* {outVar} = List_{cProjInner}_New();");
                     ctx.WriteLine($"for (int {idxVar} = 0; {idxVar} < {srcCount} && {idxVar} < {otherCount}; {idxVar}++)");
-                    ctx.WriteLine($"  List_{cProjInner}_Add({outVar}, {zipFn}({captureCtx}, {listGet.Replace("_idx", idxVar)}, List_{cInner}_Get({otherExpr}, {idxVar})));");
+                    ctx.WriteLine($"  List_{cProjInner}_Add({outVar}, {zipFn}({listGet.Replace("_idx", idxVar)}, List_{cInner}_Get({otherExpr}, {idxVar})));");
                     result = outVar;
                     ctx.LocalTypes[outVar] = "List<" + projInner + ">";
                     return true;

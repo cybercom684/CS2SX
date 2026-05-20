@@ -274,14 +274,6 @@ public sealed class StringMethodHandler : InvocationHandlerBase
             && lit.Token.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.CharacterLiteralToken);
     }
 
-    private static bool IsCharLiteral(InvocationExpressionSyntax inv, int argIndex)
-    {
-        if (inv.ArgumentList.Arguments.Count <= argIndex) return false;
-        return inv.ArgumentList.Arguments[argIndex].Expression
-            is LiteralExpressionSyntax lit
-            && lit.Token.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.CharacterLiteralToken);
-    }
-
     // Split instance: s.Split(',')  / s.Split(new char[]{','}) / s.Split(',', StringSplitOptions.*)
     private static string HandleSplitInstance(InvocationExpressionSyntax inv,
         string receiver, List<string> args)

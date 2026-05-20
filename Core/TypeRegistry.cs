@@ -290,7 +290,42 @@ public static class TypeRegistry
             return $"HashSet_{cInner}*";
         }
 
+        // Delegate types → C function pointer typedef names
+        if (csType == "Action") return "Action_t";
+        if (csType.StartsWith("Action<") && csType.EndsWith(">"))
+        {
+            var inner = csType[7..^1].Trim();
+            var args = SplitGenericArgs(inner);
+            var suffix = string.Join("_", args.Select(a => MapListInnerType(a.Trim())));
+            return $"Action_{suffix}_t";
+        }
+        if (csType.StartsWith("Func<") && csType.EndsWith(">"))
+        {
+            var inner = csType[5..^1].Trim();
+            var args = SplitGenericArgs(inner);
+            var suffix = string.Join("_", args.Select(a => MapListInnerType(a.Trim())));
+            return $"Func_{suffix}_t";
+        }
+        if (csType == "EventHandler" || csType.StartsWith("EventHandler<"))
+            return "Action_t";
+
         return s_primitives.TryGetValue(csType, out var c) ? c : csType;
+    }
+
+    private static List<string> SplitGenericArgs(string s)
+    {
+        var result = new List<string>();
+        var cur = new System.Text.StringBuilder();
+        int depth = 0;
+        foreach (char c in s)
+        {
+            if (c == '<' || c == '(') { depth++; cur.Append(c); }
+            else if (c == '>' || c == ')') { depth--; cur.Append(c); }
+            else if (c == ',' && depth == 0) { result.Add(cur.ToString()); cur.Clear(); }
+            else cur.Append(c);
+        }
+        if (cur.Length > 0) result.Add(cur.ToString());
+        return result;
     }
 
     /// <summary>
@@ -432,6 +467,14 @@ public static class TypeRegistry
     public static bool IsValueType(string csType) =>
         IsPrimitive(csType) || IsLibNxStruct(csType);
 
+    public static bool IsDelegate(string csType)
+    {
+        csType = csType.Trim();
+        return csType == "Action" || csType == "EventHandler"
+            || csType.StartsWith("Action<") || csType.StartsWith("Func<")
+            || csType.StartsWith("EventHandler<");
+    }
+
     public static bool NeedsPointerSuffix(string csType) =>
         !IsPrimitive(csType)
         && !IsLibNxStruct(csType)
@@ -440,6 +483,7 @@ public static class TypeRegistry
         && !IsStack(csType)
         && !IsQueue(csType)
         && !IsHashSet(csType)
+        && !IsDelegate(csType)
         && csType != "string"
         && !csType.EndsWith("[]");
 

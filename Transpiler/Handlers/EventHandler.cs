@@ -37,9 +37,6 @@ public sealed class EventDelegateHandler : InvocationHandlerBase
             var delegateRaw = mem.Expression.ToString();
             var delegateKey = delegateRaw.TrimStart('_');
 
-            // Capture context: pass self for instance methods, NULL for static
-            var captureCtx = ctx.IsStaticMethod ? "NULL" : "self";
-
             // Is this a field/local of a known delegate type?
             string? delType = null;
             ctx.LocalTypes.TryGetValue(delegateRaw, out delType);
@@ -49,8 +46,8 @@ public sealed class EventDelegateHandler : InvocationHandlerBase
                 || delType.StartsWith("Action<")
                 || delType.StartsWith("Func<")))
             {
-                // Null-checked invocation: delegate != NULL ? delegate(self, args...) : 0
-                var argStr = string.Join(", ", new[] { captureCtx }.Concat(args));
+                // Null-checked invocation — lifted lambdas no longer take void* ctx arg
+                var argStr = args.Count > 0 ? string.Join(", ", args) : "";
                 result = "((void*)" + delegateExpr + " != NULL ? " + delegateExpr + "(" + argStr + "), 0 : 0)";
                 return true;
             }
@@ -62,15 +59,15 @@ public sealed class EventDelegateHandler : InvocationHandlerBase
             {
                 var idxVar = ctx.NextTmp("ei");
                 var listExpr = "self->f_" + listKey;
-                // Forward all invocation args after the capture context
                 var invokeArgSuffix = args.Count > 0
-                    ? ", " + string.Join(", ", args)
+                    ? string.Join(", ", args)
                     : "";
                 ctx.WriteLine($"if ({listExpr}) for (int {idxVar} = 0; {idxVar} < {listExpr}->count; {idxVar}++)");
                 ctx.WriteLine("{");
                 ctx.Indent();
-                ctx.WriteLine($"void (*_ev_fn)(void*) = (void(*)(void*))List_voidptr_Get({listExpr}, {idxVar});");
-                ctx.WriteLine($"if (_ev_fn) _ev_fn({captureCtx}{invokeArgSuffix});");
+                // Cast to unspecified-param function pointer (C11 compatible, args passed by register)
+                ctx.WriteLine($"void (*_ev_fn)() = (void(*)())List_voidptr_Get({listExpr}, {idxVar});");
+                ctx.WriteLine($"if (_ev_fn) _ev_fn({invokeArgSuffix});");
                 ctx.Dedent();
                 ctx.WriteLine("}");
                 result = "/* event invoked */";
