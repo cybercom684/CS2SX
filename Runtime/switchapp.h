@@ -663,20 +663,23 @@ static inline void SwitchApp_Run(SwitchApp* self)
     padConfigureInput(1, HidNpadStyleSet_NpadStandard);
     padInitializeDefault(&pad);
 
-    NWindow* win = nwindowGetDefault();
-    framebufferCreate(&g_fb, win,
-        (u32)g_fb_width, (u32)g_fb_height,
-        PIXEL_FORMAT_RGBA_8888, 2);
-    framebufferMakeLinear(&g_fb);
-
+    // OnInit first: lets the user call Graphics.Init() to set g_fb_width/g_fb_height
+    // before framebufferCreate, so the buffer is allocated at the correct size.
     if (self->OnInit)
         self->OnInit(self);
 
     int use_gfx = g_gfx_init;
 
-    if (!use_gfx)
+    if (use_gfx)
     {
-        framebufferClose(&g_fb);
+        NWindow* win = nwindowGetDefault();
+        framebufferCreate(&g_fb, win,
+            (u32)g_fb_width, (u32)g_fb_height,
+            PIXEL_FORMAT_RGBA_8888, 2);
+        framebufferMakeLinear(&g_fb);
+    }
+    else
+    {
         consoleInit(NULL);
         Form_InitFocus(&self->form);
     }
