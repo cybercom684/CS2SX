@@ -216,6 +216,16 @@ public static class TypeInferrer
         if (callee is "System.GetBattery" or "CS2SX_GetBattery")
             return "BatteryInfo";
 
+        if (callee is "Stopwatch.StartNew" or "CS2SX_Stopwatch_StartNew")
+            return "Stopwatch";
+
+        if (callee is "TimeSpan.FromMilliseconds" or "TimeSpan.FromSeconds"
+                   or "TimeSpan.FromMinutes"      or "TimeSpan.FromHours"
+                   or "TimeSpan.FromTicks"        or "TimeSpan.Zero"
+                   or "CS2SX_TimeSpan_FromMs"     or "CS2SX_TimeSpan_FromSec"
+                   or "CS2SX_TimeSpan_FromTicks"  or "CS2SX_DateTime_Subtract")
+            return "TimeSpan";
+
         // FIX 3: Random Methoden → int/float
         if (callee is "CS2SX_Rand_Next" or "CS2SX_Rand_NextMax")
             return "int";
@@ -282,6 +292,14 @@ public static class TypeInferrer
 
         var leftType = InferSyntactic(bin.Left, ctx);
         var rightType = InferSyntactic(bin.Right, ctx);
+
+        // DateTime - DateTime → TimeSpan
+        if (bin.IsKind(SyntaxKind.SubtractExpression)
+            && leftType == "DateTime" && rightType == "DateTime")
+            return "TimeSpan";
+
+        // TimeSpan ± TimeSpan → TimeSpan
+        if (leftType == "TimeSpan" || rightType == "TimeSpan") return "TimeSpan";
 
         if (leftType == "double" || rightType == "double") return "double";
         if (leftType == "float" || rightType == "float") return "float";

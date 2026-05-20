@@ -48,6 +48,9 @@ public static class TypeRegistry
         ["StickPos"] = "CS2SX_StickPos",
         ["TouchState"] = "CS2SX_TouchState",
         ["BatteryInfo"] = "CS2SX_BatteryInfo",
+        ["Stopwatch"] = "CS2SX_Stopwatch",
+        ["TimeSpan"] = "CS2SX_TimeSpan",
+        ["Regex"] = "CS2SX_Regex",
         ["Random"] = "void",
         // PHASE 2: Tuple → void* (Tupels werden als temporäre Structs behandelt)
         ["(int, int)"] = "void*",
@@ -205,9 +208,20 @@ public static class TypeRegistry
 
     // ── Öffentliche API ───────────────────────────────────────────────────────
 
+    // decimal types are silently mapped to double (precision loss).
+    // Callers that can emit a warning should check this first.
+    public static bool IsDecimalType(string csType)
+    {
+        var t = csType.Trim().TrimEnd('?');
+        return t is "decimal" or "Decimal" or "System.Decimal";
+    }
+
     public static string MapType(string csType)
     {
         csType = csType.Trim();
+
+        // decimal → double (precision loss — warn at call sites)
+        if (IsDecimalType(csType)) return "double";
 
         if (csType.EndsWith('?'))
             csType = csType[..^1].Trim();
@@ -253,6 +267,27 @@ public static class TypeRegistry
             var inner = csType[14..^1].Trim();
             var cInner = MapListInnerType(inner);
             return $"List_{cInner}*";
+        }
+
+        if (csType.StartsWith("Stack<") && csType.EndsWith(">"))
+        {
+            var inner = csType[6..^1].Trim();
+            var cInner = inner == "string" ? "str" : MapListInnerType(inner);
+            return $"Stack_{cInner}*";
+        }
+
+        if (csType.StartsWith("Queue<") && csType.EndsWith(">"))
+        {
+            var inner = csType[6..^1].Trim();
+            var cInner = inner == "string" ? "str" : MapListInnerType(inner);
+            return $"Queue_{cInner}*";
+        }
+
+        if (csType.StartsWith("HashSet<") && csType.EndsWith(">"))
+        {
+            var inner = csType[8..^1].Trim();
+            var cInner = inner == "string" ? "str" : MapListInnerType(inner);
+            return $"HashSet_{cInner}*";
         }
 
         return s_primitives.TryGetValue(csType, out var c) ? c : csType;
@@ -339,8 +374,45 @@ public static class TypeRegistry
 
     public static bool IsStringBuilder(string csType) => csType.Trim() == "StringBuilder";
 
+    public static bool IsStack(string csType)
+    {
+        csType = csType.Trim();
+        return csType.StartsWith("Stack<") && csType.EndsWith(">");
+    }
+
+    public static bool IsQueue(string csType)
+    {
+        csType = csType.Trim();
+        return csType.StartsWith("Queue<") && csType.EndsWith(">");
+    }
+
+    public static bool IsHashSet(string csType)
+    {
+        csType = csType.Trim();
+        return csType.StartsWith("HashSet<") && csType.EndsWith(">");
+    }
+
+    public static string? GetStackInnerType(string csType)
+    {
+        csType = csType.Trim();
+        return csType.StartsWith("Stack<") && csType.EndsWith(">") ? csType[6..^1].Trim() : null;
+    }
+
+    public static string? GetQueueInnerType(string csType)
+    {
+        csType = csType.Trim();
+        return csType.StartsWith("Queue<") && csType.EndsWith(">") ? csType[6..^1].Trim() : null;
+    }
+
+    public static string? GetHashSetInnerType(string csType)
+    {
+        csType = csType.Trim();
+        return csType.StartsWith("HashSet<") && csType.EndsWith(">") ? csType[8..^1].Trim() : null;
+    }
+
     public static bool IsNativePointerType(string csType) =>
-        s_nativePointerTypes.Contains(csType) || IsList(csType);
+        s_nativePointerTypes.Contains(csType) || IsList(csType) || IsStack(csType)
+        || IsQueue(csType) || IsHashSet(csType);
 
     public static string? GetListInnerType(string csType)
     {
@@ -365,6 +437,9 @@ public static class TypeRegistry
         && !IsLibNxStruct(csType)
         && !IsNativePointerType(csType)
         && !IsDictionary(csType)
+        && !IsStack(csType)
+        && !IsQueue(csType)
+        && !IsHashSet(csType)
         && csType != "string"
         && !csType.EndsWith("[]");
 

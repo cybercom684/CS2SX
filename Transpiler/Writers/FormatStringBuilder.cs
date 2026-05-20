@@ -1,4 +1,5 @@
 using CS2SX.Core;
+using CS2SX.Transpiler.Handlers;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 
@@ -96,7 +97,11 @@ public static class FormatStringBuilder
                 // FIX: Bei bedingten Ausdrücken (ternär) den Typ beider Zweige prüfen
                 //      und den "sichersten" Specifier wählen:
                 //      Wenn einer der Zweige string ist → %s für alles.
-                var specifier = InferHoleSpecifier(hole.Expression, ctx);
+                var baseSpec = InferHoleSpecifier(hole.Expression, ctx);
+                var fmtClause = hole.FormatClause?.FormatStringToken.ValueText;
+                var specifier = fmtClause != null
+                    ? StringMethodHandler.MapFormatSpecifier(fmtClause, baseSpec)
+                    : baseSpec;
                 fmt.Append(specifier);
                 args.Add(writeExpr(hole.Expression));
             }

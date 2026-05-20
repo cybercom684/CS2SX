@@ -35,6 +35,10 @@ public sealed class StatementWriter
             case ThrowStatementSyntax throwStmt: WriteThrow(throwStmt); break;
             case UsingStatementSyntax usingStmt: WriteUsing(usingStmt); break;
             case EmptyStatementSyntax: break;
+            case YieldStatementSyntax yield:
+                _ctx.Warn(yield, "yield return/break not supported — C has no generators; refactor to a List<T> or callback pattern");
+                _ctx.WriteLine("/* yield not supported — refactor to List<T> or callback */");
+                break;
             default:
                 _ctx.Warn(stmt, $"unsupported statement '{stmt.GetType().Name}' — check generated C");
                 _ctx.WriteLine("/* UNSUPPORTED: " + stmt.GetType().Name + " */");
@@ -75,6 +79,9 @@ public sealed class StatementWriter
     private void WriteLocal(LocalDeclarationStatementSyntax local)
     {
         var declType = local.Declaration.Type.ToString().Trim();
+
+        if (TypeRegistry.IsDecimalType(declType))
+            _ctx.Warn(local, "decimal is not supported — mapped to double (precision loss possible)");
 
         if (declType.Contains(",") && declType.Contains("[") && declType.Contains("]"))
         {
@@ -497,6 +504,10 @@ public sealed class StatementWriter
                           or "CS2SX_GetBattery")
                 return ("CS2SX_BatteryInfo", false);
 
+            if (calleeStr is "Stopwatch.StartNew"
+                          or "CS2SX_Stopwatch_StartNew")
+                return ("CS2SX_Stopwatch", true);
+
             if (_ctx.MethodReturnTypes.TryGetValue(calleeStr, out var retType))
             {
                 var needsPtr = TypeRegistry.NeedsPointerSuffix(retType)
@@ -515,7 +526,10 @@ public sealed class StatementWriter
 
             if (TypeRegistry.IsList(inferred)
                 || TypeRegistry.IsDictionary(inferred)
-                || TypeRegistry.IsStringBuilder(inferred))
+                || TypeRegistry.IsStringBuilder(inferred)
+                || TypeRegistry.IsStack(inferred)
+                || TypeRegistry.IsQueue(inferred)
+                || TypeRegistry.IsHashSet(inferred))
                 return (TypeRegistry.MapType(inferred).TrimEnd('*'), true);
 
             if (inferred.EndsWith("*"))
@@ -531,7 +545,10 @@ public sealed class StatementWriter
 
         if (TypeRegistry.IsList(ct)
             || TypeRegistry.IsDictionary(ct)
-            || TypeRegistry.IsStringBuilder(ct))
+            || TypeRegistry.IsStringBuilder(ct)
+            || TypeRegistry.IsStack(ct)
+            || TypeRegistry.IsQueue(ct)
+            || TypeRegistry.IsHashSet(ct))
             return (TypeRegistry.MapType(ct).TrimEnd('*'), true);
 
         if (ct.EndsWith("*"))
@@ -1086,7 +1103,7 @@ public sealed class StatementWriter
             {
                 var extra = tryStmt.Catches[ci];
                 var typeName = extra.Declaration?.Type.ToString() ?? "Exception";
-                _ctx.Warn($"catch({typeName}) ist nicht erreichbar — kein RTTI auf Switch. In erstem catch zusammengeführt.", "try/catch");
+                _ctx.Warn(extra, $"catch({typeName}) unreachable — no RTTI on Switch; merged into first catch");
                 _ctx.WriteLine("/* catch (" + typeName + ") — unreachable without RTTI */");
             }
 
@@ -1185,6 +1202,28 @@ public sealed class StatementWriter
                     var ck = types.key == "string" ? "str" : TypeRegistry.MapType(types.key);
                     var cv = types.val == "string" ? "str" : TypeRegistry.MapType(types.val);
                     disposeActions.Add("if (" + varName + ") Dict_" + ck + "_" + cv + "_Free(" + varName + ");");
+                }
+                else if (TypeRegistry.IsStack(typeName))
+                {
+                    var inner = TypeRegistry.GetStackInnerType(typeName) ?? "int";
+                    var cInner = inner == "string" ? "str" : TypeRegistry.MapType(inner);
+                    disposeActions.Add("if (" + varName + ") Stack_" + cInner + "_Free(" + varName + ");");
+                }
+                else if (TypeRegistry.IsQueue(typeName))
+                {
+                    var inner = TypeRegistry.GetQueueInnerType(typeName) ?? "int";
+                    var cInner = inner == "string" ? "str" : TypeRegistry.MapType(inner);
+                    disposeActions.Add("if (" + varName + ") Queue_" + cInner + "_Free(" + varName + ");");
+                }
+                else if (TypeRegistry.IsHashSet(typeName))
+                {
+                    var inner = TypeRegistry.GetHashSetInnerType(typeName) ?? "int";
+                    var cInner = inner == "string" ? "str" : TypeRegistry.MapType(inner);
+                    disposeActions.Add("if (" + varName + ") HashSet_" + cInner + "_Free(" + varName + ");");
+                }
+                else if (typeName == "Stopwatch")
+                {
+                    disposeActions.Add("if (" + varName + ") CS2SX_Stopwatch_Free(" + varName + ");");
                 }
                 else if (!isValueType && TypeRegistry.NeedsPointerSuffix(typeName))
                 {

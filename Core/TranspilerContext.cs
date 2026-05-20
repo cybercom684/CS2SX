@@ -70,6 +70,8 @@ public sealed class TranspilerContext
     public Dictionary<string, string> MethodReturnTypes { get; } = new(StringComparer.Ordinal);
     public Dictionary<string, string> PropertyTypes { get; } = new(StringComparer.Ordinal);
     public HashSet<string> EnumMembers { get; } = new(StringComparer.Ordinal);
+    // EnumName → ordered list of member names (for Enum.GetValues)
+    public Dictionary<string, List<string>> EnumDefs { get; } = new(StringComparer.Ordinal);
 
     // ── Methoden-Kontext ──────────────────────────────────────────────────────
 
@@ -219,6 +221,7 @@ public sealed class TranspilerContext
         MethodReturnTypes.Clear();
         PropertyTypes.Clear();
         EnumMembers.Clear();
+        EnumDefs.Clear();
 
         // FIX-1: Zähler nur hier zurücksetzen — pro Klasse, nicht pro Methode.
         _classTmpCounter = 0;

@@ -118,4 +118,43 @@ public static class OperatorOverloadWriter
         var fnName = GetFunctionName(operandCsType, opToken);
         return $"{fnName}({operandExpr})";
     }
+
+    // ── Conversion operators ─────────────────────────────────────────────────
+
+    // Key: "SourceType.to_TargetType" or "SourceType.implicit_TargetType"
+    private static readonly HashSet<string> s_conversions = new(StringComparer.Ordinal);
+
+    public static void RegisterConversion(string sourceType, string targetType, bool isImplicit)
+    {
+        var key = sourceType + (isImplicit ? ".implicit_" : ".explicit_")
+                + targetType.Replace(".", "_");
+        s_conversions.Add(key);
+    }
+
+    public static bool HasConversion(string sourceType, string targetType) =>
+        s_conversions.Contains(sourceType + ".implicit_" + targetType.Replace(".", "_"))
+     || s_conversions.Contains(sourceType + ".explicit_" + targetType.Replace(".", "_"));
+
+    public static string GetConversionFunctionName(string sourceType, string targetType)
+    {
+        var suffix = s_conversions.Contains(sourceType + ".implicit_" + targetType.Replace(".", "_"))
+            ? "implicit_" : "explicit_";
+        return sourceType + "_" + suffix + targetType.Replace(".", "_");
+    }
+
+    public static string BuildConversionSignature(
+        ConversionOperatorDeclarationSyntax conv,
+        string className,
+        Func<ParameterSyntax, string> buildParamDecl)
+    {
+        var retType = TypeRegistry.MapType(conv.Type.ToString().Trim());
+        var isImplicit = conv.ImplicitOrExplicitKeyword.RawKind ==
+            (int)Microsoft.CodeAnalysis.CSharp.SyntaxKind.ImplicitKeyword;
+        var suffix = (isImplicit ? "implicit_" : "explicit_")
+                   + conv.Type.ToString().Trim().Replace(".", "_");
+        var paramList = string.Join(", ", conv.ParameterList.Parameters.Select(p => buildParamDecl(p)));
+
+        RegisterConversion(className, conv.Type.ToString().Trim(), isImplicit);
+        return $"{retType} {className}_{suffix}({paramList})";
+    }
 }

@@ -65,7 +65,7 @@ public sealed class ExpressionWriter : IExpressionWriter
             BinaryExpressionSyntax bin => WriteBinary(bin),
             LiteralExpressionSyntax lit => WriteLiteral(lit),
             IdentifierNameSyntax id => WriteIdentifier(id),
-            PrefixUnaryExpressionSyntax pre => pre.OperatorToken.Text + Write(pre.Operand),
+            PrefixUnaryExpressionSyntax pre => WritePrefixUnary(pre),
             PostfixUnaryExpressionSyntax post => Write(post.Operand) + post.OperatorToken.Text,
             AssignmentExpressionSyntax assign => WriteAssignment(assign),
             MemberAccessExpressionSyntax mem => WriteMemberAccess(mem),
@@ -86,6 +86,8 @@ public sealed class ExpressionWriter : IExpressionWriter
             ConditionalAccessExpressionSyntax condAccess => WriteConditionalAccess(condAccess),
             LambdaExpressionSyntax lambda => WriteLambda(lambda),
             TupleExpressionSyntax tuple => WriteTuple(tuple),
+            AwaitExpressionSyntax awaitExpr => WriteAwait(awaitExpr),
+            TypeOfExpressionSyntax typeOf => WriteTypeOf(typeOf),
             _ => WriteFallback(node),
         };
     }
@@ -97,6 +99,28 @@ public sealed class ExpressionWriter : IExpressionWriter
         _ctx.Warn($"unsupported expression '{typeName}' — passed through as-is: {(text.Length > 40 ? text[..40] + "…" : text)}",
             typeName);
         return text;
+    }
+
+    private string WritePrefixUnary(PrefixUnaryExpressionSyntax pre)
+    {
+        var operandExpr = Write(pre.Operand);
+        var operandType = TypeInferrer.InferCSharpType(pre.Operand, _ctx);
+        var overloaded = OperatorOverloadWriter.TryRewriteUnary(pre, operandType, operandExpr);
+        if (overloaded != null) return overloaded;
+        return pre.OperatorToken.Text + operandExpr;
+    }
+
+    private string WriteAwait(AwaitExpressionSyntax awaitExpr)
+    {
+        _ctx.Warn(awaitExpr, "await — no async support on Switch; executing inner expression synchronously");
+        return Write(awaitExpr.Expression);
+    }
+
+    private string WriteTypeOf(TypeOfExpressionSyntax typeOf)
+    {
+        var typeName = typeOf.Type.ToString().Trim();
+        // typeof(T) has no runtime representation in C; return a string constant
+        return "((void*)0) /* typeof(" + typeName + ") — no runtime type info in C */";
     }
 
     // ── Lambda ────────────────────────────────────────────────────────────────
@@ -266,6 +290,17 @@ public sealed class ExpressionWriter : IExpressionWriter
             if (TypeRegistry.IsPrimitive(isTypeName) && isTypeName != "string")
                 return "1";
             return "(" + left + " != NULL)";
+        }
+
+        // DateTime - DateTime → TimeSpan
+        if (op == "-" && leftCsType == "DateTime" && rightCsType == "DateTime")
+            return "CS2SX_DateTime_Subtract((time_t)" + left + ", (time_t)" + right + ")";
+
+        // TimeSpan + TimeSpan / TimeSpan - TimeSpan
+        if (leftCsType == "TimeSpan" || rightCsType == "TimeSpan")
+        {
+            if (op == "+") return "CS2SX_TimeSpan_Add(" + left + ", " + right + ")";
+            if (op == "-") return "CS2SX_TimeSpan_Sub(" + left + ", " + right + ")";
         }
 
         return left + " " + op + " " + right;
@@ -440,6 +475,20 @@ public sealed class ExpressionWriter : IExpressionWriter
 
     private string WriteInvocation(InvocationExpressionSyntax inv)
     {
+        // Nullable: x.GetValueOrDefault() / x.GetValueOrDefault(defVal)
+        if (inv.Expression is MemberAccessExpressionSyntax nvMem
+            && nvMem.Name.Identifier.Text == "GetValueOrDefault"
+            && IsNullableExpr(nvMem.Expression))
+        {
+            var nvObj = Write(nvMem.Expression);
+            if (inv.ArgumentList.Arguments.Count > 0)
+            {
+                var defVal = Write(inv.ArgumentList.Arguments[0].Expression);
+                return "(" + nvObj + " != NULL ? *" + nvObj + " : " + defVal + ")";
+            }
+            return "(" + nvObj + " != NULL ? *" + nvObj + " : 0)";
+        }
+
         var result = _dispatcher.Dispatch(inv);
         if (result != null) return result;
 
@@ -467,9 +516,8 @@ public sealed class ExpressionWriter : IExpressionWriter
 
         var args = inv.ArgumentList.Arguments.Select(a => Write(a.Expression)).ToList();
         var calleeStr = inv.Expression.ToString();
-        if (!calleeStr.StartsWith("CS2SX_", StringComparison.Ordinal)
-            && !calleeStr.StartsWith("_cs2sx_", StringComparison.Ordinal))
-            _ctx.Warn(inv, $"unknown call '{calleeStr}' — passed through as-is, verify generated C");
+        if (!IsSilentCall(calleeStr))
+            _ctx.Warn(inv, $"unrecognized call '{calleeStr}' — passed through as-is; verify generated C compiles");
         return calleeStr + "(" + string.Join(", ", args) + ")";
     }
 
@@ -731,6 +779,46 @@ public sealed class ExpressionWriter : IExpressionWriter
         if (full == "int.MaxValue") return "INT_MAX";
         if (full == "int.MinValue") return "INT_MIN";
 
+        // typeof(T).Name / typeof(T).FullName → string constant
+        if (mem.Expression is TypeOfExpressionSyntax typeOfExpr)
+        {
+            var tName = typeOfExpr.Type.ToString().Trim();
+            var typeofProp = mem.Name.Identifier.Text;
+            return typeofProp switch
+            {
+                "Name"      => "\"" + tName + "\"",
+                "FullName"  => "\"" + tName + "\"",
+                "IsEnum"    => "(0)",
+                "IsClass"   => "(1)",
+                "IsValueType" => "(0)",
+                _           => "\"" + tName + "\" /* typeof." + typeofProp + " */"
+            };
+        }
+
+        // DateTime.Now.* properties
+        if (full is "DateTime.Now" or "DateTime.UtcNow")
+            return "_cs2sx_now()";
+        if (full.StartsWith("DateTime.Now.", StringComparison.Ordinal)
+         || full.StartsWith("DateTime.UtcNow.", StringComparison.Ordinal))
+        {
+            var dotIdx = full.LastIndexOf('.');
+            var part = full[(dotIdx + 1)..];
+            return part switch
+            {
+                "Year"       => "CS2SX_DateTime_Now_Year()",
+                "Month"      => "CS2SX_DateTime_Now_Month()",
+                "Day"        => "CS2SX_DateTime_Now_Day()",
+                "Hour"       => "CS2SX_DateTime_Now_Hour()",
+                "Minute"     => "CS2SX_DateTime_Now_Minute()",
+                "Second"     => "CS2SX_DateTime_Now_Second()",
+                "DayOfWeek"  => "CS2SX_DateTime_Now_DayOfWeek()",
+                "DayOfYear"  => "CS2SX_DateTime_Now_DayOfYear()",
+                "Ticks"      => "CS2SX_DateTime_Now_Ticks()",
+                "Millisecond"=> "0 /* Millisecond not supported */",
+                _            => "0 /* DateTime." + part + " not supported */"
+            };
+        }
+
         if (IsNumericTypeMember(mem, out var constResult)) return constResult;
 
         var mapped = TypeRegistry.MapEnum(full);
@@ -741,6 +829,72 @@ public sealed class ExpressionWriter : IExpressionWriter
 
         var obj = Write(mem.Expression);
         var prop = mem.Name.Identifier.Text;
+
+        // Stopwatch.Elapsed.TotalMilliseconds / TotalSeconds / TotalMinutes
+        if (prop is "TotalMilliseconds" or "TotalSeconds" or "TotalMinutes")
+        {
+            if (mem.Expression is MemberAccessExpressionSyntax elapsedMem
+                && elapsedMem.Name.Identifier.Text == "Elapsed")
+            {
+                var swRaw = elapsedMem.Expression.ToString();
+                var swType = ResolveReceiverType(swRaw, elapsedMem.Expression);
+                if (swType == "Stopwatch")
+                {
+                    var swObj2 = Write(elapsedMem.Expression);
+                    return prop switch
+                    {
+                        "TotalMilliseconds" => "CS2SX_Stopwatch_ElapsedMsDouble(" + swObj2 + ")",
+                        "TotalSeconds"      => "CS2SX_Stopwatch_ElapsedSecDouble(" + swObj2 + ")",
+                        "TotalMinutes"      => "(CS2SX_Stopwatch_ElapsedSecDouble(" + swObj2 + ") / 60.0)",
+                        _                   => swObj2
+                    };
+                }
+            }
+        }
+
+        // Stopwatch instance properties
+        if (prop == "ElapsedMilliseconds")
+        {
+            var swType = ResolveReceiverType(mem.Expression.ToString(), mem.Expression);
+            if (swType == "Stopwatch")
+                return "CS2SX_Stopwatch_ElapsedMs(" + obj + ")";
+        }
+        if (prop == "ElapsedTicks")
+        {
+            var swType = ResolveReceiverType(mem.Expression.ToString(), mem.Expression);
+            if (swType == "Stopwatch")
+                return "CS2SX_Stopwatch_ElapsedTicks(" + obj + ")";
+        }
+        if (prop == "IsRunning")
+        {
+            var swType = ResolveReceiverType(mem.Expression.ToString(), mem.Expression);
+            if (swType == "Stopwatch")
+                return obj + "->running";
+        }
+
+        // TimeSpan properties
+        if (prop is "TotalMilliseconds" or "TotalSeconds" or "TotalMinutes" or "TotalHours" or "TotalDays"
+            or "Milliseconds" or "Seconds" or "Minutes" or "Hours" or "Days")
+        {
+            var tsType = ResolveReceiverType(mem.Expression.ToString(), mem.Expression);
+            if (tsType == "TimeSpan")
+            {
+                return prop switch
+                {
+                    "TotalMilliseconds" => "CS2SX_TimeSpan_TotalMs(" + obj + ")",
+                    "TotalSeconds"      => "CS2SX_TimeSpan_TotalSec(" + obj + ")",
+                    "TotalMinutes"      => "CS2SX_TimeSpan_TotalMin(" + obj + ")",
+                    "TotalHours"        => "CS2SX_TimeSpan_TotalHours(" + obj + ")",
+                    "TotalDays"         => "CS2SX_TimeSpan_TotalDays(" + obj + ")",
+                    "Milliseconds"      => "CS2SX_TimeSpan_Milliseconds(" + obj + ")",
+                    "Seconds"           => "CS2SX_TimeSpan_Seconds(" + obj + ")",
+                    "Minutes"           => "CS2SX_TimeSpan_Minutes(" + obj + ")",
+                    "Hours"             => "CS2SX_TimeSpan_Hours(" + obj + ")",
+                    "Days"              => "CS2SX_TimeSpan_Days(" + obj + ")",
+                    _                   => obj + ".ticks",
+                };
+            }
+        }
 
         // FIX: base.Prop → ((BaseType*)self)->Prop
         // Zuvor: hardcodet ((Control*)self)->prop.toLower() — falsch für alle Nicht-Control-Hierarchien
@@ -778,6 +932,7 @@ public sealed class ExpressionWriter : IExpressionWriter
                 return "strlen(" + obj + ")";
         }
         if (prop == "Count" && IsListExpr(mem.Expression)) return obj + "->count";
+        if (prop == "Count" && IsStackQueueHashSetExpr(mem.Expression)) return obj + "->count";
         if (prop == "Length" && IsStringBuilderExpr(mem.Expression)) return obj + "->length";
         if (prop == "HasValue" && IsNullableExpr(mem.Expression)) return NullableHandler.WriteHasValue(obj);
         if (prop == "Value" && IsNullableExpr(mem.Expression)) return NullableHandler.WriteGetValue(obj);
@@ -911,7 +1066,7 @@ public sealed class ExpressionWriter : IExpressionWriter
         var typeName = _ctx.GetSemanticType(obj);
         if (typeName == null)
         {
-            _ctx.Warn("new() — Zieltyp nicht bestimmbar (kein SemanticModel oder Typ-Fehler)", "new()");
+            _ctx.Warn(obj, "new() — Zieltyp nicht bestimmbar (kein SemanticModel oder Typ-Fehler)");
             return "NULL /* new() — type not resolvable */";
         }
         return WriteObjectCreationFromTypeName(typeName, obj.ArgumentList, obj.Initializer);
@@ -942,6 +1097,24 @@ public sealed class ExpressionWriter : IExpressionWriter
             var cVal = types.val == "string" ? "str" : TypeRegistry.MapType(types.val);
             return "Dict_" + cKey + "_" + cVal + "_New()";
         }
+        if (TypeRegistry.IsStack(typeName))
+        {
+            var inner = TypeRegistry.GetStackInnerType(typeName)!;
+            var cInner = inner == "string" ? "str" : TypeRegistry.MapType(inner);
+            return "Stack_" + cInner + "_New()";
+        }
+        if (TypeRegistry.IsQueue(typeName))
+        {
+            var inner = TypeRegistry.GetQueueInnerType(typeName)!;
+            var cInner = inner == "string" ? "str" : TypeRegistry.MapType(inner);
+            return "Queue_" + cInner + "_New()";
+        }
+        if (TypeRegistry.IsHashSet(typeName))
+        {
+            var inner = TypeRegistry.GetHashSetInnerType(typeName)!;
+            var cInner = inner == "string" ? "str" : TypeRegistry.MapType(inner);
+            return "HashSet_" + cInner + "_New()";
+        }
         // Generischer Typ aus String-Repräsentation (z.B. bei target-typed new)
         var angleIdx = typeName.IndexOf('<');
         if (angleIdx > 0 && typeName.EndsWith(">"))
@@ -958,6 +1131,8 @@ public sealed class ExpressionWriter : IExpressionWriter
         }
         if (typeName == "Random")
             return "NULL /* Random — use CS2SX_Rand_Next() directly */";
+        if (typeName == "Stopwatch")
+            return "CS2SX_Stopwatch_New()";
         if (_ctx.ValueTypeStructs.Contains(typeName))
         {
             var cType = TypeRegistry.MapType(typeName);
@@ -1171,12 +1346,52 @@ public sealed class ExpressionWriter : IExpressionWriter
             || (_ctx.FieldTypes.TryGetValue(key, out var ft) && TypeRegistry.IsStringBuilder(ft));
     }
 
+    private bool IsStackQueueHashSetExpr(SyntaxNode node)
+    {
+        var raw = node.ToString();
+        var key = raw.TrimStart('_');
+        string? t = null;
+        _ctx.LocalTypes.TryGetValue(raw, out t);
+        if (t == null) _ctx.FieldTypes.TryGetValue(key, out t);
+        return t != null && (TypeRegistry.IsStack(t) || TypeRegistry.IsQueue(t) || TypeRegistry.IsHashSet(t));
+    }
+
     private bool IsNullableExpr(SyntaxNode node)
     {
         var raw = node.ToString();
         var key = raw.TrimStart('_');
         if (_ctx.LocalTypes.TryGetValue(raw, out var lt)) return NullableHandler.IsNullable(lt);
         if (_ctx.FieldTypes.TryGetValue(key, out var ft)) return NullableHandler.IsNullable(ft);
+        var semantic = _ctx.GetSemanticType(node);
+        if (semantic != null) return NullableHandler.IsNullable(semantic);
         return false;
     }
+
+    // Returns true for calls that should NOT generate a warning when unrecognized.
+    private static bool IsSilentCall(string calleeStr)
+    {
+        if (calleeStr.StartsWith("CS2SX_", StringComparison.Ordinal)) return true;
+        if (calleeStr.StartsWith("_cs2sx_", StringComparison.Ordinal)) return true;
+        // Plain identifier = likely own method, no dot = no namespace prefix
+        if (!calleeStr.Contains('.')) return true;
+        // Known C stdlib
+        return s_knownCBuiltins.Contains(calleeStr);
+    }
+
+    private static readonly HashSet<string> s_knownCBuiltins = new(StringComparer.Ordinal)
+    {
+        "printf", "sprintf", "snprintf", "fprintf", "puts", "putchar",
+        "malloc", "calloc", "realloc", "free",
+        "memset", "memcpy", "memmove", "memcmp",
+        "strlen", "strcmp", "strncmp", "strcpy", "strncpy", "strcat", "strncat",
+        "strstr", "strchr", "strrchr", "strtok",
+        "abs", "fabs", "sqrtf", "sinf", "cosf", "tanf", "powf", "floorf", "ceilf",
+        "atan2f", "fabsf", "fminf", "fmaxf", "roundf",
+        "sqrt", "sin", "cos", "tan", "pow", "floor", "ceil", "atan2",
+        "rand", "srand", "exit", "abort",
+        "atoi", "atof", "strtol", "strtod",
+        "setjmp", "longjmp",
+        "qsort", "bsearch",
+        "fopen", "fclose", "fread", "fwrite", "fgets", "fputs", "fseek", "ftell",
+    };
 }

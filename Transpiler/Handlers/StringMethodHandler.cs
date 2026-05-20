@@ -156,7 +156,7 @@ public sealed class StringMethodHandler : InvocationHandlerBase
                 => "String_Join(" + ArgAt(args, 0) + ", " + ArgAt(args, 1) + ")",
 
             "string.Split" or "String.Split"
-                => "String_Split(" + ArgAt(args, 0) + ", " + ArgAt(args, 1) + ")",
+                => HandleSplitStatic(inv, args),
 
             _ => args.Count > 0 ? args[0] : "\"\"",
         };
@@ -245,7 +245,7 @@ public sealed class StringMethodHandler : InvocationHandlerBase
                 ? "String_IndexOfChar(" + receiver + ", " + ArgAt(args, 0) + ")"
                 : "String_IndexOf(" + receiver + ", " + ArgAt(args, 0) + ")",
 
-            "Split" => "String_Split(" + receiver + ", " + ArgAt(args, 0) + ")",
+            "Split" => HandleSplitInstance(inv, receiver, args),
 
             "Substring" => args.Count == 1
                 ? "String_SubstringFrom(" + receiver + ", " + ArgAt(args, 0) + ")"
@@ -280,6 +280,72 @@ public sealed class StringMethodHandler : InvocationHandlerBase
         return inv.ArgumentList.Arguments[argIndex].Expression
             is LiteralExpressionSyntax lit
             && lit.Token.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.CharacterLiteralToken);
+    }
+
+    // Split instance: s.Split(',')  / s.Split(new char[]{','}) / s.Split(',', StringSplitOptions.*)
+    private static string HandleSplitInstance(InvocationExpressionSyntax inv,
+        string receiver, List<string> args)
+    {
+        if (args.Count == 0) return "String_Split(" + receiver + ", \",\")";
+        var sep = ExtractSplitSeparator(inv, 0, args[0]);
+        return "String_Split(" + receiver + ", " + sep + ")";
+    }
+
+    // Split static: string.Split(str, ',') / string.Split(str, new char[]{})
+    private static string HandleSplitStatic(InvocationExpressionSyntax inv, List<string> args)
+    {
+        if (args.Count == 0) return "NULL";
+        if (args.Count == 1) return "String_Split(" + args[0] + ", \",\")";
+        var sep = ExtractSplitSeparator(inv, 1, args[1]);
+        return "String_Split(" + args[0] + ", " + sep + ")";
+    }
+
+    // Extracts the split separator from a C# Split() argument.
+    // Handles: char literal, string literal, new char[]{'/',...} initializers.
+    // StringSplitOptions and count overloads are silently ignored (extra args).
+    private static string ExtractSplitSeparator(
+        InvocationExpressionSyntax inv, int argIndex, string fallback)
+    {
+        if (inv.ArgumentList.Arguments.Count <= argIndex) return fallback;
+        var expr = inv.ArgumentList.Arguments[argIndex].Expression;
+
+        // StringSplitOptions enum — skip, return plain separator as is
+        if (expr.ToString().Contains("StringSplitOptions")) return fallback;
+
+        // char literal → wrap as one-char string  ','  →  ","
+        if (expr is LiteralExpressionSyntax charLit
+            && charLit.Token.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.CharacterLiteralToken))
+        {
+            var ch = charLit.Token.ValueText;
+            if (ch == "\\") return "\"\\\\\"";
+            if (ch == "\"") return "\"\\\"\"";
+            return "\"" + ch + "\"";
+        }
+
+        // new char[] { '/', '\\' } — take first element
+        if (expr is ArrayCreationExpressionSyntax arrCreate
+            && arrCreate.Initializer?.Expressions.Count > 0)
+        {
+            var first = arrCreate.Initializer.Expressions[0];
+            if (first is LiteralExpressionSyntax flit
+                && flit.Token.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.CharacterLiteralToken))
+            {
+                var ch = flit.Token.ValueText;
+                return "\"" + ch + "\"";
+            }
+        }
+
+        // new[] { '/' } implicit array
+        if (expr is ImplicitArrayCreationExpressionSyntax implArr
+            && implArr.Initializer.Expressions.Count > 0)
+        {
+            var first = implArr.Initializer.Expressions[0];
+            if (first is LiteralExpressionSyntax flit
+                && flit.Token.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.CharacterLiteralToken))
+                return "\"" + flit.Token.ValueText + "\"";
+        }
+
+        return fallback;
     }
 
     private static string HandleStringFormat(InvocationExpressionSyntax inv,
@@ -317,6 +383,11 @@ public sealed class StringMethodHandler : InvocationHandlerBase
         return buf;
     }
 
+    // Public overload for use by StringBuilderHandler
+    public static string BuildFormatStringPublic(string template,
+        List<ArgumentSyntax> formatArgs, TranspilerContext ctx)
+        => BuildFormatString(template, formatArgs, ctx);
+
     private static string BuildFormatString(string template,
         List<ArgumentSyntax> formatArgs, TranspilerContext ctx)
     {
@@ -338,8 +409,12 @@ public sealed class StringMethodHandler : InvocationHandlerBase
                     if (colonIdx >= 0) cutIdx = colonIdx;
                     if (commaIdx >= 0 && (cutIdx < 0 || commaIdx < cutIdx)) cutIdx = commaIdx;
                     var idxStr = cutIdx >= 0 ? inner[..cutIdx] : inner;
+                    var fmtSpec = colonIdx >= 0 ? inner[(colonIdx + 1)..] : null;
                     if (int.TryParse(idxStr.Trim(), out var argIdx) && argIdx < formatArgs.Count)
-                        sb.Append(TypeInferrer.FormatSpecifier(formatArgs[argIdx].Expression, ctx));
+                    {
+                        var baseSpec = TypeInferrer.FormatSpecifier(formatArgs[argIdx].Expression, ctx);
+                        sb.Append(fmtSpec != null ? MapFormatSpecifier(fmtSpec, baseSpec) : baseSpec);
+                    }
                     else
                         sb.Append("%s");
                     i = close + 1;
@@ -357,5 +432,31 @@ public sealed class StringMethodHandler : InvocationHandlerBase
             i++;
         }
         return sb.ToString();
+    }
+
+    // Maps .NET format specifiers to printf format strings.
+    // fmtSpec is the text after the colon in {0:F2}, baseSpec is the inferred %d/%f/%s etc.
+    internal static string MapFormatSpecifier(string fmtSpec, string baseSpec)
+    {
+        if (string.IsNullOrEmpty(fmtSpec)) return baseSpec;
+
+        var upper = fmtSpec.TrimStart().ToUpperInvariant();
+        char letter = upper.Length > 0 ? upper[0] : '\0';
+        var numStr = upper.Length > 1 ? upper[1..] : "";
+        int.TryParse(numStr, out var precision);
+
+        return letter switch
+        {
+            'F' => numStr.Length > 0 ? $"%.{precision}f" : "%f",
+            'E' => numStr.Length > 0 ? $"%.{precision}e" : "%e",
+            'G' => numStr.Length > 0 ? $"%.{precision}g" : "%g",
+            'N' => numStr.Length > 0 ? $"%.{precision}f" : "%.2f",
+            'D' => numStr.Length > 0 ? $"%0{precision}d"  : "%d",
+            'X' => numStr.Length > 0 ? $"%0{precision}X"  : "%X",
+            'x' => numStr.Length > 0 ? $"%0{precision}x"  : "%x",
+            'P' => numStr.Length > 0 ? $"%.{precision}f%%%%"  : "%.2f%%",
+            'C' => "%.2f",
+            _ => baseSpec,
+        };
     }
 }

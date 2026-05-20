@@ -136,15 +136,19 @@ public sealed class CSharpToC : CSharpSyntaxWalker
         _ctx.Out.WriteLine("enum " + node.Identifier.Text);
         _ctx.Out.WriteLine("{");
         _ctx.Indent();
+        var enumName = node.Identifier.Text;
+        var members = new List<string>();
         foreach (var member in node.Members)
         {
             var name = member.Identifier.Text;
             _ctx.EnumMembers.Add(name);
+            members.Add(name);
             if (member.EqualsValue != null)
                 _ctx.Out.WriteLine(name + " = " + _exprWriter.Write(member.EqualsValue.Value) + ",");
             else
                 _ctx.Out.WriteLine(name + ",");
         }
+        _ctx.EnumDefs[enumName] = members;
         _ctx.Dedent();
         _ctx.Out.WriteLine("};");
         _ctx.Out.WriteLine();
@@ -448,7 +452,10 @@ public sealed class CSharpToC : CSharpSyntaxWalker
             }
             catch { }
         }
-        return field.Declaration.Type.ToString().Trim();
+        var csType = field.Declaration.Type.ToString().Trim();
+        if (TypeRegistry.IsDecimalType(csType))
+            _ctx.Warn(field, "decimal field mapped to double (precision loss possible)");
+        return csType;
     }
 
     private void WriteOperatorBody(OperatorDeclarationSyntax op, string className)
@@ -893,6 +900,12 @@ public sealed class CSharpToC : CSharpSyntaxWalker
             var sig = OperatorOverloadWriter.BuildSignature(opDecl, name, BuildParamDecl);
             _ctx.Out.WriteLine(sig + ";");
         }
+        // Write conversion operator signatures
+        foreach (var convDecl in node.Members.OfType<ConversionOperatorDeclarationSyntax>())
+        {
+            var sig = OperatorOverloadWriter.BuildConversionSignature(convDecl, name, BuildParamDecl);
+            _ctx.Out.WriteLine(sig + ";");
+        }
 
         _ctx.Out.WriteLine();
     }
@@ -940,8 +953,46 @@ public sealed class CSharpToC : CSharpSyntaxWalker
         foreach (var opDecl in node.Members.OfType<OperatorDeclarationSyntax>())
             WriteOperatorBody(opDecl, className);
 
+        foreach (var convDecl in node.Members.OfType<ConversionOperatorDeclarationSyntax>())
+            WriteConversionOperatorBody(convDecl, className);
+
         foreach (var method in node.Members.OfType<MethodDeclarationSyntax>())
             VisitMethodDeclaration(method);
+    }
+
+    private void WriteConversionOperatorBody(ConversionOperatorDeclarationSyntax conv, string className)
+    {
+        // implicit/explicit operator TargetType(SourceType x)
+        // → TargetType ClassName_to_TargetType(SourceType x) { ... }
+        var retType = TypeRegistry.MapType(conv.Type.ToString().Trim());
+        var isImplicit = conv.ImplicitOrExplicitKeyword.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.ImplicitKeyword);
+        var suffix = isImplicit ? "implicit_" : "explicit_";
+        suffix += conv.Type.ToString().Trim().Replace(".", "_");
+
+        var paramList = string.Join(", ",
+            conv.ParameterList.Parameters.Select(p =>
+            {
+                var decl = BuildParamDecl(p);
+                _ctx.LocalTypes[p.Identifier.Text] = p.Type?.ToString().Trim() ?? "int";
+                return decl;
+            }));
+
+        OperatorOverloadWriter.RegisterConversion(className, conv.Type.ToString().Trim(), isImplicit);
+
+        _ctx.ClearMethodContext();
+        _ctx.Out.WriteLine($"{retType} {className}_{suffix}({paramList})");
+        _ctx.Out.WriteLine("{");
+        _ctx.Indent();
+
+        if (conv.Body != null)
+            foreach (var stmt in conv.Body.Statements)
+                _stmtWriter.Write(stmt);
+        else if (conv.ExpressionBody != null)
+            _ctx.WriteLine($"return {_exprWriter.Write(conv.ExpressionBody.Expression)};");
+
+        _ctx.Dedent();
+        _ctx.Out.WriteLine("}");
+        _ctx.Out.WriteLine();
     }
 
     public override void VisitMethodDeclaration(MethodDeclarationSyntax node)

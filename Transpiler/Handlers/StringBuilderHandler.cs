@@ -1,4 +1,5 @@
 using Microsoft.CodeAnalysis.CSharp.Syntax;
+using Microsoft.CodeAnalysis.CSharp;
 using CS2SX.Core;
 using CS2SX.Transpiler.Writers;
 
@@ -36,6 +37,7 @@ public sealed class StringBuilderHandler : InvocationHandlerBase
             "Replace" => "StringBuilder_Replace(" + sbExpr + ", " + ArgAt(args, 0) + ", " + ArgAt(args, 1) + ")",
             "Append" => BuildAppend(sbExpr, inv, args, ctx),
             "AppendLine" => BuildAppendLine(sbExpr, inv, args, ctx),
+            "AppendFormat" => BuildAppendFormat(sbExpr, inv, args, ctx),
             _ => sbExpr + "->" + method + "(" + JoinArgs(args) + ")",
         };
         return true;
@@ -58,6 +60,34 @@ public sealed class StringBuilderHandler : InvocationHandlerBase
             "char" => "StringBuilder_AppendChar(" + sbExpr + ", " + args[0] + ")",
             _ => "StringBuilder_AppendStr(" + sbExpr + ", " + args[0] + ")",
         };
+    }
+
+    // AppendFormat("{0:F2}", x, ...) → snprintf into tmp buf, then StringBuilder_AppendStr
+    private static string BuildAppendFormat(string sbExpr, InvocationExpressionSyntax inv,
+        List<string> args, TranspilerContext ctx)
+    {
+        if (inv.ArgumentList.Arguments.Count == 0)
+            return "StringBuilder_AppendStr(" + sbExpr + ", \"\")";
+
+        var firstArg = inv.ArgumentList.Arguments[0].Expression;
+        if (firstArg is LiteralExpressionSyntax lit
+            && lit.Token.RawKind == (int)SyntaxKind.StringLiteralToken)
+        {
+            var template = lit.Token.ValueText;
+            var formatArgs = inv.ArgumentList.Arguments.Skip(1).ToList();
+            var fmt = StringMethodHandler.BuildFormatStringPublic(template, formatArgs, ctx);
+            var buf = ctx.NextStringBuf();
+            if (formatArgs.Count > 0)
+            {
+                var argStr = string.Join(", ", args.Skip(1));
+                ctx.Out.WriteLine(ctx.Tab
+                    + $"snprintf({buf}, sizeof({buf}), \"{fmt}\", {argStr});");
+            }
+            return "StringBuilder_AppendStr(" + sbExpr + ", " + buf + ")";
+        }
+
+        // Fallback: treat first arg as string
+        return "StringBuilder_AppendStr(" + sbExpr + ", " + ArgAt(args, 0) + ")";
     }
 
     private static string BuildAppendLine(string sbExpr, InvocationExpressionSyntax inv,

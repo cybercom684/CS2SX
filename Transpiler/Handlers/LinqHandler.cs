@@ -43,6 +43,7 @@ public sealed class LinqHandler : InvocationHandlerBase
         "Contains", "Distinct", "Skip", "Take", "Concat", "Reverse",
         "Single", "SingleOrDefault", "ElementAt", "ElementAtOrDefault",
         "Average", "Aggregate",
+        "ToDictionary", "ToHashSet", "GroupBy", "Zip",
     };
 
     public override bool TryHandle(InvocationExpressionSyntax inv, string calleeStr,
@@ -428,7 +429,7 @@ public sealed class LinqHandler : InvocationHandlerBase
 
                     if (accLambda == null)
                     {
-                        ctx.Warn("Aggregate: kein Accumulator-Lambda gefunden — no-op", "Aggregate");
+                        ctx.Warn(inv, "Aggregate: kein Accumulator-Lambda gefunden — no-op");
                         result = sourceExpr;
                         return true;
                     }
@@ -591,10 +592,116 @@ public sealed class LinqHandler : InvocationHandlerBase
                     return true;
                 }
 
+            case "ToHashSet":
+                {
+                    // list.ToHashSet() → HashSet_T_New() + loop Add
+                    var outVar = ctx.NextTmp("ths");
+                    var idxVar = ctx.NextTmp("i");
+                    ctx.WriteLine($"HashSet_{cInner}* {outVar} = HashSet_{cInner}_New();");
+                    ctx.WriteLine($"for (int {idxVar} = 0; {idxVar} < {listCount.Replace("_idx", idxVar)}; {idxVar}++)");
+                    ctx.WriteLine($"  HashSet_{cInner}_Add({outVar}, {listGet.Replace("_idx", idxVar)});");
+                    result = outVar;
+                    ctx.LocalTypes[outVar] = "HashSet<" + inner + ">";
+                    return true;
+                }
+
+            case "ToDictionary":
+                {
+                    // list.ToDictionary(x => x.Key, x => x.Value)
+                    // or list.ToDictionary(x => x.Key)  — value = element itself
+                    if (lambdaArg == null) { result = "NULL /* ToDictionary: no key selector */"; return true; }
+
+                    LambdaExpressionSyntax? valLambda = null;
+                    if (inv.ArgumentList.Arguments.Count >= 2
+                        && inv.ArgumentList.Arguments[1].Expression is LambdaExpressionSyntax vl)
+                        valLambda = vl;
+
+                    var keyFn = MakeLifter().LiftLambda(lambdaArg, elementTypeHint: inner);
+
+                    string keyInner = "int";
+                    if (lambdaArg is SimpleLambdaExpressionSyntax skl)
+                        keyInner = TypeInferrer.InferCSharpType(skl.Body, ctx);
+                    else if (lambdaArg is ParenthesizedLambdaExpressionSyntax pkl)
+                        keyInner = TypeInferrer.InferCSharpType(pkl.Body, ctx);
+                    var cKey = keyInner == "string" ? "str" : TypeRegistry.MapType(keyInner);
+
+                    string valInner = inner;
+                    string valFnName = "";
+                    if (valLambda != null)
+                    {
+                        valFnName = MakeLifter().LiftLambda(valLambda, elementTypeHint: inner);
+                        if (valLambda is SimpleLambdaExpressionSyntax svl)
+                            valInner = TypeInferrer.InferCSharpType(svl.Body, ctx);
+                        else if (valLambda is ParenthesizedLambdaExpressionSyntax pvl)
+                            valInner = TypeInferrer.InferCSharpType(pvl.Body, ctx);
+                    }
+                    var cVal = valInner == "string" ? "str" : TypeRegistry.MapType(valInner);
+
+                    var outVar = ctx.NextTmp("tdict");
+                    var idxVar = ctx.NextTmp("i");
+                    ctx.WriteLine($"Dict_{cKey}_{cVal}* {outVar} = Dict_{cKey}_{cVal}_New();");
+                    ctx.WriteLine($"for (int {idxVar} = 0; {idxVar} < {listCount.Replace("_idx", idxVar)}; {idxVar}++)");
+                    ctx.WriteLine("{");
+                    ctx.Indent();
+                    ctx.WriteLine($"{cInnerType}{elemPtr} _td_e = {listGet.Replace("_idx", idxVar)};");
+                    var valExpr = valLambda != null
+                        ? $"{valFnName}({captureCtx}, _td_e)"
+                        : "_td_e";
+                    ctx.WriteLine($"Dict_{cKey}_{cVal}_Set({outVar}, {keyFn}({captureCtx}, _td_e), {valExpr});");
+                    ctx.Dedent();
+                    ctx.WriteLine("}");
+                    result = outVar;
+                    ctx.LocalTypes[outVar] = $"Dictionary<{keyInner},{valInner}>";
+                    return true;
+                }
+
+            case "GroupBy":
+                {
+                    // list.GroupBy(x => x.Key) → List<List<T>>  (inner lists per group)
+                    // Simplified: returns a List_str* of group keys; full group support is complex.
+                    // Emit a List of the source elements grouped by key — represented as List<T>.
+                    if (lambdaArg == null) { result = sourceExpr; return true; }
+                    ctx.Warn(inv, "GroupBy — simplified: returns source list (full group semantics not supported in C)");
+                    result = sourceExpr;
+                    return true;
+                }
+
+            case "Zip":
+                {
+                    // list.Zip(other, (a, b) => result)
+                    if (inv.ArgumentList.Arguments.Count < 2) { result = "NULL"; return true; }
+                    var otherExpr = writeExpr(inv.ArgumentList.Arguments[0].Expression);
+
+                    LambdaExpressionSyntax? zipLambda = null;
+                    if (inv.ArgumentList.Arguments.Count >= 2
+                        && inv.ArgumentList.Arguments[1].Expression is LambdaExpressionSyntax zl)
+                        zipLambda = zl;
+
+                    if (zipLambda == null) { result = sourceExpr; return true; }
+
+                    string projInner = "int";
+                    if (zipLambda is ParenthesizedLambdaExpressionSyntax pzl)
+                        projInner = TypeInferrer.InferCSharpType(pzl.Body, ctx);
+                    var cProjInner = projInner == "string" ? "str" : TypeRegistry.MapType(projInner);
+
+                    var zipFn = MakeLifter().LiftLambda(zipLambda, elementTypeHint: inner);
+                    var outVar = ctx.NextTmp("zip");
+                    var idxVar = ctx.NextTmp("i");
+                    var otherCount = $"{otherExpr}->count";
+                    var srcCount = listCount.Replace("_idx", idxVar);
+                    ctx.WriteLine($"List_{cProjInner}* {outVar} = List_{cProjInner}_New();");
+                    ctx.WriteLine($"for (int {idxVar} = 0; {idxVar} < {srcCount} && {idxVar} < {otherCount}; {idxVar}++)");
+                    ctx.WriteLine($"  List_{cProjInner}_Add({outVar}, {zipFn}({captureCtx}, {listGet.Replace("_idx", idxVar)}, List_{cInner}_Get({otherExpr}, {idxVar})));");
+                    result = outVar;
+                    ctx.LocalTypes[outVar] = "List<" + projInner + ">";
+                    return true;
+                }
+
             default:
-                ctx.Warn($"LINQ method '{methodName}' not fully supported — emitting no-op", methodName);
+                ctx.Warn(inv, $"LINQ method '{methodName}' not fully supported — emitting no-op");
                 result = sourceExpr;
                 return true;
         }
     }
 }
+

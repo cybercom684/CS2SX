@@ -54,6 +54,23 @@ public class ProjectCreator
             }
             """);
 
+        //Eine einfache Batch-Datei zum Builden und Bereinigen des Projekts (Windows_only)
+        File.WriteAllText(Path.Combine(projectDir, "cs2sx_batch.cmd"), $"""
+            @echo off
+            REM Batch-Datei für CS2SX-Befehle
+            REM Wähle einen Befehl: clean, build, watch
+            set /p cmd=Enter command (clean/build/watch):
+            if "%cmd%"=="clean" (
+                cs2sx clean {appName}.csproj
+            ) else if "%cmd%"=="build" (
+                cs2sx build {appName}.csproj
+            ) else if "%cmd%"=="watch" (
+                cs2sx watch {appName}.csproj
+            ) else (
+                echo Invalid command. Use clean, build, or watch.
+            )
+            """);
+
         // FIX: Default-Icon als 1x1 Pixel JPEG exportieren wenn kein Icon vorhanden
         // Ein echtes Icon muss vom User ersetzt werden, aber der Build schlägt nicht fehl.
         ExportDefaultIconSafe(projectDir);

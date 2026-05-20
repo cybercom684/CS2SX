@@ -39,7 +39,7 @@ public sealed class AsyncHandler : InvocationHandlerBase
         // Task.Delay → kein op (busy-wait wäre schlecht, einfach ignorieren mit Warning)
         if (calleeStr == "Task.Delay")
         {
-            ctx.Warn("Task.Delay — ignored on Switch (use svcSleepThread for delays)", calleeStr);
+            ctx.Warn(inv, "Task.Delay — ignored on Switch (use svcSleepThread for delays)");
             result = "/* Task.Delay ignored */";
             return true;
         }
