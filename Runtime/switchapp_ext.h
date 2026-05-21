@@ -74,21 +74,24 @@ static inline void SwitchAppEx_Run(SwitchAppEx* self)
 
     hidInitializeTouchScreen();
 
-    NWindow* win = nwindowGetDefault();
-    framebufferCreate(&g_fb, win,
-        (u32)g_fb_width, (u32)g_fb_height,
-        PIXEL_FORMAT_RGBA_8888, 2);
-    framebufferMakeLinear(&g_fb);
-
+    // OnInit first — same fix as SwitchApp_Run: Graphics.Init() must run before
+    // framebufferCreate so g_fb_width/height are set to the user's requested size.
     if (self->base.OnInit)
         self->base.OnInit((SwitchApp*)self);
 
     bool psmOk = R_SUCCEEDED(psmInitialize());
 
     int use_gfx = g_gfx_init;
-    if (!use_gfx)
+    if (use_gfx)
     {
-        framebufferClose(&g_fb);
+        NWindow* win = nwindowGetDefault();
+        framebufferCreate(&g_fb, win,
+            (u32)g_fb_width, (u32)g_fb_height,
+            PIXEL_FORMAT_RGBA_8888, 2);
+        framebufferMakeLinear(&g_fb);
+    }
+    else
+    {
         consoleInit(NULL);
         Form_InitFocus(&self->base.form);
     }
