@@ -29,23 +29,42 @@ public sealed class UsingStaticResolver
     private readonly HashSet<string> _usingStaticTypes =
         new(StringComparer.Ordinal);
 
+    // using X = Y; → "X" → "Y" (short name or fully qualified)
+    private readonly Dictionary<string, string> _usingAliases =
+        new(StringComparer.Ordinal);
+
     public IReadOnlyCollection<string> UsingStaticTypes => _usingStaticTypes;
+    public IReadOnlyDictionary<string, string> UsingAliases => _usingAliases;
 
     /// <summary>
-    /// Liest alle "using static" Direktiven aus dem Syntax-Baum.
+    /// Liest alle "using static" und "using X = Y" Direktiven aus dem Syntax-Baum.
     /// </summary>
     public void Collect(Microsoft.CodeAnalysis.SyntaxNode root)
     {
         _usingStaticTypes.Clear();
+        _usingAliases.Clear();
 
-        foreach (var us in root.DescendantNodes()
-            .OfType<UsingDirectiveSyntax>()
-            .Where(u => u.StaticKeyword.IsKind(
-                Microsoft.CodeAnalysis.CSharp.SyntaxKind.StaticKeyword)))
+        foreach (var us in root.DescendantNodes().OfType<UsingDirectiveSyntax>())
         {
-            var typeName = us.Name?.ToString() ?? "";
-            if (!string.IsNullOrEmpty(typeName))
-                _usingStaticTypes.Add(typeName);
+            if (us.StaticKeyword.IsKind(
+                Microsoft.CodeAnalysis.CSharp.SyntaxKind.StaticKeyword))
+            {
+                var typeName = us.Name?.ToString() ?? "";
+                if (!string.IsNullOrEmpty(typeName))
+                    _usingStaticTypes.Add(typeName);
+            }
+            else if (us.Alias != null)
+            {
+                // using X = Some.Qualified.Type; or using X = SomeType;
+                var aliasName = us.Alias.Name.Identifier.Text;
+                var targetName = us.Name?.ToString() ?? "";
+                // Use short name (last segment) as the resolved C# type
+                var shortTarget = targetName.Contains('.')
+                    ? targetName[(targetName.LastIndexOf('.') + 1)..]
+                    : targetName;
+                if (!string.IsNullOrEmpty(aliasName) && !string.IsNullOrEmpty(shortTarget))
+                    _usingAliases[aliasName] = shortTarget;
+            }
         }
     }
 

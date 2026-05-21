@@ -34,6 +34,7 @@ public sealed class StatementWriter
             case TryStatementSyntax tryStmt: WriteTryCatch(tryStmt); break;
             case ThrowStatementSyntax throwStmt: WriteThrow(throwStmt); break;
             case UsingStatementSyntax usingStmt: WriteUsing(usingStmt); break;
+            case LockStatementSyntax lockStmt: WriteLock(lockStmt); break;
             case EmptyStatementSyntax: break;
             case YieldStatementSyntax yield:
                 _ctx.Warn(yield, "yield return/break not supported — C has no generators; refactor to a List<T> or callback pattern");
@@ -50,6 +51,10 @@ public sealed class StatementWriter
     {
         var line = ret.GetLocation().GetLineSpan().StartLinePosition.Line + 1;
         _ctx.CurrentLine = line;
+
+        // Flush using-var cleanups before return (LIFO order)
+        foreach (var cleanup in _ctx.PendingUsingVarCleanups)
+            _ctx.WriteLine(cleanup);
 
         if (ret.Expression == null)
             _ctx.WriteLineWithMapping("return;", line, "return;");
@@ -78,7 +83,8 @@ public sealed class StatementWriter
 
     private void WriteLocal(LocalDeclarationStatementSyntax local)
     {
-        var declType = local.Declaration.Type.ToString().Trim();
+        bool isUsingDecl = local.UsingKeyword.IsKind(SyntaxKind.UsingKeyword);
+        var declType = _ctx.ResolveAlias(local.Declaration.Type.ToString().Trim());
 
         if (TypeRegistry.IsDecimalType(declType))
             _ctx.Warn(local, "decimal is not supported — mapped to double (precision loss possible)");
@@ -108,12 +114,15 @@ public sealed class StatementWriter
                     : " = {0}";
                 _ctx.WriteLine(TypeRegistry.MapType(declType) + " " + v.Identifier + si + ";");
                 _ctx.LocalTypes[v.Identifier.Text] = declType;
+                if (isUsingDecl)
+                    ScheduleUsingVarCleanup(v.Identifier.Text, declType);
                 continue;
             }
 
             if (NullableHandler.IsNullable(declType))
             {
                 WriteNullableLocal(v, declType);
+                if (isUsingDecl) ScheduleUsingVarCleanup(v.Identifier.Text, declType);
                 continue;
             }
 
@@ -135,6 +144,7 @@ public sealed class StatementWriter
                 var initVal = _expr.Write(v.Initializer.Value);
                 _ctx.WriteLine("List_str* " + v.Identifier + " = " + initVal + ";");
                 _ctx.LocalTypes[v.Identifier.Text] = "List<string>";
+                if (isUsingDecl) ScheduleUsingVarCleanup(v.Identifier.Text, "List<string>");
                 continue;
             }
 
@@ -199,7 +209,43 @@ public sealed class StatementWriter
                 ? "List<string>"
                 : (declType is "var" or "var?" ? cTypeFinal : declType);
             _ctx.LocalTypes[v.Identifier.Text] = registeredType;
+
+            if (isUsingDecl) ScheduleUsingVarCleanup(v.Identifier.Text, registeredType);
         }
+    }
+
+    // Schedules a cleanup action for a "using var" declaration.
+    // These are flushed (LIFO) before each return statement.
+    private void ScheduleUsingVarCleanup(string varName, string csType)
+    {
+        string cleanup;
+        if (TypeRegistry.IsStringBuilder(csType))
+            cleanup = $"if ({varName}) StringBuilder_Free({varName});";
+        else if (TypeRegistry.IsList(csType))
+        {
+            var inner = TypeRegistry.GetListInnerType(csType) ?? "int";
+            var cInner = inner == "string" ? "str" : TypeRegistry.MapType(inner);
+            cleanup = $"if ({varName}) List_{cInner}_Free({varName});";
+        }
+        else if (TypeRegistry.IsDictionary(csType))
+        {
+            var types = TypeRegistry.GetDictionaryTypes(csType);
+            if (types.HasValue)
+            {
+                var ck = types.Value.key == "string" ? "str" : TypeRegistry.MapType(types.Value.key);
+                var cv = types.Value.val == "string" ? "str" : TypeRegistry.MapType(types.Value.val);
+                cleanup = $"if ({varName}) Dict_{ck}_{cv}_Free({varName});";
+            }
+            else cleanup = $"/* using var {varName}: free manually */";
+        }
+        else if (TypeRegistry.IsDisposable(csType))
+            cleanup = $"if ({varName}) {csType}_Dispose({varName});";
+        else if (!TypeRegistry.IsPrimitive(csType) && csType != "string"
+                 && TypeRegistry.NeedsPointerSuffix(csType))
+            cleanup = $"if ({varName}) {TypeRegistry.MapType(csType)}_Free({varName});";
+        else
+            return; // primitives don't need cleanup
+        _ctx.PendingUsingVarCleanups.Push(cleanup);
     }
 
     private string? TryWrapAsInterface(string exprRaw, string exprCode, string targetIfaceName)
@@ -914,7 +960,16 @@ public sealed class StatementWriter
         if (_ctx.ArrayLengths.TryGetValue(colRaw, out var knownLen)) return knownLen;
         if (_ctx.ArrayLengths.TryGetValue(colKey, out var knownLenField)) return knownLenField;
         if (_ctx.LocalTypes.ContainsKey(colRaw))
-            return "(sizeof(" + colExpr + ") / sizeof(" + colExpr + "[0]))";
+        {
+            // Only use sizeof/sizeof for stack arrays; heap arrays need stored length
+            var varType = _ctx.LocalTypes[colRaw];
+            bool isDynamic = varType.EndsWith("[]");
+            if (!isDynamic)
+                return "(sizeof(" + colExpr + ") / sizeof(" + colExpr + "[0]))";
+            // For dynamically-sized arrays without stored length, warn and use 0 length
+            _ctx.Warn($"foreach on dynamic array '{colRaw}' without known length — use an explicit length variable or ArrayLengths registration", colRaw);
+            return colExpr + "_len /* unknown — set this before foreach */";
+        }
         return colExpr + "_count";
     }
 
@@ -1060,13 +1115,21 @@ public sealed class StatementWriter
         }
     }
 
+    private void WriteLock(LockStatementSyntax lockStmt)
+    {
+        // Switch is single-threaded from C# perspective; lock is a no-op
+        _ctx.Warn(lockStmt, "lock statement: Switch homebrew is single-threaded — lock ignored");
+        _ctx.WriteLine("/* lock(" + _expr.Write(lockStmt.Expression) + ") — no-op on Switch */");
+        WriteBlockOrStmt(lockStmt.Statement);
+    }
+
     private void WriteTryCatch(TryStatementSyntax tryStmt)
     {
         var jmpBufName = "_ex_buf_" + _ctx.NextTmp();
         // FIX: Stack statt single field — geschachtelte try/catch korrekt
         _ctx.PushJumpBuf(jmpBufName);
 
-        _ctx.WriteLine("char _ex_msg[256] = \"unknown error\";");
+        _ctx.WriteLine("char _ex_msg[512] = \"unknown error\";");
         _ctx.WriteLine("jmp_buf " + jmpBufName + ";");
         _ctx.WriteLine("int _ex_val = setjmp(" + jmpBufName + ");");
         _ctx.WriteLine("if (_ex_val == 0)");
@@ -1114,7 +1177,12 @@ public sealed class StatementWriter
         // FIX: finally-Blöcke wurden zuvor still gedropt
         if (tryStmt.Finally != null)
         {
-            _ctx.WriteLine("/* finally */");
+            // Check if try block has return statements (finally won't execute in that case in C)
+            bool tryHasReturn = tryStmt.Block.Statements
+                .OfType<ReturnStatementSyntax>().Any();
+            if (tryHasReturn)
+                _ctx.Warn(tryStmt.Finally, "finally block: return inside try bypasses finally in C — finally still emitted after catch but may not execute on all paths");
+            _ctx.WriteLine("/* finally — always runs after try/catch */");
             _ctx.WriteLine("{");
             _ctx.Indent();
             foreach (var stmt in tryStmt.Finally.Block.Statements)

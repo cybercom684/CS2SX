@@ -179,9 +179,9 @@ public class MyApp : SwitchApp
 
 | Typ | Problem |
 |---|---|
-| `IntPtr` | Wird zu `IntPtr` in C → GCC kennt diesen Typ nicht |
+| `IntPtr` / `nint` | Wird zu `intptr_t` — funktioniert, aber vorzeichenbehaftet; keine Zeiger-Arithmetik-Semantik |
 | `void*` | Wird vom Transpiler als Pointer-Feld behandelt → falscher Destruktor, falsche Signaturen |
-| `ulong` | Wird zu `unsigned long long` → 8 Byte auf AArch64, passt für jeden Pointer-Wert |
+| `ulong` | Wird zu `unsigned long long` → 8 Byte auf AArch64, passt für jeden opaken Handle-Wert |
 
 ### Wichtige Regeln für addLib-Projekte
 
@@ -484,6 +484,9 @@ public class MyApp : SwitchAppEx
 | `List<UserClass>` | ✅ | Listen eigener Klassen — Instanzen werden heap-allokiert (`CS2SX_LIST_DEFINE_PTR`) |
 | `List<string>` | ✅ | `foreach`, `string.Join`, `string.Split` |
 | `Dictionary<K,V>` | ✅ | `Add`, `Remove`, `ContainsKey`, `TryGetValue`, Indexer, `foreach` |
+| `Stack<T>` | ✅ | `Push`, `Pop`, `Peek`, `Clear`, `Count` — mit Underflow-Guard |
+| `Queue<T>` | ✅ | `Enqueue`, `Dequeue`, `Peek`, `Clear`, `Count` — mit Underflow-Guard |
+| `HashSet<T>` | ✅ | `Add`, `Contains`, `Remove`, `Clear`, `UnionWith`, `IntersectWith`, `ExceptWith` |
 | `StringBuilder` | ✅ | `Append`, `AppendLine`, `Clear`, `ToString`, `Insert`, `Replace`, `IndexOf` |
 | `int[]`, `float[]`, `string[]` | ✅ | Stack-Arrays mit Initializer |
 | `int[,]` mehrdimensionale Arrays | ✅ | wird als flaches 1D-Array transpiliert |
@@ -624,6 +627,17 @@ LINQ-Methodenketten werden in äquivalente C-Schleifen expandiert. Alle Ergebnis
 | `.Concat(other)` | Zusammengeführte Liste |
 | `.Reverse()` | Umgekehrte Kopie |
 | `.ElementAt(i)` / `.ElementAtOrDefault(i)` | Element per Index |
+| `.TakeWhile(pred)` | Elemente solange Bedingung wahr |
+| `.SkipWhile(pred)` | Elemente überspringen solange Bedingung wahr |
+| `.SelectMany(proj)` | Verschachtelte Listen flachklopfen |
+| `.GroupBy(key)` | Gruppierung → `Dictionary<Key, List<T>>` |
+| `.Join(inner, outerKey, innerKey, result)` | Zwei Listen verbinden |
+| `.Zip(other, (a,b) => …)` | Parallel über zwei Listen iterieren |
+| `.ToDictionary(key, val?)` | Liste → `Dictionary<K,V>` |
+| `.ToHashSet()` | Liste → `HashSet<T>` |
+| `.Except(other)` | Differenz zweier Listen |
+| `.Intersect(other)` | Schnittmenge zweier Listen |
+| `.Union(other)` | Vereinigung zweier Listen (dedupliziert) |
 
 ```csharp
 List<int> scores = new List<int>();
@@ -794,6 +808,7 @@ Alle Pfade müssen absolut sein und mit `/switch/` beginnen — außer beim Star
 | `foreach` über `List<T>`, Arrays, `string`, `Dictionary<K,V>` | ✅ |
 | `switch` (Wert und Pattern) | ✅ |
 | `try` / `catch` | ✅ (via `setjmp/longjmp`) |
+| `lock` | ✅ | No-op mit Warning — Switch ist single-threaded |
 | `using` (mit `IDisposable`) | ✅ |
 | `??`, `??=`, `?.` | ✅ |
 
@@ -824,6 +839,8 @@ if (obj is Dog d) { d.Bark(); }
 | Generics (Methoden) | ✅ — Typ-Spezialisierung am Aufruf-Punkt |
 | `interface` | ✅ |
 | Extension-Methoden | ✅ |
+| `record` | ✅ | Wird als Klasse mit Auto-Properties transpiliert |
+| Named / optionale Parameter | ✅ | Neuordnung per SemanticModel; Defaults automatisch injiziert |
 | `using static` | ✅ |
 | `async` / `await` | ⚠️ Synchroner Fallback |
 
@@ -883,7 +900,8 @@ MeinProjekt/
 | Eine Klasse pro `.cs`-Datei | Keine verschachtelten Klassen |
 | String-Puffer 512 Bytes | Für `snprintf`-basierte Interpolation |
 | `$"..."` nicht in Felder speichern | Erzeugt Stack-Buffer → dangling pointer. Nur in lokalen Variablen oder direkt in Ausgabe-Funktionen verwenden |
-| `IntPtr` / `void*` als Felder | Nicht unterstützt — `ulong` als Pointer-Ersatz für externe Libraries verwenden |
+| `IntPtr` / `nint` | Unterstützt → `intptr_t`; für opake C-Handles ist `ulong` weiterhin die sicherere Wahl |
+| `void*` als Felder | Nicht empfohlen — Transpiler behandelt es als Pointer-Feld → falscher Destruktor; `ulong` verwenden |
 | `Input.IsDown()` statt `kDown` | Direktes `kDown` in Subklassen-Methoden ist nicht erreichbar — immer `Input.IsDown/IsHeld/IsUp()` verwenden |
 | Datei-Lesepuffer max. 1 MB | `File.ReadAllText` |
 | Bitmap-Font 8×8 | Kein Anti-Aliasing, kein TrueType (Freetype via `addLib` als Alternative) |

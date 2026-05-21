@@ -60,6 +60,17 @@
 static inline int CS2SX_Sign(int x) { return (x > 0) - (x < 0); }
 
 // ============================================================================
+// NULL-safe string comparison (CS2SX_strcmp_safe)
+// ============================================================================
+
+static inline int CS2SX_strcmp_safe(const char* a, const char* b) {
+    if (!a && !b) return 0;
+    if (!a) return -1;
+    if (!b) return 1;
+    return strcmp(a, b);
+}
+
+// ============================================================================
 // Fix 3: Pseudo-Zufallszahlengenerator
 // ============================================================================
 

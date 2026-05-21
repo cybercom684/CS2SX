@@ -1,9 +1,15 @@
 ﻿using System.Diagnostics;
+using System.Text.RegularExpressions;
+using CS2SX.Logging;
 
 namespace CS2SX.Build;
 
 internal static class ProcessRunner
 {
+    // GCC code-context lines: "  626 |    code;" or "      |    ^~~~~"
+    private static readonly Regex s_gccContext =
+        new(@"^\s*(\d+\s*)?\|", RegexOptions.Compiled);
+
     public static string ResolveTool(string path)
     {
         if (File.Exists(path)) return path;
@@ -39,11 +45,29 @@ internal static class ProcessRunner
             var outText = stdout.Result;
             var errText = stderr.Result;
 
-            if (!string.IsNullOrWhiteSpace(outText)) Console.Write(outText);
-            if (!string.IsNullOrWhiteSpace(errText)) Console.Error.Write(errText);
+            // Route all output through Log so BuildRenderer can buffer and display
+            // it cleanly after the build completes — never write directly to Console.
+            LogLines(outText, isError: false);
+            LogLines(errText, isError: true);
 
             if (proc.ExitCode != 0)
-                throw new Exception(toolName + " fehlgeschlagen (Exit-Code " + proc.ExitCode + ").");
+                throw new Exception(toolName + " fehlgeschlagen (Exit-Code " + proc.ExitCode + ").\n" + errText);
+        }
+    }
+
+    private static void LogLines(string text, bool isError)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return;
+        foreach (var raw in text.Split('\n'))
+        {
+            var line = raw.TrimEnd('\r');
+            if (string.IsNullOrWhiteSpace(line)) continue;
+            // Skip GCC code-context lines (source snippets + ^~~~~ pointers)
+            if (isError && s_gccContext.IsMatch(line)) continue;
+
+            if (line.Contains(": error:"))        Log.Error(line);
+            else if (line.Contains(": warning:")) Log.Warning(line);
+            else                                  Log.Info(line);
         }
     }
 

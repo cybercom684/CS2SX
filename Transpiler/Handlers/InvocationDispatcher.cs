@@ -107,9 +107,11 @@ public sealed class InvocationDispatcher
     {
         var calleeStr = inv.Expression.ToString();
 
-        var args = inv.ArgumentList.Arguments
+        var rawArgs = inv.ArgumentList.Arguments
             .Select(a => BuildArg(a))
             .ToList();
+
+        var args = ResolveNamedAndOptionalArgs(inv, rawArgs);
 
         if (inv.Expression is GenericNameSyntax genName && _genericMethodExpander != null)
         {
@@ -140,6 +142,85 @@ public sealed class InvocationDispatcher
         // Return null — WriteInvocation will try TryWriteDirectUserClassCall next,
         // and only warn if it truly falls through to the raw-passthrough fallback.
         return null;
+    }
+
+    /// <summary>
+    /// Reorders named arguments to positional order and injects optional parameter defaults.
+    /// Falls back to the original arg list if SemanticModel is unavailable or resolution fails.
+    /// </summary>
+    private List<string> ResolveNamedAndOptionalArgs(
+        InvocationExpressionSyntax inv, List<string> rawArgs)
+    {
+        if (_ctx.SemanticModel == null) return rawArgs;
+
+        bool hasNamed = inv.ArgumentList.Arguments.Any(a => a.NameColon != null);
+
+        Microsoft.CodeAnalysis.IMethodSymbol? sym = null;
+        try
+        {
+            sym = _ctx.SemanticModel.GetSymbolInfo(inv).Symbol
+                  as Microsoft.CodeAnalysis.IMethodSymbol;
+        }
+        catch { }
+
+        if (sym == null) return rawArgs;
+
+        var parameters = sym.Parameters;
+
+        // No reordering needed if no named args and all params are positional
+        if (!hasNamed && rawArgs.Count >= parameters.Length) return rawArgs;
+        // No optional params and no named args → nothing to do
+        if (!hasNamed && !parameters.Any(p => p.HasExplicitDefaultValue)) return rawArgs;
+
+        try
+        {
+            // Build result array pre-filled with defaults
+            var result = new string[parameters.Length];
+            for (int i = 0; i < parameters.Length; i++)
+            {
+                result[i] = parameters[i].HasExplicitDefaultValue
+                    ? FormatDefaultValue(parameters[i].ExplicitDefaultValue, parameters[i].Type)
+                    : (rawArgs.Count > i ? rawArgs[i] : "0 /* missing arg */");
+            }
+
+            // Fill actual args (respecting NameColon)
+            for (int i = 0; i < inv.ArgumentList.Arguments.Count; i++)
+            {
+                var arg = inv.ArgumentList.Arguments[i];
+                if (arg.NameColon != null)
+                {
+                    var paramName = arg.NameColon.Name.Identifier.Text;
+                    for (int j = 0; j < parameters.Length; j++)
+                    {
+                        if (parameters[j].Name == paramName)
+                        {
+                            result[j] = rawArgs[i];
+                            break;
+                        }
+                    }
+                }
+                else if (i < result.Length)
+                {
+                    result[i] = rawArgs[i];
+                }
+            }
+
+            return result.ToList();
+        }
+        catch { return rawArgs; }
+    }
+
+    private static string FormatDefaultValue(object? value, Microsoft.CodeAnalysis.ITypeSymbol type)
+    {
+        if (value == null) return "NULL";
+        return value switch
+        {
+            bool b   => b ? "1" : "0",
+            string s => "\"" + s.Replace("\\", "\\\\").Replace("\"", "\\\"") + "\"",
+            float f  => f.ToString("G", System.Globalization.CultureInfo.InvariantCulture) + "f",
+            double d => d.ToString("G", System.Globalization.CultureInfo.InvariantCulture),
+            _        => value.ToString() ?? "0",
+        };
     }
 
     private string BuildArg(ArgumentSyntax a)

@@ -280,6 +280,8 @@ public sealed class StringMethodHandler : InvocationHandlerBase
     {
         if (args.Count == 0) return "String_Split(" + receiver + ", \",\")";
         var sep = ExtractSplitSeparator(inv, 0, args[0]);
+        // Guard: empty separator would cause strtok to loop forever
+        if (sep == "\"\"") return "/* String.Split(\"\") — empty separator not supported; returning single-element list */ String_Split(" + receiver + ", \",\")";
         return "String_Split(" + receiver + ", " + sep + ")";
     }
 
@@ -289,6 +291,8 @@ public sealed class StringMethodHandler : InvocationHandlerBase
         if (args.Count == 0) return "NULL";
         if (args.Count == 1) return "String_Split(" + args[0] + ", \",\")";
         var sep = ExtractSplitSeparator(inv, 1, args[1]);
+        // Guard: empty separator would cause strtok to loop forever
+        if (sep == "\"\"") return "/* String.Split(\"\") — empty separator not supported; returning single-element list */ String_Split(" + args[0] + ", \",\")";
         return "String_Split(" + args[0] + ", " + sep + ")";
     }
 

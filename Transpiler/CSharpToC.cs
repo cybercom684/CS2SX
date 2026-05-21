@@ -99,6 +99,10 @@ public sealed class CSharpToC : CSharpSyntaxWalker
             ?? CSharpSyntaxTree.ParseText(csharpSource);
 
         _ctx.UsingStaticResolver.Collect(tree.GetRoot());
+        // Sync type aliases (using X = Y;) into context
+        _ctx.TypeAliases.Clear();
+        foreach (var kv in _ctx.UsingStaticResolver.UsingAliases)
+            _ctx.TypeAliases[kv.Key] = kv.Value;
 
         var diags = tree.GetDiagnostics()
             .Where(d => d.Severity == Microsoft.CodeAnalysis.DiagnosticSeverity.Error)
@@ -133,10 +137,19 @@ public sealed class CSharpToC : CSharpSyntaxWalker
     {
         if (_mode != TranspileMode.HeaderOnly) return;
 
-        _ctx.Out.WriteLine("enum " + node.Identifier.Text);
+        var enumName = node.Identifier.Text;
+
+        // Determine the underlying C type (default: int)
+        string underlyingCType = "int";
+        if (node.BaseList?.Types.Count > 0)
+        {
+            var baseTypeName = node.BaseList.Types[0].ToString().Trim();
+            underlyingCType = TypeRegistry.MapType(baseTypeName);
+        }
+
+        _ctx.Out.WriteLine("enum " + enumName);
         _ctx.Out.WriteLine("{");
         _ctx.Indent();
-        var enumName = node.Identifier.Text;
         var members = new List<string>();
         foreach (var member in node.Members)
         {
@@ -151,6 +164,9 @@ public sealed class CSharpToC : CSharpSyntaxWalker
         _ctx.EnumDefs[enumName] = members;
         _ctx.Dedent();
         _ctx.Out.WriteLine("};");
+        // Emit a typedef with the correct underlying type when non-default
+        if (underlyingCType != "int")
+            _ctx.Out.WriteLine($"typedef {underlyingCType} {enumName};");
         _ctx.Out.WriteLine();
     }
 
@@ -340,7 +356,7 @@ public sealed class CSharpToC : CSharpSyntaxWalker
                 {
                     var inner = TypeRegistry.GetListInnerType(csType) ?? "int";
                     var cInner = inner == "string" ? "str" : TypeRegistry.MapType(inner);
-                    _ctx.WriteLine($"if ({fieldExpr}) List_{cInner}_Free({fieldExpr});");
+                    _ctx.WriteLine($"if ({fieldExpr}) {{ List_{cInner}_Free({fieldExpr}); {fieldExpr} = NULL; }}");
                 }
                 else if (TypeRegistry.IsDictionary(csType))
                 {
@@ -349,21 +365,21 @@ public sealed class CSharpToC : CSharpSyntaxWalker
                     {
                         var ck = types.Value.key == "string" ? "str" : TypeRegistry.MapType(types.Value.key);
                         var cv = types.Value.val == "string" ? "str" : TypeRegistry.MapType(types.Value.val);
-                        _ctx.WriteLine($"if ({fieldExpr}) Dict_{ck}_{cv}_Free({fieldExpr});");
+                        _ctx.WriteLine($"if ({fieldExpr}) {{ Dict_{ck}_{cv}_Free({fieldExpr}); {fieldExpr} = NULL; }}");
                     }
                 }
                 else if (TypeRegistry.IsStringBuilder(csType))
                 {
-                    _ctx.WriteLine($"if ({fieldExpr}) StringBuilder_Free({fieldExpr});");
+                    _ctx.WriteLine($"if ({fieldExpr}) {{ StringBuilder_Free({fieldExpr}); {fieldExpr} = NULL; }}");
                 }
                 else if (TypeRegistry.IsDisposable(csType))
                 {
-                    _ctx.WriteLine($"if ({fieldExpr}) {csType}_Dispose({fieldExpr});");
+                    _ctx.WriteLine($"if ({fieldExpr}) {{ {csType}_Dispose({fieldExpr}); {fieldExpr} = NULL; }}");
                 }
                 else
                 {
                     var cType = TypeRegistry.MapType(csType);
-                    _ctx.WriteLine($"if ({fieldExpr}) {cType}_Free({fieldExpr});");
+                    _ctx.WriteLine($"if ({fieldExpr}) {{ {cType}_Free({fieldExpr}); {fieldExpr} = NULL; }}");
                 }
             }
         }
@@ -1176,6 +1192,235 @@ public sealed class CSharpToC : CSharpSyntaxWalker
         }
     }
 
+    // ── Records ───────────────────────────────────────────────────────────────
+
+    public override void VisitRecordDeclaration(RecordDeclarationSyntax node)
+    {
+        // Records are treated as struct-like classes with positional constructor params
+        // and auto-properties as fields.
+        var name = node.Identifier.Text;
+        _ctx.ClearClassContext();
+        _ctx.CurrentClass = name;
+
+        // Collect positional record params as fields
+        var paramFields = node.ParameterList?.Parameters
+            .Select(p => (
+                csType: _ctx.ResolveAlias(p.Type?.ToString().Trim() ?? "int"),
+                fieldName: p.Identifier.Text))
+            .ToList() ?? new();
+
+        // Also collect any additional properties/fields in the body
+        foreach (var (csType, fieldName) in paramFields)
+            _ctx.FieldTypes[fieldName] = csType;
+
+        if (_mode == TranspileMode.HeaderOnly)
+        {
+            _ctx.Out.WriteLine($"struct {name}");
+            _ctx.Out.WriteLine("{");
+            _ctx.Indent();
+            foreach (var (csType, fieldName) in paramFields)
+            {
+                var cType = TypeRegistry.MapType(csType);
+                var needsPtr = TypeRegistry.NeedsPointerSuffix(csType) && !cType.EndsWith("*");
+                _ctx.WriteLine($"{cType}{(needsPtr ? "*" : "")} {fieldName};");
+            }
+            // Also emit regular members from the record body
+            foreach (var field in node.Members.OfType<FieldDeclarationSyntax>()
+                .Where(f => !f.Modifiers.Any(m => m.IsKind(SyntaxKind.StaticKeyword))))
+            {
+                var csType = _ctx.ResolveAlias(field.Declaration.Type.ToString().Trim());
+                var cType = TypeRegistry.MapType(csType);
+                var needsPtr = TypeRegistry.NeedsPointerSuffix(csType) && !cType.EndsWith("*");
+                foreach (var v in field.Declaration.Variables)
+                    _ctx.WriteLine($"{cType}{(needsPtr ? "*" : "")} f_{v.Identifier.Text.TrimStart('_')};");
+            }
+            _ctx.Dedent();
+            _ctx.Out.WriteLine("};");
+            _ctx.Out.WriteLine();
+
+            // Constructor signature
+            if (paramFields.Count > 0)
+            {
+                var paramDecls = string.Join(", ",
+                    paramFields.Select(pf =>
+                    {
+                        var ct = TypeRegistry.MapType(pf.csType);
+                        var ptr = TypeRegistry.NeedsPointerSuffix(pf.csType) && !ct.EndsWith("*") ? "*" : "";
+                        return $"{ct}{ptr} {pf.fieldName}";
+                    }));
+                _ctx.Out.WriteLine($"{name}* {name}_New({paramDecls});");
+            }
+            else
+            {
+                _ctx.Out.WriteLine($"{name}* {name}_New();");
+            }
+            _ctx.Out.WriteLine($"void {name}_Free({name}* self);");
+
+            // Method signatures from body
+            foreach (var method in node.Members.OfType<MethodDeclarationSyntax>())
+                WriteMethodSignature(method, name);
+
+            _ctx.Out.WriteLine();
+        }
+        else
+        {
+            // Constructor implementation
+            _ctx.Out.WriteLine($"{name}* {name}_New({BuildRecordParamList(paramFields)})");
+            _ctx.Out.WriteLine("{");
+            _ctx.Indent();
+            _ctx.WriteLine($"{name}* self = ({name}*)calloc(1, sizeof({name}));");
+            _ctx.WriteLine("if (!self) return NULL;");
+            foreach (var (csType, fieldName) in paramFields)
+                _ctx.WriteLine($"self->{fieldName} = {fieldName};");
+            _ctx.Dedent();
+            _ctx.Out.WriteLine("    return self;");
+            _ctx.Out.WriteLine("}");
+            _ctx.Out.WriteLine();
+
+            // Free
+            _ctx.Out.WriteLine($"void {name}_Free({name}* self)");
+            _ctx.Out.WriteLine("{");
+            _ctx.Indent();
+            _ctx.WriteLine("if (!self) return;");
+            // Free any collection/heap fields from positional params
+            foreach (var (csType, fieldName) in paramFields)
+            {
+                var fieldExpr = $"self->{fieldName}";
+                if (TypeRegistry.IsList(csType))
+                {
+                    var inner = TypeRegistry.GetListInnerType(csType) ?? "int";
+                    var cInner = inner == "string" ? "str" : TypeRegistry.MapType(inner);
+                    _ctx.WriteLine($"if ({fieldExpr}) {{ List_{cInner}_Free({fieldExpr}); {fieldExpr} = NULL; }}");
+                }
+                else if (TypeRegistry.IsDictionary(csType))
+                {
+                    var types = TypeRegistry.GetDictionaryTypes(csType);
+                    if (types.HasValue)
+                    {
+                        var ck = types.Value.key == "string" ? "str" : TypeRegistry.MapType(types.Value.key);
+                        var cv = types.Value.val == "string" ? "str" : TypeRegistry.MapType(types.Value.val);
+                        _ctx.WriteLine($"if ({fieldExpr}) {{ Dict_{ck}_{cv}_Free({fieldExpr}); {fieldExpr} = NULL; }}");
+                    }
+                }
+                else if (TypeRegistry.IsStringBuilder(csType))
+                {
+                    _ctx.WriteLine($"if ({fieldExpr}) {{ StringBuilder_Free({fieldExpr}); {fieldExpr} = NULL; }}");
+                }
+                else if (NullableHandler.IsNullable(csType))
+                {
+                    _ctx.WriteLine($"if ({fieldExpr}) {{ free({fieldExpr}); {fieldExpr} = NULL; }}");
+                }
+                else if (TypeRegistry.NeedsPointerSuffix(csType)
+                         && !TypeRegistry.IsPrimitive(csType)
+                         && csType != "string"
+                         && !TypeRegistry.IsLibNxStruct(csType))
+                {
+                    var cType = TypeRegistry.MapType(csType);
+                    _ctx.WriteLine($"if ({fieldExpr}) {{ {cType}_Free({fieldExpr}); {fieldExpr} = NULL; }}");
+                }
+            }
+            _ctx.WriteLine("free(self);");
+            _ctx.Dedent();
+            _ctx.Out.WriteLine("}");
+            _ctx.Out.WriteLine();
+
+            // Method bodies
+            foreach (var method in node.Members.OfType<MethodDeclarationSyntax>())
+                VisitMethodDeclaration(method);
+        }
+
+        _ctx.ClearClassContext();
+    }
+
+    private string BuildRecordParamList(List<(string csType, string fieldName)> paramFields)
+    {
+        if (paramFields.Count == 0) return "";
+        return string.Join(", ", paramFields.Select(pf =>
+        {
+            var ct = TypeRegistry.MapType(pf.csType);
+            var ptr = TypeRegistry.NeedsPointerSuffix(pf.csType) && !ct.EndsWith("*") ? "*" : "";
+            return $"{ct}{ptr} {pf.fieldName}";
+        }));
+    }
+
+    // ── Indexer ───────────────────────────────────────────────────────────────
+
+    public override void VisitIndexerDeclaration(IndexerDeclarationSyntax node)
+    {
+        var className = _ctx.CurrentClass;
+        if (string.IsNullOrEmpty(className)) return;
+
+        _ctx.IndexerClasses.Add(className);
+
+        var retType = TypeRegistry.MapType(_ctx.ResolveAlias(node.Type.ToString().Trim()));
+        var needsPtr = TypeRegistry.NeedsPointerSuffix(node.Type.ToString().Trim())
+                    && !retType.EndsWith("*");
+        var retDecl = retType + (needsPtr ? "*" : "");
+
+        // Build index parameter declarations
+        var indexParams = string.Join(", ",
+            node.ParameterList.Parameters.Select(p => BuildParamDecl(p)));
+
+        bool hasGet = node.AccessorList?.Accessors
+            .Any(a => a.IsKind(SyntaxKind.GetAccessorDeclaration)) == true;
+        bool hasSet = node.AccessorList?.Accessors
+            .Any(a => a.IsKind(SyntaxKind.SetAccessorDeclaration)) == true;
+
+        if (_mode == TranspileMode.HeaderOnly)
+        {
+            if (hasGet)
+                _ctx.Out.WriteLine($"{retDecl} {className}_get({className}* self, {indexParams});");
+            if (hasSet)
+                _ctx.Out.WriteLine($"void {className}_set({className}* self, {indexParams}, {retDecl} value);");
+            return;
+        }
+
+        // Implementation
+        var getAccessor = node.AccessorList?.Accessors
+            .FirstOrDefault(a => a.IsKind(SyntaxKind.GetAccessorDeclaration));
+        if (getAccessor != null)
+        {
+            _ctx.ClearMethodContext();
+            _ctx.CurrentReturnBuffer = null;
+            foreach (var p in node.ParameterList.Parameters)
+            {
+                _ctx.LocalTypes[p.Identifier.Text] = p.Type?.ToString().Trim() ?? "int";
+            }
+            _ctx.Out.WriteLine($"{retDecl} {className}_get({className}* self, {indexParams})");
+            _ctx.Out.WriteLine("{");
+            _ctx.Indent();
+            if (getAccessor.Body != null)
+                foreach (var stmt in getAccessor.Body.Statements)
+                    _stmtWriter.Write(stmt);
+            else if (getAccessor.ExpressionBody != null)
+                _ctx.WriteLine($"return {_exprWriter.Write(getAccessor.ExpressionBody.Expression)};");
+            _ctx.Dedent();
+            _ctx.Out.WriteLine("}");
+            _ctx.Out.WriteLine();
+        }
+
+        var setAccessor = node.AccessorList?.Accessors
+            .FirstOrDefault(a => a.IsKind(SyntaxKind.SetAccessorDeclaration));
+        if (setAccessor != null)
+        {
+            _ctx.ClearMethodContext();
+            foreach (var p in node.ParameterList.Parameters)
+                _ctx.LocalTypes[p.Identifier.Text] = p.Type?.ToString().Trim() ?? "int";
+            _ctx.LocalTypes["value"] = node.Type.ToString().Trim();
+            _ctx.Out.WriteLine($"void {className}_set({className}* self, {indexParams}, {retDecl} value)");
+            _ctx.Out.WriteLine("{");
+            _ctx.Indent();
+            if (setAccessor.Body != null)
+                foreach (var stmt in setAccessor.Body.Statements)
+                    _stmtWriter.Write(stmt);
+            else if (setAccessor.ExpressionBody != null)
+                _ctx.WriteLine($"{_exprWriter.Write(setAccessor.ExpressionBody.Expression)};");
+            _ctx.Dedent();
+            _ctx.Out.WriteLine("}");
+            _ctx.Out.WriteLine();
+        }
+    }
+
     // ── Property ─────────────────────────────────────────────────────────────
 
     public override void VisitPropertyDeclaration(PropertyDeclarationSyntax node)
@@ -1231,7 +1476,7 @@ public sealed class CSharpToC : CSharpSyntaxWalker
     {
         if (p.Type == null) return p.Identifier.Text;
 
-        var csType = p.Type.ToString().Trim();
+        var csType = _ctx.ResolveAlias(p.Type.ToString().Trim());
 
         if (_ctx.SemanticModel != null)
         {

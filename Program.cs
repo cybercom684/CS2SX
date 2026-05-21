@@ -2,6 +2,8 @@
 using CS2SX.Cli;
 using CS2SX.Logging;
 
+BuildRenderer.EnableAnsi();
+
 var cli = CliParser.Parse(args);
 
 switch (cli.Command)

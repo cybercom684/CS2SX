@@ -94,6 +94,20 @@ public sealed class TranspilerContext
     // Löst "using static"-Importe auf
     public UsingStaticResolver UsingStaticResolver { get; } = new();
 
+    // using X = Y; type aliases collected per file
+    public Dictionary<string, string> TypeAliases { get; } = new(StringComparer.Ordinal);
+
+    // Classes that have user-defined indexers (this[T])
+    public HashSet<string> IndexerClasses { get; } = new(StringComparer.Ordinal);
+
+    /// <summary>Resolves a type alias to its target, or returns the name unchanged.</summary>
+    public string ResolveAlias(string typeName)
+    {
+        if (TypeAliases.TryGetValue(typeName, out var resolved))
+            return resolved;
+        return typeName;
+    }
+
     // ── Zähler ────────────────────────────────────────────────────────────────
 
     // FIX-1: _classTmpCounter und _classStringCounter ersetzen die alten
@@ -197,11 +211,16 @@ public sealed class TranspilerContext
             line.Trim().Length > 60 ? line.Trim()[..60] + "…" : line.Trim());
     }
 
+    // Tracks "using var" cleanup actions to emit before each return statement
+    // (cleanup code strings, in LIFO order; flushed by WriteReturn)
+    public Stack<string> PendingUsingVarCleanups { get; } = new();
+
     public void ClearMethodContext()
     {
         LocalTypes.Clear();
         ArrayLengths.Clear();
         IsStaticMethod = false;
+        PendingUsingVarCleanups.Clear();
         // FIX-1: TmpCounter und TmpStringCounter werden NICHT zurückgesetzt.
         // Sie gelten für die gesamte Klasse (bis ClearClassContext()), damit
         // keine doppelten Variablennamen in der generierten .c-Datei entstehen.

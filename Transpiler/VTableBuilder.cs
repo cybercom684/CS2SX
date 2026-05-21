@@ -50,15 +50,17 @@ public static class VTableBuilder
         string className,
         System.IO.TextWriter output)
     {
-        var virtuals = GetVirtualMethods(node);
-        if (virtuals.Count == 0) return;
+        var virtuals  = GetVirtualMethods(node);
+        var virtProps = GetVirtualProperties(node);
+        if (virtuals.Count == 0 && virtProps.Count == 0) return;
 
         output.WriteLine("typedef struct " + className + "_vtable");
         output.WriteLine("{");
+
         foreach (var method in virtuals)
         {
-            var retC    = TypeRegistry.MapType(method.ReturnType.ToString().Trim());
-            var parms   = new List<string> { "void* self" };
+            var retC  = TypeRegistry.MapType(method.ReturnType.ToString().Trim());
+            var parms = new List<string> { "void* self" };
             foreach (var p in method.ParameterList.Parameters)
             {
                 var pt = TypeRegistry.MapType(p.Type?.ToString().Trim() ?? "int");
@@ -67,6 +69,28 @@ public static class VTableBuilder
             output.WriteLine("    " + retC + " (*" + method.Identifier.Text
                            + ")(" + string.Join(", ", parms) + ");");
         }
+
+        // Virtual/abstract properties → getter and setter function pointers
+        foreach (var prop in virtProps)
+        {
+            var propRetC = TypeRegistry.MapType(prop.Type.ToString().Trim());
+            var needsPtr = TypeRegistry.NeedsPointerSuffix(prop.Type.ToString().Trim())
+                        && !propRetC.EndsWith("*");
+            var retDecl = propRetC + (needsPtr ? "*" : "");
+            var propName = prop.Identifier.Text;
+
+            bool hasGetter = prop.AccessorList?.Accessors
+                .Any(a => a.IsKind(SyntaxKind.GetAccessorDeclaration)) == true
+                || prop.ExpressionBody != null;
+            bool hasSetter = prop.AccessorList?.Accessors
+                .Any(a => a.IsKind(SyntaxKind.SetAccessorDeclaration)) == true;
+
+            if (hasGetter)
+                output.WriteLine($"    {retDecl} (*get_{propName})(void* self);");
+            if (hasSetter)
+                output.WriteLine($"    void (*set_{propName})(void* self, {retDecl} value);");
+        }
+
         output.WriteLine("} " + className + "_vtable;");
         output.WriteLine();
     }
@@ -97,8 +121,13 @@ public static class VTableBuilder
         string baseClassName,
         System.IO.TextWriter output)
     {
-        var overrides  = GetOverrideMethods(node);
-        if (overrides.Count == 0 && !HasInheritance(node)) return new();
+        var overrides     = GetOverrideMethods(node);
+        var overrideProps = node.Members.OfType<PropertyDeclarationSyntax>()
+            .Where(p => p.Modifiers.Any(m => m.IsKind(SyntaxKind.OverrideKeyword)))
+            .ToList();
+
+        if (overrides.Count == 0 && overrideProps.Count == 0 && !HasInheritance(node))
+            return new();
 
         var instanceName = className + "_vtable_instance";
 
@@ -111,6 +140,21 @@ public static class VTableBuilder
             var mName = method.Identifier.Text;
             methodNames.Add(mName);
             output.WriteLine("    ." + mName + " = " + className + "_" + mName + ",");
+        }
+
+        // Override property getter/setter entries
+        foreach (var prop in overrideProps)
+        {
+            var propName = prop.Identifier.Text;
+            bool hasGetter = prop.AccessorList?.Accessors
+                .Any(a => a.IsKind(SyntaxKind.GetAccessorDeclaration)) == true
+                || prop.ExpressionBody != null;
+            bool hasSetter = prop.AccessorList?.Accessors
+                .Any(a => a.IsKind(SyntaxKind.SetAccessorDeclaration)) == true;
+            if (hasGetter)
+                output.WriteLine($"    .get_{propName} = {className}_get_{propName},");
+            if (hasSetter)
+                output.WriteLine($"    .set_{propName} = {className}_set_{propName},");
         }
 
         output.WriteLine("};");
@@ -211,7 +255,7 @@ public static class VTableBuilder
     // ── Utility ───────────────────────────────────────────────────────────
 
     public static bool HasVirtualMethods(ClassDeclarationSyntax node)
-        => GetVirtualMethods(node).Count > 0;
+        => GetVirtualMethods(node).Count > 0 || GetVirtualProperties(node).Count > 0;
 
     public static bool HasInheritance(ClassDeclarationSyntax node)
         => node.BaseList?.Types.Any() ?? false;
@@ -222,6 +266,13 @@ public static class VTableBuilder
     private static List<MethodDeclarationSyntax> GetVirtualMethods(ClassDeclarationSyntax node)
         => node.Members.OfType<MethodDeclarationSyntax>()
             .Where(m => m.Modifiers.Any(mod =>
+                mod.IsKind(SyntaxKind.VirtualKeyword) ||
+                mod.IsKind(SyntaxKind.AbstractKeyword)))
+            .ToList();
+
+    internal static List<PropertyDeclarationSyntax> GetVirtualProperties(ClassDeclarationSyntax node)
+        => node.Members.OfType<PropertyDeclarationSyntax>()
+            .Where(p => p.Modifiers.Any(mod =>
                 mod.IsKind(SyntaxKind.VirtualKeyword) ||
                 mod.IsKind(SyntaxKind.AbstractKeyword)))
             .ToList();

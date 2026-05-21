@@ -52,6 +52,10 @@ public static class TypeRegistry
         ["TimeSpan"] = "CS2SX_TimeSpan",
         ["Regex"] = "CS2SX_Regex",
         ["Random"] = "void",
+        ["IntPtr"]  = "intptr_t",
+        ["UIntPtr"] = "uintptr_t",
+        ["nint"]    = "intptr_t",
+        ["nuint"]   = "uintptr_t",
         // PHASE 2: Tuple → void* (Tupels werden als temporäre Structs behandelt)
         ["(int, int)"] = "void*",
         ["(string, string)"] = "void*",
@@ -109,6 +113,8 @@ public static class TypeRegistry
         ["double"] = "%lf",
         ["bool"] = "%d",
         ["const char*"] = "%s",
+        ["intptr_t"]  = "%zd",
+        ["uintptr_t"] = "%zu",
     };
 
     // ── Property-Name Mappings ────────────────────────────────────────────────

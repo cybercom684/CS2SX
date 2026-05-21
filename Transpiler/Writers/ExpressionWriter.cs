@@ -280,7 +280,7 @@ public sealed class ExpressionWriter : IExpressionWriter
                     return op == "==" ? "String_IsNullOrEmpty(" + left + ")" : "!String_IsNullOrEmpty(" + left + ")";
                 if (IsNullLiteral(bin.Left))
                     return op == "==" ? "String_IsNullOrEmpty(" + right + ")" : "!String_IsNullOrEmpty(" + right + ")";
-                return "strcmp(" + left + ", " + right + ") " + op + " 0";
+                return "CS2SX_strcmp_safe(" + left + ", " + right + ") " + op + " 0";
             }
         }
 
@@ -766,6 +766,12 @@ public sealed class ExpressionWriter : IExpressionWriter
             var cVal = types.val == "string" ? "str" : TypeRegistry.MapType(types.val);
             return "Dict_" + cKey + "_" + cVal + "_Set(" + obj + ", " + key + ", " + right + ")";
         }
+
+        // User-defined indexer setter → ClassName_set(obj, key, value)
+        var objTypeName = (lt ?? ft ?? "").TrimEnd('*').Trim();
+        if (!string.IsNullOrEmpty(objTypeName) && _ctx.IndexerClasses.Contains(objTypeName))
+            return objTypeName + "_set(" + obj + ", " + key + ", " + right + ")";
+
         return obj + "[" + key + "] = " + right;
     }
 
@@ -963,6 +969,30 @@ public sealed class ExpressionWriter : IExpressionWriter
                 return $"{obj}->value";
             if (receiverType is "ProgressBar" && prop is "WidthChars" or "width_chars")
                 return $"{obj}->width_chars";
+        }
+
+        // Tuple named field access: (int x, int y) t → t.x → t.item1
+        if (_ctx.SemanticModel != null)
+        {
+            try
+            {
+                var typeInfo = _ctx.SemanticModel.GetTypeInfo(mem.Expression);
+                var recvSym = typeInfo.ConvertedType ?? typeInfo.Type;
+                if (recvSym is Microsoft.CodeAnalysis.INamedTypeSymbol namedSym
+                    && namedSym.IsTupleType)
+                {
+                    var elements = namedSym.TupleElements;
+                    for (int ti = 0; ti < elements.Length; ti++)
+                    {
+                        var elem = elements[ti];
+                        if (elem.Name == prop || elem.Name == "Item" + (ti + 1))
+                        {
+                            return obj + ".item" + (ti + 1);
+                        }
+                    }
+                }
+            }
+            catch { }
         }
 
         if ((_ctx.LocalTypes.TryGetValue(rawExpr, out var lt) && IsStructType(lt))
@@ -1306,6 +1336,11 @@ public sealed class ExpressionWriter : IExpressionWriter
             var cInner = inner == "string" ? "str" : TypeRegistry.MapType(inner);
             return "List_" + cInner + "_Get(" + objExpr + ", " + index + ")";
         }
+
+        // User-defined indexer (this[T]) → ClassName_get(obj, index)
+        var objTypeName = (lt ?? ft ?? "").TrimEnd('*').Trim();
+        if (!string.IsNullOrEmpty(objTypeName) && _ctx.IndexerClasses.Contains(objTypeName))
+            return objTypeName + "_get(" + objExpr + ", " + index + ")";
 
         return objExpr + "[" + index + "]";
     }

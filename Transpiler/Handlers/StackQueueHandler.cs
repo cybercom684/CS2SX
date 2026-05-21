@@ -65,6 +65,11 @@ public sealed class StackQueueHandler : InvocationHandlerBase
             var inner = TypeRegistry.GetStackInnerType(collType) ?? "int";
             var cInner = inner == "string" ? "str" : TypeRegistry.MapType(inner);
             var prefix = "Stack_" + cInner;
+            // Emit bounds-check assertion for Pop and Peek
+            if (method is "Pop" or "Peek")
+            {
+                ctx.Out.WriteLine(ctx.Tab + "if (!" + objStr + " || " + objStr + "->count == 0) { fprintf(stderr, \"Stack underflow\\n\"); abort(); }");
+            }
             result = method switch
             {
                 "Push"  => prefix + "_Push(" + objStr + ", " + JoinArgs(args) + ")",
@@ -82,6 +87,11 @@ public sealed class StackQueueHandler : InvocationHandlerBase
             var inner = TypeRegistry.GetQueueInnerType(collType) ?? "int";
             var cInner = inner == "string" ? "str" : TypeRegistry.MapType(inner);
             var prefix = "Queue_" + cInner;
+            // Emit bounds-check assertion for Dequeue and Peek
+            if (method is "Dequeue" or "Peek")
+            {
+                ctx.Out.WriteLine(ctx.Tab + "if (!" + objStr + " || " + objStr + "->count == 0) { fprintf(stderr, \"Queue underflow\\n\"); abort(); }");
+            }
             result = method switch
             {
                 "Enqueue" => prefix + "_Enqueue(" + objStr + ", " + JoinArgs(args) + ")",

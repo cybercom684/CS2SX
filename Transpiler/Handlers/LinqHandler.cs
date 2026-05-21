@@ -44,6 +44,9 @@ public sealed class LinqHandler : InvocationHandlerBase
         "Single", "SingleOrDefault", "ElementAt", "ElementAtOrDefault",
         "Average", "Aggregate",
         "ToDictionary", "ToHashSet", "GroupBy", "Zip",
+        "TakeWhile", "SkipWhile", "SelectMany",
+        "Except", "Intersect", "Union",
+        "Join", "OfType", "Cast",
     };
 
     public override bool TryHandle(InvocationExpressionSyntax inv, string calleeStr,
@@ -654,12 +657,278 @@ public sealed class LinqHandler : InvocationHandlerBase
 
             case "GroupBy":
                 {
-                    // list.GroupBy(x => x.Key) → List<List<T>>  (inner lists per group)
-                    // Simplified: returns a List_str* of group keys; full group support is complex.
-                    // Emit a List of the source elements grouped by key — represented as List<T>.
+                    // list.GroupBy(x => x.Key) → Dict<Key, List<T>>
                     if (lambdaArg == null) { result = sourceExpr; return true; }
-                    ctx.Warn(inv, "GroupBy — simplified: returns source list (full group semantics not supported in C)");
+
+                    var keyFnGrp = MakeLifter().LiftLambda(lambdaArg, elementTypeHint: inner);
+                    string keyInnerGrp = "int";
+                    if (lambdaArg is SimpleLambdaExpressionSyntax sgb)
+                        keyInnerGrp = TypeInferrer.InferCSharpType(sgb.Body, ctx);
+                    else if (lambdaArg is ParenthesizedLambdaExpressionSyntax pgb)
+                        keyInnerGrp = TypeInferrer.InferCSharpType(pgb.Body, ctx);
+                    var cKeyGrp = keyInnerGrp == "string" ? "str" : TypeRegistry.MapType(keyInnerGrp);
+                    var cKeyTypeGrp = keyInnerGrp == "string" ? "const char*" : TypeRegistry.MapType(keyInnerGrp);
+
+                    var outVar = ctx.NextTmp("grp");
+                    var idxVar = ctx.NextTmp("i");
+                    var keyVar = ctx.NextTmp("k");
+                    var grpVar = ctx.NextTmp("gl");
+                    ctx.WriteLine($"Dict_{cKeyGrp}_ptr* {outVar} = Dict_{cKeyGrp}_ptr_New();");
+                    ctx.WriteLine($"for (int {idxVar} = 0; {idxVar} < {listCount.Replace("_idx", idxVar)}; {idxVar}++)");
+                    ctx.WriteLine("{");
+                    ctx.Indent();
+                    ctx.WriteLine($"{cInnerType}{elemPtr} _ge_{outVar} = {listGet.Replace("_idx", idxVar)};");
+                    ctx.WriteLine($"{cKeyTypeGrp} {keyVar} = {keyFnGrp}(_ge_{outVar});");
+                    ctx.WriteLine($"List_{cInner}* {grpVar} = *Dict_{cKeyGrp}_ptr_Get({outVar}, {keyVar});");
+                    ctx.WriteLine($"if (!{grpVar})");
+                    ctx.WriteLine("{");
+                    ctx.Indent();
+                    ctx.WriteLine($"{grpVar} = List_{cInner}_New();");
+                    ctx.WriteLine($"Dict_{cKeyGrp}_ptr_Set({outVar}, {keyVar}, {grpVar});");
+                    ctx.Dedent();
+                    ctx.WriteLine("}");
+                    ctx.WriteLine($"List_{cInner}_Add({grpVar}, _ge_{outVar});");
+                    ctx.Dedent();
+                    ctx.WriteLine("}");
+                    result = outVar;
+                    ctx.LocalTypes[outVar] = $"Dictionary<{keyInnerGrp},List<{inner}>>";
+                    return true;
+                }
+
+            case "TakeWhile":
+                {
+                    if (lambdaArg == null) return NotHandled(out result);
+                    var predFn = MakeLifter().LiftLambda(lambdaArg, elementTypeHint: inner);
+                    var outVar = ctx.NextTmp("tw");
+                    var idxVar = ctx.NextTmp("i");
+                    ctx.WriteLine($"List_{cInner}* {outVar} = List_{cInner}_New();");
+                    ctx.WriteLine($"for (int {idxVar} = 0; {idxVar} < {listCount.Replace("_idx", idxVar)}; {idxVar}++)");
+                    ctx.WriteLine("{");
+                    ctx.Indent();
+                    ctx.WriteLine($"{cInnerType}{elemPtr} _e_{outVar} = {listGet.Replace("_idx", idxVar)};");
+                    ctx.WriteLine($"if (!{predFn}(_e_{outVar})) break;");
+                    ctx.WriteLine($"List_{cInner}_Add({outVar}, _e_{outVar});");
+                    ctx.Dedent();
+                    ctx.WriteLine("}");
+                    result = outVar;
+                    ctx.LocalTypes[outVar] = "List<" + inner + ">";
+                    return true;
+                }
+
+            case "SkipWhile":
+                {
+                    if (lambdaArg == null) return NotHandled(out result);
+                    var predFn = MakeLifter().LiftLambda(lambdaArg, elementTypeHint: inner);
+                    var outVar = ctx.NextTmp("sw");
+                    var idxVar = ctx.NextTmp("i");
+                    var foundVar = ctx.NextTmp("found");
+                    ctx.WriteLine($"List_{cInner}* {outVar} = List_{cInner}_New();");
+                    ctx.WriteLine($"int {foundVar} = 0;");
+                    ctx.WriteLine($"for (int {idxVar} = 0; {idxVar} < {listCount.Replace("_idx", idxVar)}; {idxVar}++)");
+                    ctx.WriteLine("{");
+                    ctx.Indent();
+                    ctx.WriteLine($"{cInnerType}{elemPtr} _e_{outVar} = {listGet.Replace("_idx", idxVar)};");
+                    ctx.WriteLine($"if (!{foundVar} && {predFn}(_e_{outVar})) continue;");
+                    ctx.WriteLine($"{foundVar} = 1;");
+                    ctx.WriteLine($"List_{cInner}_Add({outVar}, _e_{outVar});");
+                    ctx.Dedent();
+                    ctx.WriteLine("}");
+                    result = outVar;
+                    ctx.LocalTypes[outVar] = "List<" + inner + ">";
+                    return true;
+                }
+
+            case "SelectMany":
+                {
+                    if (lambdaArg == null) return NotHandled(out result);
+                    // x => x.Items — projector returns a List<Inner> or array
+                    var projFn = MakeLifter().LiftLambda(lambdaArg, elementTypeHint: inner);
+                    // Try to infer the projected element type
+                    string projInner = "int";
+                    if (lambdaArg is SimpleLambdaExpressionSyntax smLam)
+                    {
+                        var inferred = TypeInferrer.InferCSharpType(smLam.Body, ctx);
+                        projInner = TypeRegistry.IsList(inferred)
+                            ? TypeRegistry.GetListInnerType(inferred) ?? "int"
+                            : inferred.EndsWith("[]") ? inferred[..^2].Trim() : "int";
+                    }
+                    var cProjInner = projInner == "string" ? "str" : TypeRegistry.MapType(projInner);
+                    var cProjType  = projInner == "string" ? "const char*" : TypeRegistry.MapType(projInner);
+                    var outVar = ctx.NextTmp("sm");
+                    var idxVar = ctx.NextTmp("i");
+                    var subVar = ctx.NextTmp("sub");
+                    var jVar   = ctx.NextTmp("j");
+                    ctx.WriteLine($"List_{cProjInner}* {outVar} = List_{cProjInner}_New();");
+                    ctx.WriteLine($"for (int {idxVar} = 0; {idxVar} < {listCount.Replace("_idx", idxVar)}; {idxVar}++)");
+                    ctx.WriteLine("{");
+                    ctx.Indent();
+                    ctx.WriteLine($"{cInnerType}{elemPtr} _e_{outVar} = {listGet.Replace("_idx", idxVar)};");
+                    ctx.WriteLine($"List_{cProjInner}* {subVar} = {projFn}(_e_{outVar});");
+                    ctx.WriteLine($"if ({subVar})");
+                    ctx.WriteLine("{");
+                    ctx.Indent();
+                    ctx.WriteLine($"for (int {jVar} = 0; {jVar} < {subVar}->count; {jVar}++)");
+                    ctx.WriteLine($"    List_{cProjInner}_Add({outVar}, List_{cProjInner}_Get({subVar}, {jVar}));");
+                    ctx.Dedent();
+                    ctx.WriteLine("}");
+                    ctx.Dedent();
+                    ctx.WriteLine("}");
+                    result = outVar;
+                    ctx.LocalTypes[outVar] = "List<" + projInner + ">";
+                    return true;
+                }
+
+            case "Except":
+                {
+                    if (inv.ArgumentList.Arguments.Count < 1) { result = sourceExpr; return true; }
+                    var otherExpr = writeExpr(inv.ArgumentList.Arguments[0].Expression);
+                    var outVar = ctx.NextTmp("exc");
+                    var idxVar = ctx.NextTmp("i");
+                    ctx.WriteLine($"List_{cInner}* {outVar} = List_{cInner}_New();");
+                    ctx.WriteLine($"for (int {idxVar} = 0; {idxVar} < {listCount.Replace("_idx", idxVar)}; {idxVar}++)");
+                    ctx.WriteLine("{");
+                    ctx.Indent();
+                    ctx.WriteLine($"{cInnerType}{elemPtr} _e_{outVar} = {listGet.Replace("_idx", idxVar)};");
+                    ctx.WriteLine($"if (!List_{cInner}_Contains({otherExpr}, _e_{outVar})) List_{cInner}_Add({outVar}, _e_{outVar});");
+                    ctx.Dedent();
+                    ctx.WriteLine("}");
+                    result = outVar;
+                    ctx.LocalTypes[outVar] = "List<" + inner + ">";
+                    return true;
+                }
+
+            case "Intersect":
+                {
+                    if (inv.ArgumentList.Arguments.Count < 1) { result = sourceExpr; return true; }
+                    var otherExpr = writeExpr(inv.ArgumentList.Arguments[0].Expression);
+                    var outVar = ctx.NextTmp("int");
+                    var idxVar = ctx.NextTmp("i");
+                    ctx.WriteLine($"List_{cInner}* {outVar} = List_{cInner}_New();");
+                    ctx.WriteLine($"for (int {idxVar} = 0; {idxVar} < {listCount.Replace("_idx", idxVar)}; {idxVar}++)");
+                    ctx.WriteLine("{");
+                    ctx.Indent();
+                    ctx.WriteLine($"{cInnerType}{elemPtr} _e_{outVar} = {listGet.Replace("_idx", idxVar)};");
+                    ctx.WriteLine($"if (List_{cInner}_Contains({otherExpr}, _e_{outVar})) List_{cInner}_Add({outVar}, _e_{outVar});");
+                    ctx.Dedent();
+                    ctx.WriteLine("}");
+                    result = outVar;
+                    ctx.LocalTypes[outVar] = "List<" + inner + ">";
+                    return true;
+                }
+
+            case "Union":
+                {
+                    if (inv.ArgumentList.Arguments.Count < 1) { result = sourceExpr; return true; }
+                    var otherExpr = writeExpr(inv.ArgumentList.Arguments[0].Expression);
+                    var outVar = ctx.NextTmp("uni");
+                    var idxVar = ctx.NextTmp("i");
+                    var jVar   = ctx.NextTmp("j");
+                    ctx.WriteLine($"List_{cInner}* {outVar} = List_{cInner}_New();");
+                    ctx.WriteLine($"for (int {idxVar} = 0; {idxVar} < {listCount.Replace("_idx", idxVar)}; {idxVar}++)");
+                    ctx.WriteLine("{");
+                    ctx.Indent();
+                    ctx.WriteLine($"{cInnerType}{elemPtr} _e_{outVar} = {listGet.Replace("_idx", idxVar)};");
+                    ctx.WriteLine($"if (!List_{cInner}_Contains({outVar}, _e_{outVar})) List_{cInner}_Add({outVar}, _e_{outVar});");
+                    ctx.Dedent();
+                    ctx.WriteLine("}");
+                    ctx.WriteLine($"for (int {jVar} = 0; {jVar} < {otherExpr}->count; {jVar}++)");
+                    ctx.WriteLine("{");
+                    ctx.Indent();
+                    ctx.WriteLine($"{cInnerType}{elemPtr} _oe_{outVar} = List_{cInner}_Get({otherExpr}, {jVar});");
+                    ctx.WriteLine($"if (!List_{cInner}_Contains({outVar}, _oe_{outVar})) List_{cInner}_Add({outVar}, _oe_{outVar});");
+                    ctx.Dedent();
+                    ctx.WriteLine("}");
+                    result = outVar;
+                    ctx.LocalTypes[outVar] = "List<" + inner + ">";
+                    return true;
+                }
+
+            case "OfType":
+                {
+                    // No RTTI on Switch — OfType<T> treated as passthrough with warning
+                    ctx.Warn(inv, "OfType<T> — no RTTI on Switch; treated as passthrough (all elements included)");
                     result = sourceExpr;
+                    return true;
+                }
+
+            case "Cast":
+                {
+                    // Cast<T>: element-by-element pointer cast
+                    if (inv.Expression is MemberAccessExpressionSyntax castMem
+                        && castMem.Name is GenericNameSyntax castGeneric
+                        && castGeneric.TypeArgumentList.Arguments.Count > 0)
+                    {
+                        var targetType = castGeneric.TypeArgumentList.Arguments[0].ToString().Trim();
+                        var cTarget    = targetType == "string" ? "str" : TypeRegistry.MapType(targetType);
+                        var cTargetType = targetType == "string" ? "const char*" : TypeRegistry.MapType(targetType);
+                        var outVar = ctx.NextTmp("cast");
+                        var idxVar = ctx.NextTmp("i");
+                        ctx.WriteLine($"List_{cTarget}* {outVar} = List_{cTarget}_New();");
+                        ctx.WriteLine($"for (int {idxVar} = 0; {idxVar} < {listCount.Replace("_idx", idxVar)}; {idxVar}++)");
+                        ctx.WriteLine($"    List_{cTarget}_Add({outVar}, ({cTargetType}{(TypeRegistry.IsPrimitive(targetType) ? "" : "*")}){listGet.Replace("_idx", idxVar)});");
+                        result = outVar;
+                        ctx.LocalTypes[outVar] = "List<" + targetType + ">";
+                        return true;
+                    }
+                    ctx.Warn(inv, "Cast<T> — could not determine target type; treated as passthrough");
+                    result = sourceExpr;
+                    return true;
+                }
+
+            case "Join":
+                {
+                    // list.Join(inner, outerKey, innerKey, resultSelector)
+                    if (inv.ArgumentList.Arguments.Count < 4) { result = "NULL /* Join: insufficient args */"; return true; }
+
+                    var innerSrcExpr = writeExpr(inv.ArgumentList.Arguments[0].Expression);
+                    LambdaExpressionSyntax? outerKeyLam = inv.ArgumentList.Arguments[1].Expression as LambdaExpressionSyntax;
+                    LambdaExpressionSyntax? innerKeyLam = inv.ArgumentList.Arguments[2].Expression as LambdaExpressionSyntax;
+                    LambdaExpressionSyntax? resultLam   = inv.ArgumentList.Arguments[3].Expression as LambdaExpressionSyntax;
+
+                    if (outerKeyLam == null || innerKeyLam == null || resultLam == null)
+                    { ctx.Warn(inv, "Join — key/result selectors must be lambda expressions"); result = sourceExpr; return true; }
+
+                    var outerKeyFn = MakeLifter().LiftLambda(outerKeyLam, elementTypeHint: inner);
+                    var innerKeyFn = MakeLifter().LiftLambda(innerKeyLam);
+                    var resultFn   = MakeLifter().LiftLambda(resultLam);
+
+                    // Infer inner-source element type
+                    var innerSrcRaw = inv.ArgumentList.Arguments[0].Expression.ToString();
+                    var innerSrcKey = innerSrcRaw.TrimStart('_');
+                    string? innerSrcType = null;
+                    ctx.LocalTypes.TryGetValue(innerSrcRaw, out innerSrcType);
+                    if (innerSrcType == null) ctx.FieldTypes.TryGetValue(innerSrcKey, out innerSrcType);
+                    var innerSrcInner = innerSrcType != null && TypeRegistry.IsList(innerSrcType)
+                        ? TypeRegistry.GetListInnerType(innerSrcType) ?? "int"
+                        : "int";
+                    var cInnerSrc = innerSrcInner == "string" ? "str" : TypeRegistry.MapType(innerSrcInner);
+                    var cInnerSrcType = innerSrcInner == "string" ? "const char*" : TypeRegistry.MapType(innerSrcInner);
+
+                    string projResult = "int";
+                    if (resultLam is ParenthesizedLambdaExpressionSyntax prl)
+                        projResult = TypeInferrer.InferCSharpType(prl.Body, ctx);
+                    var cResult = projResult == "string" ? "str" : TypeRegistry.MapType(projResult);
+
+                    var outVar  = ctx.NextTmp("join");
+                    var idxVar  = ctx.NextTmp("i");
+                    var jVar    = ctx.NextTmp("j");
+                    ctx.WriteLine($"List_{cResult}* {outVar} = List_{cResult}_New();");
+                    ctx.WriteLine($"for (int {idxVar} = 0; {idxVar} < {listCount.Replace("_idx", idxVar)}; {idxVar}++)");
+                    ctx.WriteLine("{");
+                    ctx.Indent();
+                    ctx.WriteLine($"{cInnerType}{elemPtr} _oe_{outVar} = {listGet.Replace("_idx", idxVar)};");
+                    ctx.WriteLine($"for (int {jVar} = 0; {jVar} < {innerSrcExpr}->count; {jVar}++)");
+                    ctx.WriteLine("{");
+                    ctx.Indent();
+                    ctx.WriteLine($"{cInnerSrcType}{(TypeRegistry.IsPrimitive(innerSrcInner) ? "" : "*")} _ie_{outVar} = List_{cInnerSrc}_Get({innerSrcExpr}, {jVar});");
+                    ctx.WriteLine($"if ({outerKeyFn}(_oe_{outVar}) == {innerKeyFn}(_ie_{outVar}))");
+                    ctx.WriteLine($"    List_{cResult}_Add({outVar}, {resultFn}(_oe_{outVar}, _ie_{outVar}));");
+                    ctx.Dedent();
+                    ctx.WriteLine("}");
+                    ctx.Dedent();
+                    ctx.WriteLine("}");
+                    result = outVar;
+                    ctx.LocalTypes[outVar] = "List<" + projResult + ">";
                     return true;
                 }
 
