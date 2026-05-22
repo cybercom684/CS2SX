@@ -55,9 +55,25 @@ public sealed class CleanCommand
             try { Directory.Delete(dir); } catch { }
         }
 
+        // Also remove generated .nro files from the project directory
+        foreach (var nro in Directory.GetFiles(_projectDir, "*.nro", SearchOption.TopDirectoryOnly))
+        {
+            try
+            {
+                File.Delete(nro);
+                deleted++;
+                Log.Info($"Removed: {Path.GetFileName(nro)}");
+            }
+            catch (Exception ex)
+            {
+                Log.Warning($"Cannot delete {Path.GetFileName(nro)}: {ex.Message}");
+                failed++;
+            }
+        }
+
         if (failed == 0)
         {
-            Log.Ok($"Clean complete: {deleted} file(s) removed from cs2sx_out");
+            Log.Ok($"Clean complete: {deleted} file(s) removed");
             return 0;
         }
         else

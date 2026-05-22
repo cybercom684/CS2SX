@@ -47,12 +47,66 @@ public sealed class LinqHandler : InvocationHandlerBase
         "TakeWhile", "SkipWhile", "SelectMany",
         "Except", "Intersect", "Union",
         "Join", "OfType", "Cast",
+        "DefaultIfEmpty",
     };
 
     public override bool TryHandle(InvocationExpressionSyntax inv, string calleeStr,
         List<string> args, TranspilerContext ctx,
         Func<SyntaxNode?, string> writeExpr, out string result)
     {
+        // ── Statische Enumerable.*-Methoden ──────────────────────────────────────
+        if (calleeStr == "Enumerable.Range")
+        {
+            var start = args.Count > 0 ? args[0] : "0";
+            var count = args.Count > 1 ? args[1] : "0";
+            var outVar = ctx.NextTmp("range");
+            var idxVar = ctx.NextTmp("ri");
+            ctx.WriteLine($"List_int* {outVar} = List_int_New();");
+            ctx.WriteLine($"for (int {idxVar} = 0; {idxVar} < {count}; {idxVar}++)");
+            ctx.WriteLine($"    List_int_Add({outVar}, ({start}) + {idxVar});");
+            ctx.LocalTypes[outVar] = "List<int>";
+            result = outVar;
+            return true;
+        }
+
+        if (calleeStr == "Enumerable.Repeat")
+        {
+            var elem = args.Count > 0 ? args[0] : "0";
+            var count = args.Count > 1 ? args[1] : "0";
+            // Infer element type from the first argument syntax node
+            string elemCs = "int";
+            if (inv.ArgumentList.Arguments.Count > 0)
+                elemCs = TypeInferrer.InferCSharpType(inv.ArgumentList.Arguments[0].Expression, ctx);
+            var cElemType = elemCs == "string" ? "str" : TypeRegistry.MapType(elemCs);
+            var outVar = ctx.NextTmp("rep");
+            var idxVar = ctx.NextTmp("repi");
+            ctx.WriteLine($"List_{cElemType}* {outVar} = List_{cElemType}_New();");
+            ctx.WriteLine($"for (int {idxVar} = 0; {idxVar} < {count}; {idxVar}++)");
+            ctx.WriteLine($"    List_{cElemType}_Add({outVar}, {elem});");
+            ctx.LocalTypes[outVar] = "List<" + elemCs + ">";
+            result = outVar;
+            return true;
+        }
+
+        if (calleeStr == "Enumerable.Empty")
+        {
+            // Enumerable.Empty<T>() — Typ aus dem Generic-Argument ableiten
+            string elemCs = "int";
+            if (inv.Expression is MemberAccessExpressionSyntax emptyMem
+                && emptyMem.Name is GenericNameSyntax emptyGeneric
+                && emptyGeneric.TypeArgumentList.Arguments.Count > 0)
+            {
+                elemCs = emptyGeneric.TypeArgumentList.Arguments[0].ToString().Trim();
+                if (elemCs.EndsWith("?")) elemCs = elemCs[..^1];
+            }
+            var cEmptyType = elemCs == "string" ? "str" : TypeRegistry.MapType(elemCs);
+            var outVar = ctx.NextTmp("empty");
+            ctx.WriteLine($"List_{cEmptyType}* {outVar} = List_{cEmptyType}_New();");
+            ctx.LocalTypes[outVar] = "List<" + elemCs + ">";
+            result = outVar;
+            return true;
+        }
+
         if (inv.Expression is not MemberAccessExpressionSyntax mem
             || !s_linqMethods.Contains(mem.Name.Identifier.Text))
             return NotHandled(out result);
@@ -196,7 +250,16 @@ public sealed class LinqHandler : InvocationHandlerBase
                     }
                     else
                     {
-                        result = listGet.Replace("_idx", "0");
+                        // Bounds-Check: leere Collection → abort mit Fehlermeldung (wie C# InvalidOperationException)
+                        var countExpr0 = listCount.Replace("_idx", "0");
+                        var retVar = ctx.NextTmp("first");
+                        var fillLine = isPrim || inner == "string"
+                            ? $"{cInnerType} {retVar} = 0;"
+                            : $"{cInnerType}* {retVar} = NULL;";
+                        ctx.WriteLine(fillLine);
+                        ctx.WriteLine($"if ({countExpr0} > 0) {{ {retVar} = {listGet.Replace("_idx", "0")}; }}");
+                        ctx.WriteLine($"else {{ fprintf(stderr, \"First()/Single(): sequence contains no elements\\n\"); abort(); }}");
+                        result = retVar;
                     }
                     return true;
                 }
@@ -592,6 +655,27 @@ public sealed class LinqHandler : InvocationHandlerBase
                     return true;
                 }
 
+            case "DefaultIfEmpty":
+                {
+                    // list.DefaultIfEmpty([defaultVal]) → wenn leer, Liste mit einem Default-Element zurückgeben
+                    var defaultVal = args.Count > 0 ? args[0] : (isPrim ? "0" : "NULL");
+                    var outVar = ctx.NextTmp("die");
+                    var countExprDie = listCount.Replace("_idx", "0");
+                    ctx.WriteLine($"List_{cInner}* {outVar} = List_{cInner}_New();");
+                    ctx.WriteLine($"if ({countExprDie} > 0)");
+                    ctx.WriteLine("{");
+                    ctx.Indent();
+                    var idxVar = ctx.NextTmp("i");
+                    ctx.WriteLine($"for (int {idxVar} = 0; {idxVar} < {countExprDie}; {idxVar}++)");
+                    ctx.WriteLine($"    List_{cInner}_Add({outVar}, {listGet.Replace("_idx", idxVar)});");
+                    ctx.Dedent();
+                    ctx.WriteLine("}");
+                    ctx.WriteLine($"else List_{cInner}_Add({outVar}, {defaultVal});");
+                    result = outVar;
+                    ctx.LocalTypes[outVar] = "List<" + inner + ">";
+                    return true;
+                }
+
             case "ToHashSet":
                 {
                     // list.ToHashSet() → HashSet_T_New() + loop Add
@@ -801,7 +885,7 @@ public sealed class LinqHandler : InvocationHandlerBase
                 {
                     if (inv.ArgumentList.Arguments.Count < 1) { result = sourceExpr; return true; }
                     var otherExpr = writeExpr(inv.ArgumentList.Arguments[0].Expression);
-                    var outVar = ctx.NextTmp("int");
+                    var outVar = ctx.NextTmp("isec");
                     var idxVar = ctx.NextTmp("i");
                     ctx.WriteLine($"List_{cInner}* {outVar} = List_{cInner}_New();");
                     ctx.WriteLine($"for (int {idxVar} = 0; {idxVar} < {listCount.Replace("_idx", idxVar)}; {idxVar}++)");

@@ -10,6 +10,8 @@
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using CS2SX.Core;
+using CS2SX.Transpiler;
+using CS2SX.Transpiler.Writers;
 
 namespace CS2SX.Transpiler.Handlers;
 
@@ -19,6 +21,7 @@ public sealed class ListHandler : InvocationHandlerBase
     {
         "Add", "Clear", "RemoveAt", "Remove", "Contains", "Insert",
         "Sort", "IndexOf", "Reverse", "ForEach",
+        "FindAll", "TrueForAll", "ConvertAll", "Find", "Exists",
     };
 
     public override bool TryHandle(InvocationExpressionSyntax inv, string calleeStr,
@@ -66,9 +69,95 @@ public sealed class ListHandler : InvocationHandlerBase
             var actionExpr = args.Count > 0 ? args[0] : "NULL /* ForEach: missing action */";
             var iVar = ctx.NextTmp("fe_i");
             ctx.WriteLine($"for (int {iVar} = 0; {iVar} < {listExpr}->count; {iVar}++)");
-            ctx.WriteLine($"    {actionExpr}({listExpr}->items[{iVar}]);");
+            ctx.WriteLine($"    {actionExpr}({listExpr}->data[{iVar}]);");
             result = "";
             return true;
+        }
+
+        if (method is "FindAll" or "Find" or "Exists" or "TrueForAll" or "ConvertAll")
+        {
+            if (inv.ArgumentList.Arguments.Count == 0)
+            {
+                result = listExpr;
+                return true;
+            }
+
+            var lambdaNode = inv.ArgumentList.Arguments[0].Expression as LambdaExpressionSyntax;
+            if (lambdaNode == null) { result = listExpr; return true; }
+
+            var lifter = new LambdaLifter(ctx, new ExpressionWriter(ctx));
+            lifter.SetStatementWriter(new StatementWriter(ctx, new ExpressionWriter(ctx)));
+            var predFn = lifter.LiftLambda(lambdaNode, elementTypeHint: inner);
+
+            var cInnerType = inner == "string" ? "const char*" : TypeRegistry.MapType(inner);
+            var isPrim = TypeRegistry.IsPrimitive(inner);
+            var elemPtr = (isPrim || inner == "string") ? "" : "*";
+            var idxVar = ctx.NextTmp("li");
+
+            if (method == "Exists")
+            {
+                var retVar = ctx.NextTmp("ex");
+                ctx.WriteLine($"int {retVar} = 0;");
+                ctx.WriteLine($"for (int {idxVar} = 0; {idxVar} < {listExpr}->count; {idxVar}++)");
+                ctx.WriteLine($"    if ({predFn}({listExpr}->data[{idxVar}])) {{ {retVar} = 1; break; }}");
+                result = retVar;
+                return true;
+            }
+
+            if (method == "TrueForAll")
+            {
+                var retVar = ctx.NextTmp("tfa");
+                ctx.WriteLine($"int {retVar} = 1;");
+                ctx.WriteLine($"for (int {idxVar} = 0; {idxVar} < {listExpr}->count; {idxVar}++)");
+                ctx.WriteLine($"    if (!{predFn}({listExpr}->data[{idxVar}])) {{ {retVar} = 0; break; }}");
+                result = retVar;
+                return true;
+            }
+
+            if (method == "Find")
+            {
+                var retVar = ctx.NextTmp("find");
+                var fillLine = isPrim || inner == "string"
+                    ? $"{cInnerType} {retVar} = 0;"
+                    : $"{cInnerType}* {retVar} = NULL;";
+                ctx.WriteLine(fillLine);
+                ctx.WriteLine($"for (int {idxVar} = 0; {idxVar} < {listExpr}->count; {idxVar}++)");
+                ctx.WriteLine($"    if ({predFn}({listExpr}->data[{idxVar}])) {{ {retVar} = {listExpr}->data[{idxVar}]; break; }}");
+                result = retVar;
+                return true;
+            }
+
+            if (method == "FindAll")
+            {
+                var outVar = ctx.NextTmp("fa");
+                ctx.WriteLine($"List_{cList[5..]}* {outVar} = {cList}_New();");
+                ctx.WriteLine($"for (int {idxVar} = 0; {idxVar} < {listExpr}->count; {idxVar}++)");
+                ctx.WriteLine($"    if ({predFn}({listExpr}->data[{idxVar}])) {cList}_Add({outVar}, {listExpr}->data[{idxVar}]);");
+                ctx.LocalTypes[outVar] = "List<" + inner + ">";
+                result = outVar;
+                return true;
+            }
+
+            if (method == "ConvertAll")
+            {
+                // ConvertAll(x => expr) — Ergebnis-Typ aus Lambda inferieren
+                string projInner = "int";
+                if (lambdaNode is SimpleLambdaExpressionSyntax sl)
+                    projInner = TypeInferrer.InferCSharpType(sl.Body, ctx);
+                else if (lambdaNode is ParenthesizedLambdaExpressionSyntax pl)
+                    projInner = TypeInferrer.InferCSharpType(pl.Body, ctx);
+                var cProj = projInner == "string" ? "str" : TypeRegistry.MapType(projInner);
+                var projLifter = new LambdaLifter(ctx, new ExpressionWriter(ctx));
+                projLifter.SetStatementWriter(new StatementWriter(ctx, new ExpressionWriter(ctx)));
+                var projFn = projLifter.LiftLambda(lambdaNode, elementTypeHint: inner);
+                var outVar = ctx.NextTmp("ca");
+                ctx.WriteLine($"List_{cProj}* {outVar} = List_{cProj}_New();");
+                ctx.WriteLine($"for (int {idxVar} = 0; {idxVar} < {listExpr}->count; {idxVar}++)");
+                ctx.WriteLine($"    List_{cProj}_Add({outVar}, {projFn}({listExpr}->data[{idxVar}]));");
+                ctx.LocalTypes[outVar] = "List<" + projInner + ">";
+                result = outVar;
+                return true;
+            }
         }
 
         if (method == "Sort" && inv.ArgumentList.Arguments.Count > 0)

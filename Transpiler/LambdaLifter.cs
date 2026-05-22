@@ -324,7 +324,8 @@ public sealed class LambdaLifter
         }
 
         // Prüfen ob eigene Methoden-Aufrufe self benötigen
-        if (!needsSelf && !string.IsNullOrEmpty(_ctx.CurrentClass))
+        // FIX: In statischen Methoden gibt es kein self — Prüfung überspringen
+        if (!needsSelf && !string.IsNullOrEmpty(_ctx.CurrentClass) && !_ctx.IsStaticMethod)
         {
             needsSelf = lambda.DescendantNodes()
                 .OfType<InvocationExpressionSyntax>()
@@ -335,6 +336,7 @@ public sealed class LambdaLifter
         }
 
         if (needsSelf
+            && !_ctx.IsStaticMethod
             && !string.IsNullOrEmpty(_ctx.CurrentClass)
             && !captures.Any(c => c.CapName == "self"))
         {

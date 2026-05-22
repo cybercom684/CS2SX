@@ -157,11 +157,11 @@ public sealed class ConsoleHandler : InvocationHandlerBase
             "u8" => "%u",
             "u16" => "%u",
             "u32" => "%u",
-            "u64" => "%llu",
+            "u64" => "%lu",
             "s8" => "%d",
             "s16" => "%d",
             "s32" => "%d",
-            "s64" => "%lld",
+            "s64" => "%ld",
             "int" => "%d",
             _ => TypeRegistry.FormatSpecifier(cType),
         };

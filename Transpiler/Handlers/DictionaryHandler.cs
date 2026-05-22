@@ -12,6 +12,7 @@ public sealed class DictionaryHandler : InvocationHandlerBase
     private static readonly HashSet<string> s_methods = new(StringComparer.Ordinal)
     {
         "Add", "Remove", "ContainsKey", "TryGetValue", "Clear",
+        "ContainsValue", "TryAdd",
     };
 
     public override bool TryHandle(InvocationExpressionSyntax inv, string calleeStr,
@@ -85,6 +86,43 @@ public sealed class DictionaryHandler : InvocationHandlerBase
             // Normaler Fall: args[1] ist bereits ein Ausdruck (z.B. &myVar)
             var outPtr = args[1].StartsWith("&") ? args[1] : "&" + args[1];
             result = cDict + "_TryGetValue(" + dictExpr + ", " + args[0] + ", " + outPtr + ")";
+            return true;
+        }
+
+        if (method == "ContainsValue")
+        {
+            // Linearer Scan über alle Werte — kein O(1) in C
+            var types = TypeRegistry.GetDictionaryTypes(dictType);
+            var valCs = types?.val ?? "int";
+            var valC = valCs == "string" ? "const char*" : TypeRegistry.MapType(valCs);
+            var cmpFn = valCs == "string"
+                ? $"CS2SX_strcmp_safe({dictExpr}->values[_dv_i], {ArgAt(args, 0)}) == 0"
+                : $"{dictExpr}->values[_dv_i] == {ArgAt(args, 0)}";
+            var idxVar = ctx.NextTmp("dv_i");
+            var retVar = ctx.NextTmp("dv_found");
+            ctx.WriteLine($"int {retVar} = 0;");
+            ctx.WriteLine($"for (int {idxVar} = 0; {idxVar} < {dictExpr}->count; {idxVar}++)");
+            ctx.WriteLine("{");
+            ctx.Indent();
+            ctx.WriteLine($"if ({cmpFn.Replace("_dv_i", idxVar)}) {{ {retVar} = 1; break; }}");
+            ctx.Dedent();
+            ctx.WriteLine("}");
+            result = retVar;
+            return true;
+        }
+
+        if (method == "TryAdd")
+        {
+            // TryAdd: nur hinzufügen wenn Schlüssel noch nicht vorhanden
+            var retVar = ctx.NextTmp("ta_ok");
+            ctx.WriteLine($"int {retVar} = 0;");
+            ctx.WriteLine($"if (!{cDict}_ContainsKey({dictExpr}, {ArgAt(args, 0)})) {{");
+            ctx.Indent();
+            ctx.WriteLine($"{cDict}_Add({dictExpr}, {ArgAt(args, 0)}, {ArgAt(args, 1)});");
+            ctx.WriteLine($"{retVar} = 1;");
+            ctx.Dedent();
+            ctx.WriteLine("}");
+            result = retVar;
             return true;
         }
 

@@ -222,7 +222,13 @@ public sealed class ExpressionWriter : IExpressionWriter
         if (!string.IsNullOrEmpty(_ctx.CurrentTupleReturnType))
         {
             var typeName = _ctx.CurrentTupleReturnType;
-            var fields = new[] { "item1", "item2", "item3", "item4", "item5", "item6", "item7" };
+            // Support up to 8 tuple elements (ValueTuple max); warn on overflow
+            var fields = new[] { "item1", "item2", "item3", "item4", "item5", "item6", "item7", "item8" };
+            if (elements.Count > fields.Length)
+            {
+                _ctx.Warn($"Tuple mit {elements.Count} Elementen — maximal {fields.Length} unterstützt; überzählige Felder ignoriert.");
+                elements = elements[..fields.Length];
+            }
             var assigns = elements
                 .Select((e, i) => $".{fields[i]} = {e}")
                 .ToList();
@@ -788,7 +794,7 @@ public sealed class ExpressionWriter : IExpressionWriter
         // string.* Konstanten
         if (full == "string.Empty") return "\"\"";
         if (full == "string.IsNullOrEmpty") return "String_IsNullOrEmpty";
-        if (full == "string.IsNullOrWhiteSpace") return "String_IsNullOrEmpty";
+        if (full == "string.IsNullOrWhiteSpace") return "String_IsNullOrWhiteSpace";
         if (full == "int.MaxValue") return "INT_MAX";
         if (full == "int.MinValue") return "INT_MIN";
 
@@ -1284,12 +1290,12 @@ public sealed class ExpressionWriter : IExpressionWriter
     {
         // Infer element type from first element when possible
         string cType = "int";
-        if (implArr.Initializer.Expressions.Count > 0)
+        if (implArr.Initializer?.Expressions.Count > 0)
         {
             var firstType = TypeInferrer.InferCSharpType(implArr.Initializer.Expressions[0], _ctx);
             cType = firstType == "string" ? "const char*" : TypeRegistry.MapType(firstType);
         }
-        var elems = implArr.Initializer.Expressions.Select(e => Write(e));
+        var elems = implArr.Initializer?.Expressions.Select(e => Write(e)) ?? Enumerable.Empty<string>();
         return "(" + cType + "[]){ " + string.Join(", ", elems) + " }";
     }
 

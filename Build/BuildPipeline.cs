@@ -231,6 +231,15 @@ public sealed class BuildPipeline
                 .Where(File.Exists);
             allTranspiledHeaders.AddRange(generatedHeaders);
 
+            // FIX: Custom-Header aus dem Projektverzeichnis in die Timestamp-Berechnung einbeziehen.
+            // Vorher wurden diese erst NACH dem Transpile-Loop zu allHeaders hinzugefügt und
+            // beeinflussten latestHeaderTime nicht → Änderungen an Custom-Headern triggerten
+            // keine Neu-Transpilierung.
+            var customProjectHeaders = Directory.GetFiles(_projectDir, "*.h")
+                .Where(h => File.Exists(h))
+                .ToList();
+            allTranspiledHeaders.AddRange(customProjectHeaders);
+
             var latestHeaderTime = allTranspiledHeaders.Count > 0
                 ? allTranspiledHeaders.Max(h => File.GetLastWriteTimeUtc(h))
                 : DateTime.MinValue;
@@ -350,12 +359,13 @@ public sealed class BuildPipeline
             foreach (var hFile in Directory.GetFiles(_projectDir, "*.h"))
             {
                 var fileName = Path.GetFileName(hFile);
-                if (fileName != null && IsListOnlyHeader(fileName, listUserClasses))
+                if (fileName == null) continue;
+                if (IsListOnlyHeader(fileName, listUserClasses))
                 {
                     Log.Warning($"Skipping '{fileName}' — defines List<UserClass> types that are now auto-generated. Remove this file from your project.");
                     continue;
                 }
-                var dest = Path.Combine(_buildDir, fileName!);
+                var dest = Path.Combine(_buildDir, fileName);
                 System.IO.File.Copy(hFile, dest, overwrite: true);
                 Log.Info($"Custom header: {fileName}");
 
@@ -699,8 +709,8 @@ public sealed class BuildPipeline
         w.WriteLine("PadState     g_cs2sx_pad;");
         w.WriteLine("unsigned int _cs2sx_rand_state = 12345u;");
         w.WriteLine();
-        w.WriteLine("char _cs2sx_strpool[32][1024];");
-        w.WriteLine("int  _cs2sx_strpool_idx = 0;");
+        w.WriteLine("char   _cs2sx_arena[CS2SX_ARENA_SIZE];");
+        w.WriteLine("size_t _cs2sx_arena_pos = 0;");
         w.WriteLine();
         w.WriteLine("// Audio state (extern in AudioStub.h)");
         w.WriteLine("int               _cs2sx_audio_init      = 0;");

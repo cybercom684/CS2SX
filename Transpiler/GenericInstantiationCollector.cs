@@ -217,10 +217,70 @@ public sealed class GenericInstantiationCollector
             }
         }
 
+        // Pass 3: Transitive instantiation — if Container<T> uses List<T> internally,
+        // and Container<int> was registered, also register List<int>.
+        int before = _instantiations.Count;
+        CollectTransitiveInstantiations();
+        int added = _instantiations.Count - before;
+
         Log.Info($"GenericCollector: {GenericClasses.Count} generische Klasse(n), "
                + $"{Interfaces.Count} Interface(s), "
-               + $"{_instantiations.Count} Instantiierung(en), "
-               + $"{ExtensionMethods.Values.SelectMany(v => v).Count()} Extension-Methode(n)");
+               + $"{_instantiations.Count} Instantiierung(en)"
+               + (added > 0 ? $" ({added} transitiv)" : "")
+               + $", {ExtensionMethods.Values.SelectMany(v => v).Count()} Extension-Methode(n)");
+    }
+
+    // ── Pass 3: Transitive instantiation ─────────────────────────────────────
+
+    private void CollectTransitiveInstantiations()
+    {
+        bool changed;
+        do
+        {
+            changed = false;
+            // Snapshot so we can safely add to _instantiations while iterating
+            var snapshot = _instantiations.ToList();
+
+            foreach (var inst in snapshot)
+            {
+                if (!GenericClasses.TryGetValue(inst.BaseName, out var cls)) continue;
+
+                // Build T→concrete map for this instantiation
+                var typeMap = BuildTransitiveTypeMap(cls, inst);
+
+                // Scan every generic name usage in the class body
+                foreach (var gn in cls.DescendantNodes().OfType<GenericNameSyntax>())
+                {
+                    var nestedBase = gn.Identifier.Text;
+                    if (!GenericClasses.ContainsKey(nestedBase)) continue;
+
+                    var args = gn.TypeArgumentList.Arguments
+                        .Select(a =>
+                        {
+                            var t = NormalizeTypeName(a.ToString().Trim());
+                            return typeMap.TryGetValue(t, out var mapped) ? mapped : t;
+                        })
+                        .ToList();
+
+                    if (args.Any(a => a.Contains('<'))) continue; // skip still-unresolved
+
+                    int countBefore = _instantiations.Count;
+                    RegisterInstantiation(nestedBase, args);
+                    if (_instantiations.Count > countBefore) changed = true;
+                }
+            }
+        } while (changed);
+    }
+
+    private static Dictionary<string, string> BuildTransitiveTypeMap(
+        ClassDeclarationSyntax cls, GenericInstantiation inst)
+    {
+        var map = new Dictionary<string, string>(StringComparer.Ordinal);
+        var typeParams = cls.TypeParameterList?.Parameters.ToList()
+                         ?? new List<TypeParameterSyntax>();
+        for (int i = 0; i < typeParams.Count && i < inst.TypeArguments.Count; i++)
+            map[typeParams[i].Identifier.Text] = inst.TypeArguments[i];
+        return map;
     }
 
     // ── Pass 1: Definitionen ──────────────────────────────────────────────────

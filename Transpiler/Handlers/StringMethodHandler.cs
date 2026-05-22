@@ -82,8 +82,10 @@ public sealed class StringMethodHandler : InvocationHandlerBase
         return calleeStr switch
         {
             "string.IsNullOrEmpty" or "String.IsNullOrEmpty"
-          or "string.IsNullOrWhiteSpace" or "String.IsNullOrWhiteSpace"
                 => "String_IsNullOrEmpty(" + ArgAt(args, 0) + ")",
+
+            "string.IsNullOrWhiteSpace" or "String.IsNullOrWhiteSpace"
+                => "String_IsNullOrWhiteSpace(" + ArgAt(args, 0) + ")",
 
             // FIX: inv wird jetzt durchgereicht damit wir den Roh-Text des 3. Args lesen können
             "string.Compare" or "String.Compare"
@@ -193,7 +195,7 @@ public sealed class StringMethodHandler : InvocationHandlerBase
                 || thirdArgRaw.Contains("InvariantCultureIgnoreCase")
                 || thirdArgRaw.Contains("OrdinalIgnoreCase"))
             {
-                return "String_EqualsIgnoreCase(" + a + ", " + b + ") ? 0 : strcmp(" + a + ", " + b + ")";
+                return "String_CompareIgnoreCase(" + a + ", " + b + ")";
             }
         }
 
@@ -251,11 +253,11 @@ public sealed class StringMethodHandler : InvocationHandlerBase
                 ? "String_SubstringFrom(" + receiver + ", " + ArgAt(args, 0) + ")"
                 : "String_Substring(" + receiver + ", " + ArgAt(args, 0) + ", " + ArgAt(args, 1) + ")",
 
-            "PadLeft" => args.Count == 1
+            "PadLeft" or "PadStart" => args.Count == 1
                 ? "String_PadLeft(" + receiver + ", " + ArgAt(args, 0) + ", ' ')"
                 : "String_PadLeft(" + receiver + ", " + ArgAt(args, 0) + ", " + ArgAt(args, 1) + ")",
 
-            "PadRight" => args.Count == 1
+            "PadRight" or "PadEnd" => args.Count == 1
                 ? "String_PadRight(" + receiver + ", " + ArgAt(args, 0) + ", ' ')"
                 : "String_PadRight(" + receiver + ", " + ArgAt(args, 0) + ", " + ArgAt(args, 1) + ")",
 
@@ -282,9 +284,10 @@ public sealed class StringMethodHandler : InvocationHandlerBase
     {
         if (args.Count == 0) return "String_Split(" + receiver + ", \",\")";
         var sep = ExtractSplitSeparator(inv, 0, args[0]);
-        // Guard: empty separator would cause strtok to loop forever
         if (sep == "\"\"") return "/* String.Split(\"\") — empty separator not supported; returning single-element list */ String_Split(" + receiver + ", \",\")";
-        return "String_Split(" + receiver + ", " + sep + ")";
+        var removeEmpty = HasRemoveEmptyEntries(inv);
+        var fn = removeEmpty ? "String_Split_RemoveEmpty" : "String_Split";
+        return $"{fn}({receiver}, {sep})";
     }
 
     // Split static: string.Split(str, ',') / string.Split(str, new char[]{})
@@ -293,9 +296,20 @@ public sealed class StringMethodHandler : InvocationHandlerBase
         if (args.Count == 0) return "NULL";
         if (args.Count == 1) return "String_Split(" + args[0] + ", \",\")";
         var sep = ExtractSplitSeparator(inv, 1, args[1]);
-        // Guard: empty separator would cause strtok to loop forever
         if (sep == "\"\"") return "/* String.Split(\"\") — empty separator not supported; returning single-element list */ String_Split(" + args[0] + ", \",\")";
-        return "String_Split(" + args[0] + ", " + sep + ")";
+        var removeEmpty = HasRemoveEmptyEntries(inv);
+        var fn = removeEmpty ? "String_Split_RemoveEmpty" : "String_Split";
+        return $"{fn}({args[0]}, {sep})";
+    }
+
+    private static bool HasRemoveEmptyEntries(InvocationExpressionSyntax inv)
+    {
+        foreach (var arg in inv.ArgumentList.Arguments)
+        {
+            var raw = arg.Expression.ToString();
+            if (raw.Contains("RemoveEmptyEntries")) return true;
+        }
+        return false;
     }
 
     // Extracts the split separator from a C# Split() argument.

@@ -25,6 +25,7 @@ public sealed class WatchCommand
     private readonly string _projectDir;
     private CancellationTokenSource? _debounceCts;
     private readonly object _lock = new();
+    private volatile string _buildReason = "";
 
     public WatchCommand(string csprojPath)
     {
@@ -102,30 +103,35 @@ public sealed class WatchCommand
 
     private void OnFileChanged(object sender, FileSystemEventArgs e)
     {
-        if (e.FullPath.Contains("cs2sx_out")) return;
-        if (e.FullPath.Contains(Path.DirectorySeparatorChar + "obj" + Path.DirectorySeparatorChar)) return;
-        if (e.FullPath.Contains(Path.DirectorySeparatorChar + "bin" + Path.DirectorySeparatorChar)) return;
+        var sep = Path.DirectorySeparatorChar;
+        if (e.FullPath.Contains(sep + "cs2sx_out" + sep)
+            || e.FullPath.EndsWith(sep + "cs2sx_out")) return;
+        if (e.FullPath.Contains(sep + "obj" + sep)) return;
+        if (e.FullPath.Contains(sep + "bin" + sep)) return;
 
-        Log.Info($"Changed: {Path.GetFileName(e.FullPath)}");
-        ScheduleBuild();
+        var name = Path.GetFileName(e.FullPath);
+        Log.Info($"{e.ChangeType}: {name}");
+        ScheduleBuild($"{e.ChangeType.ToString().ToLower()}: {name}");
     }
 
     private void OnFileRenamed(object sender, RenamedEventArgs e)
     {
-        if (e.FullPath.Contains("cs2sx_out")) return;
-        Log.Info($"Renamed: {Path.GetFileName(e.FullPath)}");
-        ScheduleBuild();
+        var sep = Path.DirectorySeparatorChar;
+        if (e.FullPath.Contains(sep + "cs2sx_out" + sep)
+            || e.FullPath.EndsWith(sep + "cs2sx_out")) return;
+        var name = Path.GetFileName(e.FullPath);
+        Log.Info($"Renamed: {name}");
+        ScheduleBuild($"renamed: {name}");
     }
 
     /// <summary>
     /// Debounced Build — 500ms Verzögerung nach letzter Änderung.
     /// </summary>
-    private void ScheduleBuild()
+    private void ScheduleBuild(string reason = "")
     {
         lock (_lock)
         {
-            // FIX 3: Altes CTS canceln UND disposen bevor neues erstellt wird.
-            // Vorher: _debounceCts?.Cancel() + _debounceCts = new ... ohne Dispose.
+            _buildReason = reason; // last change wins
             DisposeDebounceCts();
             _debounceCts = new CancellationTokenSource();
             var token = _debounceCts.Token;
@@ -157,6 +163,9 @@ public sealed class WatchCommand
     private void TriggerBuild()
     {
         Console.WriteLine();
+        var reason = _buildReason;
+        if (!string.IsNullOrEmpty(reason))
+            Log.Info($"Rebuild triggered ({reason})");
         Log.Info($"Building {Path.GetFileNameWithoutExtension(_csprojPath)}...");
         Console.WriteLine(new string('─', 60));
 

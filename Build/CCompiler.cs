@@ -37,9 +37,17 @@ public sealed class CCompiler
         var libnxLib = Path.Combine(_devkitPath, "libnx", "lib");
         var switchSpecs = Path.Combine(_devkitPath, "libnx", "switch.specs");
 
+        if (!File.Exists(switchSpecs))
+            throw new FileNotFoundException(
+                $"Switch specs nicht gefunden: {switchSpecs}\n"
+                + "Bitte DevkitPro korrekt installieren: https://devkitpro.org/wiki/Getting_Started",
+                switchSpecs);
+
         gcc = ProcessRunner.ResolveTool(gcc);
 
         var allCFiles = cFiles.ToList();
+        if (allCFiles.Count == 0)
+            throw new ArgumentException("Keine .c-Dateien zum Kompilieren übergeben.", nameof(cFiles));
         var extraIncludeArgs = new System.Text.StringBuilder();
         var defineArgs = new System.Text.StringBuilder();
 

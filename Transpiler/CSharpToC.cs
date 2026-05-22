@@ -294,9 +294,13 @@ public sealed class CSharpToC : CSharpSyntaxWalker
 
     private void WriteDestructor(ClassDeclarationSyntax node, string name, string baseType)
     {
+        bool isRootClass = string.IsNullOrEmpty(baseType);
+
         if (_mode == TranspileMode.HeaderOnly)
         {
             _ctx.Out.WriteLine($"void {name}_Free({name}* self);");
+            if (isRootClass)
+                _ctx.Out.WriteLine($"{name}* {name}_Retain({name}* self);");
             return;
         }
 
@@ -304,6 +308,23 @@ public sealed class CSharpToC : CSharpSyntaxWalker
         _ctx.Out.WriteLine("{");
         _ctx.Indent();
         _ctx.WriteLine("if (!self) return;");
+        if (isRootClass)
+            _ctx.WriteLine("if (--self->_rc > 0) return;");
+
+        // Benutzerdefinierter Destruktor-Body (falls vorhanden) VOR dem automatischen Cleanup ausführen.
+        // C#-Konvention: Finalizer läuft zuerst, danach GC → hier: user-code, dann field-cleanup.
+        var customDtor = node.Members.OfType<DestructorDeclarationSyntax>().FirstOrDefault();
+        if (customDtor?.Body != null)
+        {
+            _ctx.CurrentClass = name;
+            foreach (var stmt in customDtor.Body.Statements)
+                _stmtWriter.Write(stmt);
+        }
+        else if (customDtor?.ExpressionBody != null)
+        {
+            _ctx.CurrentClass = name;
+            _ctx.WriteLine(_exprWriter.Write(customDtor.ExpressionBody.Expression) + ";");
+        }
 
         foreach (var field in node.Members.OfType<FieldDeclarationSyntax>())
         {
@@ -395,6 +416,16 @@ public sealed class CSharpToC : CSharpSyntaxWalker
         _ctx.Dedent();
         _ctx.Out.WriteLine("}");
         _ctx.Out.WriteLine();
+
+        if (isRootClass)
+        {
+            _ctx.Out.WriteLine($"{name}* {name}_Retain({name}* self)");
+            _ctx.Out.WriteLine("{");
+            _ctx.Out.WriteLine($"    if (self) self->_rc++;");
+            _ctx.Out.WriteLine($"    return self;");
+            _ctx.Out.WriteLine("}");
+            _ctx.Out.WriteLine();
+        }
     }
 
     public override void VisitStructDeclaration(StructDeclarationSyntax node)
@@ -539,6 +570,11 @@ public sealed class CSharpToC : CSharpSyntaxWalker
         _ctx.Out.WriteLine("struct " + name);
         _ctx.Out.WriteLine("{");
         _ctx.Indent();
+
+        // Reference-count field for root classes (no base type).
+        // _Retain() increments, _Free() decrements and frees when it reaches 0.
+        if (string.IsNullOrEmpty(baseType))
+            _ctx.WriteLine("int _rc;");
 
         if (!string.IsNullOrEmpty(baseType) && baseType != SwitchAppBase
             && !IsControlSubclass(baseType))
@@ -1255,6 +1291,7 @@ public sealed class CSharpToC : CSharpSyntaxWalker
             _ctx.Out.WriteLine($"struct {name}");
             _ctx.Out.WriteLine("{");
             _ctx.Indent();
+            _ctx.WriteLine("int _rc;");
             foreach (var (csType, fieldName) in paramFields)
             {
                 var cType = TypeRegistry.MapType(csType);
@@ -1292,6 +1329,7 @@ public sealed class CSharpToC : CSharpSyntaxWalker
                 _ctx.Out.WriteLine($"{name}* {name}_New();");
             }
             _ctx.Out.WriteLine($"void {name}_Free({name}* self);");
+            _ctx.Out.WriteLine($"{name}* {name}_Retain({name}* self);");
 
             // Method signatures from body
             foreach (var method in node.Members.OfType<MethodDeclarationSyntax>())
@@ -1307,6 +1345,7 @@ public sealed class CSharpToC : CSharpSyntaxWalker
             _ctx.Indent();
             _ctx.WriteLine($"{name}* self = ({name}*)calloc(1, sizeof({name}));");
             _ctx.WriteLine("if (!self) return NULL;");
+            _ctx.WriteLine("self->_rc = 1;");
             foreach (var (csType, fieldName) in paramFields)
                 _ctx.WriteLine($"self->{fieldName} = {fieldName};");
             _ctx.Dedent();
@@ -1319,6 +1358,7 @@ public sealed class CSharpToC : CSharpSyntaxWalker
             _ctx.Out.WriteLine("{");
             _ctx.Indent();
             _ctx.WriteLine("if (!self) return;");
+            _ctx.WriteLine("if (--self->_rc > 0) return;");
             // Free any collection/heap fields from positional params
             foreach (var (csType, fieldName) in paramFields)
             {
@@ -1358,6 +1398,13 @@ public sealed class CSharpToC : CSharpSyntaxWalker
             }
             _ctx.WriteLine("free(self);");
             _ctx.Dedent();
+            _ctx.Out.WriteLine("}");
+            _ctx.Out.WriteLine();
+
+            _ctx.Out.WriteLine($"{name}* {name}_Retain({name}* self)");
+            _ctx.Out.WriteLine("{");
+            _ctx.Out.WriteLine($"    if (self) self->_rc++;");
+            _ctx.Out.WriteLine($"    return self;");
             _ctx.Out.WriteLine("}");
             _ctx.Out.WriteLine();
 
@@ -1489,6 +1536,42 @@ public sealed class CSharpToC : CSharpSyntaxWalker
             _ctx.BaseFieldTypes["value"] = "int";
             _ctx.BaseFieldTypes["width_chars"] = "int";
         }
+
+        // Benutzerdefinierte Basisklassen: Felder über das SemanticModel auflösen.
+        // Ohne diese Info würde der Transpiler z.B. "self->speed" emittieren statt
+        // "self->base.speed" für ein Feld, das in der Elternklasse definiert ist.
+        if (_ctx.SemanticModel == null) return;
+        if (IsControlSubclass(baseType) || baseType is "SwitchApp") return;
+
+        try
+        {
+            var compilation = _ctx.SemanticModel.Compilation;
+            var baseSym = compilation.GetTypeByMetadataName(baseType)
+                       ?? compilation.GlobalNamespace
+                              .GetTypeMembers(baseType)
+                              .FirstOrDefault();
+            if (baseSym == null) return;
+
+            foreach (var member in baseSym.GetMembers())
+            {
+                string? csType = null;
+                string memberName;
+                switch (member)
+                {
+                    case IFieldSymbol f when !f.IsStatic && !f.IsConst:
+                        csType = TranspilerContext.FormatTypeSymbol(f.Type);
+                        memberName = f.Name.TrimStart('_');
+                        _ctx.BaseFieldTypes[memberName] = csType;
+                        break;
+                    case IPropertySymbol p when !p.IsStatic:
+                        csType = TranspilerContext.FormatTypeSymbol(p.Type);
+                        memberName = p.Name;
+                        _ctx.BaseFieldTypes[memberName] = csType;
+                        break;
+                }
+            }
+        }
+        catch { }
     }
 
     internal static bool IsControlSubclass(string baseType) =>

@@ -3,30 +3,41 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <stdbool.h>
 #include <ctype.h>
 
 extern char _cs2sx_strbuf[1024];
 
 // ============================================================================
-// String-Buffer-Pool
-// FIX: Pool-Slots von 8 auf 32 erhöht. Außerdem: _cs2sx_next_buf_heap()
-// für Funktionen die viele Strings auf einmal zurückgeben (Split, ReadAllLines)
-// — diese allozieren eigene Heap-Kopien statt Pool-Slots zu verbrauchen.
+// Per-Frame String Arena
+//
+// Replaces the 64-slot ring buffer with a flat bump-pointer arena.
+// cs2sx_frame_begin() resets the arena at the start of every game-loop frame;
+// all string temporaries are valid until the next frame begins.
+// Capacity: CS2SX_ARENA_SIZE bytes per frame (default 512 KB).
+// Each _cs2sx_next_buf() call hands out CS2SX_STRBUF_SIZE bytes, 8-byte aligned.
+// If the arena fills within a single frame the allocator wraps (same behaviour
+// as the old ring-buffer overflow — silent wrap rather than a crash).
 // ============================================================================
 
-#define CS2SX_STRBUF_SLOTS 32
 #define CS2SX_STRBUF_SIZE  1024
+#define CS2SX_ARENA_SIZE   (512 * 1024)
 
-// FIX: Pool-State als extern — Definition liegt in switchforms.c (ODR-sicher)
-extern char   _cs2sx_strpool[CS2SX_STRBUF_SLOTS][CS2SX_STRBUF_SIZE];
-extern int    _cs2sx_strpool_idx;
+extern char   _cs2sx_arena[CS2SX_ARENA_SIZE];
+extern size_t _cs2sx_arena_pos;
+
+static inline void cs2sx_frame_begin(void)
+{
+    _cs2sx_arena_pos = 0;
+}
 
 static inline char* _cs2sx_next_buf(void)
 {
-    char* buf = _cs2sx_strpool[_cs2sx_strpool_idx];
-    _cs2sx_strpool_idx = (_cs2sx_strpool_idx + 1) % CS2SX_STRBUF_SLOTS;
-    return buf;
+    size_t pos = (_cs2sx_arena_pos + 7u) & ~(size_t)7u;
+    if (pos + CS2SX_STRBUF_SIZE > CS2SX_ARENA_SIZE) pos = 0;
+    _cs2sx_arena_pos = pos + CS2SX_STRBUF_SIZE;
+    return _cs2sx_arena + pos;
 }
 
 // FIX: Heap-String für lange Lebensdauer (Liste von Strings etc.)
@@ -1209,6 +1220,19 @@ static inline List_str* String_Split(const char* s, const char* sep)
     return result;
 }
 
+// StringSplitOptions.RemoveEmptyEntries-Variante
+static inline List_str* String_Split_RemoveEmpty(const char* s, const char* sep)
+{
+    List_str* raw = String_Split(s, sep);
+    if (!raw) return List_str_New();
+    List_str* result = List_str_New();
+    for (int _i = 0; _i < raw->count; _i++)
+        if (raw->data[_i] && raw->data[_i][0] != '\0')
+            List_str_Add(result, raw->data[_i]);
+    List_str_Free(raw);
+    return result;
+}
+
 // ============================================================================
 // Dictionary<TKey, TValue>
 // ============================================================================
@@ -1722,6 +1746,48 @@ static inline int CS2SX_Path_IsDirectory(const char* path)
     return CS2SX_Path_GetExtension(path)[0] == '\0';
 }
 
+static inline const char* CS2SX_Path_GetFileNameWithoutExt(const char* path)
+{
+    char* buf = _cs2sx_next_buf();
+    const char* fname = CS2SX_Path_GetFileName(path);
+    strncpy(buf, fname, CS2SX_STRBUF_SIZE - 1);
+    buf[CS2SX_STRBUF_SIZE - 1] = '\0';
+    char* dot = NULL;
+    for (char* p = buf; *p; p++)
+        if (*p == '.') dot = p;
+    if (dot) *dot = '\0';
+    return buf;
+}
+
+static inline int CS2SX_Path_IsPathRooted(const char* path)
+{
+    if (!path || !path[0]) return 0;
+    return path[0] == '/' || path[0] == '\\';
+}
+
+static inline const char* CS2SX_Path_ChangeExtension(const char* path, const char* ext)
+{
+    char* buf = _cs2sx_next_buf();
+    if (!path) { buf[0] = '\0'; return buf; }
+    char base[CS2SX_STRBUF_SIZE];
+    strncpy(base, path, CS2SX_STRBUF_SIZE - 1);
+    base[CS2SX_STRBUF_SIZE - 1] = '\0';
+    char* dot = NULL;
+    for (char* p = base; *p; p++)
+        if (*p == '.') dot = p;
+    if (dot) *dot = '\0';
+    if (ext && ext[0]) {
+        if (ext[0] != '.')
+            snprintf(buf, CS2SX_STRBUF_SIZE, "%s.%s", base, ext);
+        else
+            snprintf(buf, CS2SX_STRBUF_SIZE, "%s%s", base, ext);
+    } else {
+        strncpy(buf, base, CS2SX_STRBUF_SIZE - 1);
+        buf[CS2SX_STRBUF_SIZE - 1] = '\0';
+    }
+    return buf;
+}
+
 static inline int String_LastIndexOfChar(const char* s, char c)
 {
     if (!s) return -1;
@@ -2066,9 +2132,10 @@ static inline List_str* CS2SX_Regex_Split(const char* input, const char* pattern
     regmatch_t m;
     while (regexec(&rx, src, 1, &m, 0) == 0 && m.rm_so >= 0)
     {
-        char tmp[512];
-        int len = m.rm_so; if (len >= 511) len = 511;
-        memcpy(tmp, src, len); tmp[len] = '\0';
+        char tmp[CS2SX_STRBUF_SIZE];
+        int len = (int)m.rm_so;
+        if (len >= CS2SX_STRBUF_SIZE - 1) len = CS2SX_STRBUF_SIZE - 1;
+        memcpy(tmp, src, (size_t)len); tmp[len] = '\0';
         List_str_Add(result, tmp);
         src += m.rm_eo;
         if (m.rm_eo == m.rm_so && *src) src++;

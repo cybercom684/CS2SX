@@ -65,6 +65,8 @@ public sealed class DefaultConstructorStrategy : IConstructorStrategy
         ctx.WriteLine(name + "* self = (" + name + "*)malloc(sizeof(" + name + "));");
         ctx.WriteLine("if (!self) return NULL;");
         ctx.WriteLine("memset(self, 0, sizeof(" + name + "));");
+        if (string.IsNullOrEmpty(baseType))
+            ctx.WriteLine("self->_rc = 1;");
 
         // VTable-Zeiger setzen wenn Basisklasse existiert
         if (!string.IsNullOrEmpty(baseType) && baseType != "SwitchApp"

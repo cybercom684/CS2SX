@@ -40,6 +40,8 @@ internal static class ProcessRunner
         {
             var stdout = Task.Run(() => proc.StandardOutput.ReadToEnd());
             var stderr = Task.Run(() => proc.StandardError.ReadToEnd());
+            // Drain both streams first to prevent buffer-full deadlock, then wait for process
+            Task.WaitAll(stdout, stderr);
             proc.WaitForExit();
 
             var outText = stdout.Result;
