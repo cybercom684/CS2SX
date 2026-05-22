@@ -700,6 +700,8 @@ public sealed class CSharpToC : CSharpSyntaxWalker
 
     internal void WriteStaticFieldDefinitions(ClassDeclarationSyntax node, string name)
     {
+        WriteStaticConstructor(node, name);
+
         foreach (var field in node.Members.OfType<FieldDeclarationSyntax>())
         {
             bool isConst = field.Modifiers.Any(m => m.IsKind(SyntaxKind.ConstKeyword));
@@ -718,6 +720,20 @@ public sealed class CSharpToC : CSharpSyntaxWalker
                         var initVal = _exprWriter.Write(v.Initializer.Value);
                         _ctx.Out.WriteLine(
                             $"const char* const {name}_{fieldName} = {initVal};");
+                    }
+                }
+                else if (!TypeRegistry.IsPrimitive(csType))
+                {
+                    // Non-primitive const/readonly: emit definition (header has extern decl)
+                    var cTypeNP = TypeRegistry.MapType(csType);
+                    var needPtrNP = NeedsPtr(csType);
+                    var ptrNP = needPtrNP ? "*" : "";
+                    foreach (var v in field.Declaration.Variables)
+                    {
+                        if (v.Initializer == null) continue;
+                        var fieldName = v.Identifier.Text.TrimStart('_');
+                        var initVal = _exprWriter.Write(v.Initializer.Value);
+                        _ctx.Out.WriteLine($"const {cTypeNP}{ptrNP} {name}_{fieldName} = {initVal};");
                     }
                 }
                 continue;
@@ -746,6 +762,27 @@ public sealed class CSharpToC : CSharpSyntaxWalker
                 _ctx.Out.WriteLine($"{cType}{ptr} {name}_{fieldName}{init};");
             }
         }
+    }
+
+    private void WriteStaticConstructor(ClassDeclarationSyntax node, string name)
+    {
+        var staticCtor = node.Members.OfType<ConstructorDeclarationSyntax>()
+            .FirstOrDefault(c => c.Modifiers.Any(m => m.IsKind(SyntaxKind.StaticKeyword)));
+        if (staticCtor == null) return;
+
+        _ctx.Out.WriteLine($"__attribute__((constructor))");
+        _ctx.Out.WriteLine($"static void {name}_StaticInit(void)");
+        _ctx.Out.WriteLine("{");
+        _ctx.Indent();
+        if (staticCtor.Body != null)
+        {
+            var stmtWriter = new Writers.StatementWriter(_ctx, _exprWriter);
+            foreach (var s in staticCtor.Body.Statements)
+                stmtWriter.Write(s);
+        }
+        _ctx.Dedent();
+        _ctx.Out.WriteLine("}");
+        _ctx.Out.WriteLine();
     }
 
     private void WriteStaticArrayFieldDef(FieldDeclarationSyntax field, string className, string csType)

@@ -60,6 +60,30 @@
 static inline int CS2SX_Sign(int x) { return (x > 0) - (x < 0); }
 
 // ============================================================================
+// String construction helpers (new string(char, count) / new string(char[], start, count))
+// ============================================================================
+
+static inline const char* CS2SX_RepeatChar(char c, int count)
+{
+    if (count <= 0) return "";
+    char* buf = (char*)malloc((size_t)count + 1);
+    if (!buf) return "";
+    memset(buf, (unsigned char)c, (size_t)count);
+    buf[count] = '\0';
+    return buf;
+}
+
+static inline const char* CS2SX_SubstrFromChars(const char* arr, int start, int count)
+{
+    if (!arr || count <= 0) return "";
+    char* buf = (char*)malloc((size_t)count + 1);
+    if (!buf) return "";
+    memcpy(buf, arr + start, (size_t)count);
+    buf[count] = '\0';
+    return buf;
+}
+
+// ============================================================================
 // NULL-safe string comparison (CS2SX_strcmp_safe)
 // ============================================================================
 

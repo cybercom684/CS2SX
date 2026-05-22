@@ -158,7 +158,16 @@ public sealed class ArrayHandler : InvocationHandlerBase
         var val = args[1];
         var arrRaw = inv.ArgumentList.Arguments[0].Expression.ToString();
         var elemType = InferArrayElementType(arrRaw, ctx);
-        var lenExpr = ctx.ArrayLengths.TryGetValue(arrRaw, out var len) ? len : "0";
+        string lenExpr;
+        if (ctx.ArrayLengths.TryGetValue(arrRaw, out var len))
+            lenExpr = len;
+        else if (ctx.LocalTypes.ContainsKey(arrRaw))
+            lenExpr = "(int)(sizeof(" + arrName + ") / sizeof(" + arrName + "[0]))";
+        else
+        {
+            ctx.Warn(inv, $"Array.IndexOf: length of '{arrRaw}' unknown — register it in ArrayLengths or use explicit-size array");
+            lenExpr = arrName + "_count /* unknown length — set before Array.IndexOf */";
+        }
 
         var resultVar = ctx.NextTmp("idx");
         var iVar = ctx.NextTmp("ii");

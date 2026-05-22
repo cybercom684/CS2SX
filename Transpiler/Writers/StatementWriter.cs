@@ -26,6 +26,7 @@ public sealed class StatementWriter
             case BlockSyntax block: WriteBlock(block); break;
             case ForStatementSyntax forStmt: WriteFor(forStmt); break;
             case ForEachStatementSyntax forEach: WriteForEach(forEach); break;
+            case ForEachVariableStatementSyntax deconForeach: WriteForEachDeconstruction(deconForeach); break;
             case WhileStatementSyntax whileStmt: WriteWhile(whileStmt); break;
             case DoStatementSyntax doStmt: WriteDo(doStmt); break;
             case BreakStatementSyntax: _ctx.WriteLine("break;"); break;
@@ -36,6 +37,11 @@ public sealed class StatementWriter
             case UsingStatementSyntax usingStmt: WriteUsing(usingStmt); break;
             case LockStatementSyntax lockStmt: WriteLock(lockStmt); break;
             case EmptyStatementSyntax: break;
+            case CheckedStatementSyntax checkedStmt:
+                _ctx.Warn(checkedStmt, "checked/unchecked block — C has no overflow checking; body emitted as-is");
+                _ctx.WriteLine("/* checked/unchecked — no overflow checking in C */");
+                WriteBlockOrStmt(checkedStmt.Block);
+                break;
             case YieldStatementSyntax yield:
                 _ctx.Warn(yield, "yield return/break not supported — C has no generators; refactor to a List<T> or callback pattern");
                 _ctx.WriteLine("/* yield not supported — refactor to List<T> or callback */");
@@ -944,6 +950,74 @@ public sealed class StatementWriter
         // FIX: varName selbst als __kvp__varName registrieren damit WriteMemberAccess
         //      "kv.Key" → "kv_Key" und "kv.Value" → "kv_Value" umschreibt.
         _ctx.LocalTypes[varName] = $"__kvp__{varName}";
+
+        var bodyStmts = forEach.Statement is BlockSyntax b
+            ? b.Statements.Cast<StatementSyntax>()
+            : new[] { forEach.Statement };
+        foreach (var s in bodyStmts)
+            Write(s);
+
+        _ctx.Dedent();
+        _ctx.WriteLine("}");
+    }
+
+    /// <summary>
+    /// foreach(var (k, v) in dict) — Roslyn emits ForEachVariableStatementSyntax for deconstruction.
+    /// Supports Dictionary<K,V> and List<(T1,T2)> (tuple list).
+    /// </summary>
+    private void WriteForEachDeconstruction(ForEachVariableStatementSyntax forEach)
+    {
+        var colExpr  = _expr.Write(forEach.Expression);
+        var colRaw   = forEach.Expression.ToString().Trim();
+        var colType  = _ctx.LocalTypes.TryGetValue(colRaw, out var t) ? t : "";
+
+        // Extract deconstruction names
+        var names = new List<string>();
+        if (forEach.Variable is DeclarationExpressionSyntax decl
+            && decl.Designation is ParenthesizedVariableDesignationSyntax paren)
+        {
+            foreach (var desig in paren.Variables)
+                names.Add(desig is SingleVariableDesignationSyntax svd ? svd.Identifier.Text : "_");
+        }
+
+        var idxVar = "_i_decon_" + colRaw.Replace(".", "_");
+
+        if (TypeRegistry.IsDictionary(colType) && names.Count >= 2)
+        {
+            var types = TypeRegistry.GetDictionaryTypes(colType)!.Value;
+            var cKey = types.key == "string" ? "const char*" : TypeRegistry.MapType(types.key);
+            var cVal = types.val == "string" ? "const char*" : TypeRegistry.MapType(types.val);
+
+            _ctx.WriteLine($"for (int {idxVar} = 0; {idxVar} < (int)({colExpr}->count); {idxVar}++)");
+            _ctx.WriteLine("{");
+            _ctx.Indent();
+            _ctx.WriteLine($"{cKey} {names[0]} = {colExpr}->keys[{idxVar}];");
+            _ctx.WriteLine($"{cVal} {names[1]} = {colExpr}->vals[{idxVar}];");
+            _ctx.LocalTypes[names[0]] = types.key;
+            _ctx.LocalTypes[names[1]] = types.val;
+        }
+        else if (TypeRegistry.IsList(colType))
+        {
+            // List<(T1, T2)> — access via item1/item2
+            _ctx.WriteLine($"for (int {idxVar} = 0; {idxVar} < (int)({colExpr}->count); {idxVar}++)");
+            _ctx.WriteLine("{");
+            _ctx.Indent();
+            var elemVar = "_elem_" + idxVar;
+            _ctx.WriteLine($"void* {elemVar} = {colExpr}->items[{idxVar}];");
+            for (int i = 0; i < names.Count; i++)
+            {
+                if (names[i] == "_") continue;
+                _ctx.WriteLine($"/* {names[i]} = {elemVar}->item{i + 1} — tuple field access */");
+                _ctx.WriteLine($"__auto_type {names[i]} = ((__auto_type){elemVar})->item{i + 1};");
+            }
+        }
+        else
+        {
+            _ctx.Warn(forEach, $"foreach deconstruction on unsupported collection type '{colType}' — emitting index loop");
+            _ctx.WriteLine($"for (int {idxVar} = 0; {idxVar} < (int)({colExpr}->count); {idxVar}++)");
+            _ctx.WriteLine("{");
+            _ctx.Indent();
+        }
 
         var bodyStmts = forEach.Statement is BlockSyntax b
             ? b.Statements.Cast<StatementSyntax>()

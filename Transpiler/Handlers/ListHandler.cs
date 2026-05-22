@@ -18,7 +18,7 @@ public sealed class ListHandler : InvocationHandlerBase
     private static readonly HashSet<string> s_methods = new(StringComparer.Ordinal)
     {
         "Add", "Clear", "RemoveAt", "Remove", "Contains", "Insert",
-        "Sort", "IndexOf", "Reverse",
+        "Sort", "IndexOf", "Reverse", "ForEach",
     };
 
     public override bool TryHandle(InvocationExpressionSyntax inv, string calleeStr,
@@ -56,6 +56,18 @@ public sealed class ListHandler : InvocationHandlerBase
             ctx.WriteLine($"if ({args[0]} >= 0 && {args[0]} < {listExpr}->count && {listExpr}->data[{args[0]}])");
             ctx.WriteLine($"    {cInner}_Free({listExpr}->data[{args[0]}]);");
             result = cList + "_Remove(" + listExpr + ", " + args[0] + ")";
+            return true;
+        }
+
+        if (method == "ForEach")
+        {
+            // list.ForEach(action) → for loop calling action on each element
+            var cInner = inner == "string" ? "const char*" : TypeRegistry.MapType(inner);
+            var actionExpr = args.Count > 0 ? args[0] : "NULL /* ForEach: missing action */";
+            var iVar = ctx.NextTmp("fe_i");
+            ctx.WriteLine($"for (int {iVar} = 0; {iVar} < {listExpr}->count; {iVar}++)");
+            ctx.WriteLine($"    {actionExpr}({listExpr}->items[{iVar}]);");
+            result = "";
             return true;
         }
 

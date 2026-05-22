@@ -102,6 +102,19 @@ public static class FormatStringBuilder
                 var specifier = fmtClause != null
                     ? StringMethodHandler.MapFormatSpecifier(fmtClause, baseSpec)
                     : baseSpec;
+
+                // Alignment: {x,10} → "%-10s" / "%10d" etc.
+                if (hole.AlignmentClause != null
+                    && int.TryParse(hole.AlignmentClause.Value.ToString().Trim(), out var width))
+                {
+                    // Negative width = left-align in C printf (matches C# left-align)
+                    // Remove leading % and inject width
+                    var pct = specifier.StartsWith('%') ? specifier[1..] : specifier[1..];
+                    specifier = width < 0
+                        ? "%-" + (-width) + pct
+                        : "%" + width + pct;
+                }
+
                 fmt.Append(specifier);
                 args.Add(writeExpr(hole.Expression));
             }

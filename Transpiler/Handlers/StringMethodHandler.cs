@@ -42,7 +42,7 @@ public sealed class StringMethodHandler : InvocationHandlerBase
         "ToString", "Trim", "TrimStart", "TrimEnd",
         "ToUpper", "ToLower", "Replace", "Substring",
         "IndexOf", "LastIndexOf", "PadLeft", "PadRight",
-        "Split", "CompareTo",
+        "Split", "CompareTo", "ToCharArray",
     };
 
     public override bool TryHandle(InvocationExpressionSyntax inv, string calleeStr,
@@ -258,6 +258,8 @@ public sealed class StringMethodHandler : InvocationHandlerBase
             "PadRight" => args.Count == 1
                 ? "String_PadRight(" + receiver + ", " + ArgAt(args, 0) + ", ' ')"
                 : "String_PadRight(" + receiver + ", " + ArgAt(args, 0) + ", " + ArgAt(args, 1) + ")",
+
+            "ToCharArray" => receiver + " /* ToCharArray — const char* is already a char array in C */",
 
             _ => args.Count > 0 ? args[0] : "\"\"",
         };

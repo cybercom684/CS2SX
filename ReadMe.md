@@ -2,6 +2,8 @@
 
 CS2SX transpiliert C#-Quellcode zu C und kompiliert ihn via DevkitPro zu einer Nintendo Switch Homebrew `.nro`-Datei.
 
+**[Dokumentation](docs/index.md)** · [Erste Schritte](docs/getting-started.md) · [Sprachunterstützung](docs/language-guide.md) · [Beispiele](docs/examples/)
+
 ---
 
 ## Voraussetzungen

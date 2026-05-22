@@ -65,6 +65,10 @@ public sealed class ExpressionWriter : IExpressionWriter
             BinaryExpressionSyntax bin => WriteBinary(bin),
             LiteralExpressionSyntax lit => WriteLiteral(lit),
             IdentifierNameSyntax id => WriteIdentifier(id),
+            // ^n  →  (len - n)  — must come before the general PrefixUnary arm
+            PrefixUnaryExpressionSyntax hatIdx
+                when hatIdx.IsKind(SyntaxKind.IndexExpression)
+                => "(-1 - " + Write(hatIdx.Operand) + ") /* ^n index — use inside [] */",
             PrefixUnaryExpressionSyntax pre => WritePrefixUnary(pre),
             PostfixUnaryExpressionSyntax post => Write(post.Operand) + post.OperatorToken.Text,
             AssignmentExpressionSyntax assign => WriteAssignment(assign),
@@ -88,6 +92,8 @@ public sealed class ExpressionWriter : IExpressionWriter
             TupleExpressionSyntax tuple => WriteTuple(tuple),
             AwaitExpressionSyntax awaitExpr => WriteAwait(awaitExpr),
             TypeOfExpressionSyntax typeOf => WriteTypeOf(typeOf),
+            SizeOfExpressionSyntax sizeOf => "sizeof(" + TypeRegistry.MapType(sizeOf.Type.ToString().Trim()) + ")",
+            RangeExpressionSyntax range => WriteRange(range),
             _ => WriteFallback(node),
         };
     }
@@ -601,10 +607,8 @@ public sealed class ExpressionWriter : IExpressionWriter
     {
         var target = Write(assign.Left);
         _ctx.Out.WriteLine(_ctx.Tab + "if (" + target + " == NULL)");
-        _ctx.Out.WriteLine(_ctx.Tab + "{");
         _ctx.Out.WriteLine(_ctx.Tab + "    " + target + " = " + right + ";");
-        _ctx.Out.WriteLine(_ctx.Tab + "}");
-        return "";
+        return target;
     }
 
     private string WriteMemberAssignment(AssignmentExpressionSyntax assign,
@@ -1110,6 +1114,28 @@ public sealed class ExpressionWriter : IExpressionWriter
         ArgumentListSyntax? argList,
         InitializerExpressionSyntax? initializer)
     {
+        // new string(char c, int count) → CS2SX_RepeatChar(c, count)
+        // new string(char[] arr) or new string(char[] arr, int start, int count)
+        if (typeName == "string" && argList != null)
+        {
+            var a = argList.Arguments;
+            if (a.Count == 2)
+            {
+                var ch    = Write(a[0].Expression);
+                var count = Write(a[1].Expression);
+                return "CS2SX_RepeatChar(" + ch + ", " + count + ")";
+            }
+            if (a.Count == 3)
+            {
+                var arr   = Write(a[0].Expression);
+                var start = Write(a[1].Expression);
+                var count = Write(a[2].Expression);
+                return "CS2SX_SubstrFromChars(" + arr + ", " + start + ", " + count + ")";
+            }
+            if (a.Count == 1)
+                return Write(a[0].Expression); // new string(existingCharPtr)
+        }
+
         if (TypeRegistry.IsStringBuilder(typeName))
         {
             var cap = argList?.Arguments.Count > 0
@@ -1314,7 +1340,28 @@ public sealed class ExpressionWriter : IExpressionWriter
             return objExpr + "[" + string.Join("][", flatParts) + "]";
         }
 
-        var index = Write(elem.ArgumentList.Arguments[0].Expression);
+        // ^n index-from-end: arr[^1] → arr[len - 1]
+        var rawArg = elem.ArgumentList.Arguments[0].Expression;
+        string index;
+        if (rawArg.IsKind(SyntaxKind.IndexExpression)
+            && rawArg is PrefixUnaryExpressionSyntax hatExpr)
+        {
+            var n = Write(hatExpr.Operand);
+            // Length expression: prefer known array length or ->count for collections
+            var collType = lt ?? ft ?? "";
+            string lenExpr;
+            if (TypeRegistry.IsList(collType))        lenExpr = objExpr + "->count";
+            else if (TypeRegistry.IsStack(collType))  lenExpr = objExpr + "->count";
+            else if (TypeRegistry.IsQueue(collType))  lenExpr = objExpr + "->count";
+            else if (collType == "string")            lenExpr = "(int)strlen(" + objExpr + ")";
+            else if (_ctx.ArrayLengths.TryGetValue(objRaw, out var kl)) lenExpr = kl;
+            else lenExpr = "(int)(sizeof(" + objExpr + ") / sizeof(" + objExpr + "[0]))";
+            index = "(" + lenExpr + " - " + n + ")";
+        }
+        else
+        {
+            index = Write(rawArg);
+        }
 
         bool isDict = (lt != null && TypeRegistry.IsDictionary(lt))
                    || (ft != null && TypeRegistry.IsDictionary(ft));
@@ -1343,6 +1390,16 @@ public sealed class ExpressionWriter : IExpressionWriter
             return objTypeName + "_get(" + objExpr + ", " + index + ")";
 
         return objExpr + "[" + index + "]";
+    }
+
+    // Range expression: 1..3, ^3.., ..^1 etc.
+    // Maps to a Substring call when used on strings, or emits a comment for arrays.
+    private string WriteRange(RangeExpressionSyntax range)
+    {
+        var left  = range.LeftOperand  != null ? Write(range.LeftOperand)  : "0";
+        var right = range.RightOperand != null ? Write(range.RightOperand) : "-1";
+        _ctx.Warn(range, "range expression — use String_Substring or manual loop; emitting stub");
+        return "/* range " + left + ".." + right + " — use Substring/manual slice */";
     }
 
     private bool IsStringExpr(SyntaxNode node)

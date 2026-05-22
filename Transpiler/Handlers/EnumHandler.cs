@@ -52,8 +52,24 @@ public sealed class EnumHandler : InvocationHandlerBase
         // ── Enum.IsDefined ────────────────────────────────────────────────────
         if (calleeStr is "Enum.IsDefined")
         {
-            // Simple: just cast and check — we can't do runtime introspection
-            result = args.Count >= 2 ? $"((int)({args[1]}) >= 0)" : "0";
+            string? enumTypeName = null;
+            string valArg = args.Count >= 2 ? args[args.Count - 1] : (args.Count >= 1 ? args[0] : "0");
+            if (inv.Expression is GenericNameSyntax gnDef && gnDef.TypeArgumentList.Arguments.Count > 0)
+                enumTypeName = gnDef.TypeArgumentList.Arguments[0].ToString().Trim();
+            else if (inv.ArgumentList.Arguments.Count >= 1
+                  && inv.ArgumentList.Arguments[0].Expression is TypeOfExpressionSyntax tofDef)
+                enumTypeName = tofDef.Type.ToString().Trim();
+
+            if (enumTypeName != null && ctx.EnumDefs.TryGetValue(enumTypeName, out var defMembers))
+            {
+                var checks = string.Join(" || ", defMembers.Select(m => $"(({valArg}) == {m})"));
+                result = "(" + checks + ")";
+            }
+            else
+            {
+                ctx.Warn(inv, "Enum.IsDefined — enum type not found; falling back to range check >= 0");
+                result = $"((int)({valArg}) >= 0)";
+            }
             return true;
         }
 
@@ -117,19 +133,28 @@ public sealed class EnumHandler : InvocationHandlerBase
 
         if (isTryParse)
         {
-            // TryParse<T>(str, out T result) → *result = atoi(str); return 1;
+            // TryParse<T>(str, out T result) → lookup by name, return 1 on success, 0 on failure
             var outArg = ArgAt(args, 1);
+            if (enumTypeName != null && ctx.EnumDefs.TryGetValue(enumTypeName, out var tryMembers))
+            {
+                var okVar = ctx.NextTmp("ep_ok");
+                ctx.WriteLine($"int {okVar} = 0;");
+                foreach (var m in tryMembers)
+                    ctx.WriteLine($"if (CS2SX_strcmp_safe({strArg}, \"{m}\") == 0) {{ *{outArg} = {m}; {okVar} = 1; }}");
+                return okVar;
+            }
+            // Fallback: numeric parse always succeeds
             ctx.Out.WriteLine(ctx.Tab + $"*{outArg} = ({enumTypeName ?? "int"})atoi({strArg});");
             return "1";
         }
 
-        // If we have enum defs, build a lookup table
+        // If we have enum defs, build a name-to-value lookup
         if (enumTypeName != null && ctx.EnumDefs.TryGetValue(enumTypeName, out var members))
         {
             var resultVar = ctx.NextTmp("ep");
             ctx.WriteLine($"{enumTypeName} {resultVar} = ({enumTypeName})0;");
             foreach (var m in members)
-                ctx.WriteLine($"if (strcmp({strArg}, \"{m}\") == 0) {resultVar} = {m};");
+                ctx.WriteLine($"if (CS2SX_strcmp_safe({strArg}, \"{m}\") == 0) {resultVar} = {m};");
             return resultVar;
         }
 

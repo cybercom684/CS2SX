@@ -99,6 +99,19 @@ public sealed class ConvertHandler : InvocationHandlerBase
             ? TypeInferrer.InferCSharpType(firstArgNode, ctx)
             : "int";
 
+        // Convert.ToInt32(str, base) — second arg is numeric base (e.g. 16 for hex)
+        if (argType == "string" && args.Count >= 2)
+        {
+            // Only int-like targets support radix parsing
+            if (calleeStr is "Convert.ToInt32" or "Convert.ToInt" or "Convert.ToInt64"
+                or "Convert.ToUInt32" or "Convert.ToUInt64" or "Convert.ToInt16"
+                or "Convert.ToUInt16" or "Convert.ToByte" or "Convert.ToSByte")
+            {
+                result = "(int)strtol(" + args[0] + ", NULL, " + args[1] + ")";
+                return true;
+            }
+        }
+
         result = (argType == "string")
             ? mapping.parseFunc + "(" + args[0] + ")"
             : mapping.cast + "(" + args[0] + ")";
