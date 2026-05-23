@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(dotnet run *)",
+      "Bash(dotnet build *)",
+      "Bash(xargs grep -l \"TouchState\\\\|GetTouch\")",
+      "Read(//c/Users/Johannes/Documents/Privat/Neuer Ordner/switch/Datenstrukturen/textEditor/**)",
+      "Bash(xargs grep -l \"NpadButton\\\\|IsDown\\\\|CS2SX Stub\")"
+    ]
+  }
+}

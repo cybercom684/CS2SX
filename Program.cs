@@ -28,6 +28,12 @@ switch (cli.Command)
             return new CheckCommand(cli.CheckTarget).Run();
         }
 
+    case "dump":
+        {
+            if (string.IsNullOrEmpty(cli.CheckTarget)) return Usage();
+            return new DumpCommand(cli.CheckTarget).Run(cli.DumpFilter);
+        }
+
     case "watch":
         {
             if (string.IsNullOrWhiteSpace(cli.WatchTarget)) return Usage();
@@ -99,6 +105,7 @@ static int Usage()
     Log.Info("  cs2sx new    <AppName>                    Create a new project");
     Log.Info("  cs2sx build  <path/to/App.csproj|folder>  Build project to .nro");
     Log.Info("  cs2sx check  <path/to/App.csproj>         Transpile-only check");
+    Log.Info("  cs2sx dump   <path/to/App.csproj> [file] Print generated C to stdout");
     Log.Info("  cs2sx watch  <path/to/App.csproj|folder>  Watch & rebuild on change");
     Log.Info("  cs2sx clean  <path/to/App.csproj|folder>  Delete cs2sx_out/");
     Log.Info("  cs2sx genstubs <libnx-include> <output>   Generate LibNX stubs");

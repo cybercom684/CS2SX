@@ -239,8 +239,7 @@ public sealed class TranspilerContext
         BaseFieldTypes.Clear();
         MethodReturnTypes.Clear();
         PropertyTypes.Clear();
-        EnumMembers.Clear();
-        EnumDefs.Clear();
+        // Enum names and members are project-global — not per-class.
 
         // FIX-1: Zähler nur hier zurücksetzen — pro Klasse, nicht pro Methode.
         _classTmpCounter = 0;

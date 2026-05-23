@@ -67,17 +67,16 @@ public sealed class LambdaLifter
         WriteFunctionToSb(preludeSb, id, name, lambda, parms, retCs, caps);
         _ctx.PendingLambdaPreludes.Add(preludeSb.ToString());
 
-        // Stack-allokierter Closure-Struct statt malloc → kein Heap-Leak.
-        // _cs2sx_ctx_N wird VOR dem ersten Aufruf gesetzt und zeigt auf diesen Stack-Struct.
-        // Callers (Sort, LINQ, etc.) rufen die Funktion ohne expliziten Context-Parameter auf.
+        // Static-local Closure-Struct statt Stack → kein -Wdangling-pointer.
+        // _cs2sx_ctx_N wird VOR dem ersten Aufruf gesetzt und zeigt auf diesen Struct.
+        // Safe: Switch ist single-threaded, Lambdas werden immer synchron aufgerufen.
         if (caps.Count > 0)
         {
             var capStruct = "_cap_" + id;
-            _ctx.WriteLine($"struct {capStruct} _ctx_val_{id};");
+            _ctx.WriteLine($"static struct {capStruct} _ctx_val_{id};");
             foreach (var cap in caps)
                 _ctx.WriteLine($"_ctx_val_{id}.{cap.CapName} = {cap.CExpr};");
-            _ctx.WriteLine($"struct {capStruct}* _ctx_{id} = &_ctx_val_{id};");
-            _ctx.WriteLine($"_cs2sx_ctx_{id} = _ctx_{id};");
+            _ctx.WriteLine($"_cs2sx_ctx_{id} = &_ctx_val_{id};");
         }
 
         return name;
@@ -385,14 +384,22 @@ public sealed class LambdaLifter
     private static string MapFieldType(string csType) =>
         csType == "string" ? "const char*" : TypeRegistry.MapType(csType);
 
-    private static string MapParamType(string csType) =>
-        csType == "string" ? "const char*" : TypeRegistry.MapType(csType);
+    private string MapParamType(string csType)
+    {
+        if (csType == "string") return "const char*";
+        var mapped = TypeRegistry.MapType(csType);
+        if (mapped.EndsWith("*")) return mapped;
+        if (TypeRegistry.NeedsPointerSuffix(csType) && !_ctx.EnumDefs.ContainsKey(csType))
+            return mapped + "*";
+        return mapped;
+    }
 
-    private static bool NeedsPtr(string csType)
+    private bool NeedsPtr(string csType)
     {
         if (csType == "string") return false;
+        if (_ctx.EnumDefs.ContainsKey(csType)) return false;
         var cMapped = TypeRegistry.MapType(csType);
-        if (cMapped.EndsWith("*")) return false; // already a pointer from MapType
+        if (cMapped.EndsWith("*")) return false;
         return TypeRegistry.NeedsPointerSuffix(csType) || TypeRegistry.IsList(csType);
     }
 

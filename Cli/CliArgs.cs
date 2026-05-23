@@ -23,6 +23,9 @@ public sealed class CliArgs
     // --- addlib ---
     public string AddLibName { get; init; } = string.Empty;
 
+    // --- dump ---
+    public string[] DumpFilter { get; init; } = Array.Empty<string>();
+
     // --- flags ---
     public bool Verbose
     {

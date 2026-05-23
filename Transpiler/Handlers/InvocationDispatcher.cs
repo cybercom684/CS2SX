@@ -21,6 +21,22 @@ public sealed class InvocationDispatcher
     private readonly Func<SyntaxNode?, string> _writeExpr;
     private GenericMethodExpander? _genericMethodExpander;
 
+    // LINQ methods whose lambda arguments must NOT be pre-evaluated by BuildArg.
+    // LinqHandler accesses the lambda directly from raw syntax and lifts it with the
+    // correct element type hint. Pre-evaluating here generates a stale _lambda_N with
+    // fallback type 'int' that compiles (causing GCC errors) but is never called.
+    private static readonly HashSet<string> s_linqMethodNames = new(StringComparer.Ordinal)
+    {
+        "Where", "Select", "First", "FirstOrDefault", "Last", "LastOrDefault",
+        "Any", "All", "Count", "Sum", "Min", "Max", "Average", "Aggregate",
+        "ToList", "ToArray", "OrderBy", "OrderByDescending", "ThenBy", "ThenByDescending",
+        "Contains", "Distinct", "Skip", "Take", "Concat", "Reverse",
+        "Single", "SingleOrDefault", "ElementAt", "ElementAtOrDefault",
+        "ToDictionary", "ToHashSet", "GroupBy", "Zip",
+        "TakeWhile", "SkipWhile", "SelectMany",
+        "Except", "Intersect", "Union", "Join", "OfType", "Cast", "DefaultIfEmpty",
+    };
+
     // Bekannte C-Builtins die NICHT gewarnt werden sollen
     private static readonly HashSet<string> s_silentPassthrough = new(StringComparer.Ordinal)
     {
@@ -225,6 +241,15 @@ public sealed class InvocationDispatcher
 
     private string BuildArg(ArgumentSyntax a)
     {
+        // Skip lifting lambdas for LINQ methods — LinqHandler accesses raw syntax directly
+        // and re-lifts with the correct element type. Lifting here generates a stale
+        // _lambda_N with fallback type 'int' that causes GCC errors but is never called.
+        if (a.Expression is LambdaExpressionSyntax
+            && a.Parent?.Parent is InvocationExpressionSyntax outerInv
+            && outerInv.Expression is MemberAccessExpressionSyntax outerMem
+            && s_linqMethodNames.Contains(outerMem.Name.Identifier.Text))
+            return "";
+
         // out var x → Deklaration + Adresse
         if (a.RefKindKeyword.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.OutKeyword)
             && a.Expression is DeclarationExpressionSyntax declExpr

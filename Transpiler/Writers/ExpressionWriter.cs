@@ -331,8 +331,14 @@ public sealed class ExpressionWriter : IExpressionWriter
             return NullableHandler.WriteNullCoalescing(left, right, isValueType);
         }
 
-        var isPrim = TypeRegistry.IsPrimitive(leftType) && leftType != "string";
-        if (isPrim) return left;
+        // Only skip the null-check when the semantic model positively confirms a
+        // non-nullable primitive — the "int" fallback from InferInvocation is not
+        // trustworthy enough to suppress ?? (e.g. FirstOrDefault infers "int" but
+        // actually returns a nullable pointer).
+        var semanticType = _ctx.GetSemanticType(coalesce.Left);
+        var confirmedPrim = semanticType != null
+            && TypeRegistry.IsPrimitive(semanticType) && semanticType != "string";
+        if (confirmedPrim) return left;
 
         return "(" + left + " != NULL ? " + left + " : " + right + ")";
     }
@@ -777,6 +783,16 @@ public sealed class ExpressionWriter : IExpressionWriter
             return "Dict_" + cKey + "_" + cVal + "_Set(" + obj + ", " + key + ", " + right + ")";
         }
 
+        bool isList = (lt != null && TypeRegistry.IsList(lt))
+                   || (ft != null && TypeRegistry.IsList(ft));
+        if (isList)
+        {
+            var listType = lt ?? ft!;
+            var inner = TypeRegistry.GetListInnerType(listType) ?? "int";
+            var cInner = inner == "string" ? "str" : TypeRegistry.MapType(inner);
+            return "List_" + cInner + "_Set(" + obj + ", " + key + ", " + right + ")";
+        }
+
         // User-defined indexer setter → ClassName_set(obj, key, value)
         var objTypeName = (lt ?? ft ?? "").TrimEnd('*').Trim();
         if (!string.IsNullOrEmpty(objTypeName) && _ctx.IndexerClasses.Contains(objTypeName))
@@ -842,6 +858,25 @@ public sealed class ExpressionWriter : IExpressionWriter
 
         var mapped = TypeRegistry.MapEnum(full);
         if (mapped != full) return mapped;
+
+        // Qualified enum member access: ClassName.EnumType.Member, EnumType.Member, etc.
+        // After typedef, enum members are global C constants — emit the name directly.
+        // Semantic model resolves this reliably across files.
+        if (_ctx.SemanticModel != null)
+        {
+            try
+            {
+                var sym = _ctx.SemanticModel.GetSymbolInfo(mem).Symbol;
+                if (sym is Microsoft.CodeAnalysis.IFieldSymbol fld
+                    && fld.ContainingType?.TypeKind == Microsoft.CodeAnalysis.TypeKind.Enum)
+                    return fld.Name;
+            }
+            catch { }
+        }
+        // Fallback for check-mode without semantic model: if the property name is a known
+        // enum member in the current translation unit, return it directly.
+        if (_ctx.EnumMembers.Contains(mem.Name.Identifier.Text))
+            return mem.Name.Identifier.Text;
 
         if (full.StartsWith("LibNX.", StringComparison.Ordinal))
             return mem.Name.Identifier.Text;
@@ -960,6 +995,14 @@ public sealed class ExpressionWriter : IExpressionWriter
 
         var key = rawExpr.TrimStart('_');
         var receiverType = ResolveReceiverType(rawExpr, mem.Expression);
+
+        // TouchState computed properties — CS2SX_TouchState is a plain C struct without methods
+        if (receiverType == "TouchState" || obj.Contains("touch") || obj.Contains("Touch"))
+        {
+            if (prop == "IsTouched") return "(" + obj + ".count > 0)";
+            if (prop == "X0") return "(" + obj + ".count > 0 ? " + obj + ".x[0] : 0)";
+            if (prop == "Y0") return "(" + obj + ".count > 0 ? " + obj + ".y[0] : 0)";
+        }
 
         if (receiverType != null && IsControlSubclassType(receiverType))
         {
@@ -1153,7 +1196,19 @@ public sealed class ExpressionWriter : IExpressionWriter
         {
             var inner = TypeRegistry.GetListInnerType(typeName)!;
             var cInner = inner == "string" ? "str" : TypeRegistry.MapType(inner);
-            return "List_" + cInner + "_New()";
+            var listCreate = "List_" + cInner + "_New()";
+            if (initializer?.Expressions.Count > 0)
+            {
+                var tmp = _ctx.NextTmp("list");
+                _ctx.Out.WriteLine(_ctx.Tab + "List_" + cInner + "* " + tmp + " = " + listCreate + ";");
+                foreach (var item in initializer.Expressions)
+                {
+                    var itemVal = Write(item);
+                    _ctx.Out.WriteLine(_ctx.Tab + "List_" + cInner + "_Add(" + tmp + ", " + itemVal + ");");
+                }
+                return tmp;
+            }
+            return listCreate;
         }
         if (TypeRegistry.IsDictionary(typeName))
         {

@@ -135,9 +135,19 @@ public sealed class CSharpToC : CSharpSyntaxWalker
 
     public override void VisitEnumDeclaration(EnumDeclarationSyntax node)
     {
-        if (_mode != TranspileMode.HeaderOnly) return;
-
         var enumName = node.Identifier.Text;
+
+        // Always register so EnumDefs can be consulted for pointer-type decisions.
+        var memberNames = new List<string>();
+        foreach (var member in node.Members)
+        {
+            var mname = member.Identifier.Text;
+            _ctx.EnumMembers.Add(mname);
+            memberNames.Add(mname);
+        }
+        _ctx.EnumDefs[enumName] = memberNames;
+
+        if (_mode != TranspileMode.HeaderOnly) return;
 
         // Determine the underlying C type (default: int)
         string underlyingCType = "int";
@@ -147,26 +157,20 @@ public sealed class CSharpToC : CSharpSyntaxWalker
             underlyingCType = TypeRegistry.MapType(baseTypeName);
         }
 
-        _ctx.Out.WriteLine("enum " + enumName);
+        // typedef form so 'EnumName' is usable without the 'enum' keyword in C.
+        _ctx.Out.WriteLine("typedef enum " + enumName);
         _ctx.Out.WriteLine("{");
         _ctx.Indent();
-        var members = new List<string>();
         foreach (var member in node.Members)
         {
             var name = member.Identifier.Text;
-            _ctx.EnumMembers.Add(name);
-            members.Add(name);
             if (member.EqualsValue != null)
                 _ctx.Out.WriteLine(name + " = " + _exprWriter.Write(member.EqualsValue.Value) + ",");
             else
                 _ctx.Out.WriteLine(name + ",");
         }
-        _ctx.EnumDefs[enumName] = members;
         _ctx.Dedent();
-        _ctx.Out.WriteLine("};");
-        // Emit a typedef with the correct underlying type when non-default
-        if (underlyingCType != "int")
-            _ctx.Out.WriteLine($"typedef {underlyingCType} {enumName};");
+        _ctx.Out.WriteLine("} " + enumName + ";");
         _ctx.Out.WriteLine();
     }
 
@@ -231,6 +235,11 @@ public sealed class CSharpToC : CSharpSyntaxWalker
 
         if (_mode == TranspileMode.HeaderOnly)
         {
+            // Hoist nested enum declarations before the class struct so they are
+            // declared before any field or method signature that references them.
+            foreach (var nestedEnum in node.Members.OfType<EnumDeclarationSyntax>())
+                VisitEnumDeclaration(nestedEnum);
+
             if (!isStaticClass && VTableBuilder.HasVirtualMethods(node))
                 VTableBuilder.WriteVTableStruct(node, node.Identifier.Text, _ctx.Out);
 
@@ -260,6 +269,10 @@ public sealed class CSharpToC : CSharpSyntaxWalker
         }
         else
         {
+            // Register nested enums for pointer-type decisions in method bodies.
+            foreach (var nestedEnum in node.Members.OfType<EnumDeclarationSyntax>())
+                VisitEnumDeclaration(nestedEnum);
+
             if (!isStaticClass)
                 WriteConstructor(node);
 
@@ -620,6 +633,7 @@ public sealed class CSharpToC : CSharpSyntaxWalker
             var csType = ResolveFieldType(field);
             var cType = ResolveConcreteType(csType);
             var needPtr = !cType.EndsWith("*")
+                       && !_ctx.EnumDefs.ContainsKey(csType)
                        && (TypeRegistry.NeedsPointerSuffix(csType)
                        || TypeRegistry.IsStringBuilder(csType)
                        || TypeRegistry.IsControlType(csType)
@@ -940,6 +954,36 @@ public sealed class CSharpToC : CSharpSyntaxWalker
 
             _ctx.WriteLine("self->f_" + prop.Identifier.Text + " = "
                 + _exprWriter.Write(prop.Initializer.Value) + ";");
+        }
+
+        // Auto-init List<T> properties/fields with no explicit initializer to List_T_New()
+        // so that Add() calls don't crash with a null pointer.
+        foreach (var prop in node.Members.OfType<PropertyDeclarationSyntax>())
+        {
+            if (prop.Modifiers.Any(m => m.IsKind(SyntaxKind.StaticKeyword))) continue;
+            if (!PropertyWriter.IsAutoProperty(prop)) continue;
+            if (prop.Initializer != null) continue;
+            var csType = prop.Type.ToString().Trim();
+            if (!TypeRegistry.IsList(csType)) continue;
+            var inner = TypeRegistry.GetListInnerType(csType) ?? "int";
+            var cInner = inner == "string" ? "str" : TypeRegistry.MapType(inner);
+            _ctx.WriteLine("self->f_" + prop.Identifier.Text + " = List_" + cInner + "_New();");
+        }
+
+        foreach (var field in node.Members.OfType<FieldDeclarationSyntax>())
+        {
+            if (field.Modifiers.Any(m => m.IsKind(SyntaxKind.StaticKeyword))) continue;
+            var csType = field.Declaration.Type.ToString().Trim();
+            if (!TypeRegistry.IsList(csType)) continue;
+            var inner = TypeRegistry.GetListInnerType(csType) ?? "int";
+            var cInner = inner == "string" ? "str" : TypeRegistry.MapType(inner);
+            foreach (var v in field.Declaration.Variables)
+            {
+                if (v.Initializer != null) continue;
+                var fieldName = v.Identifier.Text.TrimStart('_');
+                var prefix = TypeRegistry.HasNoPrefix(fieldName) ? "" : "f_";
+                _ctx.WriteLine("self->" + prefix + fieldName + " = List_" + cInner + "_New();");
+            }
         }
     }
 
@@ -1641,7 +1685,9 @@ public sealed class CSharpToC : CSharpSyntaxWalker
             return csType + "* " + p.Identifier;
 
         var cType = TypeRegistry.MapType(csType);
-        var isPrim = TypeRegistry.IsPrimitive(csType) || csType == "string";
+        var isPrim = TypeRegistry.IsPrimitive(csType)
+                  || csType == "string"
+                  || _ctx.EnumDefs.ContainsKey(csType);
 
         if (isRef)
         {

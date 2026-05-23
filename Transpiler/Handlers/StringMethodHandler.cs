@@ -218,12 +218,7 @@ public sealed class StringMethodHandler : InvocationHandlerBase
 
         return methodName switch
         {
-            "ToString" => recvType switch
-            {
-                "uint" or "u32" => "UInt_ToString((unsigned int)" + receiver + ")",
-                "float" => "Float_ToString(" + receiver + ")",
-                _ => "Int_ToString((int)" + receiver + ")",
-            },
+            "ToString" => BuildToString(mem.Expression, receiver, recvType, ctx),
             "Contains" => "String_Contains(" + receiver + ", " + ArgAt(args, 0) + ")",
             "StartsWith" => "String_StartsWith(" + receiver + ", " + ArgAt(args, 0) + ")",
             "EndsWith" => "String_EndsWith(" + receiver + ", " + ArgAt(args, 0) + ")",
@@ -264,6 +259,42 @@ public sealed class StringMethodHandler : InvocationHandlerBase
             "ToCharArray" => receiver + " /* ToCharArray — const char* is already a char array in C */",
 
             _ => args.Count > 0 ? args[0] : "\"\"",
+        };
+    }
+
+    private static string BuildToString(
+        Microsoft.CodeAnalysis.CSharp.Syntax.ExpressionSyntax receiverExpr,
+        string receiver, string recvType, CS2SX.Core.TranspilerContext ctx)
+    {
+        // Enum.ToString() → ternary name lookup using known members.
+        // Check semantic model first (works across files), then EnumDefs (current TU).
+        List<string>? members = null;
+        if (ctx.SemanticModel != null)
+        {
+            try
+            {
+                var typeInfo = ctx.SemanticModel.GetTypeInfo(receiverExpr);
+                var sym = typeInfo.ConvertedType ?? typeInfo.Type;
+                if (sym?.TypeKind == Microsoft.CodeAnalysis.TypeKind.Enum
+                    && ctx.EnumDefs.TryGetValue(sym.Name, out var semMembers))
+                    members = semMembers;
+            }
+            catch { }
+        }
+        if (members == null && ctx.EnumDefs.TryGetValue(recvType, out var localMembers))
+            members = localMembers;
+
+        if (members != null && members.Count > 0)
+        {
+            var chain = string.Join(" : ", members.Select(m => $"{receiver} == {m} ? \"{m}\""));
+            return "(" + chain + " : \"0\")";
+        }
+
+        return recvType switch
+        {
+            "uint" or "u32" => "UInt_ToString((unsigned int)" + receiver + ")",
+            "float" => "Float_ToString(" + receiver + ")",
+            _ => "Int_ToString((int)" + receiver + ")",
         };
     }
 

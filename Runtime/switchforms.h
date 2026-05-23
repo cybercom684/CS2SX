@@ -1098,6 +1098,10 @@ static inline void List_str_Add(List_str* l, const char* val)
 
 static inline const char* List_str_Get(List_str* l, int i) { return l->data[i]; }
 static inline int          List_str_Count(List_str* l) { return l ? l->count : 0; }
+static inline void         List_str_Set(List_str* l, int i, const char* val) {
+    if (!l || i < 0 || i >= l->count) return;
+    free(l->data[i]);
+    l->data[i] = val ? _cs2sx_heap_strdup(val) : NULL; }
 
 static inline void List_str_Clear(List_str* l)
 {

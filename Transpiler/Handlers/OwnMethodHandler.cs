@@ -72,16 +72,8 @@ public sealed class OwnMethodHandler : InvocationHandlerBase
         if (s_cBuiltins.Contains(calleeStr))
             return NotHandled(out result);
 
-        // "using static" resolution
-        var resolvedPrefix = ctx.UsingStaticResolver.TryResolveStaticMethod(calleeStr);
-        if (resolvedPrefix != null && resolvedPrefix != ctx.CurrentClass)
-        {
-            var syntheticCallee = resolvedPrefix + "." + calleeStr;
-            result = syntheticCallee + "(" + string.Join(", ", args) + ")";
-            return true;
-        }
-
-        // SemanticModel check
+        // SemanticModel check first — it is authoritative over any using-static heuristic.
+        // A "using static EditorController" must not shadow methods on the current class.
         if (ctx.SemanticModel != null)
         {
             try
@@ -116,6 +108,15 @@ public sealed class OwnMethodHandler : InvocationHandlerBase
                     return NotHandled(out result);
             }
             catch { }
+        }
+
+        // "using static" resolution — fallback when semantic model is unavailable
+        var resolvedPrefix = ctx.UsingStaticResolver.TryResolveStaticMethod(calleeStr);
+        if (resolvedPrefix != null && resolvedPrefix != ctx.CurrentClass)
+        {
+            var syntheticCallee = resolvedPrefix + "." + calleeStr;
+            result = syntheticCallee + "(" + string.Join(", ", args) + ")";
+            return true;
         }
 
         // Heuristic: lowercase = own method
