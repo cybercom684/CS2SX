@@ -67,8 +67,10 @@ public sealed class BuildRenderer : IDisposable
     {
         EnableAnsi();
         _stages.AddRange(stages);
-        _originRow = Console.CursorTop;
-        Console.CursorVisible = false;
+        try { _originRow = Console.CursorTop; }
+        catch { _originRow = 0; }
+        try { Console.CursorVisible = false; }
+        catch { }
         PrintHeader();
         Render();
         _ticker = new System.Timers.Timer(80);
@@ -179,7 +181,9 @@ public sealed class BuildRenderer : IDisposable
 
     private void PrintHeader()
     {
-        var w = Math.Min(Console.WindowWidth, 72);
+        int w;
+        try { w = Math.Min(Console.WindowWidth, 72); }
+        catch { w = 72; }
         Console.WriteLine($"{Bold}{Gray}  cs2sx{Reset}  {Dim}{Repeat("─", w - 10)}{Reset}");
         Console.WriteLine();
     }

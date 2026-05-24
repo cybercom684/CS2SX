@@ -15,9 +15,10 @@ Willkommen bei CS2SX — dem C#-zu-C-Transpiler für Nintendo Switch Homebrew.
 
 | Dokument | Beschreibung |
 |----------|-------------|
-| [Graphics API](graphics.md) | 2D-Zeichenfunktionen, Farben, Text, Texturen |
-| [Input API](input.md) | Controller-Buttons lesen |
+| [Graphics API](graphics.md) | 2D-Zeichenfunktionen, Farben, Text, Texturen, Assets (romfs) |
+| [Input API](input.md) | Controller-Buttons, Analog-Sticks, Touch-Screen |
 | [Forms API](forms.md) | Text-UI mit Label, Button, ProgressBar |
+| System API | `System.GetBattery()` → `BatteryInfo`, `System.GetTime()` → `TimeInfo` |
 
 ## Beispiele
 

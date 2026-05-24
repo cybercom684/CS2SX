@@ -35,7 +35,17 @@ public sealed class ListHandler : InvocationHandlerBase
         var objStr = mem.Expression.ToString();
 
         if (!TryResolveList(objStr, ctx, out var listType, out var listExpr))
-            return NotHandled(out result);
+        {
+            // Fallback: chained member access like _taskBar.OpenTasks — resolve via SemanticModel
+            var semType = ctx.GetSemanticType(mem.Expression);
+            if (semType != null && TypeRegistry.IsList(semType))
+            {
+                listType = semType;
+                listExpr = writeExpr(mem.Expression);
+            }
+            else
+                return NotHandled(out result);
+        }
 
         var cList = ListFuncPrefix(listType);
         var method = mem.Name.Identifier.Text;

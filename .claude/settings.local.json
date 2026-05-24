@@ -5,7 +5,21 @@
       "Bash(dotnet build *)",
       "Bash(xargs grep -l \"TouchState\\\\|GetTouch\")",
       "Read(//c/Users/Johannes/Documents/Privat/Neuer Ordner/switch/Datenstrukturen/textEditor/**)",
-      "Bash(xargs grep -l \"NpadButton\\\\|IsDown\\\\|CS2SX Stub\")"
+      "Bash(xargs grep -l \"NpadButton\\\\|IsDown\\\\|CS2SX Stub\")",
+      "Bash(dotnet publish *)",
+      "Bash(\"C:\\\\Users\\\\Johannes\\\\source\\\\repos\\\\CS2SX\\\\publish_out\\\\CS2SX.exe\" build *)",
+      "Bash(ls \"C:\\\\Users\\\\Johannes\\\\Documents\\\\Privat\\\\Neuer Ordner\\\\switch\\\\UI\\\\multiWindow\" 2>&1)",
+      "Read(//c/Users/Johannes/Documents/Privat/Neuer Ordner/switch/UI/multiWindow/**)",
+      "Bash(Get-ChildItem -Recurse \"C:\\\\Users\\\\Johannes\\\\Documents\\\\Privat\\\\Neuer Ordner\\\\switch\\\\UI\\\\multiWindow\" -Filter \"*.cs\")",
+      "Bash(Select-Object FullName)",
+      "PowerShell(dotnet tool uninstall -g cs2sx 2>&1)",
+      "PowerShell(dotnet tool install -g cs2sx --add-source \"c:\\\\Users\\\\Johannes\\\\source\\\\repos\\\\CS2SX\\\\nupkg\" 2>&1)",
+      "PowerShell(cs2sx build \"C:\\\\Users\\\\Johannes\\\\Documents\\\\Privat\\\\Neuer Ordner\\\\switch\\\\UI\\\\multiWindow\\\\multiWindow.csproj\" 2>&1)",
+      "PowerShell(cs2sx build \"C:\\\\Users\\\\Johannes\\\\Documents\\\\Privat\\\\Neuer Ordner\\\\switch\\\\UI\\\\multiWindow\\\\multiWindow.csproj\"; Write-Host \"Exit: $LASTEXITCODE\")",
+      "PowerShell(cs2sx build \"C:\\\\Users\\\\Johannes\\\\Documents\\\\Privat\\\\Neuer Ordner\\\\switch\\\\UI\\\\multiWindow\\\\multiWindow.csproj\" 2>&1; Write-Host \"Exit: $LASTEXITCODE\")",
+      "Bash(Get-ChildItem -Path \"c:\\\\Users\\\\Johannes\\\\source\\\\repos\\\\CS2SX\" -Recurse -Directory)",
+      "Bash(Select-Object -ExpandProperty FullName)",
+      "Bash(Sort-Object)"
     ]
   }
 }

@@ -107,7 +107,13 @@ public sealed class ConvertHandler : InvocationHandlerBase
                 or "Convert.ToUInt32" or "Convert.ToUInt64" or "Convert.ToInt16"
                 or "Convert.ToUInt16" or "Convert.ToByte" or "Convert.ToSByte")
             {
-                result = "(int)strtol(" + args[0] + ", NULL, " + args[1] + ")";
+                result = calleeStr switch
+                {
+                    "Convert.ToInt64"  => "(long long)strtoll(" + args[0] + ", NULL, " + args[1] + ")",
+                    "Convert.ToUInt64" => "(unsigned long long)strtoull(" + args[0] + ", NULL, " + args[1] + ")",
+                    "Convert.ToUInt32" => "(unsigned int)strtoul(" + args[0] + ", NULL, " + args[1] + ")",
+                    _                  => "(int)strtol(" + args[0] + ", NULL, " + args[1] + ")"
+                };
                 return true;
             }
         }

@@ -119,7 +119,8 @@ public static class VTableBuilder
         ClassDeclarationSyntax node,
         string className,
         string baseClassName,
-        System.IO.TextWriter output)
+        System.IO.TextWriter output,
+        Microsoft.CodeAnalysis.SemanticModel? semanticModel = null)
     {
         var overrides     = GetOverrideMethods(node);
         var overrideProps = node.Members.OfType<PropertyDeclarationSyntax>()
@@ -134,12 +135,51 @@ public static class VTableBuilder
         output.WriteLine("static " + baseClassName + "_vtable " + instanceName + " =");
         output.WriteLine("{");
 
+        var overriddenNames = new HashSet<string>(overrides.Select(m => m.Identifier.Text),
+            StringComparer.Ordinal);
+
         var methodNames = new List<string>();
         foreach (var method in overrides)
         {
             var mName = method.Identifier.Text;
             methodNames.Add(mName);
-            output.WriteLine("    ." + mName + " = " + className + "_" + mName + ",");
+            // Cast to match vtable slot signature (void* self) to avoid -Wincompatible-pointer-types
+            var retC = TypeRegistry.MapType(method.ReturnType.ToString().Trim());
+            var castParms = new List<string> { "void*" };
+            foreach (var p in method.ParameterList.Parameters)
+                castParms.Add(TypeRegistry.MapType(p.Type?.ToString().Trim() ?? "int"));
+            var castType = retC + "(*)(" + string.Join(", ", castParms) + ")";
+            output.WriteLine($"    .{mName} = ({castType}){className}_{mName},");
+        }
+
+        // For virtual methods NOT overridden in this class, wire to the base implementation
+        // so vtable slots are never NULL (null function pointer → crash on first call).
+        if (semanticModel != null)
+        {
+            try
+            {
+                var classSym = semanticModel.GetDeclaredSymbol(node);
+                var baseSym = classSym?.BaseType;
+                if (baseSym != null)
+                {
+                    foreach (var bm in baseSym.GetMembers().OfType<Microsoft.CodeAnalysis.IMethodSymbol>()
+                        .Where(m => (m.IsVirtual || m.IsAbstract) && !m.IsStatic))
+                    {
+                        if (overriddenNames.Contains(bm.Name)) continue;
+                        if (bm.IsAbstract) continue; // no base body to fall back to
+                        var retC = TypeRegistry.MapType(
+                            TranspilerContext.FormatTypeSymbol(bm.ReturnType));
+                        var castParms = new List<string> { "void*" };
+                        foreach (var p in bm.Parameters)
+                            castParms.Add(TypeRegistry.MapType(
+                                TranspilerContext.FormatTypeSymbol(p.Type)));
+                        var castType = retC + "(*)(" + string.Join(", ", castParms) + ")";
+                        output.WriteLine(
+                            $"    .{bm.Name} = ({castType}){baseSym.Name}_{bm.Name},");
+                    }
+                }
+            }
+            catch { }
         }
 
         // Override property getter/setter entries

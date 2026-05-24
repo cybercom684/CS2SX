@@ -48,6 +48,7 @@ public static class TypeRegistry
         ["StickPos"] = "CS2SX_StickPos",
         ["TouchState"] = "CS2SX_TouchState",
         ["BatteryInfo"] = "CS2SX_BatteryInfo",
+        ["TimeInfo"] = "CS2SX_TimeInfo",
         ["Stopwatch"] = "CS2SX_Stopwatch",
         ["TimeSpan"] = "CS2SX_TimeSpan",
         ["Regex"] = "CS2SX_Regex",
@@ -79,7 +80,7 @@ public static class TypeRegistry
     {
         "FsDir", "FsFile", "FsFileSystem", "FsDirectoryEntry",
         "PadState", "HidTouchScreenState", "AccountUid", "PsmChargerType",
-        "CS2SX_StickPos", "CS2SX_TouchState", "CS2SX_BatteryInfo",
+        "CS2SX_StickPos", "CS2SX_TouchState", "CS2SX_BatteryInfo", "CS2SX_TimeInfo",
     };
 
     // ── Pointer-Typen ─────────────────────────────────────────────────────────
@@ -141,6 +142,9 @@ public static class TypeRegistry
     {
         "x", "y", "width", "height", "visible", "focusable",
     };
+
+    public static bool IsBuiltinControlType(string typeName) =>
+        typeName is "Control" or "Label" or "Button" or "ProgressBar";
 
     // ── NoPrefix-Felder ───────────────────────────────────────────────────────
 
@@ -233,7 +237,14 @@ public static class TypeRegistry
             csType = csType[..^1].Trim();
 
         if (csType.EndsWith("[]"))
-            return MapType(csType[..^2]) + "*";
+        {
+            var elemType = csType[..^2].Trim();
+            var mapped = MapType(elemType);
+            // Reference types (classes): T[] → T** (array of pointers to heap objects)
+            if (NeedsPointerSuffix(elemType))
+                return mapped + "**";
+            return mapped + "*";
+        }
 
         // FIX: Verschachtelte List<List<T>> → List_List_T_ptr*
         if (csType.StartsWith("List<") && csType.EndsWith(">"))

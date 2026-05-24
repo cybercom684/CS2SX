@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <limits.h>
 #include <float.h>
 #include <math.h>
@@ -310,29 +311,87 @@ static const u8 cs2sx_font8x8[96][8] = {
 
 typedef struct Texture Texture;
 struct Texture {
-    int  width;
-    int  height;
-    u32* pixels;
+    int  f_Width;   // matches transpiler-generated field names (auto-property → f_Name)
+    int  f_Height;
+    u32* f_Pixels;
 };
 
 static inline Texture* Texture_New(int width, int height, u32* pixels)
 {
     Texture* t = (Texture*)malloc(sizeof(Texture));
     if (!t) return NULL;
-    t->width = width;
-    t->height = height;
-    t->pixels = (u32*)malloc(width * height * sizeof(u32));
-    if (!t->pixels) { free(t); return NULL; }
-    if (pixels) memcpy(t->pixels, pixels, width * height * sizeof(u32));
-    else        memset(t->pixels, 0, width * height * sizeof(u32));
+    t->f_Width  = width;
+    t->f_Height = height;
+    t->f_Pixels = (u32*)malloc(width * height * sizeof(u32));
+    if (!t->f_Pixels) { free(t); return NULL; }
+    if (pixels) memcpy(t->f_Pixels, pixels, width * height * sizeof(u32));
+    else        memset(t->f_Pixels, 0, width * height * sizeof(u32));
     return t;
 }
 
 static inline void Texture_Dispose(Texture* t)
 {
     if (!t) return;
-    free(t->pixels);
+    free(t->f_Pixels);
     free(t);
+}
+
+// Load a 24-bit or 32-bit BMP from the filesystem (use "romfs:/file.bmp" for embedded assets).
+// Returns NULL on failure. Caller owns the returned Texture and must call Texture_Dispose().
+static inline Texture* CS2SX_Texture_LoadBMP(const char* path)
+{
+    FILE* f = fopen(path, "rb");
+    if (!f) return NULL;
+
+    // BMP file header (14 bytes)
+    u8 hdr[54];
+    if (fread(hdr, 1, 54, f) < 54) { fclose(f); return NULL; }
+    if (hdr[0] != 'B' || hdr[1] != 'M') { fclose(f); return NULL; }
+
+    u32 dataOffset = hdr[10] | (hdr[11]<<8) | (hdr[12]<<16) | (hdr[13]<<24);
+    int width      = (int)(hdr[18] | (hdr[19]<<8) | (hdr[20]<<16) | (hdr[21]<<24));
+    int height     = (int)(hdr[22] | (hdr[23]<<8) | (hdr[24]<<16) | (hdr[25]<<24));
+    int bpp        = hdr[28] | (hdr[29]<<8);
+
+    if (width <= 0 || height == 0 || (bpp != 24 && bpp != 32))
+        { fclose(f); return NULL; }
+
+    int flipped = height > 0; // positive height = bottom-up storage
+    if (height < 0) height = -height;
+
+    int bytesPerPx = bpp / 8;
+    int rowBytes   = ((width * bytesPerPx + 3) / 4) * 4; // padded to 4 bytes
+    u8* rowBuf = (u8*)malloc(rowBytes);
+    if (!rowBuf) { fclose(f); return NULL; }
+
+    u32* pixels = (u32*)malloc(width * height * sizeof(u32));
+    if (!pixels) { free(rowBuf); fclose(f); return NULL; }
+
+    fseek(f, (long)dataOffset, SEEK_SET);
+    for (int row = 0; row < height; row++)
+    {
+        if (fread(rowBuf, 1, rowBytes, f) < (size_t)rowBytes) break;
+        int destRow = flipped ? (height - 1 - row) : row;
+        for (int col = 0; col < width; col++)
+        {
+            u8 b = rowBuf[col * bytesPerPx + 0];
+            u8 g = rowBuf[col * bytesPerPx + 1];
+            u8 r = rowBuf[col * bytesPerPx + 2];
+            u8 a = (bpp == 32) ? rowBuf[col * bytesPerPx + 3] : 0xFF;
+            // framebuffer expects RGBA_8888
+            pixels[destRow * width + col] = ((u32)a << 24) | ((u32)b << 16) | ((u32)g << 8) | r;
+        }
+    }
+
+    free(rowBuf);
+    fclose(f);
+
+    Texture* tex = (Texture*)malloc(sizeof(Texture));
+    if (!tex) { free(pixels); return NULL; }
+    tex->f_Width  = width;
+    tex->f_Height = height;
+    tex->f_Pixels = pixels;
+    return tex;
 }
 
 // ============================================================================
@@ -356,6 +415,24 @@ static inline void Graphics_Init(int width, int height)
     g_fb_width = width;
     g_fb_height = height;
     g_gfx_init = 1;
+}
+
+static int _g_frame_owned = 0;
+
+static inline void Graphics_BeginFrame(void)
+{
+    if (g_fb_addr) return;  // runtime already manages this frame
+    u8* raw = framebufferBegin(&g_fb, NULL);
+    g_fb_addr = (u32*)raw;
+    _g_frame_owned = 1;
+}
+
+static inline void Graphics_EndFrame(void)
+{
+    if (!_g_frame_owned) return;  // runtime will call framebufferEnd after OnFrame returns
+    framebufferEnd(&g_fb);
+    g_fb_addr = NULL;
+    _g_frame_owned = 0;
 }
 
 static inline void Graphics_SetPixel(int x, int y, u32 color)
@@ -468,20 +545,60 @@ static inline void Graphics_DrawText(int x, int y, const char* text, u32 color, 
 
 static inline void Graphics_DrawTexture(Texture* tex, int x, int y)
 {
-    if (!tex || !tex->pixels || !g_fb_addr) return;
-    for (int row = 0; row < tex->height; row++)
+    if (!tex || !tex->f_Pixels || !g_fb_addr) return;
+    for (int row = 0; row < tex->f_Height; row++)
     {
         int py = y + row;
         if (py < 0 || py >= g_fb_height) continue;
-        for (int col = 0; col < tex->width; col++)
+        for (int col = 0; col < tex->f_Width; col++)
         {
             int px = x + col;
             if (px < 0 || px >= g_fb_width) continue;
-            u32 c = tex->pixels[row * tex->width + col];
+            u32 c = tex->f_Pixels[row * tex->f_Width + col];
             if ((c >> 24) > 0)
                 g_fb_addr[py * g_fb_width + px] = c;
         }
     }
+}
+
+// Draws tex centered inside the rectangle (rx, ry, rw, rh) at native size.
+static inline void Graphics_DrawTextureCentered(Texture* tex, int rx, int ry, int rw, int rh)
+{
+    if (!tex) return;
+    int x = rx + (rw - tex->f_Width)  / 2;
+    int y = ry + (rh - tex->f_Height) / 2;
+    Graphics_DrawTexture(tex, x, y);
+}
+
+// Draws tex scaled to (dw x dh) pixels at (x, y) using nearest-neighbor interpolation.
+static inline void Graphics_DrawTextureScaled(Texture* tex, int x, int y, int dw, int dh)
+{
+    if (!tex || !tex->f_Pixels || !g_fb_addr || dw <= 0 || dh <= 0) return;
+    for (int row = 0; row < dh; row++)
+    {
+        int srcRow = row * tex->f_Height / dh;
+        int py = y + row;
+        if (py < 0 || py >= g_fb_height) continue;
+        for (int col = 0; col < dw; col++)
+        {
+            int srcCol = col * tex->f_Width / dw;
+            int px = x + col;
+            if (px < 0 || px >= g_fb_width) continue;
+            u32 c = tex->f_Pixels[srcRow * tex->f_Width + srcCol];
+            if ((c >> 24) > 0)
+                g_fb_addr[py * g_fb_width + px] = c;
+        }
+    }
+}
+
+// Draws tex scaled to (tw x th) and centered inside (rx, ry, rw, rh).
+static inline void Graphics_DrawTextureCenteredScaled(Texture* tex,
+    int rx, int ry, int rw, int rh, int tw, int th)
+{
+    if (!tex) return;
+    int x = rx + (rw - tw) / 2;
+    int y = ry + (rh - th) / 2;
+    Graphics_DrawTextureScaled(tex, x, y, tw, th);
 }
 
 static inline int Graphics_MeasureTextWidth(const char* text, int scale)
@@ -696,6 +813,7 @@ typedef struct { int percent; bool charging; bool connected; } CS2SX_BatteryInfo
 static inline CS2SX_BatteryInfo CS2SX_GetBattery(void)
 {
     CS2SX_BatteryInfo info = { 0,false,false };
+    psmInitialize(); // ref-counted — safe to call even if already initialized
     u32 chargePercent = 0;
     if (R_SUCCEEDED(psmGetBatteryChargePercentage(&chargePercent))) info.percent = (int)chargePercent;
     PsmChargerType chargerType = PsmChargerType_Unconnected;
@@ -707,12 +825,29 @@ static inline CS2SX_BatteryInfo CS2SX_GetBattery(void)
 }
 
 // ============================================================================
+// Extension System — Time
+// ============================================================================
+
+typedef struct { int hour; int minute; int second; } CS2SX_TimeInfo;
+
+static inline CS2SX_TimeInfo CS2SX_GetTime(void)
+{
+    CS2SX_TimeInfo t = { 0, 0, 0 };
+    time_t now = time(NULL);
+    struct tm* lt = localtime(&now);
+    if (lt) { t.hour = lt->tm_hour; t.minute = lt->tm_min; t.second = lt->tm_sec; }
+    return t;
+}
+
+// ============================================================================
 // SwitchApp_Run
 // ============================================================================
 
 static inline void SwitchApp_Run(SwitchApp* self)
 {
     if (!self) return;
+
+    romfsInit(); // no-op if no romfs was linked; enables romfs:/ paths
 
     PadState pad;
     padConfigureInput(1, HidNpadStyleSet_NpadStandard);

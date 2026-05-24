@@ -216,6 +216,9 @@ public static class TypeInferrer
         if (callee is "System.GetBattery" or "CS2SX_GetBattery")
             return "BatteryInfo";
 
+        if (callee is "System.GetTime" or "CS2SX_GetTime")
+            return "TimeInfo";
+
         if (callee is "Stopwatch.StartNew" or "CS2SX_Stopwatch_StartNew")
             return "Stopwatch";
 

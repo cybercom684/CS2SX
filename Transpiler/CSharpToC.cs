@@ -290,7 +290,7 @@ public sealed class CSharpToC : CSharpSyntaxWalker
                 && baseType != SwitchAppBase
                 && !IsControlSubclass(baseType))
             {
-                VTableBuilder.WriteVTableInstance(node, node.Identifier.Text, baseType, _ctx.Out);
+                VTableBuilder.WriteVTableInstance(node, node.Identifier.Text, baseType, _ctx.Out, _ctx.SemanticModel);
             }
 
             if (_interfaceExpander != null)
@@ -495,7 +495,10 @@ public sealed class CSharpToC : CSharpSyntaxWalker
 
             var csType = ResolvePropertyType(prop);
             _ctx.PropertyTypes[prop.Identifier.Text] = csType;
-            _ctx.FieldTypes[prop.Identifier.Text] = csType;
+            if (PropertyWriter.IsAutoProperty(prop))
+                _ctx.FieldTypes[prop.Identifier.Text] = csType;
+            else
+                _ctx.ComputedPropertyNames.Add(prop.Identifier.Text);
         }
     }
 
@@ -584,18 +587,16 @@ public sealed class CSharpToC : CSharpSyntaxWalker
         _ctx.Out.WriteLine("{");
         _ctx.Indent();
 
-        // Reference-count field for root classes (no base type).
-        // _Retain() increments, _Free() decrements and frees when it reaches 0.
+        // Root classes: vtable pointer FIRST (so subclass upcasts work), then _rc.
+        // Subclasses: embed BASE struct FIRST — base already contains the vtable pointer.
+        // This guarantees (BaseType*)derived correctly addresses the vtable field.
         if (string.IsNullOrEmpty(baseType))
-            _ctx.WriteLine("int _rc;");
-
-        if (!string.IsNullOrEmpty(baseType) && baseType != SwitchAppBase
-            && !IsControlSubclass(baseType))
         {
-            _ctx.WriteLine(baseType + "_vtable* vtable;");
+            if (VTableBuilder.HasVirtualMethods(node))
+                _ctx.WriteLine(name + "_vtable* vtable;");
+            _ctx.WriteLine("int _rc;");
         }
-
-        if (!string.IsNullOrEmpty(baseType))
+        else
         {
             var embedType = baseType is "Label" or "Button" or "ProgressBar"
                 ? "Control"
@@ -615,7 +616,11 @@ public sealed class CSharpToC : CSharpSyntaxWalker
 
         WriteInstanceFieldDeclarations(node);
         WritePropertyDeclarations(node);
-        WriteVirtualMethodPointers(node, name);
+        // Individual function-pointer fields are only emitted for classes that do NOT
+        // use the vtable dispatch mechanism (e.g. plain SwitchApp subclasses, controls).
+        // Classes with virtual methods use the vtable struct instead.
+        if (!VTableBuilder.HasVirtualMethods(node))
+            WriteVirtualMethodPointers(node, name);
 
         _ctx.Dedent();
         _ctx.Out.WriteLine("};");
@@ -686,7 +691,8 @@ public sealed class CSharpToC : CSharpSyntaxWalker
             var csType = ResolvePropertyType(prop);
             var cType = TypeRegistry.MapType(csType);
             var ptr = !cType.EndsWith("*") && NeedsPtr(csType) ? "*" : "";
-            _ctx.WriteLine(cType + ptr + " f_" + prop.Identifier + ";");
+            var propPfx = TypeRegistry.HasNoPrefix(prop.Identifier.Text) ? "" : "f_";
+            _ctx.WriteLine(cType + ptr + " " + propPfx + prop.Identifier + ";");
         }
     }
 
@@ -716,17 +722,30 @@ public sealed class CSharpToC : CSharpSyntaxWalker
 
     private string ResolveMethodReturnType(MethodDeclarationSyntax method)
     {
+        string csType;
         if (_ctx.SemanticModel != null)
         {
             try
             {
                 var sym = _ctx.SemanticModel.GetDeclaredSymbol(method);
                 if (sym != null)
-                    return TypeRegistry.MapType(TranspilerContext.FormatTypeSymbol(sym.ReturnType));
+                {
+                    csType = TranspilerContext.FormatTypeSymbol(sym.ReturnType);
+                    var mapped = TypeRegistry.MapType(csType);
+                    if (!mapped.EndsWith("*") && NeedsPtr(csType))
+                        return mapped + "*";
+                    return mapped;
+                }
             }
             catch { }
         }
-        return TypeRegistry.MapType(method.ReturnType.ToString().Trim());
+        csType = method.ReturnType.ToString().Trim();
+        {
+            var mapped = TypeRegistry.MapType(csType);
+            if (!mapped.EndsWith("*") && NeedsPtr(csType))
+                return mapped + "*";
+            return mapped;
+        }
     }
 
     private string ResolveParamType(ParameterSyntax p)
@@ -952,7 +971,8 @@ public sealed class CSharpToC : CSharpSyntaxWalker
             if (!PropertyWriter.IsAutoProperty(prop)) continue;
             if (prop.Initializer == null) continue;
 
-            _ctx.WriteLine("self->f_" + prop.Identifier.Text + " = "
+            var initPfx = TypeRegistry.HasNoPrefix(prop.Identifier.Text) ? "" : "f_";
+            _ctx.WriteLine("self->" + initPfx + prop.Identifier.Text + " = "
                 + _exprWriter.Write(prop.Initializer.Value) + ";");
         }
 
@@ -1108,7 +1128,9 @@ public sealed class CSharpToC : CSharpSyntaxWalker
     {
         // implicit/explicit operator TargetType(SourceType x)
         // → TargetType ClassName_to_TargetType(SourceType x) { ... }
-        var retType = TypeRegistry.MapType(conv.Type.ToString().Trim());
+        var retCsType = conv.Type.ToString().Trim();
+        var retTypeMapped = TypeRegistry.MapType(retCsType);
+        var retType = retTypeMapped + (NeedsPtr(retCsType) ? "*" : "");
         var isImplicit = conv.ImplicitOrExplicitKeyword.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.ImplicitKeyword);
         var suffix = isImplicit ? "implicit_" : "explicit_";
         suffix += conv.Type.ToString().Trim().Replace(".", "_");
@@ -1192,6 +1214,8 @@ public sealed class CSharpToC : CSharpSyntaxWalker
         {
             _ctx.CurrentTupleReturnType = null;
             cReturnType = TypeRegistry.MapType(csReturnType);
+            if (!cReturnType.EndsWith("*") && NeedsPtr(csReturnType))
+                cReturnType += "*";
         }
 
         var name = string.IsNullOrEmpty(_ctx.CurrentClass)
@@ -1289,7 +1313,13 @@ public sealed class CSharpToC : CSharpSyntaxWalker
             foreach (var stmt in node.Body.Statements)
                 _stmtWriter.Write(stmt);
         else if (node.ExpressionBody != null)
-            _ctx.WriteLine("return " + _exprWriter.Write(node.ExpressionBody.Expression) + ";");
+        {
+            var exprCode = _exprWriter.Write(node.ExpressionBody.Expression);
+            if (cReturnType == "void")
+                _ctx.WriteLine(exprCode + ";");
+            else
+                _ctx.WriteLine("return " + exprCode + ";");
+        }
 
         _ctx.Dedent();
         _ctx.Out.WriteLine("}");
@@ -1339,8 +1369,7 @@ public sealed class CSharpToC : CSharpSyntaxWalker
             foreach (var (csType, fieldName) in paramFields)
             {
                 var cType = TypeRegistry.MapType(csType);
-                var needsPtr = TypeRegistry.NeedsPointerSuffix(csType) && !cType.EndsWith("*");
-                _ctx.WriteLine($"{cType}{(needsPtr ? "*" : "")} {fieldName};");
+                _ctx.WriteLine($"{cType}{(NeedsPtr(csType) ? "*" : "")} f_{fieldName};");
             }
             // Also emit regular members from the record body
             foreach (var field in node.Members.OfType<FieldDeclarationSyntax>()
@@ -1348,9 +1377,16 @@ public sealed class CSharpToC : CSharpSyntaxWalker
             {
                 var csType = _ctx.ResolveAlias(field.Declaration.Type.ToString().Trim());
                 var cType = TypeRegistry.MapType(csType);
-                var needsPtr = TypeRegistry.NeedsPointerSuffix(csType) && !cType.EndsWith("*");
                 foreach (var v in field.Declaration.Variables)
-                    _ctx.WriteLine($"{cType}{(needsPtr ? "*" : "")} f_{v.Identifier.Text.TrimStart('_')};");
+                    _ctx.WriteLine($"{cType}{(NeedsPtr(csType) ? "*" : "")} f_{v.Identifier.Text.TrimStart('_')};");
+            }
+            foreach (var prop in node.Members.OfType<PropertyDeclarationSyntax>()
+                .Where(p => !p.Modifiers.Any(m => m.IsKind(SyntaxKind.StaticKeyword))
+                         && PropertyWriter.IsAutoProperty(p)))
+            {
+                var csType = _ctx.ResolveAlias(prop.Type.ToString().Trim());
+                var cType = TypeRegistry.MapType(csType);
+                _ctx.WriteLine($"{cType}{(NeedsPtr(csType) ? "*" : "")} f_{prop.Identifier.Text.TrimStart('_')};");
             }
             _ctx.Dedent();
             _ctx.Out.WriteLine("};");
@@ -1363,7 +1399,7 @@ public sealed class CSharpToC : CSharpSyntaxWalker
                     paramFields.Select(pf =>
                     {
                         var ct = TypeRegistry.MapType(pf.csType);
-                        var ptr = TypeRegistry.NeedsPointerSuffix(pf.csType) && !ct.EndsWith("*") ? "*" : "";
+                        var ptr = NeedsPtr(pf.csType) ? "*" : "";
                         return $"{ct}{ptr} {pf.fieldName}";
                     }));
                 _ctx.Out.WriteLine($"{name}* {name}_New({paramDecls});");
@@ -1391,7 +1427,7 @@ public sealed class CSharpToC : CSharpSyntaxWalker
             _ctx.WriteLine("if (!self) return NULL;");
             _ctx.WriteLine("self->_rc = 1;");
             foreach (var (csType, fieldName) in paramFields)
-                _ctx.WriteLine($"self->{fieldName} = {fieldName};");
+                _ctx.WriteLine($"self->f_{fieldName} = {fieldName};");
             _ctx.Dedent();
             _ctx.Out.WriteLine("    return self;");
             _ctx.Out.WriteLine("}");
@@ -1406,7 +1442,7 @@ public sealed class CSharpToC : CSharpSyntaxWalker
             // Free any collection/heap fields from positional params
             foreach (var (csType, fieldName) in paramFields)
             {
-                var fieldExpr = $"self->{fieldName}";
+                var fieldExpr = $"self->f_{fieldName}";
                 if (TypeRegistry.IsList(csType))
                 {
                     var inner = TypeRegistry.GetListInnerType(csType) ?? "int";
@@ -1466,7 +1502,7 @@ public sealed class CSharpToC : CSharpSyntaxWalker
         return string.Join(", ", paramFields.Select(pf =>
         {
             var ct = TypeRegistry.MapType(pf.csType);
-            var ptr = TypeRegistry.NeedsPointerSuffix(pf.csType) && !ct.EndsWith("*") ? "*" : "";
+            var ptr = NeedsPtr(pf.csType) ? "*" : "";
             return $"{ct}{ptr} {pf.fieldName}";
         }));
     }
@@ -1555,7 +1591,10 @@ public sealed class CSharpToC : CSharpSyntaxWalker
     {
         var csType = ResolvePropertyType(node);
         _ctx.PropertyTypes[node.Identifier.Text] = csType;
-        _ctx.FieldTypes[node.Identifier.Text] = csType;
+        if (PropertyWriter.IsAutoProperty(node))
+            _ctx.FieldTypes[node.Identifier.Text] = csType;
+        else
+            _ctx.ComputedPropertyNames.Add(node.Identifier.Text);
         base.VisitPropertyDeclaration(node);
     }
 
@@ -1564,8 +1603,17 @@ public sealed class CSharpToC : CSharpSyntaxWalker
     internal void LoadBaseFields(string baseType)
     {
         if (baseType is "Control" or "Label" or "Button" or "ProgressBar")
+        {
             foreach (var f in TypeRegistry.ControlFields)
                 _ctx.BaseFieldTypes[f] = "int";
+            // PascalCase aliases so C# property access (X, Y, Width, Height) also resolves
+            _ctx.BaseFieldTypes["X"] = "int";
+            _ctx.BaseFieldTypes["Y"] = "int";
+            _ctx.BaseFieldTypes["Width"] = "int";
+            _ctx.BaseFieldTypes["Height"] = "int";
+            _ctx.BaseFieldTypes["Visible"] = "int";
+            _ctx.BaseFieldTypes["Focusable"] = "int";
+        }
 
         if (baseType is "Button")
         {
@@ -1678,7 +1726,8 @@ public sealed class CSharpToC : CSharpSyntaxWalker
         {
             var baseType = csType[..^2].Trim();
             var cBase = baseType == "string" ? "const char*" : TypeRegistry.MapType(baseType);
-            return $"{cBase}* {p.Identifier}";
+            var arrPtr = TypeRegistry.NeedsPointerSuffix(baseType) ? "**" : "*";
+            return $"{cBase}{arrPtr} {p.Identifier}";
         }
 
         if (_genericCollector != null && _genericCollector.Interfaces.ContainsKey(csType))

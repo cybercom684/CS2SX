@@ -16,6 +16,7 @@
 using CS2SX.Core;
 using CS2SX.Logging;
 using CS2SX.Transpiler;
+using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using System.Text;
 
@@ -244,6 +245,10 @@ public sealed class BuildPipeline
                 ? allTranspiledHeaders.Max(h => File.GetLastWriteTimeUtc(h))
                 : DateTime.MinValue;
 
+            // Pre-scan all source files for VTable types so cross-file virtual dispatch
+            // works (e.g. Window.cs calling UIControl.Draw which is defined in UIControl.cs).
+            var sharedVTableTypes = PreScanVTableTypes(transpiledFiles);
+
             for (int i = 0; i < transpiledFiles.Count; i++)
             {
                 var csFile = transpiledFiles[i];
@@ -276,6 +281,8 @@ public sealed class BuildPipeline
 
                 hTranspiler.GetContext().CurrentFile = Path.GetFileName(csFile);
                 hTranspiler.GetContext().CurrentCFile = baseName + ".h";
+                foreach (var vt in sharedVTableTypes)
+                    hTranspiler.GetContext().VTableTypes.Add(vt);
 
                 var hResult = hTranspiler.Transpile(source, csFile, semanticModel);
 
@@ -286,8 +293,13 @@ public sealed class BuildPipeline
                     ? $"#include \"{Path.GetFileName(genericHeaderPath)}\"\n"
                     : "";
 
+                // If this class derives from a user-defined base, include its header so
+                // embedded struct fields compile (forward-decl alone is not enough).
+                var baseClassInclude = GetUserDefinedBaseInclude(source, transpiledFiles);
+
                 var hContent = WrapHeader(baseName,
                     "#include \"_forward.h\"\n"
+                    + baseClassInclude
                     + interfaceInclude
                     + genericInclude
                     + "\n" + hResult.Code);
@@ -305,6 +317,8 @@ public sealed class BuildPipeline
 
                 cTranspiler.GetContext().CurrentFile = Path.GetFileName(csFile);
                 cTranspiler.GetContext().CurrentCFile = baseName + ".c";
+                foreach (var vt in sharedVTableTypes)
+                    cTranspiler.GetContext().VTableTypes.Add(vt);
 
                 var cResult = cTranspiler.Transpile(source, csFile, semanticModel);
 
@@ -429,7 +443,12 @@ public sealed class BuildPipeline
                 Log.Warning("No icon found — using default");
                 warnings++;
             }
-            new NroBuilder().Build(elfPath, nroPath, nacpPath, iconPath);
+
+            var romfsDir = Path.Combine(_projectDir, "romfs");
+            if (!Directory.Exists(romfsDir)) romfsDir = null;
+            if (romfsDir != null) Log.Info($"romfs: {romfsDir}");
+
+            new NroBuilder().Build(elfPath, nroPath, nacpPath, iconPath, romfsDir);
 
             sPackage.Progress = 100;
             sPackage.Status = StageStatus.Done;
@@ -474,10 +493,9 @@ public sealed class BuildPipeline
             reader.SourceFiles.Select(f => Path.GetFileNameWithoutExtension(f)),
             StringComparer.OrdinalIgnoreCase);
 
+        foreach (var h in GeneratedHeaders)
+            validBases.Add(Path.GetFileNameWithoutExtension(h));
         validBases.Add("switchforms");
-        validBases.Add("_forward");
-        validBases.Add("_generics");
-        validBases.Add("_interfaces");
         validBases.Add("main");
         validBases.Add("switchapp");
         validBases.Add("switchforms_globals");
@@ -535,7 +553,7 @@ public sealed class BuildPipeline
         foreach (var headerName in generatedHeaderNames)
         {
             var headerPath = Path.Combine(_buildDir, headerName);
-            if (!File.Exists(headerPath)) continue;
+            if (!File.Exists(headerPath)) return false;
             var ht = File.GetLastWriteTimeUtc(headerPath);
             if (ht > hTime || ht > cTime) return false;
         }
@@ -546,6 +564,56 @@ public sealed class BuildPipeline
             return false;
 
         return true;
+    }
+
+    /// <summary>
+    /// Scans all source files for classes with virtual/abstract methods and returns
+    /// a set of those type names plus their subclass names.
+    /// Used to pre-populate VTableTypes in each per-file TranspilerContext so that
+    /// cross-file virtual dispatch (e.g. UIControl.Draw called from Window.cs) works.
+    /// </summary>
+    internal static HashSet<string> PreScanVTableTypes(IEnumerable<string> sourceFiles)
+    {
+        var result = new HashSet<string>(StringComparer.Ordinal);
+        var classToBase = new Dictionary<string, string>(StringComparer.Ordinal);
+
+        foreach (var file in sourceFiles)
+        {
+            try
+            {
+                var src = File.ReadAllText(file);
+                var tree = CSharpSyntaxTree.ParseText(src,
+                    new CSharpParseOptions(LanguageVersion.CSharp12));
+                foreach (var cls in tree.GetRoot().DescendantNodes()
+                    .OfType<ClassDeclarationSyntax>())
+                {
+                    if (VTableBuilder.HasVirtualMethods(cls))
+                        result.Add(cls.Identifier.Text);
+
+                    var baseTypeName = cls.BaseList?.Types.FirstOrDefault()?.Type.ToString().Trim();
+                    if (!string.IsNullOrEmpty(baseTypeName))
+                        classToBase[cls.Identifier.Text] = baseTypeName;
+                }
+            }
+            catch { }
+        }
+
+        // Propagate: if a class inherits from a VTable type, it's also a VTable type
+        bool changed = true;
+        while (changed)
+        {
+            changed = false;
+            foreach (var (cls, baseType) in classToBase)
+            {
+                if (!result.Contains(cls) && result.Contains(baseType))
+                {
+                    result.Add(cls);
+                    changed = true;
+                }
+            }
+        }
+
+        return result;
     }
 
     private bool IsListOnlyHeader(string headerFileName, IReadOnlySet<string> listUserClassTypes)
@@ -578,6 +646,7 @@ public sealed class BuildPipeline
         sb.AppendLine("#include <math.h>");
         sb.AppendLine();
         sb.AppendLine("typedef void (*Action)(void*);");
+        sb.AppendLine("typedef void (*Action_t)(void);");
         sb.AppendLine();
         sb.AppendLine("typedef struct Control    Control;");
         sb.AppendLine("typedef struct Form       Form;");
@@ -614,6 +683,11 @@ public sealed class BuildPipeline
 
                 if (alreadyDeclared.Add(typeName))
                     sb.AppendLine($"typedef struct {typeName} {typeName};");
+
+                // Also forward-declare the vtable struct for classes with virtual methods
+                if (typeDecl is ClassDeclarationSyntax clsWithVirtuals
+                    && Transpiler.VTableBuilder.HasVirtualMethods(clsWithVirtuals))
+                    sb.AppendLine($"typedef struct {typeName}_vtable {typeName}_vtable;");
             }
         }
 
@@ -630,6 +704,39 @@ public sealed class BuildPipeline
                     hadAny = true;
                 }
                 sb.AppendLine($"typedef struct {expandedName} {expandedName};");
+            }
+        }
+
+        // Emit typedefs for Action<T> delegate types found in source files.
+        // e.g. Action<Window> → typedef void (*Action_Window_t)(Window*);
+        var emittedDelegateTypedefs = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var csFile in sourceFiles)
+        {
+            var source = System.IO.File.ReadAllText(csFile);
+            var tree = Microsoft.CodeAnalysis.CSharp.CSharpSyntaxTree.ParseText(source);
+            foreach (var typeNode in tree.GetRoot()
+                .DescendantNodes()
+                .OfType<Microsoft.CodeAnalysis.CSharp.Syntax.GenericNameSyntax>()
+                .Where(g => g.Identifier.Text == "Action"))
+            {
+                var csType = typeNode.ToString().Trim();
+                if (!csType.StartsWith("Action<") || !csType.EndsWith(">")) continue;
+
+                var cName = CS2SX.Core.TypeRegistry.MapType(csType);
+                if (!cName.EndsWith("_t") || !emittedDelegateTypedefs.Add(cName)) continue;
+
+                var inner = csType[7..^1].Trim();
+                // Build the C parameter list: each type arg becomes its mapped C type + * if reference
+                var typeArgs = SplitSimpleGenericArgs(inner);
+                var cParams = string.Join(", ", typeArgs.Select(a =>
+                {
+                    a = a.Trim();
+                    var mapped = CS2SX.Core.TypeRegistry.MapType(a);
+                    if (!mapped.EndsWith("*") && CS2SX.Transpiler.CSharpToC.NeedsPtr(a))
+                        mapped += "*";
+                    return mapped;
+                }));
+                sb.AppendLine($"typedef void (*{cName})({cParams});");
             }
         }
 
@@ -661,6 +768,59 @@ public sealed class BuildPipeline
         System.IO.File.WriteAllText(outputPath, sb.ToString());
     }
 
+
+    private static readonly HashSet<string> s_builtinBaseTypes = new(StringComparer.Ordinal)
+    {
+        "Control", "Form", "Label", "Button", "ProgressBar", "SwitchApp",
+        "SwitchAppEx", "object", "Object",
+    };
+
+    /// <summary>
+    /// If the source contains a class that derives from a user-defined (transpiled) base,
+    /// returns "#include "BaseClass.h"\n"; otherwise returns empty string.
+    /// </summary>
+    private static string GetUserDefinedBaseInclude(string source, IReadOnlyList<string> transpiledFiles)
+    {
+        try
+        {
+            var tree = Microsoft.CodeAnalysis.CSharp.CSharpSyntaxTree.ParseText(source);
+            var cls = tree.GetRoot().DescendantNodes()
+                .OfType<ClassDeclarationSyntax>()
+                .FirstOrDefault(c => c.BaseList?.Types.Any() == true);
+            if (cls == null) return "";
+
+            var baseTypeSyntax = cls.BaseList!.Types.First().Type.ToString().Trim();
+            var baseName = baseTypeSyntax.Split('<')[0].Trim();
+
+            if (s_builtinBaseTypes.Contains(baseName)) return "";
+
+            // Only include if the base type is one of the transpiled user files
+            var transpiledNames = transpiledFiles
+                .Select(f => Path.GetFileNameWithoutExtension(f));
+            if (!transpiledNames.Contains(baseName, StringComparer.Ordinal)) return "";
+
+            return $"#include \"{baseName}.h\"\n";
+        }
+        catch { return ""; }
+    }
+
+    private static List<string> SplitSimpleGenericArgs(string s)
+    {
+        var result = new List<string>();
+        int depth = 0, start = 0;
+        for (int i = 0; i < s.Length; i++)
+        {
+            if (s[i] == '<') depth++;
+            else if (s[i] == '>') depth--;
+            else if (s[i] == ',' && depth == 0)
+            {
+                result.Add(s.Substring(start, i - start));
+                start = i + 1;
+            }
+        }
+        if (start < s.Length) result.Add(s.Substring(start));
+        return result;
+    }
 
     private static string WrapHeader(string baseName, string content)
     {

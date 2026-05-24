@@ -57,7 +57,18 @@ public sealed class LambdaLifter
         var id = _ctx.NextLambdaId();
         var name = "_lambda_" + id;
         var caps = FindCaptures(lambda);
-        var parms = ExtractParams(lambda, elementTypeHint);
+
+        // Derive per-parameter type hints from the delegate hint type (e.g. Action<Window> → ["Window"])
+        var effectiveElementHint = elementTypeHint;
+        if (effectiveElementHint == null && hintType != null
+            && hintType.StartsWith("Action<") && hintType.EndsWith(">"))
+        {
+            var inner = hintType[7..^1].Trim();
+            var typeArgs = SplitGenericArgs(inner);
+            if (typeArgs.Count == 1) effectiveElementHint = typeArgs[0];
+        }
+
+        var parms = ExtractParams(lambda, effectiveElementHint);
         var retCs = hintType != null ? ExtractReturnType(hintType, parms.Count) : "int";
 
         // FIX-1: Prelude in einem lokalen StringBuilder sammeln und dann
@@ -225,7 +236,8 @@ public sealed class LambdaLifter
         foreach (var cap in caps)
         {
             tempCtx.LocalTypes[cap.CapName] = cap.CsType;
-            tempCtx.LocalTypes["_" + cap.CapName] = cap.CsType;
+            if (!cap.CapName.StartsWith('_'))
+                tempCtx.LocalTypes["_" + cap.CapName] = cap.CsType;
         }
         foreach (var p in parms)
             tempCtx.LocalTypes[p.Name] = p.CsType;

@@ -99,15 +99,65 @@ public sealed class OwnMethodHandler : InvocationHandlerBase
                     return true;
                 }
 
+                // Inherited instance method from a base class — emit BaseType_Method((BaseType*)self, args)
+                if (symbol is IMethodSymbol inheritedMethod
+                    && !inheritedMethod.IsStatic
+                    && inheritedMethod.ContainingType?.Name != ctx.CurrentClass)
+                {
+                    var baseType = inheritedMethod.ContainingType?.Name ?? ctx.CurrentClass;
+                    var callArgs = BuildArgsWithRefOut(inv, inheritedMethod, args, ctx, writeExpr);
+                    var selfExpr = $"({baseType}*)self";
+                    result = callArgs.Count > 0
+                        ? $"{baseType}_{calleeStr}({selfExpr}, {string.Join(", ", callArgs)})"
+                        : $"{baseType}_{calleeStr}({selfExpr})";
+                    return true;
+                }
+
                 if (symbol is IMethodSymbol staticMethod
                     && staticMethod.IsStatic
                     && staticMethod.ContainingType?.Name != ctx.CurrentClass)
                     return NotHandled(out result);
 
+                // Delegate field/property invocation: self->field() or self->f_field()
+                if (symbol is IPropertySymbol propSym)
+                {
+                    var propTypeName = TranspilerContext.FormatTypeSymbol(propSym.Type);
+                    if (TypeRegistry.IsDelegate(propTypeName))
+                    {
+                        var pfx = TypeRegistry.HasNoPrefix(calleeStr) ? "" : "f_";
+                        var callArgStr = args.Count > 0 ? string.Join(", ", args) : "";
+                        result = $"self->{pfx}{calleeStr}({callArgStr})";
+                        return true;
+                    }
+                    return NotHandled(out result);
+                }
+                if (symbol is IFieldSymbol fieldSym)
+                {
+                    var fieldTypeName = TranspilerContext.FormatTypeSymbol(fieldSym.Type);
+                    if (TypeRegistry.IsDelegate(fieldTypeName))
+                    {
+                        var pfx = TypeRegistry.HasNoPrefix(calleeStr) ? "" : "f_";
+                        var callArgStr = args.Count > 0 ? string.Join(", ", args) : "";
+                        result = $"self->{pfx}{calleeStr}({callArgStr})";
+                        return true;
+                    }
+                    return NotHandled(out result);
+                }
+
                 if (symbol is not IMethodSymbol)
                     return NotHandled(out result);
             }
             catch { }
+        }
+
+        // No SemanticModel: check FieldTypes for delegate fields
+        if (ctx.FieldTypes.TryGetValue(calleeStr, out var fieldDelegateType)
+            && TypeRegistry.IsDelegate(fieldDelegateType))
+        {
+            var pfx = TypeRegistry.HasNoPrefix(calleeStr) ? "" : "f_";
+            var callArgStr = args.Count > 0 ? string.Join(", ", args) : "";
+            result = $"self->{pfx}{calleeStr}({callArgStr})";
+            return true;
         }
 
         // "using static" resolution — fallback when semantic model is unavailable

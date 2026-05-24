@@ -20,6 +20,7 @@ public sealed class ControlSubclassConstructorStrategy : IConstructorStrategy
     {
         transpiler.WriteStaticFieldDefinitions(node, name);
 
+        var preSigPos = ctx.Out.GetStringBuilder().Length;
         ctx.Out.WriteLine(name + "* " + name + "_New()");
         ctx.Out.WriteLine("{");
         ctx.Indent();
@@ -54,5 +55,14 @@ public sealed class ControlSubclassConstructorStrategy : IConstructorStrategy
         ctx.Dedent();
         ctx.Out.WriteLine("}");
         ctx.Out.WriteLine();
+
+        if (ctx.PendingLambdaPreludes.Count > 0)
+        {
+            var sb2 = ctx.Out.GetStringBuilder();
+            var ctorText = sb2.ToString(preSigPos, sb2.Length - preSigPos);
+            sb2.Remove(preSigPos, sb2.Length - preSigPos);
+            ctx.FlushLambdaPreludes();
+            ctx.Out.Write(ctorText);
+        }
     }
 }

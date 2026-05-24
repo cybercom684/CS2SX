@@ -103,6 +103,9 @@ public sealed class DumpCommand
 
         var semanticBuilder = new SemanticModelBuilder(allFiles);
 
+        // Pre-scan all files for VTable types so cross-file virtual dispatch works.
+        var sharedVTableTypes = BuildPipeline.PreScanVTableTypes(allFiles);
+
         // ── Transpile and print ────────────────────────────────────────────────
 
         int exitCode = 0;
@@ -117,11 +120,13 @@ public sealed class DumpCommand
                 var semanticModel = semanticBuilder.GetModel(csFile);
 
                 // ── Header (.h equivalent) ─────────────────────────────────────
-                var hResult = new CSharpToC(
+                var hTranspiler = new CSharpToC(
                     CSharpToC.TranspileMode.HeaderOnly,
                     genericCollector,
-                    interfaceExpander)
-                    .Transpile(source, csFile, semanticModel);
+                    interfaceExpander);
+                foreach (var vt in sharedVTableTypes)
+                    hTranspiler.GetContext().VTableTypes.Add(vt);
+                var hResult = hTranspiler.Transpile(source, csFile, semanticModel);
 
                 Console.WriteLine(new string('=', 72));
                 Console.WriteLine($"// FILE: {baseName}  [HeaderOnly]");
@@ -132,11 +137,13 @@ public sealed class DumpCommand
                     PrintDiagnostics(hResult.Diagnostics, baseName, "H");
 
                 // ── Implementation (.c equivalent) ─────────────────────────────
-                var cResult = new CSharpToC(
+                var cTranspiler = new CSharpToC(
                     CSharpToC.TranspileMode.Implementation,
                     genericCollector,
-                    interfaceExpander)
-                    .Transpile(source, csFile, semanticModel);
+                    interfaceExpander);
+                foreach (var vt in sharedVTableTypes)
+                    cTranspiler.GetContext().VTableTypes.Add(vt);
+                var cResult = cTranspiler.Transpile(source, csFile, semanticModel);
 
                 Console.WriteLine(new string('=', 72));
                 Console.WriteLine($"// FILE: {baseName}  [Implementation]");

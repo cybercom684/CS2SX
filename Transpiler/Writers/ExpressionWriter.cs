@@ -19,6 +19,7 @@ using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using CS2SX.Core;
+using CS2SX.Transpiler;
 using CS2SX.Transpiler.Handlers;
 
 namespace CS2SX.Transpiler.Writers;
@@ -137,10 +138,22 @@ public sealed class ExpressionWriter : IExpressionWriter
         // LambdaLifter.LiftLambda() schreibt das Prelude (Struct-Def + Funktionsdef)
         // in _ctx.PendingLambdaPreludes. CSharpToC.VisitMethodDeclaration() flusht
         // diese einmalig VOR der Methodensignatur via _ctx.FlushLambdaPreludes().
+        string? hintType = null;
+        if (_ctx.SemanticModel != null)
+        {
+            try
+            {
+                var typeInfo = _ctx.SemanticModel.GetTypeInfo(lambda);
+                var delegateType = typeInfo.ConvertedType ?? typeInfo.Type;
+                if (delegateType != null && delegateType is not IErrorTypeSymbol)
+                    hintType = TranspilerContext.FormatTypeSymbol(delegateType);
+            }
+            catch { }
+        }
         var lifter = new LambdaLifter(_ctx, this);
         var stmtWriter = new StatementWriter(_ctx, this);
         lifter.SetStatementWriter(stmtWriter);
-        return lifter.LiftLambda(lambda);
+        return lifter.LiftLambda(lambda, hintType: hintType);
     }
 
     // ── Identifier ────────────────────────────────────────────────────────────
@@ -180,9 +193,44 @@ public sealed class ExpressionWriter : IExpressionWriter
                 if (sym is IFieldSymbol field && field.IsStatic
                     && (field.IsConst || field.IsReadOnly))
                     return (field.ContainingType?.Name ?? _ctx.CurrentClass) + "_" + name;
+
+                // Own-class computed property (expression-body) → call getter function
+                if (sym is IPropertySymbol ownProp && !ownProp.IsStatic
+                    && ownProp.ContainingType?.Name == _ctx.CurrentClass
+                    && _ctx.ComputedPropertyNames.Contains(name))
+                    return _ctx.CurrentClass + "_get_" + name + "(self)";
+
+                // Inherited instance property → self->base.*
+                if (sym is IPropertySymbol prop && !prop.IsStatic
+                    && prop.ContainingType?.Name is { } pCont && pCont != _ctx.CurrentClass)
+                {
+                    // Only use the built-in Control lowercase field names (x, y, width, height)
+                    // for the actual runtime Control struct — user-defined classes use f_ prefix.
+                    var lower = name.ToLowerInvariant();
+                    if (TypeRegistry.IsBuiltinControlType(pCont) && TypeRegistry.ControlFields.Contains(lower))
+                        return "self->base." + lower;
+                    var pfx = TypeRegistry.HasNoPrefix(name) ? "" : "f_";
+                    return "self->base." + pfx + name;
+                }
+
+                // Inherited instance field → self->base.*
+                if (sym is IFieldSymbol baseField && !baseField.IsStatic
+                    && baseField.ContainingType?.Name is { } fCont && fCont != _ctx.CurrentClass)
+                {
+                    var lname = baseField.Name.TrimStart('_');
+                    var lower = lname.ToLowerInvariant();
+                    if (TypeRegistry.IsBuiltinControlType(fCont) && TypeRegistry.ControlFields.Contains(lower))
+                        return "self->base." + lower;
+                    var pfx = TypeRegistry.HasNoPrefix(lname) ? "" : "f_";
+                    return "self->base." + pfx + lname;
+                }
             }
             catch { }
         }
+
+        // Computed property on current class → call the generated getter function
+        if (!string.IsNullOrEmpty(_ctx.CurrentClass) && _ctx.ComputedPropertyNames.Contains(name))
+            return _ctx.CurrentClass + "_get_" + name + "(self)";
 
         if (_ctx.IsFieldAccess(name))
         {
@@ -197,6 +245,16 @@ public sealed class ExpressionWriter : IExpressionWriter
         {
             var prefix = TypeRegistry.HasNoPrefix(name) ? "" : "f_";
             return "self->" + prefix + name;
+        }
+
+        // Fallback: inherited field via BaseFieldTypes (no semantic model)
+        if (!string.IsNullOrEmpty(_ctx.CurrentClass) && _ctx.BaseFieldTypes.ContainsKey(name))
+        {
+            var lower = name.ToLowerInvariant();
+            if (TypeRegistry.ControlFields.Contains(lower))
+                return "self->base." + lower;
+            var pfx = TypeRegistry.HasNoPrefix(name) ? "" : "f_";
+            return "self->base." + pfx + name;
         }
 
         if (TypeRegistry.ControlFields.Contains(name) && !string.IsNullOrEmpty(_ctx.CurrentClass))
@@ -537,9 +595,13 @@ public sealed class ExpressionWriter : IExpressionWriter
 
         var args = inv.ArgumentList.Arguments.Select(a => Write(a.Expression)).ToList();
         var calleeStr = inv.Expression.ToString();
+        var calleeCode = inv.Expression is ElementAccessExpressionSyntax
+                         || inv.Expression is MemberAccessExpressionSyntax
+            ? Write(inv.Expression)
+            : calleeStr;
         if (!IsSilentCall(calleeStr))
             _ctx.Warn(inv, $"unrecognized call '{calleeStr}' — passed through as-is; verify generated C compiles");
-        return calleeStr + "(" + string.Join(", ", args) + ")";
+        return calleeCode + "(" + string.Join(", ", args) + ")";
     }
 
     private string? TryWriteVirtualCall(MemberAccessExpressionSyntax mem,
@@ -607,12 +669,109 @@ public sealed class ExpressionWriter : IExpressionWriter
         if (TypeRegistry.IsLibNxStruct(receiverType)) return null;
         if (TypeRegistry.IsControlType(receiverType)) return null;
         if (receiverType is "string" or "StringBuilder") return null;
+        // Generic collection types must be handled by their dedicated handlers;
+        // using them as-is would produce invalid C identifiers (e.g. "List<Foo>_Add").
+        if (TypeRegistry.IsList(receiverType) || TypeRegistry.IsDictionary(receiverType)
+            || TypeRegistry.IsStack(receiverType) || TypeRegistry.IsQueue(receiverType)
+            || TypeRegistry.IsHashSet(receiverType)) return null;
 
         var callArgs = WriteArguments(inv.ArgumentList.Arguments);
+        callArgs = ApplyUpcasts(inv, callArgs, receiverType);
         var recv = Write(mem.Expression);
         var allArgs = new List<string> { recv };
         allArgs.AddRange(callArgs);
         return receiverType + "_" + methodName + "(" + string.Join(", ", allArgs) + ")";
+    }
+
+    private List<string> ApplyUpcasts(InvocationExpressionSyntax inv, List<string> args, string receiverTypeName)
+    {
+        if (_ctx.SemanticModel == null) return args;
+        if (inv.Expression is not MemberAccessExpressionSyntax macc) return args;
+
+        var result = new List<string>(args);
+        var invArgs = inv.ArgumentList.Arguments;
+        var methodName = macc.Name.Identifier.Text;
+
+        // Use the already-resolved receiver type name to find method parameters.
+        IMethodSymbol? methodSym = null;
+        try
+        {
+            var recvTypeSym = FindTypeInCompilation(_ctx.SemanticModel.Compilation, receiverTypeName);
+            if (recvTypeSym != null)
+            {
+                methodSym = recvTypeSym
+                    .GetMembers(methodName)
+                    .OfType<IMethodSymbol>()
+                    .FirstOrDefault(m => m.Parameters.Length == invArgs.Count);
+            }
+        }
+        catch { }
+
+        if (methodSym == null) return result;
+
+        for (int i = 0; i < invArgs.Count && i < methodSym.Parameters.Length && i < result.Count; i++)
+        {
+            try
+            {
+                var paramType = methodSym.Parameters[i].Type as INamedTypeSymbol;
+                if (paramType == null) continue;
+
+                // Get actual argument type — prefer LocalTypes/FieldTypes, fall back to semantic model
+                INamedTypeSymbol? actualType = null;
+                var argExprStr = invArgs[i].Expression.ToString();
+                var argKey = argExprStr.TrimStart('_');
+                _ctx.LocalTypes.TryGetValue(argExprStr, out var argLt);
+                _ctx.FieldTypes.TryGetValue(argKey, out var argFt);
+                var argTypeName = (argLt ?? argFt ?? "").TrimEnd('*').Trim();
+                if (!string.IsNullOrEmpty(argTypeName))
+                    actualType = FindTypeInCompilation(_ctx.SemanticModel.Compilation, argTypeName);
+
+                if (actualType == null)
+                {
+                    var argTypeInfo = _ctx.SemanticModel.GetTypeInfo(invArgs[i].Expression);
+                    actualType = (argTypeInfo.Type ?? argTypeInfo.ConvertedType) as INamedTypeSymbol;
+                }
+
+                if (actualType != null
+                    && actualType.Name != paramType.Name
+                    && IsSubtypeOf(actualType, paramType))
+                {
+                    result[i] = "(" + paramType.Name + "*)" + result[i];
+                }
+            }
+            catch { }
+        }
+
+        return result;
+    }
+
+    private static INamedTypeSymbol? FindTypeInCompilation(
+        Microsoft.CodeAnalysis.Compilation compilation, string typeName)
+    {
+        return SearchNamespace(compilation.GlobalNamespace, typeName);
+
+        static INamedTypeSymbol? SearchNamespace(INamespaceSymbol ns, string name)
+        {
+            var t = ns.GetTypeMembers(name).FirstOrDefault();
+            if (t != null) return t;
+            foreach (var child in ns.GetNamespaceMembers())
+            {
+                t = SearchNamespace(child, name);
+                if (t != null) return t;
+            }
+            return null;
+        }
+    }
+
+    private static bool IsSubtypeOf(INamedTypeSymbol derived, INamedTypeSymbol baseType)
+    {
+        var t = derived.BaseType;
+        while (t != null)
+        {
+            if (t.Name == baseType.Name) return true;
+            t = t.BaseType;
+        }
+        return false;
     }
 
     private string WriteNullCoalescingAssignment(AssignmentExpressionSyntax assign, string right)
@@ -655,7 +814,11 @@ public sealed class ExpressionWriter : IExpressionWriter
                      || (ft != null && TypeRegistry.IsLibNxStruct(ft));
         var arrow = isStruct ? "." : "->";
 
-        if (prop == "Text")
+        // Only use Label_SetText for the built-in runtime Label/Button types.
+        // User-defined classes with a Text property use their own f_Text field.
+        bool isBuiltinTextControl = (lt != null && TypeRegistry.IsBuiltinControlType(lt))
+                                 || (ft != null && TypeRegistry.IsBuiltinControlType(ft));
+        if (prop == "Text" && isBuiltinTextControl)
         {
             if (assign.Right is ConditionalExpressionSyntax cond)
                 return "Label_SetText(" + obj + ", (" + Write(cond.Condition) + ") ? "
@@ -669,12 +832,13 @@ public sealed class ExpressionWriter : IExpressionWriter
             return "Label_SetText(" + obj + ", " + right + ")";
         }
 
-        // Replace just the OnClick block in WriteMemberAssignment:
+        // OnClick assignment: SwitchForms Button uses void(*)(void*), user classes use Action_t
         if (prop == "OnClick")
         {
+            var receiverType = lt ?? ft;
+            bool isSwitchFormsButton = receiverType == "Button";
+
             var methodRaw = assign.Right.ToString().Trim();
-            // Resolve the actual containing class of the method — could be CurrentClass,
-            // or a static class, or a lambda-lifted function.
             string methodExpr;
             if (assign.Right is LambdaExpressionSyntax lambdaRight)
             {
@@ -685,7 +849,6 @@ public sealed class ExpressionWriter : IExpressionWriter
             }
             else if (methodRaw.Contains('.'))
             {
-                // Fully qualified: SomeClass.Method → SomeClass_Method
                 methodExpr = methodRaw.Replace('.', '_');
             }
             else if (_ctx.SemanticModel != null && assign.Right is IdentifierNameSyntax idRight)
@@ -713,7 +876,10 @@ public sealed class ExpressionWriter : IExpressionWriter
                     ? methodRaw
                     : _ctx.CurrentClass + "_" + methodRaw;
             }
-            return obj + "->OnClick = (void(*)(void*))" + methodExpr;
+
+            if (isSwitchFormsButton)
+                return obj + "->OnClick = (void(*)(void*))" + methodExpr;
+            return obj + "->OnClick = (Action_t)" + methodExpr;
         }
 
         var fieldType = lt ?? ft;
@@ -741,6 +907,37 @@ public sealed class ExpressionWriter : IExpressionWriter
             cProp = TypeRegistry.HasNoPrefix(prop) ? prop : "f_" + prop;
         else
             cProp = TypeRegistry.MapProperty(prop);
+
+        // Detect inherited properties via semantic model and route to ->base.
+        if (_ctx.SemanticModel != null
+            && assignReceiverType != null
+            && !TypeRegistry.IsBuiltinControlType(assignReceiverType))
+        {
+            try
+            {
+                var typeInfo2 = _ctx.SemanticModel.GetTypeInfo(mem.Expression);
+                var recvSym2 = (typeInfo2.ConvertedType ?? typeInfo2.Type) as INamedTypeSymbol;
+                if (recvSym2 != null)
+                {
+                    IPropertySymbol? foundProp2 = null;
+                    INamedTypeSymbol? definingType2 = null;
+                    var t = recvSym2;
+                    while (t != null)
+                    {
+                        var p = t.GetMembers(prop).OfType<IPropertySymbol>().FirstOrDefault();
+                        if (p != null) { foundProp2 = p; definingType2 = t; break; }
+                        t = t.BaseType;
+                    }
+                    if (foundProp2 != null && definingType2 != null
+                        && definingType2.Name != recvSym2.Name)
+                    {
+                        var pfx2 = TypeRegistry.HasNoPrefix(prop) ? "" : "f_";
+                        cProp = "base." + pfx2 + prop;
+                    }
+                }
+            }
+            catch { }
+        }
 
         // Interpolated strings produce a stack snprintf-buffer → dangling pointer if stored in a field.
         // Wrap with _cs2sx_heap_strdup() so the field gets a heap copy.
@@ -1056,6 +1253,67 @@ public sealed class ExpressionWriter : IExpressionWriter
          || (_ctx.FieldTypes.TryGetValue(key, out var vft) && _ctx.ValueTypeStructs.Contains(vft)))
             return obj + "." + prop;
 
+        // SemanticModel: detect computed (non-auto) properties and inherited properties
+        if (_ctx.SemanticModel != null && receiverType != null)
+        {
+            try
+            {
+                var typeInfo2 = _ctx.SemanticModel.GetTypeInfo(mem.Expression);
+                var recvSym2 = (typeInfo2.ConvertedType ?? typeInfo2.Type) as INamedTypeSymbol;
+                if (recvSym2 != null)
+                {
+                    // Walk up the type hierarchy to find the property
+                    IPropertySymbol? foundProp = null;
+                    INamedTypeSymbol? definingType = null;
+                    var t = recvSym2;
+                    while (t != null)
+                    {
+                        var p = t.GetMembers(prop).OfType<IPropertySymbol>().FirstOrDefault();
+                        if (p != null) { foundProp = p; definingType = t; break; }
+                        t = t.BaseType;
+                    }
+
+                    if (foundProp != null && definingType != null)
+                    {
+                        bool isInherited = definingType.Name != recvSym2.Name;
+                        // Use syntax-based auto-property detection.
+                        // IsImplicitlyDeclared is false even for auto-property getters (get; is in source),
+                        // so we must check whether the getter has an explicit body.
+                        bool isComputed = false;
+                        if (foundProp.GetMethod != null)
+                        {
+                            foreach (var synRef in foundProp.DeclaringSyntaxReferences)
+                            {
+                                if (synRef.GetSyntax() is PropertyDeclarationSyntax propSyn)
+                                {
+                                    isComputed = !PropertyWriter.IsAutoProperty(propSyn);
+                                    break;
+                                }
+                            }
+                        }
+
+                        if (isComputed)
+                        {
+                            // Expression-body or explicit getter → call the getter function
+                            return definingType.Name + "_get_" + prop + "(" + obj + ")";
+                        }
+
+                        if (isInherited)
+                        {
+                            // Property defined in a base class → access via ->base.
+                            var lower = prop.ToLowerInvariant();
+                            if (TypeRegistry.IsBuiltinControlType(definingType.Name)
+                                && TypeRegistry.ControlFields.Contains(lower))
+                                return obj + "->base." + lower;
+                            var pfx2 = TypeRegistry.HasNoPrefix(prop) ? "" : "f_";
+                            return obj + "->base." + pfx2 + prop;
+                        }
+                    }
+                }
+            }
+            catch { }
+        }
+
         if (receiverType != null
             && !TypeRegistry.IsLibNxStruct(receiverType)
             && !TypeRegistry.IsLibNxStruct(TypeRegistry.MapType(receiverType).TrimEnd('*'))
@@ -1326,18 +1584,23 @@ public sealed class ExpressionWriter : IExpressionWriter
     {
         var elemType = arr.Type.ElementType.ToString().Trim();
         var cType = elemType == "string" ? "const char*" : TypeRegistry.MapType(elemType);
+        bool isRefType = elemType != "string" && TypeRegistry.NeedsPointerSuffix(elemType);
         if (arr.Initializer != null && arr.Initializer.Expressions.Count > 0)
         {
             var elems = arr.Initializer.Expressions.Select(e => Write(e));
             // C99 compound literal — valid as an expression (assignment, return, argument)
-            return "(" + cType + "[]){ " + string.Join(", ", elems) + " }";
+            return "(" + cType + (isRefType ? "*" : "") + "[]){ " + string.Join(", ", elems) + " }";
         }
         if (arr.Type.RankSpecifiers.Count > 0
             && arr.Type.RankSpecifiers[0].Sizes.Count > 0)
         {
             var size = Write(arr.Type.RankSpecifiers[0].Sizes[0]);
+            if (isRefType)
+                return "(" + cType + "**)malloc(" + size + " * sizeof(" + cType + "*))";
             return "(" + cType + "*)malloc(" + size + " * sizeof(" + cType + "))";
         }
+        if (isRefType)
+            return "(" + cType + "**)malloc(sizeof(" + cType + "*))";
         return "(" + cType + "*)malloc(sizeof(" + cType + "))";
     }
 
@@ -1359,7 +1622,7 @@ public sealed class ExpressionWriter : IExpressionWriter
     private static bool IsStructType(string csType) =>
         TypeRegistry.IsLibNxStruct(csType)
         || TypeRegistry.IsLibNxStruct(TypeRegistry.MapType(csType).TrimEnd('*'))
-        || csType is "TouchState" or "StickPos" or "BatteryInfo";
+        || csType is "TouchState" or "StickPos" or "BatteryInfo" or "TimeInfo";
 
     private string WriteConditional(ConditionalExpressionSyntax cond)
         => "(" + Write(cond.Condition) + " ? " + Write(cond.WhenTrue) + " : " + Write(cond.WhenFalse) + ")";
@@ -1392,7 +1655,7 @@ public sealed class ExpressionWriter : IExpressionWriter
             {
                 var idx0 = Write(elem.ArgumentList.Arguments[0].Expression);
                 var idx1 = Write(elem.ArgumentList.Arguments[1].Expression);
-                return objExpr + "[" + idx0 + " * " + stride + " + " + idx1 + "]";
+                return objExpr + "[(" + idx0 + ") * " + stride + " + (" + idx1 + ")]";
             }
             // Fallback: emit a warning and use flat index
             _ctx.Warn($"Multi-dim array access on '{objRaw}' without known stride — using flat index",
@@ -1416,7 +1679,11 @@ public sealed class ExpressionWriter : IExpressionWriter
             else if (TypeRegistry.IsQueue(collType))  lenExpr = objExpr + "->count";
             else if (collType == "string")            lenExpr = "(int)strlen(" + objExpr + ")";
             else if (_ctx.ArrayLengths.TryGetValue(objRaw, out var kl)) lenExpr = kl;
-            else lenExpr = "(int)(sizeof(" + objExpr + ") / sizeof(" + objExpr + "[0]))";
+            else
+            {
+                _ctx.Warn($"^n index on '{objRaw}' whose length is unknown — emitting 0 (heap arrays have no sizeof length)", elem.ToString());
+                lenExpr = "0 /* ^n on heap array: length unknown */";
+            }
             index = "(" + lenExpr + " - " + n + ")";
         }
         else

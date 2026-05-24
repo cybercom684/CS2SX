@@ -138,14 +138,18 @@ public sealed class ArrayHandler : InvocationHandlerBase
                      or "uint" or "ulong" or "ushort" or "sbyte")
         {
             // For numeric types: memset only works for 0 and -1; use loop otherwise
+            var startVar = ctx.NextTmp("fa_start");
             var idxVar = ctx.NextTmp("fi");
-            ctx.WriteLine($"for (int {idxVar} = {startExpr}; {idxVar} < ({startExpr}) + ({countExpr}); {idxVar}++)");
+            ctx.WriteLine($"int {startVar} = {startExpr};");
+            ctx.WriteLine($"for (int {idxVar} = {startVar}; {idxVar} < {startVar} + ({countExpr}); {idxVar}++)");
             ctx.WriteLine($"    {arrName}[{idxVar}] = {val};");
             return "/* filled */";
         }
 
+        var startVar2 = ctx.NextTmp("fa_start");
         var idx = ctx.NextTmp("fi");
-        ctx.WriteLine($"for (int {idx} = {startExpr}; {idx} < ({startExpr}) + ({countExpr}); {idx}++)");
+        ctx.WriteLine($"int {startVar2} = {startExpr};");
+        ctx.WriteLine($"for (int {idx} = {startVar2}; {idx} < {startVar2} + ({countExpr}); {idx}++)");
         ctx.WriteLine($"    {arrName}[{idx}] = {val};");
         return "/* filled */";
     }

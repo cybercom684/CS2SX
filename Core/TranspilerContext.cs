@@ -64,6 +64,8 @@ public sealed class TranspilerContext
 
     public Dictionary<string, string> FieldTypes { get; } = new(StringComparer.Ordinal);
     public Dictionary<string, string> BaseFieldTypes { get; } = new(StringComparer.Ordinal);
+    // Properties with expression-body or explicit get/set bodies (not struct fields)
+    public HashSet<string> ComputedPropertyNames { get; } = new(StringComparer.Ordinal);
 
     // ── Methoden- und Property-Typen ──────────────────────────────────────────
 
@@ -237,6 +239,7 @@ public sealed class TranspilerContext
         CurrentBaseType = string.Empty;
         FieldTypes.Clear();
         BaseFieldTypes.Clear();
+        ComputedPropertyNames.Clear();
         MethodReturnTypes.Clear();
         PropertyTypes.Clear();
         // Enum names and members are project-global — not per-class.
@@ -345,6 +348,16 @@ public sealed class TranspilerContext
                 + FormatTypeSymbol(dictType.TypeArguments[1]) + ">";
 
         if (type.Name == "StringBuilder") return "StringBuilder";
+
+        // Generic delegate types: Action<T>, Func<T,R>, etc.
+        if (type is INamedTypeSymbol delegateType
+            && delegateType.TypeArguments.Length > 0
+            && (delegateType.Name == "Action" || delegateType.Name == "Func"
+                || delegateType.DelegateInvokeMethod != null))
+        {
+            var typeArgs = string.Join(",", delegateType.TypeArguments.Select(FormatTypeSymbol));
+            return delegateType.Name + "<" + typeArgs + ">";
+        }
 
         return type.SpecialType switch
         {

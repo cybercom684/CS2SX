@@ -114,6 +114,52 @@ if (Input.IsHeld(NpadButton.ZR))
 
 ---
 
+## Analog-Sticks
+
+```csharp
+StickPos left  = Input.GetStickLeft();
+StickPos right = Input.GetStickRight();
+
+// Rohwerte: -32767 .. +32767
+// x: links=negativer Wert, rechts=positiver Wert
+// y: unten=negativer Wert, oben=positiver Wert
+if (left.x > 5000) Graphics.DrawText(100, 100, "Stick rechts", Color.Green, 2);
+if (left.y < -5000) Graphics.DrawText(100, 130, "Stick unten", Color.Red, 2);
+
+// Normierte Werte: 0..100 (Betrag)
+int stärkeX = left.NormX;
+int stärkeY = left.NormY;
+```
+
+---
+
+## Touch-Screen
+
+```csharp
+TouchState touch = Input.GetTouch();
+
+// Anzahl aktiver Finger
+if (touch.count > 0)
+{
+    // Position des ersten Fingers
+    int x = touch.X0;
+    int y = touch.Y0;
+    Graphics.FillCircle(x, y, 20, Color.Red);
+}
+
+// Treffer-Test für einen Bereich (idx = Finger-Index)
+if (touch.HitRect(0, 100, 200, 80, 40))  // Finger 0 in Rect(100,200,80×40)?
+    DoSomething();
+
+// Alle aktiven Finger durchlaufen
+for (int i = 0; i < touch.count; i++)
+    Graphics.FillCircle(touch.x[i], touch.y[i], 15, Color.Blue);
+```
+
+> Touch und Sticks stehen sowohl über `Input.GetTouch()` / `Input.GetStickLeft()` als auch automatisch als `_touch` / `_stickL` in `SwitchAppEx`-Subklassen zur Verfügung.
+
+---
+
 ## Input in Unterklassen
 
 In `SwitchApp`-Unterklassen immer über `Input.IsDown()` und `Input.IsHeld()` arbeiten — nicht direkt über `kDown`/`kHeld`:

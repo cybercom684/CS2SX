@@ -83,12 +83,32 @@ public sealed class InterfaceExpander
                 if (_collector.Interfaces.ContainsKey(typeName))
                 {
                     implementedInterfaces.Add(typeName);
+                    // Also collect all transitively inherited interfaces
+                    foreach (var transitiveIface in CollectTransitiveInterfaces(typeName))
+                        if (!implementedInterfaces.Contains(transitiveIface))
+                            implementedInterfaces.Add(transitiveIface);
                     Log.Debug($"InterfaceExpander: '{cls.Identifier.Text}' implementiert '{typeName}'");
                 }
             }
 
             if (implementedInterfaces.Count > 0)
                 ClassInterfaces[cls.Identifier.Text] = implementedInterfaces;
+        }
+    }
+
+    private IEnumerable<string> CollectTransitiveInterfaces(string ifaceName)
+    {
+        if (!_collector.Interfaces.TryGetValue(ifaceName, out var iface)) yield break;
+        if (iface.BaseList == null) yield break;
+        foreach (var baseType in iface.BaseList.Types)
+        {
+            var parentName = baseType.Type.ToString().Trim();
+            if (_collector.Interfaces.ContainsKey(parentName))
+            {
+                yield return parentName;
+                foreach (var grandparent in CollectTransitiveInterfaces(parentName))
+                    yield return grandparent;
+            }
         }
     }
 
@@ -228,7 +248,7 @@ public sealed class InterfaceExpander
                 if (!implemented)
                 {
                     var retType = TypeRegistry.MapType(method.ReturnType.ToString().Trim());
-                    var stubName = $"_cs2sx_{className}_{mName}_not_impl";
+                    var stubName = $"_cs2sx_{className}_{ifaceName}_{mName}_not_impl";
                     var parms = new List<string> { "void* self" };
                     foreach (var p in method.ParameterList.Parameters)
                     {
@@ -248,6 +268,41 @@ public sealed class InterfaceExpander
                 }
             }
 
+            // Pass 1b: Stub-Funktionen für nicht-implementierte Properties
+            foreach (var prop in iface.Members.OfType<PropertyDeclarationSyntax>())
+            {
+                var pName = prop.Identifier.Text;
+                var propRetType = TypeRegistry.MapType(prop.Type.ToString().Trim());
+                var hasGet = prop.AccessorList?.Accessors
+                    .Any(a => a.IsKind(SyntaxKind.GetAccessorDeclaration)) ?? false;
+                var hasSet = prop.AccessorList?.Accessors
+                    .Any(a => a.IsKind(SyntaxKind.SetAccessorDeclaration)) ?? false;
+                bool propImpl = cls.Members.OfType<PropertyDeclarationSyntax>()
+                    .Any(p => p.Identifier.Text == pName);
+
+                if (hasGet && !propImpl)
+                {
+                    var getStub = $"_cs2sx_{className}_{ifaceName}_get_{pName}_not_impl";
+                    sb.AppendLine($"static {propRetType} {getStub}(void* self)");
+                    sb.AppendLine("{");
+                    sb.AppendLine($"    /* Interface property getter '{pName}' not implemented by '{className}' */");
+                    sb.AppendLine($"    return ({propRetType})0;");
+                    sb.AppendLine("}");
+                    sb.AppendLine();
+                    Log.Warning($"InterfaceExpander: '{className}' implementiert '{ifaceName}', aber Property-Getter '{pName}' fehlt — Stub generiert");
+                }
+                if (hasSet && !propImpl)
+                {
+                    var setStub = $"_cs2sx_{className}_{ifaceName}_set_{pName}_not_impl";
+                    sb.AppendLine($"static void {setStub}(void* self, {propRetType} value)");
+                    sb.AppendLine("{");
+                    sb.AppendLine($"    /* Interface property setter '{pName}' not implemented by '{className}' */");
+                    sb.AppendLine("}");
+                    sb.AppendLine();
+                    Log.Warning($"InterfaceExpander: '{className}' implementiert '{ifaceName}', aber Property-Setter '{pName}' fehlt — Stub generiert");
+                }
+            }
+
             // Pass 2: vtable-Initialisierer
             sb.AppendLine($"static {ifaceName}_vtable {instanceName} =");
             sb.AppendLine("{");
@@ -262,7 +317,7 @@ public sealed class InterfaceExpander
                     sb.AppendLine($"    .{mName} = {className}_{mName},");
                 else
                 {
-                    var stubName = $"_cs2sx_{className}_{mName}_not_impl";
+                    var stubName = $"_cs2sx_{className}_{ifaceName}_{mName}_not_impl";
                     sb.AppendLine($"    .{mName} = {stubName},");
                 }
             }
@@ -274,9 +329,13 @@ public sealed class InterfaceExpander
                     .Any(a => a.IsKind(SyntaxKind.GetAccessorDeclaration)) ?? false;
                 var hasSet = prop.AccessorList?.Accessors
                     .Any(a => a.IsKind(SyntaxKind.SetAccessorDeclaration)) ?? false;
+                bool propImpl = cls.Members.OfType<PropertyDeclarationSyntax>()
+                    .Any(p => p.Identifier.Text == pName);
 
-                if (hasGet) sb.AppendLine($"    .get_{pName} = {className}_get_{pName},");
-                if (hasSet) sb.AppendLine($"    .set_{pName} = {className}_set_{pName},");
+                if (hasGet)
+                    sb.AppendLine($"    .get_{pName} = {(propImpl ? $"{className}_get_{pName}" : $"_cs2sx_{className}_{ifaceName}_get_{pName}_not_impl")},");
+                if (hasSet)
+                    sb.AppendLine($"    .set_{pName} = {(propImpl ? $"{className}_set_{pName}" : $"_cs2sx_{className}_{ifaceName}_set_{pName}_not_impl")},");
             }
 
             sb.AppendLine("};");

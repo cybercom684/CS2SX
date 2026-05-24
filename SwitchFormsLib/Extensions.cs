@@ -188,6 +188,30 @@ public static class Graphics
                                  int cellW, int cellH, uint color)
     {
     }
+
+    /// Lädt eine BMP-Datei und gibt eine Texture zurück (null bei Fehler).
+    /// Pfad: "romfs:/file.bmp" für eingebettete Assets, oder absoluter Dateipfad.
+    /// Wird zu CS2SX_Texture_LoadBMP(path) transpiliert.
+    public static Texture LoadTexture(string path) => null;
+
+    /// Zeichnet tex zentriert in der angegebenen Bounding-Box (rx, ry, rw, rh).
+    /// Wird zu Graphics_DrawTextureCentered transpiliert.
+    public static void DrawTextureCentered(Texture tex, int rx, int ry, int rw, int rh)
+    {
+    }
+
+    /// Zeichnet tex skaliert auf (tw x th) Pixel an Position (x, y).
+    /// Wird zu Graphics_DrawTextureScaled transpiliert.
+    public static void DrawTextureScaled(Texture tex, int x, int y, int tw, int th)
+    {
+    }
+
+    /// Zeichnet tex skaliert auf (tw x th) Pixel, zentriert in (rx, ry, rw, rh).
+    /// Wird zu Graphics_DrawTextureCenteredScaled transpiliert.
+    public static void DrawTextureCenteredScaled(Texture tex,
+        int rx, int ry, int rw, int rh, int tw, int th)
+    {
+    }
 }
 
 // ============================================================================
@@ -250,11 +274,22 @@ public struct BatteryInfo
     public bool connected;  // Ladegerät angesteckt
 }
 
+public struct TimeInfo
+{
+    public int hour;    // 0–23
+    public int minute;  // 0–59
+    public int second;  // 0–59
+}
+
 public static class System
 {
     /// Akkustand abfragen. Braucht psmInitialize() — SwitchAppEx macht das automatisch.
     /// Wird zu CS2SX_GetBattery() transpiliert.
     public static BatteryInfo GetBattery() => new BatteryInfo();
+
+    /// Aktuelle Systemzeit abfragen.
+    /// Wird zu CS2SX_GetTime() transpiliert.
+    public static TimeInfo GetTime() => new TimeInfo();
 }
 
 // ============================================================================

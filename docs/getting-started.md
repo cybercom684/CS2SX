@@ -49,7 +49,8 @@ MeineApp/
 ├── cs2sx.json            ← CS2SX-Konfiguration (Name, Icon, Version)
 ├── Program.cs            ← Einstiegspunkt (wird nicht transpiliert)
 ├── MeineApp.cs           ← Deine App-Klasse
-└── icon.jpg              ← App-Icon (256×256)
+├── icon.jpg              ← App-Icon (256×256)
+└── romfs/                ← optionale eingebettete Assets (BMPs etc.)
 ```
 
 ### 2. App-Klasse

@@ -450,23 +450,23 @@ public class MyApp : SwitchAppEx
     {
         Graphics.FillScreen(Color.Black);
 
-        if (stickL.x > 5000)
+        if (_stickL.x > 5000)
             Graphics.DrawText(100, 100, "Stick rechts", Color.Green, 2);
 
-        for (int i = 0; i < touch.count; i++)
-            Graphics.FillCircle(touch.x[i], touch.y[i], 20, Color.Red);
+        for (int i = 0; i < _touch.count; i++)
+            Graphics.FillCircle(_touch.x[i], _touch.y[i], 20, Color.Red);
 
-        Graphics.DrawText(10, 680, $"Akku: {battery.percent}%", Color.White, 1);
+        Graphics.DrawText(10, 680, $"Akku: {_battery.percent}%", Color.White, 1);
     }
 }
 ```
 
 | Feld | Typ | Beschreibung |
 |---|---|---|
-| `stickL` | `StickPos` | Linker Analog-Stick (automatisch pro Frame) |
-| `stickR` | `StickPos` | Rechter Analog-Stick (automatisch pro Frame) |
-| `touch` | `TouchState` | Touch-Screen-Zustand (automatisch pro Frame) |
-| `battery` | `BatteryInfo` | Akkustand (alle ~300 Frames aktualisiert) |
+| `_stickL` | `StickPos` | Linker Analog-Stick (automatisch pro Frame) |
+| `_stickR` | `StickPos` | Rechter Analog-Stick (automatisch pro Frame) |
+| `_touch` | `TouchState` | Touch-Screen-Zustand (automatisch pro Frame) |
+| `_battery` | `BatteryInfo` | Akkustand (alle ~300 Frames aktualisiert) |
 
 ---
 
@@ -498,7 +498,8 @@ public class MyApp : SwitchAppEx
 | `StickPos` | ✅ | Analog-Stick-Position (`x`, `y`) |
 | `TouchState` | ✅ | Touch-Screen-Zustand (`count`, `x[]`, `y[]`, `id[]`) |
 | `BatteryInfo` | ✅ | Akkustand (`percent`, `charging`, `connected`) |
-| `Texture` | ✅ | Pixel-Buffer für `Graphics.DrawTexture` |
+| `TimeInfo` | ✅ | Systemzeit (`hour`, `minute`, `second`) — via `System.GetTime()` |
+| `Texture` | ✅ | Pixel-Buffer; laden via `Graphics.LoadTexture(path)` |
 
 ### Numerische Konstanten
 
@@ -725,7 +726,11 @@ Aktivierung: `Graphics.Init(1280, 720)` in `OnInit()`.
 | `Graphics.DrawChar(x, y, c, color, scale)` | Einzelnes Zeichen |
 | `Graphics.MeasureTextWidth(text, scale)` | Text-Breite in Pixeln |
 | `Graphics.MeasureTextHeight(scale)` | Text-Höhe in Pixeln |
-| `Graphics.DrawTexture(tex, x, y)` | Texture rendern |
+| `Graphics.DrawTexture(tex, x, y)` | Texture an Position rendern |
+| `Graphics.LoadTexture(path)` | BMP laden (`"romfs:/file.bmp"` oder absoluter Pfad) |
+| `Graphics.DrawTextureCentered(tex, rx, ry, rw, rh)` | Texture zentriert in Bounding-Box |
+| `Graphics.DrawTextureScaled(tex, x, y, tw, th)` | Texture skaliert auf Zielgröße |
+| `Graphics.DrawTextureCenteredScaled(tex, rx, ry, rw, rh, tw, th)` | Texture skaliert und zentriert in Box |
 | `Graphics.BeginFrame()` / `Graphics.EndFrame()` | Manuelles Frame-Management |
 
 ### Erweiterte Primitiven
@@ -769,8 +774,8 @@ StickPos left  = Input.GetStickLeft();
 StickPos right = Input.GetStickRight();
 TouchState touch = Input.GetTouch();
 
-// Touch-Treffer-Test
-if (touch.HitRect(100, 200, 80, 40))  // x, y, width, height
+// Touch-Treffer-Test (idx = Finger-Index, dann x, y, width, height)
+if (touch.HitRect(0, 100, 200, 80, 40))
     DoSomething();
 ```
 
@@ -779,7 +784,12 @@ if (touch.HitRect(100, 200, 80, 40))  // x, y, width, height
 ## System
 
 ```csharp
-BatteryInfo battery = System.GetBattery();
+BatteryInfo bat = System.GetBattery();
+// bat.percent (0–100), bat.charging, bat.connected
+
+TimeInfo t = System.GetTime();
+// t.hour (0–23), t.minute (0–59), t.second (0–59)
+
 Environment.Exit(0);
 ```
 
@@ -795,9 +805,30 @@ Alle Pfade müssen absolut sein und mit `/switch/` beginnen — außer beim Star
 | `File.ReadAllLines(path)` | Zeilenweise lesen → `List<string>` |
 | `File.WriteAllText(path, content)` | Datei schreiben |
 | `File.Exists(path)` | Existenz prüfen |
+| `Directory.Exists(path)` | Verzeichnis prüfen |
 | `Directory.CreateDirectory(path)` | Verzeichnis anlegen |
+| `Directory.Delete(path)` | Verzeichnis löschen |
 | `Directory.GetFiles(path, pattern)` | Dateien → `List<string>` |
-| `Path.Combine(a, b)` | Pfade kombinieren |
+| `Directory.GetDirectories(path)` | Unterverzeichnisse → `List<string>` |
+| `Directory.GetEntries(path)` | Dateien + Verzeichnisse → `List<string>` |
+| `Path.Combine(a, b)` | Pfade kombinieren (`a/b`) |
+| `Path.GetFileName(path)` | Dateiname aus Pfad |
+| `Path.GetExtension(path)` | Extension inkl. Punkt (`.bmp`) |
+| `Path.GetDirectoryName(path)` | Verzeichnisteil des Pfades |
+| `Path.IsDirectory(path)` | `true` wenn kein `.` im letzten Segment |
+
+## Assets (romfs)
+
+Dateien im `romfs/`-Verzeichnis werden in die `.nro` eingebettet und sind zur Laufzeit über das `"romfs:/"` Präfix erreichbar:
+
+```csharp
+// Textur aus romfs laden (24/32-bit BMP)
+Texture tex = Graphics.LoadTexture("romfs:/bild.bmp");
+if (tex != null)
+    Graphics.DrawTextureCenteredScaled(tex, 0, 0, 1280, 720, 256, 256);
+```
+
+CS2SX erkennt automatisch ob `romfs/` vorhanden ist und bettet es beim Build ein — kein manueller Schritt nötig.
 
 ---
 
@@ -856,6 +887,8 @@ MeinProjekt/
 ├── cs2sx.json
 ├── icon.jpg
 ├── Program.cs
+├── romfs/                 ← eingebettete Assets (optional)
+│   └── bild.bmp           ← erreichbar als "romfs:/bild.bmp"
 ├── mylib_main.h           ← optionaler Shim für externe Libraries
 ├── cs2sx_out/             ← generierter C-Code
 │   ├── _forward.h         ← Forward-Declarations + Custom-Header-Includes
@@ -870,6 +903,8 @@ MeinProjekt/
         ├── include/
         └── src/
 ```
+
+Wenn ein `romfs/`-Verzeichnis vorhanden ist, wird es automatisch als romfs-Image in die `.nro` eingebettet. Dateien darin sind zur Laufzeit über `"romfs:/dateiname"` erreichbar.
 
 `cs2sx.json` mit externer Library:
 

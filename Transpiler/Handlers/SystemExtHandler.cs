@@ -20,10 +20,43 @@ public sealed class SystemExtHandler : InvocationHandlerBase
         List<string> args, TranspilerContext ctx,
         Func<SyntaxNode?, string> writeExpr, out string result)
     {
-        if (calleeStr != "System.GetBattery" && calleeStr != "CS2SX.GetBattery")
-            return NotHandled(out result);
+        if (calleeStr == "System.GetBattery" || calleeStr == "CS2SX.GetBattery")
+        {
+            result = "CS2SX_GetBattery()";
+            return true;
+        }
 
-        result = "CS2SX_GetBattery()";
-        return true;
+        if (calleeStr == "System.GetTime" || calleeStr == "CS2SX.GetTime")
+        {
+            result = "CS2SX_GetTime()";
+            return true;
+        }
+
+        if (calleeStr == "Graphics.LoadTexture")
+        {
+            var path = args.Count > 0 ? args[0] : "\"\"";
+            result = "CS2SX_Texture_LoadBMP(" + path + ")";
+            return true;
+        }
+
+        if (calleeStr == "Graphics.DrawTextureCentered")
+        {
+            result = "Graphics_DrawTextureCentered(" + string.Join(", ", args) + ")";
+            return true;
+        }
+
+        if (calleeStr == "Graphics.DrawTextureScaled")
+        {
+            result = "Graphics_DrawTextureScaled(" + string.Join(", ", args) + ")";
+            return true;
+        }
+
+        if (calleeStr == "Graphics.DrawTextureCenteredScaled")
+        {
+            result = "Graphics_DrawTextureCenteredScaled(" + string.Join(", ", args) + ")";
+            return true;
+        }
+
+        return NotHandled(out result);
     }
 }

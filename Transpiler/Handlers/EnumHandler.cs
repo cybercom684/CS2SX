@@ -191,7 +191,7 @@ public sealed class EnumHandler : InvocationHandlerBase
             foreach (var m in members)
             {
                 var kw = first ? "if" : "else if";
-                ctx.WriteLine($"{kw} ({valArg} == {m}) strncpy({buf}, \"{m}\", sizeof({buf}) - 1);");
+                ctx.WriteLine($"{kw} ({valArg} == {m}) snprintf({buf}, sizeof({buf}), \"%s\", \"{m}\");");
                 first = false;
             }
             return buf;

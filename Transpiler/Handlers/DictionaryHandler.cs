@@ -26,7 +26,16 @@ public sealed class DictionaryHandler : InvocationHandlerBase
         var objStr = mem.Expression.ToString();
 
         if (!TryResolveDict(objStr, ctx, out var dictType, out var dictExpr))
-            return NotHandled(out result);
+        {
+            var semType = ctx.GetSemanticType(mem.Expression);
+            if (semType != null && TypeRegistry.IsDictionary(semType))
+            {
+                dictType = semType;
+                dictExpr = writeExpr(mem.Expression);
+            }
+            else
+                return NotHandled(out result);
+        }
 
         var cDict = DictFuncPrefix(dictType);
         var method = mem.Name.Identifier.Text;
@@ -95,16 +104,16 @@ public sealed class DictionaryHandler : InvocationHandlerBase
             var types = TypeRegistry.GetDictionaryTypes(dictType);
             var valCs = types?.val ?? "int";
             var valC = valCs == "string" ? "const char*" : TypeRegistry.MapType(valCs);
-            var cmpFn = valCs == "string"
-                ? $"CS2SX_strcmp_safe({dictExpr}->values[_dv_i], {ArgAt(args, 0)}) == 0"
-                : $"{dictExpr}->values[_dv_i] == {ArgAt(args, 0)}";
             var idxVar = ctx.NextTmp("dv_i");
             var retVar = ctx.NextTmp("dv_found");
+            var cmpFn = valCs == "string"
+                ? $"CS2SX_strcmp_safe({dictExpr}->values[{idxVar}], {ArgAt(args, 0)}) == 0"
+                : $"{dictExpr}->values[{idxVar}] == {ArgAt(args, 0)}";
             ctx.WriteLine($"int {retVar} = 0;");
             ctx.WriteLine($"for (int {idxVar} = 0; {idxVar} < {dictExpr}->count; {idxVar}++)");
             ctx.WriteLine("{");
             ctx.Indent();
-            ctx.WriteLine($"if ({cmpFn.Replace("_dv_i", idxVar)}) {{ {retVar} = 1; break; }}");
+            ctx.WriteLine($"if ({cmpFn}) {{ {retVar} = 1; break; }}");
             ctx.Dedent();
             ctx.WriteLine("}");
             result = retVar;

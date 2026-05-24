@@ -273,21 +273,25 @@ public sealed class StatementWriter
         var baseType = declType[..^2].Trim();
         var varName = v.Identifier.Text;
         var cType = baseType == "string" ? "const char*" : TypeRegistry.MapType(baseType);
+        bool isRefType = baseType != "string" && TypeRegistry.NeedsPointerSuffix(baseType);
+        var ptrSuffix = isRefType ? "**" : "*";
+        var castPrefix = isRefType ? "(" + cType + "**)" : "(" + cType + "*)";
+        var sizeofExpr = isRefType ? "sizeof(" + cType + "*)" : "sizeof(" + cType + ")";
 
         if (arrCreate.Type.RankSpecifiers.Count > 0
             && arrCreate.Type.RankSpecifiers[0].Sizes.Count > 0
             && arrCreate.Type.RankSpecifiers[0].Sizes[0] is not OmittedArraySizeExpressionSyntax)
         {
             var sizeExpr = _expr.Write(arrCreate.Type.RankSpecifiers[0].Sizes[0]);
-            if (IsConstantSizeExpr(arrCreate.Type.RankSpecifiers[0].Sizes[0]))
+            if (IsConstantSizeExpr(arrCreate.Type.RankSpecifiers[0].Sizes[0]) && !isRefType)
             {
                 _ctx.WriteLine(cType + " " + varName + "[" + sizeExpr + "];");
                 _ctx.WriteLine("memset(" + varName + ", 0, sizeof(" + varName + "));");
             }
             else
             {
-                _ctx.WriteLine(cType + "* " + varName
-                    + " = (" + cType + "*)calloc(" + sizeExpr + ", sizeof(" + cType + "));");
+                _ctx.WriteLine(cType + ptrSuffix + " " + varName
+                    + " = " + castPrefix + "calloc(" + sizeExpr + ", " + sizeofExpr + ");");
             }
             _ctx.ArrayLengths[varName] = sizeExpr;
         }
@@ -295,12 +299,12 @@ public sealed class StatementWriter
         {
             var elems = arrCreate.Initializer.Expressions
                 .Select(e => _expr.Write(e)).ToList();
-            _ctx.WriteLine(cType + " " + varName + "[] = { " + string.Join(", ", elems) + " };");
+            _ctx.WriteLine(cType + (isRefType ? "*" : "") + " " + varName + "[] = { " + string.Join(", ", elems) + " };");
             _ctx.ArrayLengths[varName] = elems.Count.ToString();
         }
         else
         {
-            _ctx.WriteLine(cType + "* " + varName + " = NULL; /* empty array */");
+            _ctx.WriteLine(cType + ptrSuffix + " " + varName + " = NULL; /* empty array */");
         }
         _ctx.LocalTypes[varName] = declType;
     }
@@ -465,7 +469,7 @@ public sealed class StatementWriter
     }
 
     private static bool IsExtensionStructType(string csType) =>
-        csType is "TouchState" or "StickPos" or "BatteryInfo";
+        csType is "TouchState" or "StickPos" or "BatteryInfo" or "TimeInfo";
 
     private void WriteNullableLocal(VariableDeclaratorSyntax v, string declType)
     {
@@ -482,9 +486,8 @@ public sealed class StatementWriter
         else
         {
             var initVal = _expr.Write(v.Initializer.Value);
-            var tmpName = "_nval_" + varName;
-            _ctx.WriteLine(innerC + " " + tmpName + " = " + initVal + ";");
-            _ctx.WriteLine(innerC + "* " + varName + " = &" + tmpName + ";");
+            _ctx.WriteLine(innerC + "* " + varName + " = (" + innerC + "*)malloc(sizeof(" + innerC + "));");
+            _ctx.WriteLine("if (" + varName + ") *" + varName + " = " + initVal + ";");
         }
         _ctx.LocalTypes[varName] = declType;
     }
@@ -556,6 +559,10 @@ public sealed class StatementWriter
                           or "CS2SX_GetBattery")
                 return ("CS2SX_BatteryInfo", false);
 
+            if (calleeStr is "System.GetTime"
+                          or "CS2SX_GetTime")
+                return ("CS2SX_TimeInfo", false);
+
             if (calleeStr is "Stopwatch.StartNew"
                           or "CS2SX_Stopwatch_StartNew")
                 return ("CS2SX_Stopwatch", true);
@@ -575,6 +582,7 @@ public sealed class StatementWriter
             if (inferred is "TouchState") return ("CS2SX_TouchState", false);
             if (inferred is "StickPos") return ("CS2SX_StickPos", false);
             if (inferred is "BatteryInfo") return ("CS2SX_BatteryInfo", false);
+            if (inferred is "TimeInfo") return ("CS2SX_TimeInfo", false);
 
             if (TypeRegistry.IsList(inferred)
                 || TypeRegistry.IsDictionary(inferred)
@@ -594,6 +602,7 @@ public sealed class StatementWriter
         if (ct is "TouchState") return ("CS2SX_TouchState", false);
         if (ct is "StickPos") return ("CS2SX_StickPos", false);
         if (ct is "BatteryInfo") return ("CS2SX_BatteryInfo", false);
+        if (ct is "TimeInfo") return ("CS2SX_TimeInfo", false);
 
         if (TypeRegistry.IsList(ct)
             || TypeRegistry.IsDictionary(ct)

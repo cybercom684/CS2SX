@@ -20,6 +20,10 @@ public sealed class FieldMethodHandler : InvocationHandlerBase
         if (!ctx.FieldTypes.TryGetValue(fieldKey, out var fieldType))
             return NotHandled(out result);
 
+        // User-defined reference types need upcast handling — defer to TryWriteDirectUserClassCall.
+        if (TypeRegistry.NeedsPointerSuffix(fieldType))
+            return NotHandled(out result);
+
         var methodName = mem.Name.Identifier.Text;
         var allArgs = new List<string> { "self->f_" + fieldKey };
         allArgs.AddRange(args);

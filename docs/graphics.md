@@ -123,13 +123,37 @@ int höhe   = Graphics.MeasureTextHeight(2);
 
 ## Texturen
 
-```csharp
-// Textur laden (z.B. aus dem App-Verzeichnis)
-var tex = new Texture("/switch/MeineApp/bild.png");
+CS2SX unterstützt 24-bit und 32-bit BMP-Dateien. Dateien im `romfs/`-Ordner werden automatisch in die `.nro` eingebettet.
 
-// Textur zeichnen
+```csharp
+// Aus romfs laden (empfohlen — in .nro eingebettet)
+Texture tex = Graphics.LoadTexture("romfs:/bild.bmp");
+
+// Aus absolutem Dateipfad laden
+Texture tex2 = Graphics.LoadTexture("/switch/MeineApp/bild.bmp");
+
+// An fester Position rendern
 Graphics.DrawTexture(tex, x, y);
+
+// Zentriert in einer Bounding-Box rendern
+Graphics.DrawTextureCentered(tex, rx, ry, rw, rh);
+
+// Auf Zielgröße (tw × th Pixel) skalieren
+Graphics.DrawTextureScaled(tex, x, y, tw, th);
+
+// Skaliert und in Bounding-Box zentriert (nützlich für Icons)
+Graphics.DrawTextureCenteredScaled(tex, rx, ry, rw, rh, tw, th);
 ```
+
+| Methode | Beschreibung |
+|---|---|
+| `Graphics.LoadTexture(path)` | BMP laden → `Texture` (oder `null` bei Fehler) |
+| `Graphics.DrawTexture(tex, x, y)` | Texture an Position (x, y) rendern |
+| `Graphics.DrawTextureCentered(tex, rx, ry, rw, rh)` | Zentriert in Bounding-Box |
+| `Graphics.DrawTextureScaled(tex, x, y, tw, th)` | Skaliert auf tw × th Pixel |
+| `Graphics.DrawTextureCenteredScaled(tex, rx, ry, rw, rh, tw, th)` | Skaliert + zentriert |
+
+> `null`-Check empfohlen: `if (tex != null) Graphics.DrawTexture(tex, x, y);`
 
 ---
 

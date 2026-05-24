@@ -116,8 +116,9 @@ public sealed class SemanticModelBuilder
                     .OfType<Microsoft.CodeAnalysis.CSharp.Syntax.ClassDeclarationSyntax>())
                 {
                     var className = cls.Identifier.Text;
-                    if (!_modelsByClass.ContainsKey(className))
-                        _modelsByClass[className] = model;
+                    if (_modelsByClass.ContainsKey(className))
+                        Log.Debug($"SemanticModel: Duplicate class name '{className}' across files — using latest model");
+                    _modelsByClass[className] = model;
                 }
             }
         }
