@@ -581,7 +581,9 @@ public sealed class ExpressionWriter : IExpressionWriter
             var callArgs = WriteArguments(inv.ArgumentList.Arguments);
             var allArgs = new List<string> { "((" + baseType + "*)self)" };
             allArgs.AddRange(callArgs);
-            return baseType + "_" + methodName + "(" + string.Join(", ", allArgs) + ")";
+            var cName = CSharpToC.BuildCMethodName(baseType, methodName,
+                inv.ArgumentList.Arguments.Count, _ctx.OverloadedMethods);
+            return cName + "(" + string.Join(", ", allArgs) + ")";
         }
 
         if (inv.Expression is MemberAccessExpressionSyntax vtableMem)
@@ -680,7 +682,9 @@ public sealed class ExpressionWriter : IExpressionWriter
         var recv = Write(mem.Expression);
         var allArgs = new List<string> { recv };
         allArgs.AddRange(callArgs);
-        return receiverType + "_" + methodName + "(" + string.Join(", ", allArgs) + ")";
+        var cName = CSharpToC.BuildCMethodName(receiverType, methodName,
+            inv.ArgumentList.Arguments.Count, _ctx.OverloadedMethods);
+        return cName + "(" + string.Join(", ", allArgs) + ")";
     }
 
     private List<string> ApplyUpcasts(InvocationExpressionSyntax inv, List<string> args, string receiverTypeName)
@@ -840,12 +844,9 @@ public sealed class ExpressionWriter : IExpressionWriter
 
             var methodRaw = assign.Right.ToString().Trim();
             string methodExpr;
-            if (assign.Right is LambdaExpressionSyntax lambdaRight)
+            if (assign.Right is LambdaExpressionSyntax)
             {
-                var lifter = new LambdaLifter(_ctx, this);
-                var stmtWriter = new StatementWriter(_ctx, this);
-                lifter.SetStatementWriter(stmtWriter);
-                methodExpr = lifter.LiftLambda(lambdaRight, hintType: "Action");
+                methodExpr = right; // already lifted by Write(assign.Right) above
             }
             else if (methodRaw.Contains('.'))
             {
@@ -1174,7 +1175,7 @@ public sealed class ExpressionWriter : IExpressionWriter
 
         if (prop == "Length")
         {
-            if (IsStringExpr(mem.Expression))
+            if (IsStringExpr(mem.Expression) || IsStringType(mem.Expression))
                 return "strlen(" + obj + ")";
             var rk2 = mem.Expression.ToString();
             var rkey2 = rk2.TrimStart('_');

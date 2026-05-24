@@ -69,7 +69,7 @@ public sealed class LambdaLifter
         }
 
         var parms = ExtractParams(lambda, effectiveElementHint);
-        var retCs = hintType != null ? ExtractReturnType(hintType, parms.Count) : "int";
+        var retCs = hintType != null ? ExtractReturnType(hintType, parms.Count) : "void";
 
         // FIX-1: Prelude in einem lokalen StringBuilder sammeln und dann
         // in _ctx.PendingLambdaPreludes eintragen — kein StringWriter-Rewrite.

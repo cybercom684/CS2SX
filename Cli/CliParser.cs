@@ -13,6 +13,7 @@ public static class CliParser
             ["watch"] = ParseWatch,
             ["clean"] = ParseClean,   // FIX: war vergessen
             ["dump"] = ParseDump,
+            ["update"] = ParseUpdate,
         };
 
     public static CliArgs Parse(string[] args)
@@ -80,5 +81,11 @@ public static class CliParser
         // First arg is the .csproj path; remaining args are optional filename filters.
         CheckTarget = args.ElementAtOrDefault(0) ?? string.Empty,
         DumpFilter = args.Length > 1 ? args[1..] : Array.Empty<string>(),
+    };
+
+    private static CliArgs ParseUpdate(string[] args) => new()
+    {
+        Command = "update",
+        BuildTarget = args.ElementAtOrDefault(0) ?? string.Empty,
     };
 }

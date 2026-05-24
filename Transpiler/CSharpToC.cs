@@ -1007,6 +1007,69 @@ public sealed class CSharpToC : CSharpSyntaxWalker
         }
     }
 
+    // ── Base-class field initializers for subclass constructors ──────────────
+
+    /// <summary>
+    /// Emits property/field initializers from <paramref name="baseType"/>'s declaration
+    /// with "self->base." prefix, so subclass _New() functions inherit the base
+    /// class's default values (e.g. Visible = true) after memset-to-zero.
+    /// </summary>
+    internal void WriteInstanceFieldInitializersForBaseClass(string baseType)
+    {
+        if (string.IsNullOrEmpty(baseType) || _ctx.SemanticModel == null) return;
+        try
+        {
+            foreach (var tree in _ctx.SemanticModel.Compilation.SyntaxTrees)
+            {
+                var cls = tree.GetRoot()
+                    .DescendantNodes()
+                    .OfType<ClassDeclarationSyntax>()
+                    .FirstOrDefault(c => c.Identifier.Text == baseType);
+                if (cls == null) continue;
+                WriteInstanceFieldInitializersWithPrefix(cls, "self->base.");
+                return;
+            }
+        }
+        catch { }
+    }
+
+    private void WriteInstanceFieldInitializersWithPrefix(
+        ClassDeclarationSyntax node, string prefix)
+    {
+        foreach (var field in node.Members.OfType<FieldDeclarationSyntax>())
+        {
+            if (field.Modifiers.Any(m => m.IsKind(SyntaxKind.StaticKeyword))) continue;
+            foreach (var v in field.Declaration.Variables)
+            {
+                if (v.Initializer == null) continue;
+                var fieldName = v.Identifier.Text.TrimStart('_');
+                var fp = TypeRegistry.HasNoPrefix(fieldName) ? "" : "f_";
+                _ctx.WriteLine(prefix + fp + fieldName + " = "
+                    + _exprWriter.Write(v.Initializer.Value) + ";");
+            }
+        }
+        foreach (var prop in node.Members.OfType<PropertyDeclarationSyntax>())
+        {
+            if (prop.Modifiers.Any(m => m.IsKind(SyntaxKind.StaticKeyword))) continue;
+            if (!PropertyWriter.IsAutoProperty(prop)) continue;
+            if (prop.Initializer == null) continue;
+            var initPfx = TypeRegistry.HasNoPrefix(prop.Identifier.Text) ? "" : "f_";
+            _ctx.WriteLine(prefix + initPfx + prop.Identifier.Text + " = "
+                + _exprWriter.Write(prop.Initializer.Value) + ";");
+        }
+        foreach (var prop in node.Members.OfType<PropertyDeclarationSyntax>())
+        {
+            if (prop.Modifiers.Any(m => m.IsKind(SyntaxKind.StaticKeyword))) continue;
+            if (!PropertyWriter.IsAutoProperty(prop)) continue;
+            if (prop.Initializer != null) continue;
+            var csType = prop.Type.ToString().Trim();
+            if (!TypeRegistry.IsList(csType)) continue;
+            var inner = TypeRegistry.GetListInnerType(csType) ?? "int";
+            var cInner = inner == "string" ? "str" : TypeRegistry.MapType(inner);
+            _ctx.WriteLine(prefix + "f_" + prop.Identifier.Text + " = List_" + cInner + "_New();");
+        }
+    }
+
     // ── Konstruktor ───────────────────────────────────────────────────────────
 
     private void WriteConstructor(ClassDeclarationSyntax node)
@@ -1055,6 +1118,7 @@ public sealed class CSharpToC : CSharpSyntaxWalker
             }
         }
 
+        RegisterClassOverloads(node, name);
         foreach (var method in node.Members.OfType<MethodDeclarationSyntax>())
             WriteMethodSignature(method, name, isStaticClass);
 
@@ -1074,6 +1138,28 @@ public sealed class CSharpToC : CSharpSyntaxWalker
         _ctx.Out.WriteLine();
     }
 
+    // ── Methoden-Überladungen ─────────────────────────────────────────────────
+
+    private void RegisterClassOverloads(TypeDeclarationSyntax node, string className)
+    {
+        if (_ctx.OverloadedMethods.ContainsKey(className)) return;
+        var set = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var g in node.Members.OfType<MethodDeclarationSyntax>()
+                     .GroupBy(m => m.Identifier.Text)
+                     .Where(g => g.Count() > 1))
+            set.Add(g.Key);
+        _ctx.OverloadedMethods[className] = set;
+    }
+
+    // Returns "ClassName_MethodName" for unique methods, "ClassName_MethodName_N" for overloads.
+    internal static string BuildCMethodName(string className, string methodName, int userParamCount,
+        Dictionary<string, HashSet<string>> overloadedMethods)
+    {
+        if (overloadedMethods.TryGetValue(className, out var set) && set.Contains(methodName))
+            return $"{className}_{methodName}_{userParamCount}";
+        return $"{className}_{methodName}";
+    }
+
     // ── Methoden-Signaturen ───────────────────────────────────────────────────
 
     private void WriteMethodSignature(MethodDeclarationSyntax method,
@@ -1087,7 +1173,8 @@ public sealed class CSharpToC : CSharpSyntaxWalker
             .Any(m => m.IsKind(SyntaxKind.ThisKeyword)) == true;
 
         var returnType = ResolveMethodReturnType(method);
-        var name = className + "_" + method.Identifier.Text;
+        int userParamCount = method.ParameterList.Parameters.Count;
+        var name = BuildCMethodName(className, method.Identifier.Text, userParamCount, _ctx.OverloadedMethods);
 
         var parameters = new List<string>();
         if (!isStatic && !isExtension) parameters.Add(className + "* self");
@@ -1114,6 +1201,7 @@ public sealed class CSharpToC : CSharpSyntaxWalker
     private void WriteMethodBodies(ClassDeclarationSyntax node)
     {
         var className = node.Identifier.Text;
+        RegisterClassOverloads(node, className);
         foreach (var opDecl in node.Members.OfType<OperatorDeclarationSyntax>())
             WriteOperatorBody(opDecl, className);
 
@@ -1218,9 +1306,10 @@ public sealed class CSharpToC : CSharpSyntaxWalker
                 cReturnType += "*";
         }
 
+        int userParamCount = node.ParameterList.Parameters.Count;
         var name = string.IsNullOrEmpty(_ctx.CurrentClass)
             ? node.Identifier.Text
-            : _ctx.CurrentClass + "_" + node.Identifier.Text;
+            : BuildCMethodName(_ctx.CurrentClass, node.Identifier.Text, userParamCount, _ctx.OverloadedMethods);
 
         var parameters = new List<string>();
         if (!string.IsNullOrEmpty(_ctx.CurrentClass) && !isStatic && !isExtension)
@@ -1412,6 +1501,7 @@ public sealed class CSharpToC : CSharpSyntaxWalker
             _ctx.Out.WriteLine($"{name}* {name}_Retain({name}* self);");
 
             // Method signatures from body
+            RegisterClassOverloads(node, name);
             foreach (var method in node.Members.OfType<MethodDeclarationSyntax>())
                 WriteMethodSignature(method, name);
 
@@ -1489,6 +1579,7 @@ public sealed class CSharpToC : CSharpSyntaxWalker
             _ctx.Out.WriteLine();
 
             // Method bodies
+            RegisterClassOverloads(node, name);
             foreach (var method in node.Members.OfType<MethodDeclarationSyntax>())
                 VisitMethodDeclaration(method);
         }

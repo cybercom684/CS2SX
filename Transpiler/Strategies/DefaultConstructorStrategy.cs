@@ -80,6 +80,8 @@ public sealed class DefaultConstructorStrategy : IConstructorStrategy
         ctx.WriteLine("memset(self, 0, sizeof(" + name + "));");
         if (string.IsNullOrEmpty(baseType))
             ctx.WriteLine("self->_rc = 1;");
+        else if (baseType != "SwitchApp" && !CSharpToC.IsControlSubclass(baseType))
+            ctx.WriteLine("self->base._rc = 1;");
 
         // VTable-Zeiger setzen: vtable lives in the embedded base struct, not in self directly.
         // self->base.vtable points to the correct vtable for this subclass so that
@@ -88,6 +90,15 @@ public sealed class DefaultConstructorStrategy : IConstructorStrategy
             && !CSharpToC.IsControlSubclass(baseType))
         {
             ctx.WriteLine("self->base.vtable = &" + name + "_vtable_instance;");
+        }
+
+        // Base-class property/field initializers (e.g. Visible = true from UIControl).
+        // Without this, memset zeros the embedded base struct and subclass controls
+        // are invisible by default.
+        if (!string.IsNullOrEmpty(baseType) && baseType != "SwitchApp"
+            && !CSharpToC.IsControlSubclass(baseType))
+        {
+            transpiler.WriteInstanceFieldInitializersForBaseClass(baseType);
         }
 
         // Feld-Initializer aus Feld-Deklarationen

@@ -12,9 +12,11 @@ public static class RuntimeExporter
         ExportResources(outputDir, filter: r => r.Contains(".Runtime."));
     }
 
-    public static void ExportStubs(string outputDir)
+    public static (IReadOnlyList<string> Added, IReadOnlyList<string> Updated) ExportStubs(string outputDir)
     {
         var assembly = Assembly.GetExecutingAssembly();
+        var added   = new List<string>();
+        var updated = new List<string>();
 
         foreach (var resource in assembly.GetManifestResourceNames())
         {
@@ -33,8 +35,13 @@ public static class RuntimeExporter
             var targetDir = Path.Combine(new[] { outputDir }.Concat(subDirs).ToArray());
             Directory.CreateDirectory(targetDir);
 
-            WriteResource(assembly, resource, Path.Combine(targetDir, fileName));
+            var targetPath = Path.Combine(targetDir, fileName);
+            bool isNew = !File.Exists(targetPath);
+            WriteResource(assembly, resource, targetPath);
+            (isNew ? added : updated).Add(targetPath);
         }
+
+        return (added, updated);
     }
 
     /// <summary>

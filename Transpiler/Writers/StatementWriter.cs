@@ -556,11 +556,13 @@ public sealed class StatementWriter
                 return ("CS2SX_StickPos", false);
 
             if (calleeStr is "System.GetBattery"
-                          or "CS2SX_GetBattery")
+                          or "CS2SX_GetBattery"
+                          or "NX.GetBattery")
                 return ("CS2SX_BatteryInfo", false);
 
             if (calleeStr is "System.GetTime"
-                          or "CS2SX_GetTime")
+                          or "CS2SX_GetTime"
+                          or "NX.GetTime")
                 return ("CS2SX_TimeInfo", false);
 
             if (calleeStr is "Stopwatch.StartNew"

@@ -213,10 +213,10 @@ public static class TypeInferrer
                    or "CS2SX_Input_GetStickRight")
             return "StickPos";
 
-        if (callee is "System.GetBattery" or "CS2SX_GetBattery")
+        if (callee is "System.GetBattery" or "CS2SX_GetBattery" or "NX.GetBattery")
             return "BatteryInfo";
 
-        if (callee is "System.GetTime" or "CS2SX_GetTime")
+        if (callee is "System.GetTime" or "CS2SX_GetTime" or "NX.GetTime")
             return "TimeInfo";
 
         if (callee is "Stopwatch.StartNew" or "CS2SX_Stopwatch_StartNew")

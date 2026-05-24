@@ -86,6 +86,10 @@ public sealed class TranspilerContext
     public HashSet<string> VTableTypes { get; } = new(StringComparer.Ordinal);
     public HashSet<string> InterfaceTypes { get; } = new(StringComparer.Ordinal);
 
+    // Maps class name → set of method names that have overloads (same name, different param count).
+    // Used to generate unique C function names via _N suffix (N = user param count).
+    public Dictionary<string, HashSet<string>> OverloadedMethods { get; } = new(StringComparer.Ordinal);
+
     // ── Indentierung ──────────────────────────────────────────────────────────
 
     private int _indent;

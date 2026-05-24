@@ -19,7 +19,13 @@
       "PowerShell(cs2sx build \"C:\\\\Users\\\\Johannes\\\\Documents\\\\Privat\\\\Neuer Ordner\\\\switch\\\\UI\\\\multiWindow\\\\multiWindow.csproj\" 2>&1; Write-Host \"Exit: $LASTEXITCODE\")",
       "Bash(Get-ChildItem -Path \"c:\\\\Users\\\\Johannes\\\\source\\\\repos\\\\CS2SX\" -Recurse -Directory)",
       "Bash(Select-Object -ExpandProperty FullName)",
-      "Bash(Sort-Object)"
+      "Bash(Sort-Object)",
+      "Bash(cs2sx build *)",
+      "PowerShell(cs2sx build \"C:\\\\Users\\\\Johannes\\\\Documents\\\\Privat\\\\Neuer Ordner\\\\switch\\\\UI\\\\multiWindow\"; Write-Host \"Exit: $LASTEXITCODE\")",
+      "Bash(dotnet pack *)",
+      "Bash(dotnet tool *)",
+      "Bash(Get-Content \"C:/Temp/mw_build.txt\")",
+      "PowerShell(cs2sx build \"C:/Users/Johannes/Documents/Privat/Neuer Ordner/switch/UI/multiWindow\" 2>&1)"
     ]
   }
 }

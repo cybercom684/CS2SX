@@ -121,10 +121,24 @@ public static class Graphics
     public static int MeasureTextHeight(int scale) => 0;
 
     // Textures
-    public static void DrawTexture(Texture tex, int x, int y)
-    {
-    }
+    public static void DrawTexture(Texture tex, int x, int y) { }
+    public static Texture LoadTexture(string path) => null;
+    public static void DrawTextureCentered(Texture tex, int rx, int ry, int rw, int rh) { }
+    public static void DrawTextureScaled(Texture tex, int x, int y, int tw, int th) { }
+    public static void DrawTextureCenteredScaled(Texture tex, int rx, int ry, int rw, int rh, int tw, int th) { }
 
+    // Erweiterte Primitiven
+    public static void DrawTriangle(int x0, int y0, int x1, int y1, int x2, int y2, uint color) { }
+    public static void FillTriangle(int x0, int y0, int x1, int y1, int x2, int y2, uint color) { }
+    public static void DrawEllipse(int cx, int cy, int rx, int ry, uint color) { }
+    public static void FillEllipse(int cx, int cy, int rx, int ry, uint color) { }
+    public static void DrawRoundedRect(int x, int y, int w, int h, int r, uint color) { }
+    public static void FillRoundedRect(int x, int y, int w, int h, int r, uint color) { }
+    public static void SetPixelAlpha(int x, int y, uint color, byte alpha) { }
+    public static void FillRectAlpha(int x, int y, int w, int h, uint color, byte alpha) { }
+    public static void DrawTextAlpha(int x, int y, string text, uint color, int scale, byte alpha) { }
+    public static void DrawTextShadow(int x, int y, string text, uint color, uint shadow, int scale) { }
+    public static void DrawGrid(int x, int y, int w, int h, int cellW, int cellH, uint color) { }
 }
 public static class Color
 {
@@ -216,6 +230,19 @@ namespace CS2SX.Switch
         public static string GetCurrentDirectory() => "/switch";
         public static System.Collections.Generic.IEnumerable<string>
                                EnumerateFiles(string path) => System.Array.Empty<string>();
+    public static System.Collections.Generic.List<string> GetDirectories(string path)
+        => new System.Collections.Generic.List<string>();
+    public static System.Collections.Generic.List<string> GetEntries(string path)
+        => new System.Collections.Generic.List<string>();
+    }
+
+    public static class Path
+    {
+        public static string Combine(string a, string b) => a + "/" + b;
+        public static string GetFileName(string path) => path;
+        public static string GetExtension(string path) => "";
+        public static string GetDirectoryName(string path) => path;
+        public static bool IsDirectory(string path) => false;
     }
 }
 
@@ -228,4 +255,37 @@ public static class IntParser
     // int und float sind Schlüsselwörter und können keine statischen Methoden haben,
     // daher sind diese Stubs nur für die Transpiler-Erkennung nötig.
     // Der Transpiler erkennt "int.Parse" direkt als calleeStr.
+}
+
+// ── System ────────────────────────────────────────────────────────────────────
+
+public struct BatteryInfo
+{
+    public int percent;
+    public bool charging;
+    public bool connected;
+}
+
+public struct TimeInfo
+{
+    public int hour;
+    public int minute;
+    public int second;
+}
+
+// NX class instead of System to avoid shadowing the BCL System namespace
+public static class NX
+{
+    public static BatteryInfo GetBattery() => new BatteryInfo();
+    public static TimeInfo GetTime() => new TimeInfo();
+}
+
+// ── SwitchAppEx ───────────────────────────────────────────────────────────────
+
+public abstract class SwitchAppEx : SwitchApp
+{
+    public StickPos _stickL;
+    public StickPos _stickR;
+    public TouchState _touch;
+    public BatteryInfo _battery;
 }

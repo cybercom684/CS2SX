@@ -53,6 +53,12 @@ switch (cli.Command)
             return new CleanCommand(csprojPath).Run();
         }
 
+    case "update":
+        {
+            if (string.IsNullOrWhiteSpace(cli.BuildTarget)) return Usage();
+            return new UpdateCommand(cli.BuildTarget).Run();
+        }
+
     case "genstubs":
         new StubGenerator().Generate(cli.LibnxInclude, cli.StubOutput);
         return 0;
@@ -108,6 +114,7 @@ static int Usage()
     Log.Info("  cs2sx dump   <path/to/App.csproj> [file] Print generated C to stdout");
     Log.Info("  cs2sx watch  <path/to/App.csproj|folder>  Watch & rebuild on change");
     Log.Info("  cs2sx clean  <path/to/App.csproj|folder>  Delete cs2sx_out/");
+    Log.Info("  cs2sx update <path/to/App.csproj|folder>  Refresh IDE stubs to latest version");
     Log.Info("  cs2sx genstubs <libnx-include> <output>   Generate LibNX stubs");
     return 1;
 }

@@ -249,6 +249,10 @@ public sealed class BuildPipeline
             // works (e.g. Window.cs calling UIControl.Draw which is defined in UIControl.cs).
             var sharedVTableTypes = PreScanVTableTypes(transpiledFiles);
 
+            // Pre-scan for overloaded methods so cross-file call sites get the correct
+            // suffixed C name (e.g. Desktop.cs calling Window.Draw(dimmed) → Window_Draw_1).
+            var sharedOverloadedMethods = PreScanOverloadedMethods(transpiledFiles);
+
             for (int i = 0; i < transpiledFiles.Count; i++)
             {
                 var csFile = transpiledFiles[i];
@@ -283,6 +287,8 @@ public sealed class BuildPipeline
                 hTranspiler.GetContext().CurrentCFile = baseName + ".h";
                 foreach (var vt in sharedVTableTypes)
                     hTranspiler.GetContext().VTableTypes.Add(vt);
+                foreach (var (cls, set) in sharedOverloadedMethods)
+                    hTranspiler.GetContext().OverloadedMethods[cls] = set;
 
                 var hResult = hTranspiler.Transpile(source, csFile, semanticModel);
 
@@ -319,6 +325,8 @@ public sealed class BuildPipeline
                 cTranspiler.GetContext().CurrentCFile = baseName + ".c";
                 foreach (var vt in sharedVTableTypes)
                     cTranspiler.GetContext().VTableTypes.Add(vt);
+                foreach (var (cls, set) in sharedOverloadedMethods)
+                    cTranspiler.GetContext().OverloadedMethods[cls] = set;
 
                 var cResult = cTranspiler.Transpile(source, csFile, semanticModel);
 
@@ -613,6 +621,40 @@ public sealed class BuildPipeline
             }
         }
 
+        return result;
+    }
+
+    /// <summary>
+    /// Scans all source files for classes with overloaded methods (same name, different param count).
+    /// Returns a map of class name → set of overloaded method names.
+    /// Shared across all per-file TranspilerContexts so that cross-file call sites can
+    /// generate the correct suffixed C name (e.g. Window_Draw_1 vs Window_Draw_0).
+    /// </summary>
+    internal static Dictionary<string, HashSet<string>> PreScanOverloadedMethods(IEnumerable<string> sourceFiles)
+    {
+        var result = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
+        foreach (var file in sourceFiles)
+        {
+            try
+            {
+                var src = File.ReadAllText(file);
+                var tree = CSharpSyntaxTree.ParseText(src,
+                    new CSharpParseOptions(LanguageVersion.CSharp12));
+                foreach (var cls in tree.GetRoot().DescendantNodes()
+                    .OfType<TypeDeclarationSyntax>())
+                {
+                    var className = cls.Identifier.Text;
+                    var set = new HashSet<string>(StringComparer.Ordinal);
+                    foreach (var g in cls.Members.OfType<MethodDeclarationSyntax>()
+                                 .GroupBy(m => m.Identifier.Text)
+                                 .Where(g => g.Count() > 1))
+                        set.Add(g.Key);
+                    if (set.Count > 0)
+                        result[className] = set;
+                }
+            }
+            catch { }
+        }
         return result;
     }
 

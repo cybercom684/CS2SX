@@ -16,6 +16,7 @@
 // ============================================================================
 
 using CS2SX.Core;
+using CS2SX.Transpiler;
 using CS2SX.Transpiler.Writers;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
@@ -86,16 +87,16 @@ public sealed class OwnMethodHandler : InvocationHandlerBase
                     && method.ContainingType?.Name == ctx.CurrentClass)
                 {
                     var isStatic = method.IsStatic;
-
-                    // Build args with correct ref/out handling based on method signature
                     var callArgs = BuildArgsWithRefOut(inv, method, args, ctx, writeExpr);
+                    var cName = CSharpToC.BuildCMethodName(ctx.CurrentClass, calleeStr,
+                        method.Parameters.Length, ctx.OverloadedMethods);
 
                     if (isStatic)
-                        result = $"{ctx.CurrentClass}_{calleeStr}({string.Join(", ", callArgs)})";
+                        result = $"{cName}({string.Join(", ", callArgs)})";
                     else if (callArgs.Count > 0)
-                        result = $"{ctx.CurrentClass}_{calleeStr}(self, {string.Join(", ", callArgs)})";
+                        result = $"{cName}(self, {string.Join(", ", callArgs)})";
                     else
-                        result = $"{ctx.CurrentClass}_{calleeStr}(self)";
+                        result = $"{cName}(self)";
                     return true;
                 }
 
@@ -107,9 +108,11 @@ public sealed class OwnMethodHandler : InvocationHandlerBase
                     var baseType = inheritedMethod.ContainingType?.Name ?? ctx.CurrentClass;
                     var callArgs = BuildArgsWithRefOut(inv, inheritedMethod, args, ctx, writeExpr);
                     var selfExpr = $"({baseType}*)self";
+                    var cName = CSharpToC.BuildCMethodName(baseType, calleeStr,
+                        inheritedMethod.Parameters.Length, ctx.OverloadedMethods);
                     result = callArgs.Count > 0
-                        ? $"{baseType}_{calleeStr}({selfExpr}, {string.Join(", ", callArgs)})"
-                        : $"{baseType}_{calleeStr}({selfExpr})";
+                        ? $"{cName}({selfExpr}, {string.Join(", ", callArgs)})"
+                        : $"{cName}({selfExpr})";
                     return true;
                 }
 

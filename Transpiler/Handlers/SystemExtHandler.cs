@@ -20,13 +20,13 @@ public sealed class SystemExtHandler : InvocationHandlerBase
         List<string> args, TranspilerContext ctx,
         Func<SyntaxNode?, string> writeExpr, out string result)
     {
-        if (calleeStr == "System.GetBattery" || calleeStr == "CS2SX.GetBattery")
+        if (calleeStr == "System.GetBattery" || calleeStr == "CS2SX.GetBattery" || calleeStr == "NX.GetBattery")
         {
             result = "CS2SX_GetBattery()";
             return true;
         }
 
-        if (calleeStr == "System.GetTime" || calleeStr == "CS2SX.GetTime")
+        if (calleeStr == "System.GetTime" || calleeStr == "CS2SX.GetTime" || calleeStr == "NX.GetTime")
         {
             result = "CS2SX_GetTime()";
             return true;

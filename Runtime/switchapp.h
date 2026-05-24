@@ -812,10 +812,19 @@ typedef struct { int percent; bool charging; bool connected; } CS2SX_BatteryInfo
 
 static inline CS2SX_BatteryInfo CS2SX_GetBattery(void)
 {
-    CS2SX_BatteryInfo info = { 0,false,false };
-    psmInitialize(); // ref-counted — safe to call even if already initialized
+    CS2SX_BatteryInfo info = { 0, false, false };
     u32 chargePercent = 0;
-    if (R_SUCCEEDED(psmGetBatteryChargePercentage(&chargePercent))) info.percent = (int)chargePercent;
+    if (R_SUCCEEDED(psmGetBatteryChargePercentage(&chargePercent))) {
+        info.percent = (int)chargePercent;
+    } else {
+        // psmGetBatteryChargePercentage can silently fail on some firmware/libnx versions;
+        // psmGetRawBatteryChargePercentage is the more reliable alternative.
+        double rawPercent = 0.0;
+        if (R_SUCCEEDED(psmGetRawBatteryChargePercentage(&rawPercent))) {
+            info.percent = (int)(rawPercent + 0.5);
+            chargePercent = (u32)info.percent;
+        }
+    }
     PsmChargerType chargerType = PsmChargerType_Unconnected;
     if (R_SUCCEEDED(psmGetChargerType(&chargerType))) {
         info.connected = chargerType != PsmChargerType_Unconnected;
@@ -847,7 +856,8 @@ static inline void SwitchApp_Run(SwitchApp* self)
 {
     if (!self) return;
 
-    romfsInit(); // no-op if no romfs was linked; enables romfs:/ paths
+    romfsInit();    // no-op if no romfs was linked; enables romfs:/ paths
+    psmInitialize(); // battery service — must stay open for the app lifetime
 
     PadState pad;
     padConfigureInput(1, HidNpadStyleSet_NpadStandard);
@@ -930,4 +940,6 @@ static inline void SwitchApp_Run(SwitchApp* self)
         framebufferClose(&g_fb);
     else
         consoleExit(NULL);
+
+    psmExit();
 }
