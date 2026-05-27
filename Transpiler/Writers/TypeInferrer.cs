@@ -70,8 +70,19 @@ public static class TypeInferrer
             case InterpolatedStringExpressionSyntax:
                 return "string";
 
-            case ConditionalAccessExpressionSyntax:
-                return "object";
+            case ConditionalAccessExpressionSyntax condAccess:
+                if (condAccess.WhenNotNull is MemberBindingExpressionSyntax mbinding)
+                {
+                    var propName = mbinding.Name.Identifier.Text;
+                    if (propName is "Count" or "Length") return "int";
+                    if (ctx.PropertyTypes.TryGetValue(propName, out var pt)) return pt;
+                    if (ctx.FieldTypes.TryGetValue(propName, out var ft)) return ft;
+                }
+                else if (condAccess.WhenNotNull is InvocationExpressionSyntax innerInv)
+                {
+                    return InferInvocation(innerInv, ctx);
+                }
+                return "int";
 
             default:
                 return "int";

@@ -679,6 +679,27 @@ public sealed class ExpressionWriter : IExpressionWriter
 
         var callArgs = WriteArguments(inv.ArgumentList.Arguments);
         callArgs = ApplyUpcasts(inv, callArgs, receiverType);
+
+        // Fill in default values for optional parameters omitted at the call site
+        if (_ctx.SemanticModel != null)
+        {
+            try
+            {
+                var symInfo = _ctx.SemanticModel.GetSymbolInfo(inv);
+                var methodSym = symInfo.Symbol as IMethodSymbol;
+                if (methodSym != null && methodSym.Parameters.Length > callArgs.Count)
+                {
+                    for (int di = callArgs.Count; di < methodSym.Parameters.Length; di++)
+                    {
+                        var dParam = methodSym.Parameters[di];
+                        if (!dParam.IsOptional) break;
+                        callArgs.Add(FormatDefaultValue(dParam));
+                    }
+                }
+            }
+            catch { }
+        }
+
         var recv = Write(mem.Expression);
         var allArgs = new List<string> { recv };
         allArgs.AddRange(callArgs);
@@ -767,6 +788,19 @@ public sealed class ExpressionWriter : IExpressionWriter
         }
     }
 
+    private static string FormatDefaultValue(IParameterSymbol param)
+    {
+        if (!param.HasExplicitDefaultValue) return "0";
+        return param.ExplicitDefaultValue switch
+        {
+            null => "NULL",
+            true => "1",
+            false => "0",
+            string s => "\"" + s.Replace("\\", "\\\\").Replace("\"", "\\\"") + "\"",
+            var v => v.ToString() ?? "0"
+        };
+    }
+
     private static bool IsSubtypeOf(INamedTypeSymbol derived, INamedTypeSymbol baseType)
     {
         var t = derived.BaseType;
@@ -814,9 +848,13 @@ public sealed class ExpressionWriter : IExpressionWriter
             if (semType != null) lt = semType;
         }
 
-        bool isStruct = (lt != null && TypeRegistry.IsLibNxStruct(lt))
-                     || (ft != null && TypeRegistry.IsLibNxStruct(ft));
+        bool isStruct = (lt != null && IsStructType(lt))
+                     || (ft != null && IsStructType(ft));
         var arrow = isStruct ? "." : "->";
+
+        // CS2SX/LibNx value types: direct field access, no f_ prefix, no pointer
+        if (isStruct)
+            return obj + "." + prop + " " + op + " " + right;
 
         // Only use Label_SetText for the built-in runtime Label/Button types.
         // User-defined classes with a Text property use their own f_Text field.
@@ -1512,6 +1550,12 @@ public sealed class ExpressionWriter : IExpressionWriter
             return "NULL /* Random — use CS2SX_Rand_Next() directly */";
         if (typeName == "Stopwatch")
             return "CS2SX_Stopwatch_New()";
+        // CS2SX/LibNx value types not in ValueTypeStructs (they come from embedded stubs)
+        if (typeName is "TouchState" or "StickPos" or "BatteryInfo" or "TimeInfo")
+        {
+            var cType = TypeRegistry.MapType(typeName);
+            return "(" + cType + "){0}";
+        }
         if (_ctx.ValueTypeStructs.Contains(typeName))
         {
             var cType = TypeRegistry.MapType(typeName);

@@ -400,6 +400,7 @@ static inline Texture* CS2SX_Texture_LoadBMP(const char* path)
 
 extern Framebuffer g_fb;
 extern u32* g_fb_addr;
+extern u32* g_sw_backbuf;
 extern int         g_fb_width;
 extern int         g_fb_height;
 extern int         g_gfx_init;
@@ -468,9 +469,18 @@ static inline void Graphics_DrawRect(int x, int y, int w, int h, u32 color)
 static inline void Graphics_FillRect(int x, int y, int w, int h, u32 color)
 {
     if (!g_fb_addr) return;
-    for (int row = y; row < y + h; row++)
-        for (int col = x; col < x + w; col++)
-            Graphics_SetPixel(col, row, color);
+    // Clip to screen bounds once — eliminates per-pixel bounds checks
+    int x0 = x < 0 ? 0 : x;
+    int y0 = y < 0 ? 0 : y;
+    int x1 = x + w > g_fb_width  ? g_fb_width  : x + w;
+    int y1 = y + h > g_fb_height ? g_fb_height : y + h;
+    if (x0 >= x1 || y0 >= y1) return;
+    for (int row = y0; row < y1; row++)
+    {
+        u32* dst = &g_fb_addr[row * g_fb_width + x0];
+        for (int col = x0; col < x1; col++)
+            *dst++ = color;
+    }
 }
 
 static inline void Graphics_DrawLine(int x0, int y0, int x1, int y1, u32 color)
@@ -707,17 +717,49 @@ static inline void Graphics_SetPixelAlpha(int x, int y, u32 color, u8 alpha)
     if (x < 0 || x >= g_fb_width || y < 0 || y >= g_fb_height) return;
     u32* dst = &g_fb_addr[y * g_fb_width + x];
     u32 bg = *dst;
-    u32 sr = (color >> 0) & 0xFF, sg = (color >> 8) & 0xFF, sb = (color >> 16) & 0xFF;
-    u32 dr = (bg >> 0) & 0xFF, dg = (bg >> 8) & 0xFF, db = (bg >> 16) & 0xFF;
+    u32 sr = (color >>  0) & 0xFF, sg = (color >>  8) & 0xFF, sb = (color >> 16) & 0xFF;
+    u32 dr = (bg    >>  0) & 0xFF, dg = (bg    >>  8) & 0xFF, db = (bg    >> 16) & 0xFF;
     u32 a = alpha, ia = 255 - a;
-    *dst = 0xFF000000 | ((sb * a + db * ia) / 255 << 16) | ((sg * a + dg * ia) / 255 << 8) | ((sr * a + dr * ia) / 255);
+    // >> 8 instead of / 255: faster on ARM, imperceptible error (≤1/255 per channel)
+    *dst = 0xFF000000
+        | (((sb * a + db * ia + 128) >> 8) << 16)
+        | (((sg * a + dg * ia + 128) >> 8) <<  8)
+        |  ((sr * a + dr * ia + 128) >> 8);
 }
 
 static inline void Graphics_FillRectAlpha(int x, int y, int w, int h, u32 color, u8 alpha)
 {
     if (!g_fb_addr || alpha == 0) return;
-    if (alpha == 255) { Graphics_FillRect(x, y, w, h, color);return; }
-    for (int row = y;row < y + h;row++) for (int col = x;col < x + w;col++) Graphics_SetPixelAlpha(col, row, color, alpha);
+    if (alpha == 255) { Graphics_FillRect(x, y, w, h, color); return; }
+    // Clip to screen bounds once — avoids per-pixel bounds check
+    int x0 = x < 0 ? 0 : x;
+    int y0 = y < 0 ? 0 : y;
+    int x1 = x + w > g_fb_width  ? g_fb_width  : x + w;
+    int y1 = y + h > g_fb_height ? g_fb_height : y + h;
+    if (x0 >= x1 || y0 >= y1) return;
+    // Pre-compute source channels and alpha weights once outside the loop
+    u32 sr = (color >>  0) & 0xFF;
+    u32 sg = (color >>  8) & 0xFF;
+    u32 sb = (color >> 16) & 0xFF;
+    u32 a  = alpha, ia = 255 - a;
+    u32 sr_a = sr * a + 128;
+    u32 sg_a = sg * a + 128;
+    u32 sb_a = sb * a + 128;
+    for (int row = y0; row < y1; row++)
+    {
+        u32* dst = &g_fb_addr[row * g_fb_width + x0];
+        for (int col = x0; col < x1; col++, dst++)
+        {
+            u32 bg = *dst;
+            u32 dr = (bg >>  0) & 0xFF;
+            u32 dg = (bg >>  8) & 0xFF;
+            u32 db = (bg >> 16) & 0xFF;
+            *dst = 0xFF000000
+                | (((sb_a + db * ia) >> 8) << 16)
+                | (((sg_a + dg * ia) >> 8) <<  8)
+                |  ((sr_a + dr * ia) >> 8);
+        }
+    }
 }
 
 static inline void Graphics_DrawTextAlpha(int x, int y, const char* text, u32 color, int scale, u8 alpha)
@@ -877,6 +919,11 @@ static inline void SwitchApp_Run(SwitchApp* self)
             (u32)g_fb_width, (u32)g_fb_height,
             PIXEL_FORMAT_RGBA_8888, 2);
         framebufferMakeLinear(&g_fb);
+        // Allocate a CPU-cached software backbuffer.  All drawing (including
+        // FillRectAlpha reads) goes to this cached buffer; at end of frame we
+        // memcpy once to the hardware framebuffer.  This avoids the severe
+        // stall penalty of reading back from write-combining VRAM.
+        g_sw_backbuf = (u32*)malloc((size_t)g_fb_width * (size_t)g_fb_height * sizeof(u32));
     }
     else
     {
@@ -897,7 +944,8 @@ static inline void SwitchApp_Run(SwitchApp* self)
             u8* fb_raw = framebufferBegin(&g_fb, NULL);
             if (!fb_raw) continue;
 
-            g_fb_addr = (u32*)fb_raw;
+            // Point g_fb_addr at the cached backbuffer so all pixel ops are fast
+            g_fb_addr = g_sw_backbuf ? g_sw_backbuf : (u32*)fb_raw;
 
             int total = g_fb_width * g_fb_height;
             for (int i = 0; i < total; i++)
@@ -909,6 +957,10 @@ static inline void SwitchApp_Run(SwitchApp* self)
                 self->OnFrame(self);
 
             Form_DrawAll(&self->form);
+
+            // Flush backbuffer to hardware framebuffer in one pass (write-only, fast)
+            if (g_sw_backbuf)
+                memcpy(fb_raw, g_sw_backbuf, (size_t)total * sizeof(u32));
 
             framebufferEnd(&g_fb);
             g_fb_addr = NULL;
@@ -937,7 +989,11 @@ static inline void SwitchApp_Run(SwitchApp* self)
     Form_Free(&self->form);
 
     if (use_gfx)
+    {
+        free(g_sw_backbuf);
+        g_sw_backbuf = NULL;
         framebufferClose(&g_fb);
+    }
     else
         consoleExit(NULL);
 

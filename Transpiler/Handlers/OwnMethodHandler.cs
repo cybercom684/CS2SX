@@ -67,7 +67,7 @@ public sealed class OwnMethodHandler : InvocationHandlerBase
         if (calleeStr.Contains('.'))
             return NotHandled(out result);
 
-        if (calleeStr.Length == 0 || !char.IsLetter(calleeStr[0]))
+        if (calleeStr.Length == 0 || (!char.IsLetter(calleeStr[0]) && calleeStr[0] != '_'))
             return NotHandled(out result);
 
         if (s_cBuiltins.Contains(calleeStr))
@@ -122,14 +122,16 @@ public sealed class OwnMethodHandler : InvocationHandlerBase
                     return NotHandled(out result);
 
                 // Delegate field/property invocation: self->field() or self->f_field()
+                // Use the stripped name (no leading _) for the field access prefix logic.
+                var strippedCallee = calleeStr.TrimStart('_');
                 if (symbol is IPropertySymbol propSym)
                 {
                     var propTypeName = TranspilerContext.FormatTypeSymbol(propSym.Type);
                     if (TypeRegistry.IsDelegate(propTypeName))
                     {
-                        var pfx = TypeRegistry.HasNoPrefix(calleeStr) ? "" : "f_";
+                        var pfx = TypeRegistry.HasNoPrefix(strippedCallee) ? "" : "f_";
                         var callArgStr = args.Count > 0 ? string.Join(", ", args) : "";
-                        result = $"self->{pfx}{calleeStr}({callArgStr})";
+                        result = $"self->{pfx}{strippedCallee}({callArgStr})";
                         return true;
                     }
                     return NotHandled(out result);
@@ -139,9 +141,9 @@ public sealed class OwnMethodHandler : InvocationHandlerBase
                     var fieldTypeName = TranspilerContext.FormatTypeSymbol(fieldSym.Type);
                     if (TypeRegistry.IsDelegate(fieldTypeName))
                     {
-                        var pfx = TypeRegistry.HasNoPrefix(calleeStr) ? "" : "f_";
+                        var pfx = TypeRegistry.HasNoPrefix(strippedCallee) ? "" : "f_";
                         var callArgStr = args.Count > 0 ? string.Join(", ", args) : "";
-                        result = $"self->{pfx}{calleeStr}({callArgStr})";
+                        result = $"self->{pfx}{strippedCallee}({callArgStr})";
                         return true;
                     }
                     return NotHandled(out result);
@@ -153,13 +155,15 @@ public sealed class OwnMethodHandler : InvocationHandlerBase
             catch { }
         }
 
-        // No SemanticModel: check FieldTypes for delegate fields
-        if (ctx.FieldTypes.TryGetValue(calleeStr, out var fieldDelegateType)
+        // No SemanticModel: check FieldTypes for delegate fields (also try trimmed _ prefix)
+        var calleeKey = calleeStr.TrimStart('_');
+        if ((ctx.FieldTypes.TryGetValue(calleeStr, out var fieldDelegateType)
+          || ctx.FieldTypes.TryGetValue(calleeKey, out fieldDelegateType))
             && TypeRegistry.IsDelegate(fieldDelegateType))
         {
-            var pfx = TypeRegistry.HasNoPrefix(calleeStr) ? "" : "f_";
+            var pfx = TypeRegistry.HasNoPrefix(calleeKey) ? "" : "f_";
             var callArgStr = args.Count > 0 ? string.Join(", ", args) : "";
-            result = $"self->{pfx}{calleeStr}({callArgStr})";
+            result = $"self->{pfx}{calleeKey}({callArgStr})";
             return true;
         }
 
@@ -205,7 +209,6 @@ public sealed class OwnMethodHandler : InvocationHandlerBase
                 // Ensure & prefix for value types not already having it
                 if (!built.StartsWith("&") && !built.StartsWith("(*"))
                 {
-                    var exprStr = arg.Expression.ToString();
                     var csType = TypeInferrer.InferCSharpType(arg.Expression, ctx);
                     if (TypeRegistry.IsPrimitive(csType) && csType != "string")
                         result.Add("&" + built);
@@ -221,6 +224,27 @@ public sealed class OwnMethodHandler : InvocationHandlerBase
             }
         }
 
+        // Append default values for optional parameters omitted at the call site
+        for (int i = result.Count; i < method.Parameters.Length; i++)
+        {
+            var param = method.Parameters[i];
+            if (!param.IsOptional) break;
+            result.Add(FormatDefaultValue(param));
+        }
+
         return result;
+    }
+
+    private static string FormatDefaultValue(IParameterSymbol param)
+    {
+        if (!param.HasExplicitDefaultValue) return "0";
+        return param.ExplicitDefaultValue switch
+        {
+            null => "NULL",
+            true => "1",
+            false => "0",
+            string s => "\"" + s.Replace("\\", "\\\\").Replace("\"", "\\\"") + "\"",
+            var v => v.ToString() ?? "0"
+        };
     }
 }

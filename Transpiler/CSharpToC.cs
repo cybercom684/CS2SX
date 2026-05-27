@@ -779,6 +779,11 @@ public sealed class CSharpToC : CSharpSyntaxWalker
 
             if (isConst || isReadOnly)
             {
+                // Instance readonly fields are initialized in the constructor — not as globals.
+                // Only static readonly and const fields become global C variables here.
+                if (isReadOnly && !isStatic && !isConst)
+                    continue;
+
                 var csType = ResolveFieldType(field);
                 if (csType == "string")
                 {
@@ -1827,7 +1832,8 @@ public sealed class CSharpToC : CSharpSyntaxWalker
         var cType = TypeRegistry.MapType(csType);
         var isPrim = TypeRegistry.IsPrimitive(csType)
                   || csType == "string"
-                  || _ctx.EnumDefs.ContainsKey(csType);
+                  || _ctx.EnumDefs.ContainsKey(csType)
+                  || TypeRegistry.IsDelegate(csType); // function pointer typedefs — no extra *
 
         if (isRef)
         {

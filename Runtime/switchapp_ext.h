@@ -89,6 +89,7 @@ static inline void SwitchAppEx_Run(SwitchAppEx* self)
             (u32)g_fb_width, (u32)g_fb_height,
             PIXEL_FORMAT_RGBA_8888, 2);
         framebufferMakeLinear(&g_fb);
+        g_sw_backbuf = (u32*)malloc((size_t)g_fb_width * (size_t)g_fb_height * sizeof(u32));
     }
     else
     {
@@ -121,7 +122,7 @@ static inline void SwitchAppEx_Run(SwitchAppEx* self)
         {
             u8* fb_raw = framebufferBegin(&g_fb, NULL);
             if (!fb_raw) continue;
-            g_fb_addr = (u32*)fb_raw;
+            g_fb_addr = g_sw_backbuf ? g_sw_backbuf : (u32*)fb_raw;
 
             int total = g_fb_width * g_fb_height;
             for (int i = 0; i < total; i++)
@@ -133,6 +134,8 @@ static inline void SwitchAppEx_Run(SwitchAppEx* self)
                 self->base.OnFrame((SwitchApp*)self);
 
             Form_DrawAll(&self->base.form);
+            if (g_sw_backbuf)
+                memcpy(fb_raw, g_sw_backbuf, (size_t)total * sizeof(u32));
             framebufferEnd(&g_fb);
             g_fb_addr = NULL;
         }
@@ -158,7 +161,11 @@ static inline void SwitchAppEx_Run(SwitchAppEx* self)
     if (psmOk) psmExit();
 
     if (use_gfx)
+    {
+        free(g_sw_backbuf);
+        g_sw_backbuf = NULL;
         framebufferClose(&g_fb);
+    }
     else
         consoleExit(NULL);
 }

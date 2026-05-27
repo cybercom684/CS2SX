@@ -905,6 +905,7 @@ public sealed class BuildPipeline
         w.WriteLine("char         _cs2sx_strbuf[1024];");
         w.WriteLine("Framebuffer  g_fb;");
         w.WriteLine("u32*         g_fb_addr       = NULL;");
+        w.WriteLine("u32*         g_sw_backbuf    = NULL;");
         w.WriteLine("int          g_fb_width      = 1280;");
         w.WriteLine("int          g_fb_height     = 720;");
         w.WriteLine("int          g_gfx_init      = 0;");

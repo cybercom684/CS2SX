@@ -25,7 +25,14 @@
       "Bash(dotnet pack *)",
       "Bash(dotnet tool *)",
       "Bash(Get-Content \"C:/Temp/mw_build.txt\")",
-      "PowerShell(cs2sx build \"C:/Users/Johannes/Documents/Privat/Neuer Ordner/switch/UI/multiWindow\" 2>&1)"
+      "PowerShell(cs2sx build \"C:/Users/Johannes/Documents/Privat/Neuer Ordner/switch/UI/multiWindow\" 2>&1)",
+      "Bash(Get-ChildItem -Path \"c:\\\\Users\\\\Johannes\\\\source\\\\repos\\\\CS2SX\" -Recurse -File)",
+      "Read(//c/Users/Johannes/Documents/Privat/Neuer Ordner/switch/Games/simple3D/**)",
+      "Read(//c/Users/Johannes/Documents/Privat/Neuer Ordner/switch/Games/**)",
+      "Bash(# Check if deko3d headers exist anywhere on the system *)",
+      "Read(//opt/devkitpro/portlibs/switch/**)",
+      "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\Johannes\\\\source\\\\repos\\\\CS2SX\" -Recurse -Directory)",
+      "Bash(awk '{print $1}')"
     ]
   }
 }

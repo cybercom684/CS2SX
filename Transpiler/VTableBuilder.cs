@@ -154,6 +154,7 @@ public static class VTableBuilder
 
         // For virtual methods NOT overridden in this class, wire to the base implementation
         // so vtable slots are never NULL (null function pointer → crash on first call).
+        // Walk the full ancestor chain so 3+ levels of inheritance are handled correctly.
         if (semanticModel != null)
         {
             try
@@ -162,11 +163,26 @@ public static class VTableBuilder
                 var baseSym = classSym?.BaseType;
                 if (baseSym != null)
                 {
-                    foreach (var bm in baseSym.GetMembers().OfType<Microsoft.CodeAnalysis.IMethodSymbol>()
-                        .Where(m => (m.IsVirtual || m.IsAbstract) && !m.IsStatic))
+                    // Collect all virtual slots from the full ancestor chain.
+                    // Walking from most-derived base outward: first concrete match wins.
+                    var allSlots = new Dictionary<string, (Microsoft.CodeAnalysis.IMethodSymbol method, Microsoft.CodeAnalysis.INamedTypeSymbol implementor)>(StringComparer.Ordinal);
+                    var ancestor = baseSym;
+                    while (ancestor != null
+                        && ancestor.SpecialType == Microsoft.CodeAnalysis.SpecialType.None)
                     {
-                        if (overriddenNames.Contains(bm.Name)) continue;
-                        if (bm.IsAbstract) continue; // no base body to fall back to
+                        foreach (var bm in ancestor.GetMembers()
+                            .OfType<Microsoft.CodeAnalysis.IMethodSymbol>()
+                            .Where(m => (m.IsVirtual || m.IsAbstract || m.IsOverride) && !m.IsStatic))
+                        {
+                            if (!allSlots.ContainsKey(bm.Name) && !bm.IsAbstract)
+                                allSlots[bm.Name] = (bm, ancestor);
+                        }
+                        ancestor = ancestor.BaseType;
+                    }
+
+                    foreach (var (slotName, (bm, implementor)) in allSlots)
+                    {
+                        if (overriddenNames.Contains(slotName)) continue;
                         var retC = TypeRegistry.MapType(
                             TranspilerContext.FormatTypeSymbol(bm.ReturnType));
                         var castParms = new List<string> { "void*" };
@@ -175,7 +191,7 @@ public static class VTableBuilder
                                 TranspilerContext.FormatTypeSymbol(p.Type)));
                         var castType = retC + "(*)(" + string.Join(", ", castParms) + ")";
                         output.WriteLine(
-                            $"    .{bm.Name} = ({castType}){baseSym.Name}_{bm.Name},");
+                            $"    .{slotName} = ({castType}){implementor.Name}_{slotName},");
                     }
                 }
             }

@@ -133,6 +133,10 @@ public sealed class LinqHandler : InvocationHandlerBase
             catch { }
         }
 
+        // Chained LINQ: inner call creates a temp var (e.g. _where_0); look it up by generated name
+        if (colType == null)
+            ctx.LocalTypes.TryGetValue(sourceExpr, out colType);
+
         if (colType == null || (!TypeRegistry.IsList(colType) && !colType.EndsWith("[]")))
             return NotHandled(out result);
 
@@ -182,7 +186,7 @@ public sealed class LinqHandler : InvocationHandlerBase
             case "Where":
                 {
                     if (lambdaArg == null) return NotHandled(out result);
-                    var predFn = MakeLifter().LiftLambda(lambdaArg, elementTypeHint: inner);
+                    var predFn = MakeLifter().LiftLambda(lambdaArg, elementTypeHint: inner, isPredicate: true);
 
                     var outVar = ctx.NextTmp("where");
                     ctx.WriteLine($"List_{cInner}* {outVar} = List_{cInner}_New();");
@@ -211,7 +215,7 @@ public sealed class LinqHandler : InvocationHandlerBase
                     var cProjType = projInner == "string" ? "const char*" : TypeRegistry.MapType(projInner);
                     var projElemPtr = TypeRegistry.IsPrimitive(projInner) || projInner == "string" ? "" : "*";
 
-                    var projFn = MakeLifter().LiftLambda(lambdaArg, elementTypeHint: inner);
+                    var projFn = MakeLifter().LiftLambda(lambdaArg, hintType: $"Func<{inner},{projInner}>", elementTypeHint: inner);
 
                     var outVar = ctx.NextTmp("sel");
                     ctx.WriteLine($"List_{cProjInner}* {outVar} = List_{cProjInner}_New();");
@@ -233,7 +237,7 @@ public sealed class LinqHandler : InvocationHandlerBase
                 {
                     if (lambdaArg != null)
                     {
-                        var predFn = MakeLifter().LiftLambda(lambdaArg, elementTypeHint: inner);
+                        var predFn = MakeLifter().LiftLambda(lambdaArg, elementTypeHint: inner, isPredicate: true);
                         var idxVar = ctx.NextTmp("i");
                         var retVar = ctx.NextTmp("first");
                         var fillLine = isPrim || inner == "string"
@@ -270,7 +274,7 @@ public sealed class LinqHandler : InvocationHandlerBase
                     var defaultVal = isPrim ? "0" : "NULL";
                     if (lambdaArg != null)
                     {
-                        var predFn = MakeLifter().LiftLambda(lambdaArg, elementTypeHint: inner);
+                        var predFn = MakeLifter().LiftLambda(lambdaArg, elementTypeHint: inner, isPredicate: true);
                         var idxVar = ctx.NextTmp("i");
                         var retVar = ctx.NextTmp("fod");
                         ctx.WriteLine($"{cInnerType}{elemPtr} {retVar} = {defaultVal};");
@@ -319,7 +323,7 @@ public sealed class LinqHandler : InvocationHandlerBase
                 {
                     if (lambdaArg != null)
                     {
-                        var predFn = MakeLifter().LiftLambda(lambdaArg, elementTypeHint: inner);
+                        var predFn = MakeLifter().LiftLambda(lambdaArg, elementTypeHint: inner, isPredicate: true);
                         var idxVar = ctx.NextTmp("i");
                         var retVar = ctx.NextTmp("any");
                         ctx.WriteLine($"int {retVar} = 0;");
@@ -337,7 +341,7 @@ public sealed class LinqHandler : InvocationHandlerBase
             case "All":
                 {
                     if (lambdaArg == null) { result = "1"; return true; }
-                    var predFn = MakeLifter().LiftLambda(lambdaArg, elementTypeHint: inner);
+                    var predFn = MakeLifter().LiftLambda(lambdaArg, elementTypeHint: inner, isPredicate: true);
                     var idxVar = ctx.NextTmp("i");
                     var retVar = ctx.NextTmp("all");
                     ctx.WriteLine($"int {retVar} = 1;");
@@ -351,7 +355,7 @@ public sealed class LinqHandler : InvocationHandlerBase
                 {
                     if (lambdaArg != null)
                     {
-                        var predFn = MakeLifter().LiftLambda(lambdaArg, elementTypeHint: inner);
+                        var predFn = MakeLifter().LiftLambda(lambdaArg, elementTypeHint: inner, isPredicate: true);
                         var idxVar = ctx.NextTmp("i");
                         var retVar = ctx.NextTmp("cnt");
                         ctx.WriteLine($"int {retVar} = 0;");
@@ -371,7 +375,7 @@ public sealed class LinqHandler : InvocationHandlerBase
                     if (lambdaArg != null)
                     {
                         // list.Sum(x => x.Score) — project each element, then sum
-                        var projFn = MakeLifter().LiftLambda(lambdaArg, elementTypeHint: inner);
+                        var projFn = MakeLifter().LiftLambda(lambdaArg, hintType: $"Func<{inner},double>", elementTypeHint: inner);
                         var idxVar = ctx.NextTmp("i");
                         var sumVar = ctx.NextTmp("sum");
                         ctx.WriteLine($"double {sumVar} = 0.0;");
@@ -395,7 +399,7 @@ public sealed class LinqHandler : InvocationHandlerBase
                 {
                     if (lambdaArg != null)
                     {
-                        var projFn = MakeLifter().LiftLambda(lambdaArg, elementTypeHint: inner);
+                        var projFn = MakeLifter().LiftLambda(lambdaArg, hintType: $"Func<{inner},double>", elementTypeHint: inner);
                         var idxVar = ctx.NextTmp("i");
                         var minVar = ctx.NextTmp("minv");
                         var countExpr = listCount.Replace("_idx", "0");
@@ -421,7 +425,7 @@ public sealed class LinqHandler : InvocationHandlerBase
                 {
                     if (lambdaArg != null)
                     {
-                        var projFn = MakeLifter().LiftLambda(lambdaArg, elementTypeHint: inner);
+                        var projFn = MakeLifter().LiftLambda(lambdaArg, hintType: $"Func<{inner},double>", elementTypeHint: inner);
                         var idxVar = ctx.NextTmp("i");
                         var maxVar = ctx.NextTmp("maxv");
                         var countExpr = listCount.Replace("_idx", "0");
@@ -447,7 +451,7 @@ public sealed class LinqHandler : InvocationHandlerBase
                 {
                     if (lambdaArg != null)
                     {
-                        var projFn = MakeLifter().LiftLambda(lambdaArg, elementTypeHint: inner);
+                        var projFn = MakeLifter().LiftLambda(lambdaArg, hintType: $"Func<{inner},double>", elementTypeHint: inner);
                         var idxVar = ctx.NextTmp("i");
                         var sumVar = ctx.NextTmp("avgs");
                         var cntExpr = listCount.Replace("_idx", idxVar);
@@ -497,7 +501,12 @@ public sealed class LinqHandler : InvocationHandlerBase
                         return true;
                     }
 
-                    var accFn = MakeLifter().LiftLambda(accLambda, elementTypeHint: inner);
+                    string accRetType = inner;
+                    if (accLambda is SimpleLambdaExpressionSyntax aslAgg)
+                        accRetType = TypeInferrer.InferCSharpType(aslAgg.Body, ctx);
+                    else if (accLambda is ParenthesizedLambdaExpressionSyntax aplAgg)
+                        accRetType = TypeInferrer.InferCSharpType(aplAgg.Body, ctx);
+                    var accFn = MakeLifter().LiftLambda(accLambda, hintType: $"Func<{inner},{inner},{accRetType}>", elementTypeHint: inner);
                     var accVar = ctx.NextTmp("acc");
                     var idxVar = ctx.NextTmp("i");
                     int startIdx = 0;
@@ -549,7 +558,12 @@ public sealed class LinqHandler : InvocationHandlerBase
 
                     if (lambdaArg != null)
                     {
-                        var keyFn = MakeLifter().LiftLambda(lambdaArg, elementTypeHint: inner);
+                        string keyType = "int";
+                        if (lambdaArg is SimpleLambdaExpressionSyntax okl)
+                            keyType = TypeInferrer.InferCSharpType(okl.Body, ctx);
+                        else if (lambdaArg is ParenthesizedLambdaExpressionSyntax opkl)
+                            keyType = TypeInferrer.InferCSharpType(opkl.Body, ctx);
+                        var keyFn = MakeLifter().LiftLambda(lambdaArg, hintType: $"Func<{inner},{keyType}>", elementTypeHint: inner);
 
                         ctx.WriteLine($"for (int {idxVar} = 1; {idxVar} < {outVar}->count; {idxVar}++)");
                         ctx.WriteLine("{");
@@ -700,24 +714,23 @@ public sealed class LinqHandler : InvocationHandlerBase
                         && inv.ArgumentList.Arguments[1].Expression is LambdaExpressionSyntax vl)
                         valLambda = vl;
 
-                    var keyFn = MakeLifter().LiftLambda(lambdaArg, elementTypeHint: inner);
-
                     string keyInner = "int";
                     if (lambdaArg is SimpleLambdaExpressionSyntax skl)
                         keyInner = TypeInferrer.InferCSharpType(skl.Body, ctx);
                     else if (lambdaArg is ParenthesizedLambdaExpressionSyntax pkl)
                         keyInner = TypeInferrer.InferCSharpType(pkl.Body, ctx);
+                    var keyFn = MakeLifter().LiftLambda(lambdaArg, hintType: $"Func<{inner},{keyInner}>", elementTypeHint: inner);
                     var cKey = keyInner == "string" ? "str" : TypeRegistry.MapType(keyInner);
 
                     string valInner = inner;
                     string valFnName = "";
                     if (valLambda != null)
                     {
-                        valFnName = MakeLifter().LiftLambda(valLambda, elementTypeHint: inner);
                         if (valLambda is SimpleLambdaExpressionSyntax svl)
                             valInner = TypeInferrer.InferCSharpType(svl.Body, ctx);
                         else if (valLambda is ParenthesizedLambdaExpressionSyntax pvl)
                             valInner = TypeInferrer.InferCSharpType(pvl.Body, ctx);
+                        valFnName = MakeLifter().LiftLambda(valLambda, hintType: $"Func<{inner},{valInner}>", elementTypeHint: inner);
                     }
                     var cVal = valInner == "string" ? "str" : TypeRegistry.MapType(valInner);
 
@@ -744,12 +757,12 @@ public sealed class LinqHandler : InvocationHandlerBase
                     // list.GroupBy(x => x.Key) → Dict<Key, List<T>>
                     if (lambdaArg == null) { result = sourceExpr; return true; }
 
-                    var keyFnGrp = MakeLifter().LiftLambda(lambdaArg, elementTypeHint: inner);
                     string keyInnerGrp = "int";
                     if (lambdaArg is SimpleLambdaExpressionSyntax sgb)
                         keyInnerGrp = TypeInferrer.InferCSharpType(sgb.Body, ctx);
                     else if (lambdaArg is ParenthesizedLambdaExpressionSyntax pgb)
                         keyInnerGrp = TypeInferrer.InferCSharpType(pgb.Body, ctx);
+                    var keyFnGrp = MakeLifter().LiftLambda(lambdaArg, hintType: $"Func<{inner},{keyInnerGrp}>", elementTypeHint: inner);
                     var cKeyGrp = keyInnerGrp == "string" ? "str" : TypeRegistry.MapType(keyInnerGrp);
                     var cKeyTypeGrp = keyInnerGrp == "string" ? "const char*" : TypeRegistry.MapType(keyInnerGrp);
 
@@ -763,7 +776,8 @@ public sealed class LinqHandler : InvocationHandlerBase
                     ctx.Indent();
                     ctx.WriteLine($"{cInnerType}{elemPtr} _ge_{outVar} = {listGet.Replace("_idx", idxVar)};");
                     ctx.WriteLine($"{cKeyTypeGrp} {keyVar} = {keyFnGrp}(_ge_{outVar});");
-                    ctx.WriteLine($"List_{cInner}* {grpVar} = *Dict_{cKeyGrp}_ptr_Get({outVar}, {keyVar});");
+                    ctx.WriteLine($"{{ void** _slot_{grpVar} = (void**)Dict_{cKeyGrp}_ptr_Get({outVar}, {keyVar});");
+                    ctx.WriteLine($"List_{cInner}* {grpVar} = _slot_{grpVar} ? (List_{cInner}*)*_slot_{grpVar} : NULL;");
                     ctx.WriteLine($"if (!{grpVar})");
                     ctx.WriteLine("{");
                     ctx.Indent();
@@ -772,6 +786,7 @@ public sealed class LinqHandler : InvocationHandlerBase
                     ctx.Dedent();
                     ctx.WriteLine("}");
                     ctx.WriteLine($"List_{cInner}_Add({grpVar}, _ge_{outVar});");
+                    ctx.WriteLine("}"); // close slot scope
                     ctx.Dedent();
                     ctx.WriteLine("}");
                     result = outVar;
@@ -782,7 +797,7 @@ public sealed class LinqHandler : InvocationHandlerBase
             case "TakeWhile":
                 {
                     if (lambdaArg == null) return NotHandled(out result);
-                    var predFn = MakeLifter().LiftLambda(lambdaArg, elementTypeHint: inner);
+                    var predFn = MakeLifter().LiftLambda(lambdaArg, elementTypeHint: inner, isPredicate: true);
                     var outVar = ctx.NextTmp("tw");
                     var idxVar = ctx.NextTmp("i");
                     ctx.WriteLine($"List_{cInner}* {outVar} = List_{cInner}_New();");
@@ -802,7 +817,7 @@ public sealed class LinqHandler : InvocationHandlerBase
             case "SkipWhile":
                 {
                     if (lambdaArg == null) return NotHandled(out result);
-                    var predFn = MakeLifter().LiftLambda(lambdaArg, elementTypeHint: inner);
+                    var predFn = MakeLifter().LiftLambda(lambdaArg, elementTypeHint: inner, isPredicate: true);
                     var outVar = ctx.NextTmp("sw");
                     var idxVar = ctx.NextTmp("i");
                     var foundVar = ctx.NextTmp("found");

@@ -52,7 +52,8 @@ public sealed class LambdaLifter
     public string LiftLambda(
         LambdaExpressionSyntax lambda,
         string? hintType = null,
-        string? elementTypeHint = null)
+        string? elementTypeHint = null,
+        bool isPredicate = false)
     {
         var id = _ctx.NextLambdaId();
         var name = "_lambda_" + id;
@@ -69,7 +70,9 @@ public sealed class LambdaLifter
         }
 
         var parms = ExtractParams(lambda, effectiveElementHint);
-        var retCs = hintType != null ? ExtractReturnType(hintType, parms.Count) : "void";
+        var retCs = isPredicate ? "bool"
+            : hintType != null ? ExtractReturnType(hintType, parms.Count)
+            : "void";
 
         // FIX-1: Prelude in einem lokalen StringBuilder sammeln und dann
         // in _ctx.PendingLambdaPreludes eintragen — kein StringWriter-Rewrite.
