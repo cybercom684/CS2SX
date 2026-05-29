@@ -15,9 +15,9 @@ public sealed class InputHandler : InvocationHandlerBase
         var btn = TypeRegistry.MapEnum(ArgAt(args, 0));
         result = calleeStr switch
         {
-            "Input.IsDown" => "(((SwitchApp*)self)->kDown & " + btn + ")",
-            "Input.IsHeld" => "(((SwitchApp*)self)->kHeld & " + btn + ")",
-            "Input.IsUp" => "(!(((SwitchApp*)self)->kHeld & " + btn + "))",
+            "Input.IsDown" => "(g_cs2sx_kDown & " + btn + ")",
+            "Input.IsHeld" => "(g_cs2sx_kHeld & " + btn + ")",
+            "Input.IsUp"   => "(g_cs2sx_kUp   & " + btn + ")",
             _ => "0",
         };
         return true;

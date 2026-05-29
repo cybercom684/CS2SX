@@ -8,6 +8,8 @@ public class Button : Control
     public int focused;
     public System.Action OnClick;
 
+    public Button() : this("") { }
+
     public Button(string t)
     {
         text = t;

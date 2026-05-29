@@ -3,6 +3,8 @@ public class Label : Control
 {
     public string text;
 
+    public Label() : this("") { }
+
     public Label(string t)
     {
         text = t;

@@ -4,6 +4,66 @@ Diese Seite beschreibt was CS2SX nicht unterstützt und wie man die häufigsten 
 
 ---
 
+## Lambda: Feld-Mutation schlägt nicht zurück
+
+Felder der äußeren Klasse werden beim Lambda-Erstellen in die Capture-Struct **kopiert**. Zuweisungen innen ändern nur die Kopie.
+
+```csharp
+// FALSCH — _zaehler wird in der Kopie inkrementiert
+private int _zaehler;
+private Action _cb;
+void Init() { _cb = () => { _zaehler++; }; }  // inkrementiert Kopie!
+void Run()  { _cb(); /* _zaehler bleibt 0 */ }
+
+// RICHTIG — Feld nach dem Aufruf setzen
+void Run()  { _cb(); _zaehler++; }
+
+// AUCH RICHTIG — Objekte als Parameter mutieren funktioniert (Pointer)
+Action<Feind> treffen = (f) => { f.Leben -= 10; };  // f->f_Leben -= 10 — wirkt!
+treffen(_feind);
+```
+
+---
+
+## Ternary-Operator mit Null-Objekt
+
+CS2SX baut `snprintf`-Ausdrücke für String-Verkettungen vor der Bedingungsprüfung. Ein Ternary der bei `null` auf Felder des Objekts zugreift crasht.
+
+```csharp
+// FALSCH — snprintf wertet found.Name aus bevor null geprüft wird → Crash
+NamedItem found = Search("X");
+_result = found != null ? "Name: " + found.Name : "nicht gefunden";
+
+// RICHTIG — if/else trennt die Code-Pfade klar
+if (found != null)
+    _result = "Name: " + found.Name;
+else
+    _result = "nicht gefunden";
+```
+
+---
+
+## Environment.Exit(0)
+
+`Environment.Exit(0)` ruft direkt `exit()` auf und überspringt libnx-Cleanup. Auf echter Hardware erscheint die Fehlermeldung **„Software wurde wegen eines Fehlers beendet"**.
+
+```csharp
+// FALSCH — bricht hart ab, keine saubere Rückkehr ins Homebrew-Menü
+if (Input.IsDown(NpadButton.Plus))
+    Environment.Exit(0);
+
+// RICHTIG — Quit-Flag setzen, Loop endet von selbst
+private bool _quit;
+public override void OnFrame()
+{
+    if (Input.IsDown(NpadButton.Plus)) _quit = true;
+    if (_quit) return;
+    // ... Frame-Code
+}
+```
+
+---
+
 ## Strings als Felder
 
 **Problem:** Interpolierte Strings erzeugen Stack-Buffer. Werden sie in Feldern gespeichert, entsteht ein dangling pointer im generierten C.

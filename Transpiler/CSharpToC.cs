@@ -288,7 +288,8 @@ public sealed class CSharpToC : CSharpSyntaxWalker
             if (!isStaticClass
                 && !string.IsNullOrEmpty(baseType)
                 && baseType != SwitchAppBase
-                && !IsControlSubclass(baseType))
+                && !IsControlSubclass(baseType)
+                && _ctx.VTableTypes.Contains(baseType))
             {
                 VTableBuilder.WriteVTableInstance(node, node.Identifier.Text, baseType, _ctx.Out, _ctx.SemanticModel);
             }

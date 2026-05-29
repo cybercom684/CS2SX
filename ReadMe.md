@@ -939,7 +939,9 @@ Wenn ein `romfs/`-Verzeichnis vorhanden ist, wird es automatisch als romfs-Image
 | `$"..."` nicht in Felder speichern | Erzeugt Stack-Buffer → dangling pointer. Nur in lokalen Variablen oder direkt in Ausgabe-Funktionen verwenden |
 | `IntPtr` / `nint` | Unterstützt → `intptr_t`; für opake C-Handles ist `ulong` weiterhin die sicherere Wahl |
 | `void*` als Felder | Nicht empfohlen — Transpiler behandelt es als Pointer-Feld → falscher Destruktor; `ulong` verwenden |
-| `Input.IsDown()` statt `kDown` | Direktes `kDown` in Subklassen-Methoden ist nicht erreichbar — immer `Input.IsDown/IsHeld/IsUp()` verwenden |
+| Lambda: Feld-Mutation schlägt nicht zurück | Felder der äußeren Klasse werden in die Capture-Struct kopiert — Zuweisungen innen ändern nur die Kopie. Felder nach dem Lambda-Aufruf direkt setzen. Objekte via Pointer-Parameter sind nicht betroffen. |
+| Ternary + Null-Objekt | `x != null ? "..." + x.Name : "..."` kann crashen — `if/else` verwenden |
+| `Environment.Exit(0)` | Harter `exit()`-Aufruf, kein libnx-Cleanup → auf Hardware: Fehlermeldung. `_quit`-Flag setzen stattdessen. |
 | Datei-Lesepuffer max. 1 MB | `File.ReadAllText` |
 | Bitmap-Font 8×8 | Kein Anti-Aliasing, kein TrueType (Freetype via `addLib` als Alternative) |
 | Kein Heap-GC | Allokierte Objekte (`*_New()`) leben bis `_Free()` |

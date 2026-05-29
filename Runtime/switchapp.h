@@ -405,6 +405,9 @@ extern int         g_fb_width;
 extern int         g_fb_height;
 extern int         g_gfx_init;
 extern PadState    g_cs2sx_pad;
+extern u64         g_cs2sx_kDown;
+extern u64         g_cs2sx_kHeld;
+extern u64         g_cs2sx_kUp;
 
 // ============================================================================
 // Graphics primitives
@@ -935,9 +938,12 @@ static inline void SwitchApp_Run(SwitchApp* self)
     {
         cs2sx_frame_begin();
         padUpdate(&pad);
-        g_cs2sx_pad = pad;
-        self->kDown = padGetButtonsDown(&pad);
-        self->kHeld = padGetButtons(&pad);
+        g_cs2sx_pad  = pad;
+        self->kDown  = padGetButtonsDown(&pad);
+        self->kHeld  = padGetButtons(&pad);
+        g_cs2sx_kDown = self->kDown;
+        g_cs2sx_kHeld = self->kHeld;
+        g_cs2sx_kUp   = padGetButtonsUp(&pad);
 
         if (use_gfx)
         {

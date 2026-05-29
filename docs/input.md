@@ -160,14 +160,51 @@ for (int i = 0; i < touch.count; i++)
 
 ---
 
-## Input in Unterklassen
+## Input in beliebigen Klassen
 
-In `SwitchApp`-Unterklassen immer über `Input.IsDown()` und `Input.IsHeld()` arbeiten — nicht direkt über `kDown`/`kHeld`:
+`Input.IsDown()`, `Input.IsHeld()` und `Input.IsUp()` funktionieren in **jeder Klasse** — nicht nur in direkten `SwitchApp`-Unterklassen. Buttons werden über globale Frame-Variablen (`g_cs2sx_kDown/kHeld/kUp`) bereitgestellt, die der App-Loop jede Frame aktualisiert.
 
 ```csharp
-// FALSCH — kDown direkt in Unterklassen-Methoden
+// Funktioniert in SwitchApp, Hilfsklassen, UI-Komponenten, überall
+public class MeinPanel
+{
+    public void Update()
+    {
+        if (Input.IsDown(NpadButton.A))
+            Aktion();
+    }
+}
+```
+
+Direkten Zugriff auf `kDown`/`kHeld` vermeiden — die Instanzfelder existieren nur in `SwitchApp` selbst:
+
+```csharp
+// FALSCH — kDown ist kein globales Feld
 if ((kDown & NpadButton.A) != 0) { }
 
-// RICHTIG
+// RICHTIG — immer die Input-Methoden verwenden
 if (Input.IsDown(NpadButton.A)) { }
+```
+
+## Sauberes Beenden der App
+
+`Environment.Exit(0)` bricht den Prozess hart ab und überspringt libnx-Cleanup. Auf echter Hardware erscheint die Fehlermeldung „Software wurde wegen eines Fehlers beendet".
+
+```csharp
+// FALSCH — harter Abbruch, Fehlermeldung auf Hardware
+if (Input.IsDown(NpadButton.Plus))
+    Environment.Exit(0);
+
+// RICHTIG — Quit-Flag setzen, Loop endet sauber
+private bool _quit;
+
+public override void OnFrame()
+{
+    if (Input.IsDown(NpadButton.Plus))
+        _quit = true;
+
+    if (_quit) return;   // appletMainLoop() gibt beim nächsten Aufruf false zurück
+
+    // ... restlicher Frame-Code
+}
 ```

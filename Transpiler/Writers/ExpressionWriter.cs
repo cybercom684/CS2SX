@@ -1220,6 +1220,9 @@ public sealed class ExpressionWriter : IExpressionWriter
             if ((_ctx.LocalTypes.TryGetValue(rk2, out var rlt) && rlt is "string" or "char[]" or "const char*")
              || (_ctx.FieldTypes.TryGetValue(rkey2, out var rft) && rft is "string" or "char[]" or "const char*"))
                 return "strlen(" + obj + ")";
+            // params array or T[] method parameter: companion _count variable holds length
+            if (_ctx.LocalTypes.ContainsKey(rk2 + "_count"))
+                return rk2 + "_count";
         }
         if (prop == "Count" && IsListExpr(mem.Expression)) return obj + "->count";
         if (prop == "Count" && IsStackQueueHashSetExpr(mem.Expression)) return obj + "->count";
@@ -1550,6 +1553,14 @@ public sealed class ExpressionWriter : IExpressionWriter
             return "NULL /* Random — use CS2SX_Rand_Next() directly */";
         if (typeName == "Stopwatch")
             return "CS2SX_Stopwatch_New()";
+        // Label/Button: constructor accepts optional text — default to "" when no arg given
+        if (typeName is "Label" or "Button")
+        {
+            var txt = argList?.Arguments.Count > 0
+                ? Write(argList.Arguments[0].Expression)
+                : "\"\"";
+            return typeName + "_New(" + txt + ")";
+        }
         // CS2SX/LibNx value types not in ValueTypeStructs (they come from embedded stubs)
         if (typeName is "TouchState" or "StickPos" or "BatteryInfo" or "TimeInfo")
         {
@@ -1599,7 +1610,13 @@ public sealed class ExpressionWriter : IExpressionWriter
                         + _ctx.CurrentClass + "_" + propVal.Trim() + ";");
                     continue;
                 }
-                var cp = TypeRegistry.MapProperty(propName);
+                // For user-defined types use f_ prefix; MapProperty is for runtime/control types only
+                bool isRuntimeInit = TypeRegistry.IsControlType(typeName)
+                                  || TypeRegistry.IsBuiltinControlType(typeName)
+                                  || TypeRegistry.IsLibNxStruct(typeName);
+                var cp = isRuntimeInit
+                    ? TypeRegistry.MapProperty(propName)
+                    : (TypeRegistry.HasNoPrefix(propName) ? propName : "f_" + propName);
                 _ctx.Out.WriteLine(_ctx.Tab + tmp + "->" + cp + " = " + propVal + ";");
             }
             return tmp;

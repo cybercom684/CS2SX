@@ -32,7 +32,9 @@
       "Bash(# Check if deko3d headers exist anywhere on the system *)",
       "Read(//opt/devkitpro/portlibs/switch/**)",
       "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\Johannes\\\\source\\\\repos\\\\CS2SX\" -Recurse -Directory)",
-      "Bash(awk '{print $1}')"
+      "Bash(awk '{print $1}')",
+      "Read(//c/Users/Johannes/Documents/Privat/Neuer Ordner/BugRepro/**)",
+      "Read(//c/Users/Johannes/Documents/Privat/Neuer Ordner/BugRepro/cs2sx_out/**)"
     ]
   }
 }

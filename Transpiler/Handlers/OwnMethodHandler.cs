@@ -218,6 +218,18 @@ public sealed class OwnMethodHandler : InvocationHandlerBase
                 else
                     result.Add(built);
             }
+            else if (param.IsParams)
+            {
+                result.Add(built);
+                // params array: companion count argument
+                int cnt = arg.Expression switch
+                {
+                    ImplicitArrayCreationExpressionSyntax ia => ia.Initializer?.Expressions.Count ?? 0,
+                    ArrayCreationExpressionSyntax ac         => ac.Initializer?.Expressions.Count ?? 0,
+                    _ => 0
+                };
+                result.Add(cnt.ToString());
+            }
             else
             {
                 result.Add(built);

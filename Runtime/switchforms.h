@@ -109,8 +109,14 @@ static inline Label* Label_New(const char* text)
     l->base.visible = 1;
     l->base.focusable = 0;
     l->base.Draw = Label_Draw;
-    Label_SetText(l, text);
+    if (text && *text) Label_SetText(l, text);
     return l;
+}
+
+static inline void Label_Free(Label* l)
+{
+    if (!l) return;
+    free(l);
 }
 
 // ============================================================================

@@ -65,7 +65,8 @@ public sealed class DefaultConstructorStrategy : IConstructorStrategy
         // Forward-declare the vtable instance before _New() so the constructor can
         // reference it even though the full definition appears after all method bodies.
         if (!string.IsNullOrEmpty(baseType) && baseType != "SwitchApp"
-            && !CSharpToC.IsControlSubclass(baseType))
+            && !CSharpToC.IsControlSubclass(baseType)
+            && ctx.VTableTypes.Contains(baseType))
         {
             ctx.Out.WriteLine($"static {baseType}_vtable {name}_vtable_instance;");
             ctx.Out.WriteLine();
@@ -87,7 +88,8 @@ public sealed class DefaultConstructorStrategy : IConstructorStrategy
         // self->base.vtable points to the correct vtable for this subclass so that
         // (BaseType*)self casts give correct vtable dispatch.
         if (!string.IsNullOrEmpty(baseType) && baseType != "SwitchApp"
-            && !CSharpToC.IsControlSubclass(baseType))
+            && !CSharpToC.IsControlSubclass(baseType)
+            && ctx.VTableTypes.Contains(baseType))
         {
             ctx.WriteLine("self->base.vtable = &" + name + "_vtable_instance;");
         }

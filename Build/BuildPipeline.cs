@@ -910,6 +910,9 @@ public sealed class BuildPipeline
         w.WriteLine("int          g_fb_height     = 720;");
         w.WriteLine("int          g_gfx_init      = 0;");
         w.WriteLine("PadState     g_cs2sx_pad;");
+        w.WriteLine("u64          g_cs2sx_kDown = 0;");
+        w.WriteLine("u64          g_cs2sx_kHeld = 0;");
+        w.WriteLine("u64          g_cs2sx_kUp   = 0;");
         w.WriteLine("unsigned int _cs2sx_rand_state = 12345u;");
         w.WriteLine();
         w.WriteLine("char   _cs2sx_arena[CS2SX_ARENA_SIZE];");

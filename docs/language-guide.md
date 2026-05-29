@@ -263,6 +263,42 @@ liste.Sort((a, b) => a - b);
 
 Lambdas werden zu statischen C-Funktionen geliftet (`_lambda_N`). Captures von lokalen Variablen werden in einer Capture-Struct übergeben.
 
+### Lambda-Einschränkung: Feld-Mutation schlägt nicht zurück
+
+Felder der äußeren Klasse werden beim Erstellen der Lambda in die Capture-Struct **kopiert**. Zuweisungen an diese Felder innerhalb der Lambda ändern nur die Kopie — das Original bleibt unverändert.
+
+```csharp
+// FALSCH — _log wird in der Kopie gesetzt, nicht im Feld
+private string _log = "";
+private Action _cb;
+
+public void Init()
+{
+    _cb = () => { _log = "fertig"; };  // schreibt in Capture-Kopie!
+}
+
+public void OnFrame()
+{
+    _cb();
+    // _log ist weiterhin "" — die Zuweisung in der Lambda hatte keinen Effekt
+}
+
+// RICHTIG — Felder NACH dem Lambda-Aufruf setzen
+public void OnFrame()
+{
+    _cb();                   // Lambda läuft (gut für Seiteneffekte auf Objekten)
+    _log = "fertig";         // Feld direkt nach dem Aufruf setzen
+}
+```
+
+**Was funktioniert:** Pointer-Parameter innerhalb einer Lambda werden korrekt dereferenziert. Wenn die Lambda ein Objekt als Parameter empfängt (`Action<MyClass>`), können dessen Felder über den Pointer mutiert werden:
+
+```csharp
+Action<Spieler> heilen = (sp) => { sp.Leben += 10; };  // sp->f_Leben += 10 — funktioniert!
+heilen(_spieler);
+// _spieler.Leben ist jetzt +10 — Mutation via Pointer-Param wirkt sich aus
+```
+
 ---
 
 ## Math

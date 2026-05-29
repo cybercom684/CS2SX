@@ -102,9 +102,12 @@ static inline void SwitchAppEx_Run(SwitchAppEx* self)
     while (appletMainLoop())
     {
         padUpdate(&pad);
-        g_cs2sx_pad = pad;
-        self->base.kDown = padGetButtonsDown(&pad);
-        self->base.kHeld = padGetButtons(&pad);
+        g_cs2sx_pad       = pad;
+        self->base.kDown  = padGetButtonsDown(&pad);
+        self->base.kHeld  = padGetButtons(&pad);
+        g_cs2sx_kDown     = self->base.kDown;
+        g_cs2sx_kHeld     = self->base.kHeld;
+        g_cs2sx_kUp       = padGetButtonsUp(&pad);
 
         self->stickL = CS2SX_Input_GetStickLeft(&pad);
         self->stickR = CS2SX_Input_GetStickRight(&pad);
