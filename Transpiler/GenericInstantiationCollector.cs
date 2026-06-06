@@ -339,6 +339,7 @@ public sealed class GenericInstantiationCollector
         foreach (var iface in root.DescendantNodes().OfType<InterfaceDeclarationSyntax>())
         {
             Interfaces[iface.Identifier.Text] = iface;
+            TypeRegistry.RegisterInterfaceType(iface.Identifier.Text);
             Log.Debug($"GenericCollector: Interface '{iface.Identifier.Text}' gefunden");
         }
     }
@@ -396,6 +397,18 @@ public sealed class GenericInstantiationCollector
 
         // Verschachtelte Generics / Nullable vorerst überspringen
         if (arg.Contains('<') || arg.EndsWith('?')) return;
+
+        // Tuple types → handled as _Tuple2_* struct via CS2SX_LIST_DEFINE_PTR
+        if (arg.StartsWith('('))
+        {
+            var structName = TypeRegistry.GetTupleStructName(arg);
+            if (!string.IsNullOrEmpty(structName) && _listUserClasses.Add(structName))
+                Log.Debug($"GenericCollector: List<{arg}> → CS2SX_LIST_DEFINE_PTR({structName}) vorgemerkt");
+            return;
+        }
+
+        // Enum types are value types — skip pointer-list macro (they need plain list, not PTR variant)
+        if (TypeRegistry.IsUserDefinedEnum(arg)) return;
 
         if (_listUserClasses.Add(arg))
             Log.Debug($"GenericCollector: List<{arg}> → CS2SX_LIST_DEFINE_PTR({arg}) vorgemerkt");

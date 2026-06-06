@@ -69,6 +69,28 @@ public sealed class LambdaLifter
             if (typeArgs.Count == 1) effectiveElementHint = typeArgs[0];
         }
 
+        // If element type is unknown, try to infer the first parameter's type from SemanticModel.
+        // This prevents dead lambdas with "int" fallback type that fail to compile.
+        if (effectiveElementHint == null && _ctx.SemanticModel != null)
+        {
+            try
+            {
+                ParameterSyntax? firstParam = lambda switch
+                {
+                    SimpleLambdaExpressionSyntax s => s.Parameter,
+                    ParenthesizedLambdaExpressionSyntax p => p.ParameterList.Parameters.FirstOrDefault(),
+                    _ => null
+                };
+                if (firstParam != null)
+                {
+                    var sym = _ctx.SemanticModel.GetDeclaredSymbol(firstParam);
+                    if (sym?.Type != null && sym.Type is not IErrorTypeSymbol)
+                        effectiveElementHint = TranspilerContext.FormatTypeSymbol(sym.Type);
+                }
+            }
+            catch { }
+        }
+
         var parms = ExtractParams(lambda, effectiveElementHint);
         var retCs = isPredicate ? "bool"
             : hintType != null ? ExtractReturnType(hintType, parms.Count)

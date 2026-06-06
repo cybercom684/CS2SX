@@ -232,8 +232,7 @@ public unsafe struct FsDeviceOperator
 
 public unsafe struct FsDirectoryEntry
 {
-    public byte name;
-    public fixed u8 pad[3];
+    public fixed byte name[769]; // FS_MAX_PATH (769) bytes including null terminator
     public s8 type;
     public fixed u8 pad2[3];
     public s64 file_size;

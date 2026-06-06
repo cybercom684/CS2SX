@@ -97,7 +97,7 @@ public sealed class ListHandler : InvocationHandlerBase
 
             var lifter = new LambdaLifter(ctx, new ExpressionWriter(ctx));
             lifter.SetStatementWriter(new StatementWriter(ctx, new ExpressionWriter(ctx)));
-            var predFn = lifter.LiftLambda(lambdaNode, elementTypeHint: inner);
+            var predFn = lifter.LiftLambda(lambdaNode, elementTypeHint: inner, isPredicate: true);
 
             var cInnerType = inner == "string" ? "const char*" : TypeRegistry.MapType(inner);
             var isPrim = TypeRegistry.IsPrimitive(inner);

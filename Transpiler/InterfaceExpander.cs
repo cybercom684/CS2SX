@@ -145,7 +145,11 @@ public sealed class InterfaceExpander
 
         foreach (var method in iface.Members.OfType<MethodDeclarationSyntax>())
         {
-            var retType = TypeRegistry.MapType(method.ReturnType.ToString().Trim());
+            var retCsType = method.ReturnType.ToString().Trim();
+            var retType = TypeRegistry.MapType(retCsType);
+            if (!retType.EndsWith("*") && TypeRegistry.NeedsPointerSuffix(retCsType))
+                retType += "*";
+
             var parms = new List<string> { "void* self" };
 
             foreach (var p in method.ParameterList.Parameters)
@@ -203,7 +207,10 @@ public sealed class InterfaceExpander
             var callArgs = new List<string> { "_iface->obj" };
             callArgs.AddRange(paramNames);
 
-            var retType = TypeRegistry.MapType(method.ReturnType.ToString().Trim());
+            var retTypeCsH = method.ReturnType.ToString().Trim();
+            var retType = TypeRegistry.MapType(retTypeCsH);
+            if (!retType.EndsWith("*") && TypeRegistry.NeedsPointerSuffix(retTypeCsH))
+                retType += "*";
             var retKw = retType == "void" ? "" : "return ";
 
             sb.AppendLine($"static inline {retType} {ifaceName}_{mName}({string.Join(", ", paramDecls)})");
@@ -243,7 +250,10 @@ public sealed class InterfaceExpander
             {
                 var mName = method.Identifier.Text;
                 bool implemented = cls.Members.OfType<MethodDeclarationSyntax>()
-                    .Any(m => m.Identifier.Text == mName);
+                    .Any(m => m.Identifier.Text == mName
+                           || (m.ExplicitInterfaceSpecifier != null
+                               && m.Identifier.Text == mName
+                               && m.ExplicitInterfaceSpecifier.Name.ToString().TrimEnd() == ifaceName));
 
                 if (!implemented)
                 {
@@ -303,18 +313,36 @@ public sealed class InterfaceExpander
                 }
             }
 
-            // Pass 2: vtable-Initialisierer
-            sb.AppendLine($"static {ifaceName}_vtable {instanceName} =");
+            // Pass 2: vtable-Initialisierer — NOT static (header declares it extern, needs external linkage)
+            sb.AppendLine($"{ifaceName}_vtable {instanceName} =");
             sb.AppendLine("{");
 
             foreach (var method in iface.Members.OfType<MethodDeclarationSyntax>())
             {
                 var mName = method.Identifier.Text;
+                // Match both regular and explicit interface implementations (IFoo.Bar)
                 bool implemented = cls.Members.OfType<MethodDeclarationSyntax>()
-                    .Any(m => m.Identifier.Text == mName);
+                    .Any(m => m.Identifier.Text == mName
+                           || (m.ExplicitInterfaceSpecifier != null
+                               && m.Identifier.Text == mName
+                               && m.ExplicitInterfaceSpecifier.Name.ToString().TrimEnd() == ifaceName));
 
                 if (implemented)
-                    sb.AppendLine($"    .{mName} = {className}_{mName},");
+                {
+                    // Cast to the vtable's void*-based function pointer type to avoid
+                    // "incompatible pointer type" errors (impl uses ClassName*, vtable uses void*).
+                    var retCsM = iface.Members.OfType<MethodDeclarationSyntax>()
+                        .First(m => m.Identifier.Text == mName).ReturnType.ToString().Trim();
+                    var retTypeM = TypeRegistry.MapType(retCsM);
+                    if (!retTypeM.EndsWith("*") && TypeRegistry.NeedsPointerSuffix(retCsM))
+                        retTypeM += "*";
+                    var paramsList = new List<string> { "void*" };
+                    paramsList.AddRange(iface.Members.OfType<MethodDeclarationSyntax>()
+                        .First(m => m.Identifier.Text == mName).ParameterList.Parameters
+                        .Select(p => TypeRegistry.MapType(p.Type?.ToString().Trim() ?? "int")));
+                    var castType = $"{retTypeM} (*)({string.Join(", ", paramsList)})";
+                    sb.AppendLine($"    .{mName} = ({castType}){className}_{mName},");
+                }
                 else
                 {
                     var stubName = $"_cs2sx_{className}_{ifaceName}_{mName}_not_impl";
@@ -360,13 +388,14 @@ public sealed class InterfaceExpander
             var instanceName = $"{className}_{ifaceName}_vtable_instance";
             // vtable instance forward declaration
             sb.AppendLine($"extern {ifaceName}_vtable {instanceName};");
-            // _as_IFace helper: static inline in the header so each TU gets its own
-            // copy and there is no external-linkage/static-linkage mismatch.
-            sb.AppendLine($"static inline {ifaceName} {className}_as_{ifaceName}({className}* self)");
+            // _as_IFace helper: heap-allocate a new IFace struct each call so multiple pushes
+            // onto the Navigator stack don't share the same struct (which would cause wrong obj).
+            sb.AppendLine($"static inline {ifaceName}* {className}_as_{ifaceName}({className}* self)");
             sb.AppendLine("{");
-            sb.AppendLine($"    {ifaceName} _iface;");
-            sb.AppendLine($"    _iface.vtable = &{instanceName};");
-            sb.AppendLine($"    _iface.obj = self;");
+            sb.AppendLine($"    {ifaceName}* _iface = ({ifaceName}*)malloc(sizeof({ifaceName}));");
+            sb.AppendLine($"    if (!_iface) return NULL;");
+            sb.AppendLine($"    _iface->vtable = &{instanceName};");
+            sb.AppendLine($"    _iface->obj = self;");
             sb.AppendLine($"    return _iface;");
             sb.AppendLine("}");
         }
@@ -380,8 +409,42 @@ public sealed class InterfaceExpander
     {
         if (_collector.Interfaces.Count == 0) return string.Empty;
 
-        var content = "#pragma once\n#include \"_forward.h\"\n\n"
-                    + ExpandInterfaceHeaders();
+        var interfaceContent = ExpandInterfaceHeaders();
+        // After all interface structs are defined, generate Stack/List variants for each interface
+        // so Stack<IScreen> etc. are available without additional macro calls in user code.
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine("#pragma once");
+        sb.AppendLine("#include \"_forward.h\"");
+        sb.AppendLine();
+        sb.Append(interfaceContent);
+        sb.AppendLine();
+        // Stack variants for each interface type (pointer-based).
+        // The type is named Stack_IFace_ptr but functions use the short Stack_IFace_* names
+        // so generated code like Stack_IScreen_Push() matches without requiring name mapping.
+        sb.AppendLine("// Stack variants for each interface type (pointer-based)");
+        foreach (var ifaceName in _collector.Interfaces.Keys)
+        {
+            sb.AppendLine($"#ifndef CS2SX_STACK_{ifaceName}_DEFINED");
+            sb.AppendLine($"#define CS2SX_STACK_{ifaceName}_DEFINED");
+            sb.AppendLine($"typedef struct {{ {ifaceName}** data; int count; int capacity; }} Stack_{ifaceName}_ptr;");
+            sb.AppendLine($"static inline Stack_{ifaceName}_ptr* Stack_{ifaceName}_New(void) {{");
+            sb.AppendLine($"    Stack_{ifaceName}_ptr* s = (Stack_{ifaceName}_ptr*)malloc(sizeof(Stack_{ifaceName}_ptr));");
+            sb.AppendLine($"    if (!s) return NULL;");
+            sb.AppendLine($"    s->data = ({ifaceName}**)malloc(8 * sizeof({ifaceName}*)); s->count = 0; s->capacity = 8; return s; }}");
+            sb.AppendLine($"static inline void Stack_{ifaceName}_Push(Stack_{ifaceName}_ptr* s, {ifaceName}* val) {{");
+            sb.AppendLine($"    if (!s) return;");
+            sb.AppendLine($"    if (s->count >= s->capacity) {{ s->capacity *= 2; s->data = ({ifaceName}**)realloc(s->data, s->capacity * sizeof({ifaceName}*)); }}");
+            sb.AppendLine($"    s->data[s->count++] = val; }}");
+            sb.AppendLine($"static inline {ifaceName}* Stack_{ifaceName}_Pop(Stack_{ifaceName}_ptr* s) {{");
+            sb.AppendLine($"    if (!s || s->count == 0) return NULL;");
+            sb.AppendLine($"    return s->data[--s->count]; }}");
+            sb.AppendLine($"static inline {ifaceName}* Stack_{ifaceName}_Peek(Stack_{ifaceName}_ptr* s) {{");
+            sb.AppendLine($"    if (!s || s->count == 0) return NULL;");
+            sb.AppendLine($"    return s->data[s->count - 1]; }}");
+            sb.AppendLine($"static inline void Stack_{ifaceName}_Free(Stack_{ifaceName}_ptr* s) {{ if (s) {{ free(s->data); free(s); }} }}");
+            sb.AppendLine($"#endif");
+        }
+        var content = sb.ToString();
         var path = Path.Combine(buildDir, "_interfaces.h");
         File.WriteAllText(path, content);
         Log.Info($"InterfaceExpander: {_collector.Interfaces.Count} Interface(s) → _interfaces.h");

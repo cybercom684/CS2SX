@@ -205,14 +205,20 @@ public sealed class BuildPipeline
             sTranspile.Status = StageStatus.Running;
             CS2SX.Transpiler.Writers.OperatorOverloadWriter.Reset();
 
+            // Shared diagnostic reporter collects source maps from ALL transpiled files.
+            // Passed to CCompiler so GCC errors can be mapped back to C# line numbers.
+            var sharedDiagnostics = new DiagnosticReporter();
+
             var allHeaders = transpiledFiles
                 .Select(f => Path.GetFileNameWithoutExtension(f) + ".h")
                 .ToList();
 
-            if (!string.IsNullOrEmpty(genericHeaderPath))
-                allHeaders.Insert(0, Path.GetFileName(genericHeaderPath));
+            // _generics.h must come before _interfaces.h — interfaces use List_T types defined in generics.
+            // Insert _interfaces.h first (→ pos 0), then _generics.h (→ pos 0, pushing iface to pos 1).
             if (!string.IsNullOrEmpty(ifaceHeaderPath))
                 allHeaders.Insert(0, Path.GetFileName(ifaceHeaderPath));
+            if (!string.IsNullOrEmpty(genericHeaderPath))
+                allHeaders.Insert(0, Path.GetFileName(genericHeaderPath));
 
             var cFiles = new List<string> { switchformsCPath };
 
@@ -281,7 +287,8 @@ public sealed class BuildPipeline
                 var hTranspiler = new CSharpToC(
                     CSharpToC.TranspileMode.HeaderOnly,
                     genericCollector,
-                    interfaceExpander);
+                    interfaceExpander,
+                    sharedDiagnostics);
 
                 hTranspiler.GetContext().CurrentFile = Path.GetFileName(csFile);
                 hTranspiler.GetContext().CurrentCFile = baseName + ".h";
@@ -319,7 +326,8 @@ public sealed class BuildPipeline
                 var cTranspiler = new CSharpToC(
                     CSharpToC.TranspileMode.Implementation,
                     genericCollector,
-                    interfaceExpander);
+                    interfaceExpander,
+                    sharedDiagnostics);
 
                 cTranspiler.GetContext().CurrentFile = Path.GetFileName(csFile);
                 cTranspiler.GetContext().CurrentCFile = baseName + ".c";
@@ -426,6 +434,7 @@ public sealed class BuildPipeline
                 Log.Info($"ExternLibs: {string.Join(", ", externLibs.Select(l => l.Name))}");
 
             new CCompiler().Compile(cFiles, elfPath, _buildDir, _projectDir,
+                diagnostics: sharedDiagnostics,
                 externLibs: externLibs);
 
             sCompile.Progress = 100;
@@ -568,7 +577,7 @@ public sealed class BuildPipeline
 
         // Any transpiled header newer than this file's output → rebuild
         // (a struct definition change in AnyOther.h may affect this .c)
-        if (latestHeaderTime != default && latestHeaderTime > hTime)
+        if (latestHeaderTime != default && (latestHeaderTime > hTime || latestHeaderTime > cTime))
             return false;
 
         return true;
@@ -919,12 +928,39 @@ public sealed class BuildPipeline
         w.WriteLine("size_t _cs2sx_arena_pos = 0;");
         w.WriteLine();
         w.WriteLine("// Audio state (extern in AudioStub.h)");
-        w.WriteLine("int               _cs2sx_audio_init      = 0;");
-        w.WriteLine("float             _cs2sx_audio_volume    = 1.0f;");
-        w.WriteLine("float             _cs2sx_audio_phase     = 0.0f;");
-        w.WriteLine("CS2SX_AudioBuffer _cs2sx_audio_bufs[4];");
-        w.WriteLine("int               _cs2sx_audio_buf_idx   = 0;");
-        w.WriteLine("int               _cs2sx_audio_submitted = 0;");
+        w.WriteLine("int               _cs2sx_audio_init         = 0;");
+        w.WriteLine("float             _cs2sx_audio_volume       = 1.0f;");
+        w.WriteLine("CS2SX_AudioBuffer _cs2sx_audio_bufs[CS2SX_AUDIO_NUM_BUFS];");
+        w.WriteLine("int               _cs2sx_audio_buf_idx      = 0;");
+        w.WriteLine("int               _cs2sx_audio_submitted    = 0;");
+        w.WriteLine("CS2SX_AudioVoice  _cs2sx_voices[CS2SX_MAX_VOICES];");
+        w.WriteLine("CS2SX_Sound       _cs2sx_sounds[CS2SX_MAX_SOUNDS];");
+        w.WriteLine("CS2SX_SampleVoice _cs2sx_sample_voices[CS2SX_MAX_SAMPLE_VOICES];");
+        w.WriteLine("float             _cs2sx_mix_accumL[CS2SX_AUDIO_BUF_SAMPLES];");
+        w.WriteLine("float             _cs2sx_mix_accumR[CS2SX_AUDIO_BUF_SAMPLES];");
+        w.WriteLine("// Low-pass filter");
+        w.WriteLine("float             _cs2sx_lpf_alpha          = 0.0f;");
+        w.WriteLine("float             _cs2sx_lpf_prevL          = 0.0f;");
+        w.WriteLine("float             _cs2sx_lpf_prevR          = 0.0f;");
+        w.WriteLine("int               _cs2sx_lpf_active         = 0;");
+        w.WriteLine("// Echo / delay");
+        w.WriteLine("float*            _cs2sx_echo_bufL          = NULL;");
+        w.WriteLine("float*            _cs2sx_echo_bufR          = NULL;");
+        w.WriteLine("int               _cs2sx_echo_size          = 0;");
+        w.WriteLine("int               _cs2sx_echo_pos           = 0;");
+        w.WriteLine("float             _cs2sx_echo_decay         = 0.5f;");
+        w.WriteLine("int               _cs2sx_echo_active        = 0;");
+        w.WriteLine("// Wavetable synth engine");
+        w.WriteLine("CS2SX_OscCfg       _cs2sx_osc_a;");
+        w.WriteLine("CS2SX_OscCfg       _cs2sx_osc_b;");
+        w.WriteLine("float              _cs2sx_sub_level          = 0.0f;");
+        w.WriteLine("CS2SX_EnvCfg       _cs2sx_amp_env;");
+        w.WriteLine("CS2SX_FiltCfg      _cs2sx_filt_cfg;");
+        w.WriteLine("CS2SX_FilterEnvCfg _cs2sx_filt_env;");
+        w.WriteLine("CS2SX_LfoCfg       _cs2sx_lfo_cfg;");
+        w.WriteLine("float              _cs2sx_lfo_phase          = 0.0f;");
+        w.WriteLine("float              _cs2sx_pitch_bend         = 0.0f;");
+        w.WriteLine("CS2SX_SynthVoice   _cs2sx_synth_voices[CS2SX_MAX_SYNTH_VOICES];");
     }
 
     private static string? TryFindDefaultIcon(string projectDir)

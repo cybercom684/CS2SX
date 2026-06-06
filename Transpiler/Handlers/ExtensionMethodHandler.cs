@@ -49,7 +49,10 @@ public sealed class ExtensionMethodHandler : InvocationHandlerBase
 
         var methodName = mem.Name.Identifier.Text;
         var receiverRaw = mem.Expression.ToString();
-        var receiverExpr = writeExpr(mem.Expression);
+
+        // NOTE: writeExpr(mem.Expression) is deferred until AFTER we confirm this is an
+        // extension method. Evaluating it unconditionally causes side effects for receivers
+        // like Stack.Pop() which pop the stack on every writeExpr call.
 
         // 1. SemanticModel-Prüfung (bevorzugt)
         if (ctx.SemanticModel != null)
@@ -62,6 +65,7 @@ public sealed class ExtensionMethodHandler : InvocationHandlerBase
                 if (symbol is IMethodSymbol method && method.IsExtensionMethod)
                 {
                     var className = method.ContainingType.Name;
+                    var receiverExpr = writeExpr(mem.Expression);
                     var allArgs = new List<string> { receiverExpr };
                     allArgs.AddRange(args);
 
@@ -92,7 +96,9 @@ public sealed class ExtensionMethodHandler : InvocationHandlerBase
 
         if (match.method == null) return NotHandled(out result);
 
-        var allArgsFallback = new List<string> { receiverExpr };
+        // Only evaluate receiver now that we know this is a valid extension method call
+        var receiverExprFallback = writeExpr(mem.Expression);
+        var allArgsFallback = new List<string> { receiverExprFallback };
         allArgsFallback.AddRange(args);
 
         result = $"{match.className}_{methodName}({string.Join(", ", allArgsFallback)})";

@@ -49,7 +49,7 @@ public static class FormatStringBuilder
         {
             buf = ctx.NextStringBuf();
             ctx.Out.WriteLine(ctx.Tab
-                + "snprintf(" + buf + ", sizeof(" + buf + "), \""
+                + "snprintf(" + buf + ", CS2SX_STRBUF_SIZE, \""
                 + fmt + "\", " + string.Join(", ", args) + ");");
         }
 
@@ -66,7 +66,7 @@ public static class FormatStringBuilder
         if (args.Count == 0)
             return "Label_SetText(" + labelExpr + ", \"" + fmt + "\")";
         var buf = ctx.NextStringBuf();
-        return "snprintf(" + buf + ", sizeof(" + buf + "), \""
+        return "snprintf(" + buf + ", CS2SX_STRBUF_SIZE, \""
              + fmt + "\", " + string.Join(", ", args) + ");\n"
              + new string(' ', 4) + "Label_SetText(" + labelExpr + ", " + buf + ")";
     }

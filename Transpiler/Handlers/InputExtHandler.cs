@@ -50,15 +50,13 @@ public sealed class InputExtHandler : InvocationHandlerBase
             && mem.Name.Identifier.Text == "HitRect")
         {
             var objStr = mem.Expression.ToString();
-            var objKey = objStr.TrimStart('_');
-            bool isField = ctx.FieldTypes.ContainsKey(objKey)
+            bool isField = ctx.FieldTypes.ContainsKey(objStr.TrimStart('_'))
                         || ctx.LocalTypes.ContainsKey(objStr);
 
             if (isField || objStr.Contains("touch") || objStr.Contains("Touch"))
             {
-                var obj = objStr.StartsWith('_')
-                    ? "self->f_" + objKey
-                    : objStr;
+                // Use writeExpr to properly evaluate the receiver (handles pointer chains correctly)
+                var obj = writeExpr(mem.Expression);
                 result = "CS2SX_Touch_HitRect(&" + obj + ", " + JoinArgs(args) + ")";
                 return true;
             }

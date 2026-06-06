@@ -81,7 +81,8 @@ public sealed class DefaultConstructorStrategy : IConstructorStrategy
         ctx.WriteLine("memset(self, 0, sizeof(" + name + "));");
         if (string.IsNullOrEmpty(baseType))
             ctx.WriteLine("self->_rc = 1;");
-        else if (baseType != "SwitchApp" && !CSharpToC.IsControlSubclass(baseType))
+        else if (baseType != "SwitchApp" && !CSharpToC.IsControlSubclass(baseType)
+                 && !ctx.InterfaceTypes.Contains(baseType))  // interface base has no _rc
             ctx.WriteLine("self->base._rc = 1;");
 
         // VTable-Zeiger setzen: vtable lives in the embedded base struct, not in self directly.

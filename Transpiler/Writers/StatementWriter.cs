@@ -79,6 +79,20 @@ public sealed class StatementWriter
         var line = expr.GetLocation().GetLineSpan().StartLinePosition.Line + 1;
         _ctx.CurrentLine = line;
 
+        // Track instance field array sizes: _field = new T[n]  →  FieldArrayLengths["field"] = "n"
+        if (expr.Expression is AssignmentExpressionSyntax assign
+            && assign.OperatorToken.IsKind(SyntaxKind.EqualsToken)
+            && assign.Left is IdentifierNameSyntax leftId
+            && assign.Right is ArrayCreationExpressionSyntax arrCreate2
+            && arrCreate2.Type.RankSpecifiers.Count > 0
+            && arrCreate2.Type.RankSpecifiers[0].Sizes.Count > 0
+            && !(arrCreate2.Type.RankSpecifiers[0].Sizes[0] is OmittedArraySizeExpressionSyntax))
+        {
+            var fieldKey = leftId.Identifier.Text.TrimStart('_');
+            if (_ctx.FieldTypes.ContainsKey(fieldKey) && _ctx.FieldTypes[fieldKey].EndsWith("[]"))
+                _ctx.FieldArrayLengths[fieldKey] = _expr.Write(arrCreate2.Type.RankSpecifiers[0].Sizes[0]);
+        }
+
         var result = _expr.Write(expr.Expression);
         if (!string.IsNullOrEmpty(result))
             _ctx.WriteLineWithMapping(result + ";", line,
@@ -203,6 +217,15 @@ public sealed class StatementWriter
                 continue;
             }
 
+            // var x = new T[n]  →  treat as typed array allocation
+            if ((declType is "var" or "var?")
+                && v.Initializer?.Value is ArrayCreationExpressionSyntax varArrCreate)
+            {
+                var elemTypeName = varArrCreate.Type.ElementType.ToString().Trim();
+                WriteArrayAlloc(v, elemTypeName + "[]", varArrCreate);
+                continue;
+            }
+
             var (cTypeFinal, isPtr) = InferLocalType(declType, v);
             if (string.IsNullOrWhiteSpace(cTypeFinal)) cTypeFinal = "int";
 
@@ -254,16 +277,28 @@ public sealed class StatementWriter
         _ctx.PendingUsingVarCleanups.Push(cleanup);
     }
 
-    private string? TryWrapAsInterface(string exprRaw, string exprCode, string targetIfaceName)
+    private string? TryWrapAsInterface(string exprRaw, string exprCode, string targetIfaceName,
+        Microsoft.CodeAnalysis.CSharp.Syntax.ExpressionSyntax? exprSyn = null)
     {
         if (!_ctx.InterfaceTypes.Contains(targetIfaceName)) return null;
         var key = exprRaw.TrimStart('_');
         string? csType = null;
         _ctx.LocalTypes.TryGetValue(exprRaw, out csType);
         if (csType == null) _ctx.FieldTypes.TryGetValue(key, out csType);
+        // SemanticModel fallback for function call expressions
+        if (csType == null && exprSyn != null && _ctx.SemanticModel != null)
+        {
+            try
+            {
+                var sym = _ctx.SemanticModel.GetTypeInfo(exprSyn).Type as Microsoft.CodeAnalysis.INamedTypeSymbol;
+                if (sym != null) csType = sym.Name;
+            }
+            catch { }
+        }
         if (csType == null) return null;
         var bareType = csType.TrimEnd('*').Trim();
         if (bareType == targetIfaceName) return null;
+        if (!TypeRegistry.NeedsPointerSuffix(bareType)) return null; // not a class
         return bareType + "_as_" + targetIfaceName + "(" + exprCode + ")";
     }
 
@@ -515,7 +550,15 @@ public sealed class StatementWriter
     private (string cType, bool isPtr) InferVarType(VariableDeclaratorSyntax v)
     {
         if (v.Initializer?.Value is ObjectCreationExpressionSyntax oc)
-            return (oc.Type.ToString(), true);
+        {
+            // Map through TypeRegistry so List<T>/Dict<K,V>/etc. get their C names.
+            // MapType("List<RepoEntry>") → "List_RepoEntry*" (already carries *).
+            var ocTypeName = oc.Type.ToString().Trim();
+            var cMapped = TypeRegistry.MapType(ocTypeName);
+            if (cMapped.EndsWith("*"))
+                return (cMapped, false); // MapType already appended pointer
+            return (cMapped, true);
+        }
 
         if (v.Initializer?.Value is InvocationExpressionSyntax inv)
         {
@@ -1009,17 +1052,24 @@ public sealed class StatementWriter
         }
         else if (TypeRegistry.IsList(colType))
         {
-            // List<(T1, T2)> — access via item1/item2
+            // List<(T1, T2)> — access via tuple struct pointer into data[]
+            var innerType = TypeRegistry.GetListInnerType(colType) ?? "int";
+            string tupleStructName;
+            if (TypeRegistry.IsTuple(innerType))
+                tupleStructName = TypeRegistry.GetTupleStructName(innerType);
+            else
+                tupleStructName = innerType == "string" ? "const char*" : TypeRegistry.MapType(innerType);
+
             _ctx.WriteLine($"for (int {idxVar} = 0; {idxVar} < (int)({colExpr}->count); {idxVar}++)");
             _ctx.WriteLine("{");
             _ctx.Indent();
             var elemVar = "_elem_" + idxVar;
-            _ctx.WriteLine($"void* {elemVar} = {colExpr}->items[{idxVar}];");
+            // Take address of the element in place — no void*, proper struct pointer
+            _ctx.WriteLine($"{tupleStructName}* {elemVar} = &{colExpr}->data[{idxVar}];");
             for (int i = 0; i < names.Count; i++)
             {
                 if (names[i] == "_") continue;
-                _ctx.WriteLine($"/* {names[i]} = {elemVar}->item{i + 1} — tuple field access */");
-                _ctx.WriteLine($"__auto_type {names[i]} = ((__auto_type){elemVar})->item{i + 1};");
+                _ctx.WriteLine($"__auto_type {names[i]} = {elemVar}->item{i + 1};");
             }
         }
         else
@@ -1225,34 +1275,42 @@ public sealed class StatementWriter
         _ctx.Dedent();
         _ctx.WriteLine("}");
 
-        // FIX: Mehrere catch-Blöcke erzeugten mehrfaches bare `else { }` → C-Syntaxfehler.
-        // Ohne RTTI kann nicht nach Typ dispatched werden; daher nur EIN else-Block.
-        // Erster catch verarbeitet alles; weitere werden als Kommentar emittiert (unreachable).
+        // No RTTI on Switch — cannot dispatch by exception type.
+        // All catch blocks are emitted in sequence inside one else-block, each in its own
+        // scope to avoid variable conflicts. The developer sees the warning and all their
+        // error-handling code is present in the output (vs. silently dropping catch blocks).
         if (tryStmt.Catches.Count > 0)
         {
             _ctx.WriteLine("else");
             _ctx.WriteLine("{");
             _ctx.Indent();
 
-            var firstCatch = tryStmt.Catches[0];
-            if (firstCatch.Declaration != null)
+            for (int ci = 0; ci < tryStmt.Catches.Count; ci++)
             {
-                var exVarName = firstCatch.Declaration.Identifier.Text;
-                if (!string.IsNullOrEmpty(exVarName) && exVarName != "_")
-                {
-                    _ctx.LocalTypes[exVarName] = "__exception__";
-                    _ctx.LocalTypes[exVarName + ".Message"] = "string";
-                }
-            }
-            foreach (var stmt in firstCatch.Block.Statements)
-                Write(stmt);
+                var catchClause = tryStmt.Catches[ci];
+                var typeName = catchClause.Declaration?.Type.ToString() ?? "Exception";
 
-            for (int ci = 1; ci < tryStmt.Catches.Count; ci++)
-            {
-                var extra = tryStmt.Catches[ci];
-                var typeName = extra.Declaration?.Type.ToString() ?? "Exception";
-                _ctx.Warn(extra, $"catch({typeName}) unreachable — no RTTI on Switch; merged into first catch");
-                _ctx.WriteLine("/* catch (" + typeName + ") — unreachable without RTTI */");
+                if (ci > 0)
+                    _ctx.Warn(catchClause, $"catch({typeName}) — no RTTI on Switch; all catch blocks merged into one; bodies emitted sequentially");
+
+                _ctx.WriteLine($"/* catch ({typeName}) */");
+                _ctx.WriteLine("{");
+                _ctx.Indent();
+
+                if (catchClause.Declaration != null)
+                {
+                    var exVarName = catchClause.Declaration.Identifier.Text;
+                    if (!string.IsNullOrEmpty(exVarName) && exVarName != "_")
+                    {
+                        _ctx.LocalTypes[exVarName] = "__exception__";
+                        _ctx.LocalTypes[exVarName + ".Message"] = "string";
+                    }
+                }
+                foreach (var stmt in catchClause.Block.Statements)
+                    Write(stmt);
+
+                _ctx.Dedent();
+                _ctx.WriteLine("}");
             }
 
             _ctx.Dedent();

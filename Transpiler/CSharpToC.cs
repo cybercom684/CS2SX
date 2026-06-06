@@ -62,10 +62,11 @@ public sealed class CSharpToC : CSharpSyntaxWalker
     public CSharpToC(
         TranspileMode mode,
         GenericInstantiationCollector collector,
-        InterfaceExpander interfaceExpander)
+        InterfaceExpander interfaceExpander,
+        DiagnosticReporter? sharedDiagnostics = null)
     {
         _mode = mode;
-        _ctx = new TranspilerContext(new StringWriter());
+        _ctx = new TranspilerContext(new StringWriter(), sharedDiagnostics);
         _genericCollector = collector;
         _interfaceExpander = interfaceExpander;
         _extensionHandler = new ExtensionMethodHandler(collector.ExtensionMethods);
@@ -146,6 +147,8 @@ public sealed class CSharpToC : CSharpSyntaxWalker
             memberNames.Add(mname);
         }
         _ctx.EnumDefs[enumName] = memberNames;
+        // Register as value type so NeedsPointerSuffix never adds * for enum fields/locals
+        TypeRegistry.RegisterUserEnum(enumName);
 
         if (_mode != TranspileMode.HeaderOnly) return;
 
@@ -273,7 +276,9 @@ public sealed class CSharpToC : CSharpSyntaxWalker
             foreach (var nestedEnum in node.Members.OfType<EnumDeclarationSyntax>())
                 VisitEnumDeclaration(nestedEnum);
 
-            if (!isStaticClass)
+            if (isStaticClass)
+                WriteStaticFieldDefinitions(node, _ctx.CurrentClass);  // static classes need field defs
+            else
                 WriteConstructor(node);
 
             WriteMethodBodies(node);
@@ -374,6 +379,9 @@ public sealed class CSharpToC : CSharpSyntaxWalker
                 continue;
             }
 
+            // Interface types are value structs — no heap allocation, nothing to free.
+            if (TypeRegistry.IsRegisteredInterface(csType)) continue;
+
             var needsFree = TypeRegistry.NeedsPointerSuffix(csType)
                          && !TypeRegistry.IsPrimitive(csType)
                          && csType != "string"
@@ -419,14 +427,17 @@ public sealed class CSharpToC : CSharpSyntaxWalker
             }
         }
 
-        if (!string.IsNullOrEmpty(baseType)
+        // When a base _Free is called it chains up to the root class which calls free(self).
+        // Calling free(self) again here would be a double-free. Only the root class frees memory.
+        bool delegatedToBase = !string.IsNullOrEmpty(baseType)
             && baseType != "SwitchApp"
-            && !IsControlSubclass(baseType))
-        {
-            _ctx.WriteLine($"{baseType}_Free(({baseType}*)self);");
-        }
+            && !IsControlSubclass(baseType)
+            && !_ctx.InterfaceTypes.Contains(baseType); // interface base has no _Free chain
 
-        _ctx.WriteLine("free(self);");
+        if (delegatedToBase)
+            _ctx.WriteLine($"{baseType}_Free(({baseType}*)self);");
+        else
+            _ctx.WriteLine("free(self);");
         _ctx.Dedent();
         _ctx.Out.WriteLine("}");
         _ctx.Out.WriteLine();
@@ -492,14 +503,21 @@ public sealed class CSharpToC : CSharpSyntaxWalker
 
         foreach (var prop in node.Members.OfType<PropertyDeclarationSyntax>())
         {
-            if (prop.Modifiers.Any(m => m.IsKind(SyntaxKind.StaticKeyword))) continue;
+            bool isStaticProp = prop.Modifiers.Any(m => m.IsKind(SyntaxKind.StaticKeyword));
 
             var csType = ResolvePropertyType(prop);
             _ctx.PropertyTypes[prop.Identifier.Text] = csType;
             if (PropertyWriter.IsAutoProperty(prop))
-                _ctx.FieldTypes[prop.Identifier.Text] = csType;
+            {
+                // Instance auto-props only — static auto-props are global C variables, not struct fields
+                if (!isStaticProp)
+                    _ctx.FieldTypes[prop.Identifier.Text] = csType;
+            }
             else
+            {
+                // Computed properties (static or instance) → call getter function
                 _ctx.ComputedPropertyNames.Add(prop.Identifier.Text);
+            }
         }
     }
 
@@ -797,18 +815,74 @@ public sealed class CSharpToC : CSharpSyntaxWalker
                             $"const char* const {name}_{fieldName} = {initVal};");
                     }
                 }
+                else if (csType.EndsWith("[]"))
+                {
+                    // Static readonly T[] → proper C array with count macro
+                    var baseType = csType[..^2].Trim();
+                    // Strip "const " prefix from element type since we add "const" via the modifier
+                    var cBase0 = baseType == "string" ? "const char*" : TypeRegistry.MapType(baseType);
+                    var cBaseElem = cBase0.StartsWith("const ") ? cBase0["const ".Length..].Trim() : cBase0;
+                    foreach (var v in field.Declaration.Variables)
+                    {
+                        if (v.Initializer == null) continue;
+                        var fieldName = v.Identifier.Text.TrimStart('_');
+                        var fullName2 = name + "_" + fieldName;
+                        List<string> elems;
+                        if (v.Initializer.Value is Microsoft.CodeAnalysis.CSharp.Syntax.InitializerExpressionSyntax initExpr2)
+                            elems = initExpr2.Expressions.Select(e => _exprWriter.Write(e)).ToList();
+                        else if (v.Initializer.Value is Microsoft.CodeAnalysis.CSharp.Syntax.ArrayCreationExpressionSyntax arrExpr2 && arrExpr2.Initializer != null)
+                            elems = arrExpr2.Initializer.Expressions.Select(e => _exprWriter.Write(e)).ToList();
+                        else if (v.Initializer.Value is Microsoft.CodeAnalysis.CSharp.Syntax.ImplicitArrayCreationExpressionSyntax implArr2)
+                            elems = implArr2.Initializer.Expressions.Select(e => _exprWriter.Write(e)).ToList();
+                        else
+                            elems = new List<string>();
+                        // "const char* arr[]" — no "static" so it matches "extern" declaration in header
+                        _ctx.Out.WriteLine($"const {cBaseElem} {fullName2}[] = {{ {string.Join(", ", elems)} }};");
+                        _ctx.Out.WriteLine($"#define {fullName2}_count {elems.Count}");
+                    }
+                }
                 else if (!TypeRegistry.IsPrimitive(csType))
                 {
                     // Non-primitive const/readonly: emit definition (header has extern decl)
                     var cTypeNP = TypeRegistry.MapType(csType);
                     var needPtrNP = NeedsPtr(csType);
                     var ptrNP = needPtrNP ? "*" : "";
+                    // For pointer types: don't add const — header has no const, C functions expect non-const
+                    // For non-pointer value types: const is meaningful
+                    bool isPointerType = cTypeNP.EndsWith("*") || needPtrNP;
                     foreach (var v in field.Declaration.Variables)
                     {
-                        if (v.Initializer == null) continue;
                         var fieldName = v.Identifier.Text.TrimStart('_');
-                        var initVal = _exprWriter.Write(v.Initializer.Value);
-                        _ctx.Out.WriteLine($"const {cTypeNP}{ptrNP} {name}_{fieldName} = {initVal};");
+                        if (v.Initializer != null)
+                        {
+                            var initVal = _exprWriter.Write(v.Initializer.Value);
+                            // Function-call initializers (like Stack_T_New()) are NOT C compile-time constants.
+                            // Emit NULL globally and initialize in a generated static constructor.
+                            bool isRuntimeInit = initVal.Contains("_New()") || initVal.Contains("_New(")
+                                              || (initVal.Contains("(") && !initVal.StartsWith("\"") && !initVal.StartsWith("("));
+                            if (isPointerType && isRuntimeInit)
+                            {
+                                _ctx.Out.WriteLine($"{cTypeNP}{ptrNP} {name}_{fieldName} = NULL;");
+                                // Emit GCC constructor to init at runtime
+                                _ctx.Out.WriteLine($"__attribute__((constructor)) static void {name}_{fieldName}_Init(void) {{");
+                                _ctx.Out.WriteLine($"    {name}_{fieldName} = {initVal};");
+                                _ctx.Out.WriteLine($"}}");
+                            }
+                            else if (isPointerType)
+                            {
+                                _ctx.Out.WriteLine($"{cTypeNP}{ptrNP} {name}_{fieldName} = {initVal};");
+                            }
+                            else
+                            {
+                                var constPrefix = cTypeNP.StartsWith("const ") ? "" : "const ";
+                                _ctx.Out.WriteLine($"{constPrefix}{cTypeNP}{ptrNP} {name}_{fieldName} = {initVal};");
+                            }
+                        }
+                        else
+                        {
+                            // Static field with no initializer → define as NULL/0
+                            _ctx.Out.WriteLine($"{cTypeNP}{ptrNP} {name}_{fieldName} = NULL;");
+                        }
                     }
                 }
                 continue;
@@ -881,6 +955,8 @@ public sealed class CSharpToC : CSharpSyntaxWalker
                 var mod = isConst ? "static const " : "static ";
                 _ctx.Out.WriteLine(mod + cType + " " + fullName + "[] = { "
                     + string.Join(", ", elems) + " };");
+                // Emit count macro so .Length works via fullName_count
+                _ctx.Out.WriteLine($"#define {fullName}_count {elems.Count}");
             }
             else if (v.Initializer?.Value is ImplicitArrayCreationExpressionSyntax implArr)
             {
@@ -890,6 +966,7 @@ public sealed class CSharpToC : CSharpSyntaxWalker
                 var mod = isConst ? "static const " : "static ";
                 _ctx.Out.WriteLine(mod + cType + " " + fullName + "[] = { "
                     + string.Join(", ", elems) + " };");
+                _ctx.Out.WriteLine($"#define {fullName}_count {elems.Count}");
             }
             else
             {
@@ -923,8 +1000,22 @@ public sealed class CSharpToC : CSharpSyntaxWalker
                         _ctx.Out.WriteLine($"extern const char* const {name}_{fieldName};");
                     else if (TypeRegistry.IsPrimitive(csType))
                         _ctx.Out.WriteLine($"#define {name}_{fieldName} ({initVal})");
+                    else if (csType.EndsWith("[]"))
+                    {
+                        // Array: extern declaration must match implementation type (const ElemType arr[])
+                        var elemBase = csType[..^2].Trim();
+                        var cElem0 = elemBase == "string" ? "const char*" : TypeRegistry.MapType(elemBase);
+                        var cElemStrip = cElem0.StartsWith("const ") ? cElem0["const ".Length..].Trim() : cElem0;
+                        _ctx.Out.WriteLine($"extern const {cElemStrip} {name}_{fieldName}[];");
+                    }
                     else
-                        _ctx.Out.WriteLine($"extern const {TypeRegistry.MapType(csType)} {name}_{fieldName};");
+                    {
+                        var cMapped = TypeRegistry.MapType(csType);
+                        if (cMapped.EndsWith("*"))
+                            _ctx.Out.WriteLine($"extern {cMapped} {name}_{fieldName};");
+                        else
+                            _ctx.Out.WriteLine($"extern const {cMapped} {name}_{fieldName};");
+                    }
                 }
                 continue;
             }
@@ -965,8 +1056,22 @@ public sealed class CSharpToC : CSharpSyntaxWalker
                 if (v.Initializer == null) continue;
                 var fieldName = v.Identifier.Text.TrimStart('_');
                 var prefix = TypeRegistry.HasNoPrefix(fieldName) ? "" : "f_";
-                _ctx.WriteLine("self->" + prefix + fieldName + " = "
-                    + _exprWriter.Write(v.Initializer.Value) + ";");
+                var initVal = _exprWriter.Write(v.Initializer.Value);
+                // Interface-typed field: wrap initializer with as_IFace() upcast
+                var fieldCsType = ResolveFieldType(field);
+                if (_ctx.InterfaceTypes.Contains(fieldCsType) && _ctx.SemanticModel != null)
+                {
+                    try
+                    {
+                        var rightSym = _ctx.SemanticModel.GetTypeInfo(v.Initializer.Value).Type
+                            as Microsoft.CodeAnalysis.INamedTypeSymbol;
+                        if (rightSym != null && !TypeRegistry.IsRegisteredInterface(rightSym.Name)
+                            && TypeRegistry.NeedsPointerSuffix(rightSym.Name))
+                            initVal = rightSym.Name + "_as_" + fieldCsType + "(" + initVal + ")";
+                    }
+                    catch { }
+                }
+                _ctx.WriteLine("self->" + prefix + fieldName + " = " + initVal + ";");
             }
         }
 
@@ -1285,6 +1390,7 @@ public sealed class CSharpToC : CSharpSyntaxWalker
         _ctx.MethodReturnTypes[node.Identifier.Text] = csReturnType;
 
         var isAbstract = node.Modifiers.Any(m => m.IsKind(SyntaxKind.AbstractKeyword));
+        var isExtern = node.Modifiers.Any(m => m.IsKind(SyntaxKind.ExternKeyword));
         var isStatic = node.Modifiers.Any(m => m.IsKind(SyntaxKind.StaticKeyword));
 
         bool isExtension = node.ParameterList.Parameters.FirstOrDefault()?.Modifiers
@@ -1337,12 +1443,19 @@ public sealed class CSharpToC : CSharpSyntaxWalker
 
         if (_mode == TranspileMode.HeaderOnly)
         {
-            if (isAbstract) _ctx.Out.WriteLine("/* abstract: " + sig + " */");
-            else _ctx.Out.WriteLine(sig + ";");
+            if (isAbstract)
+                _ctx.Out.WriteLine("/* abstract: " + sig + " */");
+            else if (isExtern)
+                // [DllImport] / extern method → emit as C extern declaration (links to native lib)
+                _ctx.Out.WriteLine("extern " + sig + ";");
+            else
+                _ctx.Out.WriteLine(sig + ";");
             return;
         }
 
         if (isAbstract) return;
+        // extern methods have no body — only the header declaration is needed
+        if (isExtern) return;
 
         _ctx.ClearMethodContext();
         _ctx.IsStaticMethod = isStatic;
@@ -1438,11 +1551,16 @@ public sealed class CSharpToC : CSharpSyntaxWalker
 
     public override void VisitRecordDeclaration(RecordDeclarationSyntax node)
     {
-        // Records are treated as struct-like classes with positional constructor params
-        // and auto-properties as fields.
+        // record class → heap-allocated reference type (calloc + _rc ref-counting)
+        // record struct → value type (plain C struct, no heap, no _rc)
+        bool isRecordStruct = node.ClassOrStructKeyword.IsKind(SyntaxKind.StructKeyword);
+
         var name = node.Identifier.Text;
         _ctx.ClearClassContext();
         _ctx.CurrentClass = name;
+
+        if (isRecordStruct)
+            _ctx.ValueTypeStructs.Add(name); // treat as value type in type system
 
         // Collect positional record params as fields
         var paramFields = node.ParameterList?.Parameters
@@ -1460,7 +1578,8 @@ public sealed class CSharpToC : CSharpSyntaxWalker
             _ctx.Out.WriteLine($"struct {name}");
             _ctx.Out.WriteLine("{");
             _ctx.Indent();
-            _ctx.WriteLine("int _rc;");
+            if (!isRecordStruct)
+                _ctx.WriteLine("int _rc;");
             foreach (var (csType, fieldName) in paramFields)
             {
                 var cType = TypeRegistry.MapType(csType);
@@ -1488,23 +1607,32 @@ public sealed class CSharpToC : CSharpSyntaxWalker
             _ctx.Out.WriteLine();
 
             // Constructor signature
-            if (paramFields.Count > 0)
+            if (isRecordStruct)
             {
-                var paramDecls = string.Join(", ",
-                    paramFields.Select(pf =>
-                    {
-                        var ct = TypeRegistry.MapType(pf.csType);
-                        var ptr = NeedsPtr(pf.csType) ? "*" : "";
-                        return $"{ct}{ptr} {pf.fieldName}";
-                    }));
-                _ctx.Out.WriteLine($"{name}* {name}_New({paramDecls});");
+                // record struct: stack-allocatable constructor (returns by value)
+                var paramDecls = BuildRecordParamList(paramFields);
+                _ctx.Out.WriteLine($"{name} {name}_Make({paramDecls});");
             }
             else
             {
-                _ctx.Out.WriteLine($"{name}* {name}_New();");
+                if (paramFields.Count > 0)
+                {
+                    var paramDecls = string.Join(", ",
+                        paramFields.Select(pf =>
+                        {
+                            var ct = TypeRegistry.MapType(pf.csType);
+                            var ptr = NeedsPtr(pf.csType) ? "*" : "";
+                            return $"{ct}{ptr} {pf.fieldName}";
+                        }));
+                    _ctx.Out.WriteLine($"{name}* {name}_New({paramDecls});");
+                }
+                else
+                {
+                    _ctx.Out.WriteLine($"{name}* {name}_New();");
+                }
+                _ctx.Out.WriteLine($"void {name}_Free({name}* self);");
+                _ctx.Out.WriteLine($"{name}* {name}_Retain({name}* self);");
             }
-            _ctx.Out.WriteLine($"void {name}_Free({name}* self);");
-            _ctx.Out.WriteLine($"{name}* {name}_Retain({name}* self);");
 
             // Method signatures from body
             RegisterClassOverloads(node, name);
@@ -1513,9 +1641,28 @@ public sealed class CSharpToC : CSharpSyntaxWalker
 
             _ctx.Out.WriteLine();
         }
+        else if (isRecordStruct)
+        {
+            // record struct implementation: returns value (no heap)
+            _ctx.Out.WriteLine($"{name} {name}_Make({BuildRecordParamList(paramFields)})");
+            _ctx.Out.WriteLine("{");
+            _ctx.Indent();
+            _ctx.WriteLine($"{name} self;");
+            _ctx.WriteLine("memset(&self, 0, sizeof(self));");
+            foreach (var (csType, fieldName) in paramFields)
+                _ctx.WriteLine($"self.f_{fieldName} = {fieldName};");
+            _ctx.Dedent();
+            _ctx.Out.WriteLine("    return self;");
+            _ctx.Out.WriteLine("}");
+            _ctx.Out.WriteLine();
+
+            RegisterClassOverloads(node, name);
+            foreach (var method in node.Members.OfType<MethodDeclarationSyntax>())
+                VisitMethodDeclaration(method);
+        }
         else
         {
-            // Constructor implementation
+            // record class: heap-allocated, reference-counted
             _ctx.Out.WriteLine($"{name}* {name}_New({BuildRecordParamList(paramFields)})");
             _ctx.Out.WriteLine("{");
             _ctx.Indent();
@@ -1535,7 +1682,6 @@ public sealed class CSharpToC : CSharpSyntaxWalker
             _ctx.Indent();
             _ctx.WriteLine("if (!self) return;");
             _ctx.WriteLine("if (--self->_rc > 0) return;");
-            // Free any collection/heap fields from positional params
             foreach (var (csType, fieldName) in paramFields)
             {
                 var fieldExpr = $"self->f_{fieldName}";
@@ -1843,7 +1989,9 @@ public sealed class CSharpToC : CSharpSyntaxWalker
             return $"{cType}* {p.Identifier}";
         }
 
-        var ptr = (!isPrim) ? "*" : "";
+        // MapType already appends '*' for List<T>, Dictionary<K,V> etc.
+        // Do not add another '*' in that case to avoid double-pointer.
+        var ptr = (!isPrim && !cType.EndsWith("*")) ? "*" : "";
         return $"{cType}{ptr} {p.Identifier}";
     }
 }

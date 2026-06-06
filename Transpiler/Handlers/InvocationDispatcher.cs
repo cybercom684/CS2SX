@@ -183,10 +183,34 @@ public sealed class InvocationDispatcher
 
         var parameters = sym.Parameters;
 
-        // No reordering needed if no named args and all params are positional
-        if (!hasNamed && rawArgs.Count >= parameters.Length) return rawArgs;
-        // No optional params and no named args → nothing to do
-        if (!hasNamed && !parameters.Any(p => p.HasExplicitDefaultValue)) return rawArgs;
+        // Apply interface upcasts even when no reordering is needed:
+        // if a param expects IFace* but arg provides ConcreteClass*, wrap with ConcreteClass_as_IFace()
+        var needsUpcast = false;
+        if (_ctx.SemanticModel != null)
+        {
+            try
+            {
+                for (int i = 0; i < Math.Min(parameters.Length, inv.ArgumentList.Arguments.Count); i++)
+                {
+                    var paramType = TranspilerContext.FormatTypeSymbol(parameters[i].Type);
+                    if (!TypeRegistry.IsRegisteredInterface(paramType)) continue;
+                    var argSyn = inv.ArgumentList.Arguments[i].Expression;
+                    var argTypeSym = _ctx.SemanticModel.GetTypeInfo(argSyn).Type;
+                    if (argTypeSym == null || argTypeSym is Microsoft.CodeAnalysis.IErrorTypeSymbol) continue;
+                    var argType = TranspilerContext.FormatTypeSymbol(argTypeSym);
+                    if (TypeRegistry.IsRegisteredInterface(argType)) continue;
+                    // Concrete class passed to interface param — needs upcast
+                    needsUpcast = true;
+                    break;
+                }
+            }
+            catch { }
+        }
+
+        // No reordering needed if no named args and all params are positional (and no upcasts)
+        if (!hasNamed && rawArgs.Count >= parameters.Length && !needsUpcast) return rawArgs;
+        // No optional params and no named args and no upcasts → nothing to do
+        if (!hasNamed && !parameters.Any(p => p.HasExplicitDefaultValue) && !needsUpcast) return rawArgs;
 
         try
         {
@@ -218,6 +242,22 @@ public sealed class InvocationDispatcher
                 else if (i < result.Length)
                 {
                     result[i] = rawArgs[i];
+                }
+            }
+
+            // Apply interface upcasts: ConcreteClass* → IFace* conversion via as_IFace()
+            if (needsUpcast && _ctx.SemanticModel != null)
+            {
+                for (int i = 0; i < Math.Min(parameters.Length, inv.ArgumentList.Arguments.Count); i++)
+                {
+                    var paramType = TranspilerContext.FormatTypeSymbol(parameters[i].Type);
+                    if (!TypeRegistry.IsRegisteredInterface(paramType)) continue;
+                    var argSyn = inv.ArgumentList.Arguments[i].Expression;
+                    var argTypeSym = _ctx.SemanticModel.GetTypeInfo(argSyn).Type;
+                    if (argTypeSym == null || argTypeSym is Microsoft.CodeAnalysis.IErrorTypeSymbol) continue;
+                    var argType = TranspilerContext.FormatTypeSymbol(argTypeSym);
+                    if (TypeRegistry.IsRegisteredInterface(argType)) continue;
+                    result[i] = argType + "_as_" + paramType + "(" + result[i] + ")";
                 }
             }
 

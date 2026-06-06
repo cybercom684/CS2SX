@@ -71,9 +71,11 @@ struct Control
     int   x, y, width, height;
     int   visible;
     int   focusable;
+    int   focused;   // moved here from Button so all focusable controls work without casts
     void* context;
     void  (*Draw)  (Control* self);
     void  (*Update)(Control* self, u64 kDown, u64 kHeld);
+    void  (*Free)  (Control* self);  // virtual destructor — NULL → plain free()
 };
 
 // ============================================================================
@@ -128,7 +130,7 @@ struct Button
 {
     Control     base;
     const char* text;
-    int         focused;
+    // focused moved to Control.base.focused — access via base.focused or self->focused via Control*
     void        (*OnClick)(void* context);
 };
 
@@ -137,7 +139,7 @@ static inline void Button_Draw(Control* self)
     if (!self || !self->visible) return;
     Button* b = (Button*)self;
     const char* t = b->text ? b->text : "";
-    if (b->focused)
+    if (self->focused)
         printf("\033[%d;%dH> %s <", self->y, self->x, t);
     else
         printf("\033[%d;%dH  %s  ", self->y, self->x, t);
@@ -148,7 +150,7 @@ static inline void Button_Update(Control* self, u64 kDown, u64 kHeld)
     (void)kHeld;
     if (!self) return;
     Button* b = (Button*)self;
-    if (b->focused && (kDown & HidNpadButton_A) && b->OnClick)
+    if (self->focused && (kDown & HidNpadButton_A) && b->OnClick)
         b->OnClick(self->context);
 }
 
@@ -427,6 +429,27 @@ static inline const char* Float_ToString(float val)
 {
     char* buf = _cs2sx_next_buf();
     snprintf(buf, CS2SX_STRBUF_SIZE, "%f", val);
+    return buf;
+}
+
+static inline const char* Double_ToString(double val)
+{
+    char* buf = _cs2sx_next_buf();
+    snprintf(buf, CS2SX_STRBUF_SIZE, "%g", val);
+    return buf;
+}
+
+static inline const char* Long_ToString(long long val)
+{
+    char* buf = _cs2sx_next_buf();
+    snprintf(buf, CS2SX_STRBUF_SIZE, "%lld", val);
+    return buf;
+}
+
+static inline const char* ULong_ToString(unsigned long long val)
+{
+    char* buf = _cs2sx_next_buf();
+    snprintf(buf, CS2SX_STRBUF_SIZE, "%llu", val);
     return buf;
 }
 
@@ -954,6 +977,10 @@ CS2SX_LIST_DEFINE(u32)
 CS2SX_LIST_DEFINE(u64)
 CS2SX_LIST_DEFINE(s32)
 CS2SX_LIST_DEFINE(s64)
+
+// voidptr list — fallback for List<tuple> and other opaque pointer lists
+typedef void* voidptr;
+CS2SX_LIST_DEFINE(voidptr)
 
 // ============================================================================
 // Stack<T> — LIFO using growable array
@@ -1833,8 +1860,9 @@ static inline void Form_InitFocus(Form* form)
     if (!form) return;
     for (int i = 0; i < form->count; i++)
     {
-        if (!form->controls[i]->focusable) continue;
-        ((Button*)form->controls[i])->focused = 1;
+        Control* c = form->controls[i];
+        if (!c || !c->focusable) continue;
+        c->focused = 1;
         form->focusedIndex = i;
         return;
     }
@@ -1846,9 +1874,9 @@ static inline void Form_MoveFocus(Form* form, int direction)
     int current = -1;
     for (int i = 0; i < form->count; i++)
     {
-        if (!form->controls[i]->focusable) continue;
-        Button* b = (Button*)form->controls[i];
-        if (b->focused) { b->focused = 0; current = i; break; }
+        Control* c = form->controls[i];
+        if (!c || !c->focusable) continue;
+        if (c->focused) { c->focused = 0; current = i; break; }
     }
     if (current == -1) { Form_InitFocus(form); return; }
     int next = current;
@@ -1857,15 +1885,17 @@ static inline void Form_MoveFocus(Form* form, int direction)
         next += direction;
         if (next < 0)            next = form->count - 1;
         if (next >= form->count) next = 0;
-        if (form->controls[next]->focusable)
+        Control* nc = form->controls[next];
+        if (nc && nc->focusable)
         {
-            ((Button*)form->controls[next])->focused = 1;
+            nc->focused = 1;
             form->focusedIndex = next;
             return;
         }
     }
-    if (current >= 0 && form->controls[current]->focusable)
-        ((Button*)form->controls[current])->focused = 1;
+    // No other focusable found — restore focus to current
+    if (current >= 0 && form->controls[current] && form->controls[current]->focusable)
+        form->controls[current]->focused = 1;
 }
 
 static inline void Form_DrawAll(Form* form)
@@ -1893,7 +1923,18 @@ static inline void Form_UpdateAll(Form* form, u64 kDown, u64 kHeld)
 static inline void Form_Free(Form* form)
 {
     if (!form) return;
-    for (int i = 0; i < form->count; i++) { free(form->controls[i]); form->controls[i] = NULL; }
+    for (int i = 0; i < form->count; i++)
+    {
+        Control* c = form->controls[i];
+        if (!c) continue;
+        // Call the virtual Free function if present, otherwise plain free.
+        // This ensures subclass resources (textures, strings, etc.) are released.
+        if (c->Free)
+            c->Free(c);
+        else
+            free(c);
+        form->controls[i] = NULL;
+    }
     form->count = 0;
     form->focusedIndex = -1;
 }

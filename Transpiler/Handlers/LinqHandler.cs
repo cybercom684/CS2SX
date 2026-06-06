@@ -114,7 +114,6 @@ public sealed class LinqHandler : InvocationHandlerBase
         var methodName = mem.Name.Identifier.Text;
         var sourceRaw = mem.Expression.ToString();
         var sourceKey = sourceRaw.TrimStart('_');
-        var sourceExpr = writeExpr(mem.Expression);
 
         // Resolve source type — with SemanticModel fallback
         string? colType = null;
@@ -133,12 +132,23 @@ public sealed class LinqHandler : InvocationHandlerBase
             catch { }
         }
 
+        // NOTE: writeExpr(mem.Expression) is deferred to avoid side effects (e.g. Stack.Pop()
+        // called prematurely). For chained LINQ (inner temp var lookup) we evaluate lazily below.
+        string? sourceExpr = null;
+
         // Chained LINQ: inner call creates a temp var (e.g. _where_0); look it up by generated name
+        // We must evaluate the receiver to get the temp var name, but only when type is still unknown.
         if (colType == null)
+        {
+            sourceExpr = writeExpr(mem.Expression);
             ctx.LocalTypes.TryGetValue(sourceExpr, out colType);
+        }
 
         if (colType == null || (!TypeRegistry.IsList(colType) && !colType.EndsWith("[]")))
             return NotHandled(out result);
+
+        // Evaluate receiver now that we know this is a valid LINQ source
+        sourceExpr ??= writeExpr(mem.Expression);
 
         var inner = TypeRegistry.IsList(colType)
             ? TypeRegistry.GetListInnerType(colType) ?? "int"
@@ -297,9 +307,38 @@ public sealed class LinqHandler : InvocationHandlerBase
             case "Last":
             case "LastOrDefault":
                 {
+                    bool isStrict = methodName == "Last";
                     var defaultVal = isPrim ? "0" : "NULL";
-                    var countExpr = listCount.Replace("_idx", "0");
-                    result = "(" + countExpr + " > 0 ? " + listGet.Replace("_idx", countExpr + " - 1") + " : " + defaultVal + ")";
+                    if (lambdaArg != null)
+                    {
+                        // Last(predicate): scan full list, keep last match
+                        var predFn = MakeLifter().LiftLambda(lambdaArg, elementTypeHint: inner, isPredicate: true);
+                        var idxVar2 = ctx.NextTmp("i");
+                        var retVar2 = ctx.NextTmp("last");
+                        var foundVar = ctx.NextTmp("found");
+                        ctx.WriteLine($"{cInnerType}{elemPtr} {retVar2} = {defaultVal};");
+                        ctx.WriteLine($"int {foundVar} = 0;");
+                        ctx.WriteLine($"for (int {idxVar2} = 0; {idxVar2} < {listCount.Replace("_idx", idxVar2)}; {idxVar2}++)");
+                        ctx.WriteLine($"  if ({predFn}({listGet.Replace("_idx", idxVar2)})) {{ {retVar2} = {listGet.Replace("_idx", idxVar2)}; {foundVar} = 1; }}");
+                        if (isStrict)
+                            ctx.WriteLine($"if (!{foundVar}) {{ fprintf(stderr, \"Last(): sequence contains no matching elements\\n\"); abort(); }}");
+                        result = retVar2;
+                    }
+                    else if (isStrict)
+                    {
+                        // Last() without predicate — abort on empty, no silent default
+                        var countExpr = listCount.Replace("_idx", "0");
+                        var retVar2 = ctx.NextTmp("last");
+                        ctx.WriteLine($"{cInnerType}{elemPtr} {retVar2} = {defaultVal};");
+                        ctx.WriteLine($"if ({countExpr} > 0) {{ {retVar2} = {listGet.Replace("_idx", countExpr + " - 1")}; }}");
+                        ctx.WriteLine($"else {{ fprintf(stderr, \"Last(): sequence contains no elements\\n\"); abort(); }}");
+                        result = retVar2;
+                    }
+                    else
+                    {
+                        var countExpr = listCount.Replace("_idx", "0");
+                        result = "(" + countExpr + " > 0 ? " + listGet.Replace("_idx", countExpr + " - 1") + " : " + defaultVal + ")";
+                    }
                     return true;
                 }
 
@@ -1020,7 +1059,16 @@ public sealed class LinqHandler : InvocationHandlerBase
                     ctx.WriteLine("{");
                     ctx.Indent();
                     ctx.WriteLine($"{cInnerSrcType}{(TypeRegistry.IsPrimitive(innerSrcInner) ? "" : "*")} _ie_{outVar} = List_{cInnerSrc}_Get({innerSrcExpr}, {jVar});");
-                    ctx.WriteLine($"if ({outerKeyFn}(_oe_{outVar}) == {innerKeyFn}(_ie_{outVar}))");
+                    // Detect string key type to use strcmp instead of pointer ==
+                    bool keyIsStr = false;
+                    if (outerKeyLam is ParenthesizedLambdaExpressionSyntax pklStr)
+                        keyIsStr = TypeInferrer.InferCSharpType(pklStr.Body, ctx) == "string";
+                    else if (outerKeyLam is SimpleLambdaExpressionSyntax sklStr)
+                        keyIsStr = TypeInferrer.InferCSharpType(sklStr.Body, ctx) == "string";
+                    var keyCmp = keyIsStr
+                        ? $"CS2SX_strcmp_safe({outerKeyFn}(_oe_{outVar}), {innerKeyFn}(_ie_{outVar})) == 0"
+                        : $"{outerKeyFn}(_oe_{outVar}) == {innerKeyFn}(_ie_{outVar})";
+                    ctx.WriteLine($"if ({keyCmp})");
                     ctx.WriteLine($"    List_{cResult}_Add({outVar}, {resultFn}(_oe_{outVar}, _ie_{outVar}));");
                     ctx.Dedent();
                     ctx.WriteLine("}");

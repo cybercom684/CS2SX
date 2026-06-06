@@ -52,16 +52,17 @@ public static class TypeRegistry
         ["Stopwatch"] = "CS2SX_Stopwatch",
         ["TimeSpan"] = "CS2SX_TimeSpan",
         ["Regex"] = "CS2SX_Regex",
-        ["Random"] = "void",
+        ["Random"] = "void*",  // opaque handle; methods dispatched by RandomHandler to CS2SX_Rand_* globals
         ["IntPtr"]  = "intptr_t",
         ["UIntPtr"] = "uintptr_t",
         ["nint"]    = "intptr_t",
         ["nuint"]   = "uintptr_t",
-        // PHASE 2: Tuple → void* (Tupels werden als temporäre Structs behandelt)
-        ["(int, int)"] = "void*",
-        ["(string, string)"] = "void*",
-        ["(int, string)"] = "void*",
-        ["(float, float)"] = "void*",
+        // libnx enum types used as parameter/field types (not as access targets)
+        ["NpadButton"] = "HidNpadButton",
+        ["HidNpadButton"] = "HidNpadButton",
+        ["HidTouchState"] = "HidTouchState",
+        ["PadState"] = "PadState",
+        ["ValueTuple"] = "void*",  // fallback for unresolved ValueTuple (without type args)
     };
 
     // ── SwitchForms Control-Typen ─────────────────────────────────────────────
@@ -81,6 +82,8 @@ public static class TypeRegistry
         "FsDir", "FsFile", "FsFileSystem", "FsDirectoryEntry",
         "PadState", "HidTouchScreenState", "AccountUid", "PsmChargerType",
         "CS2SX_StickPos", "CS2SX_TouchState", "CS2SX_BatteryInfo", "CS2SX_TimeInfo",
+        // libnx enum types (value types — no pointer suffix)
+        "NpadButton", "HidNpadButton", "HidTouchState",
     };
 
     // ── Pointer-Typen ─────────────────────────────────────────────────────────
@@ -154,6 +157,19 @@ public static class TypeRegistry
         "focused", "OnClick", "value", "width_chars", "text",
         "kDown", "kHeld", "Form",
     };
+
+    // ── User-defined enum registry ────────────────────────────────────────────
+    private static readonly HashSet<string> s_userEnumTypes = new(StringComparer.Ordinal);
+    public static void RegisterUserEnum(string name) => s_userEnumTypes.Add(name);
+    public static bool IsUserDefinedEnum(string csType) => s_userEnumTypes.Contains(csType);
+    public static void ClearUserEnums() => s_userEnumTypes.Clear();
+
+    // ── Interface type registry ───────────────────────────────────────────────
+    // Interfaces in C are value structs {vtable*, obj*} — NOT heap-allocated pointers.
+    // NeedsPointerSuffix must return false for interface types so they're passed by value.
+    private static readonly HashSet<string> s_interfaceTypes = new(StringComparer.Ordinal);
+    public static void RegisterInterfaceType(string name) => s_interfaceTypes.Add(name);
+    public static bool IsRegisteredInterface(string csType) => s_interfaceTypes.Contains(csType);
 
     // ── Enum-Mappings ─────────────────────────────────────────────────────────
 
@@ -270,7 +286,12 @@ public static class TypeRegistry
         }
 
         if (csType.StartsWith("(") && csType.EndsWith(")") && csType.Contains(","))
+        {
+            // Tuple → proper C struct name (_Tuple2_str_str etc.)
+            var structName = GetTupleStructName(csType);
+            if (!string.IsNullOrEmpty(structName)) return structName;
             return "void*";
+        }
 
         if (csType.StartsWith("IEnumerable<") && csType.EndsWith(">"))
         {
@@ -286,9 +307,21 @@ public static class TypeRegistry
             return $"List_{cInner}*";
         }
 
+        // Task / Task<T> / ValueTask / ValueTask<T> → async is simulated synchronously.
+        // Task<T> maps to T (the return value); plain Task maps to void.
+        if (csType == "Task" || csType == "ValueTask")
+            return "void";
+        if (csType.StartsWith("Task<") && csType.EndsWith(">"))
+            return MapType(csType[5..^1].Trim());
+        if (csType.StartsWith("ValueTask<") && csType.EndsWith(">"))
+            return MapType(csType[10..^1].Trim());
+
         if (csType.StartsWith("Stack<") && csType.EndsWith(">"))
         {
             var inner = csType[6..^1].Trim();
+            // Interface types use pointer-based stack (Stack_IFace_ptr) since interfaces are IFace*
+            if (s_interfaceTypes.Contains(inner))
+                return $"Stack_{inner}_ptr*";
             var cInner = inner == "string" ? "str" : MapListInnerType(inner);
             return $"Stack_{cInner}*";
         }
@@ -380,7 +413,7 @@ public static class TypeRegistry
     /// <summary>
     /// Findet das erste Komma auf der obersten Ebene (nicht in &lt;&gt; verschachtelt).
     /// </summary>
-    private static int FindTopLevelComma(string s)
+    internal static int FindTopLevelComma(string s)
     {
         int depth = 0;
         for (int i = 0; i < s.Length; i++)
@@ -501,6 +534,7 @@ public static class TypeRegistry
         && !IsQueue(csType)
         && !IsHashSet(csType)
         && !IsDelegate(csType)
+        && !IsUserDefinedEnum(csType)
         && csType != "string"
         && !csType.EndsWith("[]");
 
@@ -564,6 +598,41 @@ public static class TypeRegistry
         }
         sb.AppendLine($"}} {name};");
         return sb.ToString();
+    }
+
+    /// <summary>
+    /// Returns the struct definition for a tuple struct by name (e.g. _Tuple2_str_str).
+    /// Used by GenericExpander to emit struct typedef before the list macro.
+    /// </summary>
+    public static string GetTupleStructDefinition(string structName)
+    {
+        // Parse _TupleN_t1_t2_... back to a fake CS tuple type and generate
+        if (!structName.StartsWith("_Tuple")) return "";
+        try
+        {
+            // e.g. _Tuple2_str_str → 2 elements: str, str
+            var body = structName["_Tuple".Length..];
+            var countEnd = body.IndexOf('_');
+            if (countEnd < 0) return "";
+            if (!int.TryParse(body[..countEnd], out var count)) return "";
+            var typesPart = body[(countEnd + 1)..];
+            // Reconstruct fields: str→const char*, int→int etc.
+            var fields = new[] { "item1", "item2", "item3", "item4" };
+            // Split by _ but rejoin compound names (e.g. const_char might appear)
+            // Simple: split assuming single-word type tokens
+            var parts = typesPart.Split('_');
+            if (parts.Length < count) return "";
+            var sb = new System.Text.StringBuilder();
+            sb.AppendLine($"typedef struct {structName} {{");
+            for (int i = 0; i < count && i < parts.Length && i < fields.Length; i++)
+            {
+                var cType = parts[i] == "str" ? "const char*" : parts[i];
+                sb.AppendLine($"    {cType} {fields[i]};");
+            }
+            sb.AppendLine($"}} {structName};");
+            return sb.ToString();
+        }
+        catch { return ""; }
     }
 
     private static List<string> SplitTupleArgs(string s)

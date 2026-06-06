@@ -40,7 +40,7 @@ public sealed class StringMethodHandler : InvocationHandlerBase
     {
         "Contains", "StartsWith", "EndsWith", "Equals",
         "ToString", "Trim", "TrimStart", "TrimEnd",
-        "ToUpper", "ToLower", "Replace", "Substring",
+        "ToUpper", "ToUpperInvariant", "ToLower", "ToLowerInvariant", "Replace", "Substring",
         "IndexOf", "LastIndexOf", "PadLeft", "PadRight",
         "Split", "CompareTo", "ToCharArray",
     };
@@ -61,6 +61,35 @@ public sealed class StringMethodHandler : InvocationHandlerBase
         {
             var objStr = mem.Expression.ToString();
             var type = LookupType(objStr, ctx);
+
+            // When type is unknown (null), verify via SemanticModel that the receiver is
+            // actually a string. Static class names like "Navigator" resolve to null here,
+            // and their methods (e.g. Navigator.Replace) must NOT be treated as string ops.
+            // Exception: ToString() is valid on any type — int/float/enum receivers must
+            // reach BuildToString() instead of falling through to invalid C `expr->ToString()`.
+            if (type == null && ctx.SemanticModel != null)
+            {
+                try
+                {
+                    var semInfo = ctx.SemanticModel.GetTypeInfo(mem.Expression);
+                    var semType = semInfo.ConvertedType ?? semInfo.Type;
+                    if (semType != null)
+                    {
+                        var dn = semType.ToDisplayString();
+                        if (mem.Name.Identifier.Text != "ToString"
+                         && !dn.Equals("string", StringComparison.OrdinalIgnoreCase)
+                         && dn != "System.String"
+                         && !dn.Contains("char"))
+                            return NotHandled(out result);
+                    }
+                    else
+                    {
+                        // Unresolvable type (e.g. static class receiver) — do not handle
+                        return NotHandled(out result);
+                    }
+                }
+                catch { }
+            }
 
             if (!TypeRegistry.IsStringBuilder(type ?? "")
              && !TypeRegistry.IsList(type ?? ""))
@@ -226,8 +255,8 @@ public sealed class StringMethodHandler : InvocationHandlerBase
             "Trim" => "String_Trim(" + receiver + ")",
             "TrimStart" => "String_TrimStart(" + receiver + ")",
             "TrimEnd" => "String_TrimEnd(" + receiver + ")",
-            "ToUpper" => "String_ToUpper(" + receiver + ")",
-            "ToLower" => "String_ToLower(" + receiver + ")",
+            "ToUpper" or "ToUpperInvariant" => "String_ToUpper(" + receiver + ")",
+            "ToLower" or "ToLowerInvariant" => "String_ToLower(" + receiver + ")",
             "Replace" => "String_Replace(" + receiver + ", " + ArgAt(args, 0) + ", " + ArgAt(args, 1) + ")",
             "CompareTo" => "String_CompareTo(" + receiver + ", " + ArgAt(args, 0) + ")",
 
@@ -292,8 +321,11 @@ public sealed class StringMethodHandler : InvocationHandlerBase
 
         return recvType switch
         {
-            "uint" or "u32" => "UInt_ToString((unsigned int)" + receiver + ")",
+            "uint" or "u32" or "uint32_t" => "UInt_ToString((unsigned int)" + receiver + ")",
             "float" => "Float_ToString(" + receiver + ")",
+            "double" => "Double_ToString(" + receiver + ")",
+            "long" or "i64" or "int64_t" => "Long_ToString((long long)" + receiver + ")",
+            "ulong" or "u64" or "uint64_t" => "ULong_ToString((unsigned long long)" + receiver + ")",
             _ => "Int_ToString((int)" + receiver + ")",
         };
     }

@@ -65,11 +65,16 @@ public sealed class ExpressionWriter : IExpressionWriter
                                                                => WriteCoalesce(coalesce),
             BinaryExpressionSyntax bin => WriteBinary(bin),
             LiteralExpressionSyntax lit => WriteLiteral(lit),
+            // Predefined type keywords (string, int, bool ...) used as receiver — pass through as-is.
+            // The invocation dispatcher / member access handler recognises "string.X", "int.X" etc.
+            PredefinedTypeSyntax pred => pred.Keyword.Text,
             IdentifierNameSyntax id => WriteIdentifier(id),
-            // ^n  →  (len - n)  — must come before the general PrefixUnary arm
+            // ^n outside [] — System.Index has no standalone C equivalent.
+            // When used as arr[^n], WriteElementAccess handles it correctly via len-n.
+            // Here we can only warn; the expression is meaningless without an array context.
             PrefixUnaryExpressionSyntax hatIdx
                 when hatIdx.IsKind(SyntaxKind.IndexExpression)
-                => "(-1 - " + Write(hatIdx.Operand) + ") /* ^n index — use inside [] */",
+                => WarnAndReturn(hatIdx, "^n (System.Index) used outside indexer — use arr[^n] form; emitting 0", "0"),
             PrefixUnaryExpressionSyntax pre => WritePrefixUnary(pre),
             PostfixUnaryExpressionSyntax post => Write(post.Operand) + post.OperatorToken.Text,
             AssignmentExpressionSyntax assign => WriteAssignment(assign),
@@ -106,6 +111,12 @@ public sealed class ExpressionWriter : IExpressionWriter
         _ctx.Warn($"unsupported expression '{typeName}' — passed through as-is: {(text.Length > 40 ? text[..40] + "…" : text)}",
             typeName);
         return text;
+    }
+
+    private string WarnAndReturn(SyntaxNode node, string message, string replacement)
+    {
+        _ctx.Warn(node, message);
+        return replacement;
     }
 
     private string WritePrefixUnary(PrefixUnaryExpressionSyntax pre)
@@ -190,9 +201,15 @@ public sealed class ExpressionWriter : IExpressionWriter
             try
             {
                 var sym = _ctx.SemanticModel.GetSymbolInfo(id).Symbol;
-                if (sym is IFieldSymbol field && field.IsStatic
-                    && (field.IsConst || field.IsReadOnly))
-                    return (field.ContainingType?.Name ?? _ctx.CurrentClass) + "_" + name;
+                if (sym is IFieldSymbol field && field.IsStatic)
+                    // Static field access: ClassName_fieldName (strip leading _ from field name)
+                    return (field.ContainingType?.Name ?? _ctx.CurrentClass) + "_" + field.Name.TrimStart('_');
+
+                // Static computed property (e.g. static IScreen Current => ...) → call static getter
+                if (sym is IPropertySymbol staticProp && staticProp.IsStatic
+                    && staticProp.ContainingType?.Name == _ctx.CurrentClass
+                    && _ctx.ComputedPropertyNames.Contains(name))
+                    return _ctx.CurrentClass + "_get_" + name + "()";
 
                 // Own-class computed property (expression-body) → call getter function
                 if (sym is IPropertySymbol ownProp && !ownProp.IsStatic
@@ -230,11 +247,18 @@ public sealed class ExpressionWriter : IExpressionWriter
 
         // Computed property on current class → call the generated getter function
         if (!string.IsNullOrEmpty(_ctx.CurrentClass) && _ctx.ComputedPropertyNames.Contains(name))
-            return _ctx.CurrentClass + "_get_" + name + "(self)";
+        {
+            // Static class: no self parameter
+            var selfArg = _ctx.IsStaticMethod ? "" : "self";
+            return _ctx.CurrentClass + "_get_" + name + "(" + selfArg + ")";
+        }
 
         if (_ctx.IsFieldAccess(name))
         {
             var trimmed = name.TrimStart('_');
+            // Static method context: use ClassName_fieldName (no self pointer)
+            if (_ctx.IsStaticMethod && !string.IsNullOrEmpty(_ctx.CurrentClass))
+                return _ctx.CurrentClass + "_" + trimmed;
             if (!_ctx.FieldTypes.ContainsKey(trimmed) && !string.IsNullOrEmpty(_ctx.CurrentClass))
                 return _ctx.CurrentClass + "_" + trimmed;
             var prefix = TypeRegistry.HasNoPrefix(trimmed) ? "" : "f_";
@@ -243,6 +267,9 @@ public sealed class ExpressionWriter : IExpressionWriter
 
         if (!string.IsNullOrEmpty(_ctx.CurrentClass) && _ctx.FieldTypes.ContainsKey(name))
         {
+            // Static method context: use ClassName_fieldName
+            if (_ctx.IsStaticMethod)
+                return _ctx.CurrentClass + "_" + name.TrimStart('_');
             var prefix = TypeRegistry.HasNoPrefix(name) ? "" : "f_";
             return "self->" + prefix + name;
         }
@@ -293,6 +320,30 @@ public sealed class ExpressionWriter : IExpressionWriter
             return $"({typeName}){{{string.Join(", ", assigns)}}}";
         }
 
+        // No explicit return-type context: try to infer tuple type from SemanticModel
+        // and generate a proper C compound literal (_TupleN_... struct).
+        if (_ctx.SemanticModel != null)
+        {
+            try
+            {
+                var typeInfo = _ctx.SemanticModel.GetTypeInfo(tuple);
+                var tupleType = (typeInfo.ConvertedType ?? typeInfo.Type)?.ToString() ?? "";
+                // Get the CS short-form tuple type
+                var csShort = TranspilerContext.FormatTypeSymbol(typeInfo.ConvertedType ?? typeInfo.Type!);
+                if (TypeRegistry.IsTuple(csShort))
+                {
+                    var structName = TypeRegistry.GetTupleStructName(csShort);
+                    if (!string.IsNullOrEmpty(structName))
+                    {
+                        // Struct is defined in _generics.h — no need to emit it here
+                        var fields = new[] { "item1", "item2", "item3", "item4", "item5", "item6", "item7", "item8" };
+                        var assigns = elements.Take(fields.Length).Select((e, i) => $".{fields[i]} = {e}").ToList();
+                        return $"({structName}){{{string.Join(", ", assigns)}}}";
+                    }
+                }
+            }
+            catch { }
+        }
         return $"{{ {string.Join(", ", elements)} }}";
     }
 
@@ -308,6 +359,10 @@ public sealed class ExpressionWriter : IExpressionWriter
         if (lit.Token.IsKind(SyntaxKind.CharacterLiteralToken))
             return "'" + StringEscaper.EscapeChar(lit.Token.ValueText) + "'";
         var text = lit.Token.Text;
+        // C# digit separators (1_048_576, 0xFF_FF) are not valid in C — strip them.
+        // Only strip for numeric literals (not strings/chars which are handled above).
+        if (text.Contains('_') && !text.StartsWith("\"") && !text.StartsWith("'"))
+            text = text.Replace("_", "");
         if (text.EndsWith("f", StringComparison.OrdinalIgnoreCase) && !text.StartsWith("0x")) return text[..^1] + "f";
         if (text.EndsWith("d", StringComparison.OrdinalIgnoreCase)) return text[..^1];
         if (text.EndsWith("m", StringComparison.OrdinalIgnoreCase)) return text[..^1];
@@ -346,10 +401,11 @@ public sealed class ExpressionWriter : IExpressionWriter
             bool rIsStr = IsStringExpr(bin.Right) || IsStringType(bin.Right);
             if (lIsStr || rIsStr)
             {
+                // str == null → str == NULL (proper pointer check, not empty-string check)
                 if (IsNullLiteral(bin.Right))
-                    return op == "==" ? "String_IsNullOrEmpty(" + left + ")" : "!String_IsNullOrEmpty(" + left + ")";
+                    return left + " " + op + " NULL";
                 if (IsNullLiteral(bin.Left))
-                    return op == "==" ? "String_IsNullOrEmpty(" + right + ")" : "!String_IsNullOrEmpty(" + right + ")";
+                    return right + " " + op + " NULL";
                 return "CS2SX_strcmp_safe(" + left + ", " + right + ") " + op + " 0";
             }
         }
@@ -410,13 +466,74 @@ public sealed class ExpressionWriter : IExpressionWriter
         else if (condAccess.WhenNotNull is InvocationExpressionSyntax inv
             && inv.Expression is MemberBindingExpressionSyntax invMember)
         {
-            var args = WriteArguments(inv.ArgumentList.Arguments);
-            accessExpr = receiver + "->" + invMember.Name.Identifier.Text
-                       + "(" + string.Join(", ", args) + ")";
+            var methodName = invMember.Name.Identifier.Text;
+            var invArgs = WriteArguments(inv.ArgumentList.Arguments);
+            var argStr = string.Join(", ", invArgs);
+            // ?.Invoke() on a delegate/Action → direct function pointer call
+            if (methodName == "Invoke")
+            {
+                accessExpr = receiver + "(" + argStr + ")";
+            }
+            else
+            {
+                // Check if receiver is an interface type → dispatch via vtable
+                var receiverRaw = condAccess.Expression.ToString().Trim();
+                var receiverType = ResolveReceiverType(receiverRaw, condAccess.Expression as ExpressionSyntax);
+                var cleanType = receiverType?.TrimEnd('*');
+                if (cleanType != null && TypeRegistry.IsRegisteredInterface(cleanType))
+                {
+                    // Interface method dispatch: iface->vtable->Method(iface->obj, args)
+                    var fullArgs = argStr.Length > 0 ? receiver + "->obj, " + argStr : receiver + "->obj";
+                    var ifaceCall = receiver + "->vtable->" + methodName + "(" + fullArgs + ")";
+                    accessExpr = ifaceCall;
+                }
+                else
+                {
+                    var receiverRaw2 = condAccess.Expression.ToString().Trim();
+                    var recvType2 = ResolveReceiverType(receiverRaw2, condAccess.Expression as ExpressionSyntax);
+                    if (recvType2 == null)
+                        recvType2 = _ctx.GetSemanticType(condAccess.Expression);
+                    var cleanType2 = recvType2?.TrimEnd('*').Trim();
+
+                    if (cleanType2 != null && _ctx.VTableTypes.Contains(cleanType2))
+                    {
+                        var vtArgs2 = argStr.Length > 0 ? receiver + ", " + argStr : receiver;
+                        accessExpr = receiver + "->vtable->" + methodName + "(" + vtArgs2 + ")";
+                    }
+                    else if (cleanType2 != null
+                             && !TypeRegistry.IsPrimitive(cleanType2)
+                             && !TypeRegistry.IsLibNxStruct(cleanType2)
+                             && !TypeRegistry.IsControlType(cleanType2)
+                             && cleanType2 is not ("string" or "StringBuilder"))
+                    {
+                        var dcArgs = argStr.Length > 0 ? receiver + ", " + argStr : receiver;
+                        accessExpr = cleanType2 + "_" + methodName + "(" + dcArgs + ")";
+                    }
+                    else
+                    {
+                        accessExpr = receiver + "->" + methodName + "(" + argStr + ")";
+                    }
+                }
+            }
         }
         else
             accessExpr = receiver + "->(" + Write(condAccess.WhenNotNull) + ")";
-        return NullableHandler.WriteNullConditional(receiver, accessExpr);
+
+        // Void-returning null-conditional: use (void)0 as null arm to avoid C11 type violation
+        bool isVoidCall = false;
+        if (_ctx.SemanticModel != null && condAccess.WhenNotNull is InvocationExpressionSyntax voidInv)
+        {
+            try
+            {
+                var si = _ctx.SemanticModel.GetSymbolInfo(voidInv);
+                var ms = (si.Symbol ?? si.CandidateSymbols.FirstOrDefault()) as IMethodSymbol;
+                isVoidCall = ms?.ReturnsVoid == true;
+            }
+            catch { }
+        }
+        return isVoidCall
+            ? "(" + receiver + " != NULL ? " + accessExpr + " : (void)0)"
+            : NullableHandler.WriteNullConditional(receiver, accessExpr);
     }
 
     // ── Assignment ────────────────────────────────────────────────────────────
@@ -482,6 +599,18 @@ public sealed class ExpressionWriter : IExpressionWriter
             {
                 var rightRaw = assign.Right.ToString().Trim();
                 var wrapped = TryWrapAsInterface(rightRaw, right, ltIface);
+                // SemanticModel fallback: when right is a function call (not in LocalTypes/FieldTypes)
+                if (wrapped == null && _ctx.SemanticModel != null)
+                {
+                    try
+                    {
+                        var rightTypeSym = _ctx.SemanticModel.GetTypeInfo(assign.Right).Type as INamedTypeSymbol;
+                        if (rightTypeSym != null && !TypeRegistry.IsRegisteredInterface(rightTypeSym.Name)
+                            && TypeRegistry.NeedsPointerSuffix(rightTypeSym.Name))
+                            wrapped = rightTypeSym.Name + "_as_" + ltIface + "(" + right + ")";
+                    }
+                    catch { }
+                }
                 if (wrapped != null)
                     return Write(assign.Left) + " " + op + " " + wrapped;
             }
@@ -994,6 +1123,30 @@ public sealed class ExpressionWriter : IExpressionWriter
             finalRight = "_cs2sx_heap_strdup(" + right + ")";
         }
 
+        // Interface field assignment upcast: if property/field type is an interface,
+        // wrap right-hand side with ClassName_as_IFace() conversion
+        if (_ctx.SemanticModel != null)
+        {
+            try
+            {
+                // Get the declared type of the property being assigned
+                var propSym = _ctx.SemanticModel.GetSymbolInfo(mem).Symbol;
+                string? targetIfaceName = null;
+                if (propSym is IPropertySymbol pSym)
+                    targetIfaceName = TranspilerContext.FormatTypeSymbol(pSym.Type);
+                else if (propSym is IFieldSymbol fSymProp)
+                    targetIfaceName = TranspilerContext.FormatTypeSymbol(fSymProp.Type);
+                if (targetIfaceName != null && TypeRegistry.IsRegisteredInterface(targetIfaceName))
+                {
+                    var rightTypeSym = _ctx.SemanticModel.GetTypeInfo(assign.Right).Type as INamedTypeSymbol;
+                    if (rightTypeSym != null && !TypeRegistry.IsRegisteredInterface(rightTypeSym.Name)
+                        && TypeRegistry.NeedsPointerSuffix(rightTypeSym.Name))
+                        finalRight = rightTypeSym.Name + "_as_" + targetIfaceName + "(" + right + ")";
+                }
+            }
+            catch { }
+        }
+
         return obj + arrow + cProp + " " + op + " " + finalRight;
     }
 
@@ -1095,17 +1248,33 @@ public sealed class ExpressionWriter : IExpressionWriter
         var mapped = TypeRegistry.MapEnum(full);
         if (mapped != full) return mapped;
 
-        // Qualified enum member access: ClassName.EnumType.Member, EnumType.Member, etc.
-        // After typedef, enum members are global C constants — emit the name directly.
+        // Qualified member access on known types: enum members and static-class const fields.
         // Semantic model resolves this reliably across files.
         if (_ctx.SemanticModel != null)
         {
             try
             {
                 var sym = _ctx.SemanticModel.GetSymbolInfo(mem).Symbol;
-                if (sym is Microsoft.CodeAnalysis.IFieldSymbol fld
-                    && fld.ContainingType?.TypeKind == Microsoft.CodeAnalysis.TypeKind.Enum)
-                    return fld.Name;
+                if (sym is Microsoft.CodeAnalysis.IFieldSymbol fld)
+                {
+                    // Enum member → global C constant (just the name)
+                    if (fld.ContainingType?.TypeKind == Microsoft.CodeAnalysis.TypeKind.Enum)
+                        return fld.Name;
+                    // Static-class const field (like AppCategory.Tools = "Tools")
+                    if (fld.IsConst && fld.ContainingType?.IsStatic == true)
+                    {
+                        // Inline the literal value when available — needed for C static array initializers
+                        // which require compile-time constants (const char* variables are NOT constants in C)
+                        if (fld.ConstantValue is string sv)
+                            return "\"" + sv.Replace("\\", "\\\\").Replace("\"", "\\\"") + "\"";
+                        if (fld.ConstantValue != null)
+                            return fld.ConstantValue.ToString() ?? (fld.ContainingType.Name + "_" + fld.Name);
+                        return fld.ContainingType.Name + "_" + fld.Name;
+                    }
+                    // Static readonly field on a static class → ClassName_FieldName
+                    if (fld.IsStatic && fld.ContainingType?.IsStatic == true)
+                        return fld.ContainingType.Name + "_" + fld.Name;
+                }
             }
             catch { }
         }
@@ -1113,6 +1282,14 @@ public sealed class ExpressionWriter : IExpressionWriter
         // enum member in the current translation unit, return it directly.
         if (_ctx.EnumMembers.Contains(mem.Name.Identifier.Text))
             return mem.Name.Identifier.Text;
+
+        // Cross-file fallback: TypeRegistry.RegisterUserEnum was called for all enums in the project.
+        // If the receiver is a registered user enum type, emit just the member name.
+        {
+            var receiverName = mem.Expression.ToString().Trim();
+            if (TypeRegistry.IsUserDefinedEnum(receiverName))
+                return mem.Name.Identifier.Text;
+        }
 
         if (full.StartsWith("LibNX.", StringComparison.Ordinal))
             return mem.Name.Identifier.Text;
@@ -1223,13 +1400,47 @@ public sealed class ExpressionWriter : IExpressionWriter
             // params array or T[] method parameter: companion _count variable holds length
             if (_ctx.LocalTypes.ContainsKey(rk2 + "_count"))
                 return rk2 + "_count";
+            // Static array field → ClassName_fieldName_count macro (emitted by transpiler)
+            if (!string.IsNullOrEmpty(_ctx.CurrentClass) && _ctx.SemanticModel != null)
+            {
+                try
+                {
+                    var sym = _ctx.SemanticModel.GetSymbolInfo(mem.Expression).Symbol;
+                    if (sym is IFieldSymbol fSym && fSym.IsStatic && fSym.Type is IArrayTypeSymbol)
+                        return _ctx.CurrentClass + "_" + rkey2 + "_count";
+                }
+                catch { }
+            }
+            // Instance array field → use tracked allocation size from FieldArrayLengths
+            if (_ctx.FieldTypes.TryGetValue(rkey2, out var ift) && ift?.EndsWith("[]") == true
+                && _ctx.FieldArrayLengths.TryGetValue(rkey2, out var flen))
+                return flen;
         }
         if (prop == "Count" && IsListExpr(mem.Expression)) return obj + "->count";
         if (prop == "Count" && IsStackQueueHashSetExpr(mem.Expression)) return obj + "->count";
+        if (prop == "Count" && IsDictExpr(mem.Expression)) return obj + "->count";
+        // Chained access like sidebar.Items.Count — simple lookup misses the type; use SemanticModel.
+        // Note: typeInfo.Type.ToString() returns fully qualified "System.Collections.Generic.List<T>",
+        // so FormatTypeSymbol is required to get the short form "List<T>" that TypeRegistry understands.
+        if (prop == "Count" && _ctx.SemanticModel != null)
+        {
+            try
+            {
+                var exprTypeSym = _ctx.SemanticModel.GetTypeInfo(mem.Expression).Type;
+                if (exprTypeSym != null)
+                {
+                    var exprType = TranspilerContext.FormatTypeSymbol(exprTypeSym);
+                    if (TypeRegistry.IsList(exprType) || TypeRegistry.IsDictionary(exprType)
+                        || TypeRegistry.IsHashSet(exprType) || TypeRegistry.IsStack(exprType)
+                        || TypeRegistry.IsQueue(exprType))
+                        return obj + "->count";
+                }
+            }
+            catch { }
+        }
         if (prop == "Length" && IsStringBuilderExpr(mem.Expression)) return obj + "->length";
         if (prop == "HasValue" && IsNullableExpr(mem.Expression)) return NullableHandler.WriteHasValue(obj);
         if (prop == "Value" && IsNullableExpr(mem.Expression)) return NullableHandler.WriteGetValue(obj);
-        if (prop == "Count" && IsDictExpr(mem.Expression)) return obj + "->count";
         if (prop is "Keys" or "Values" && IsDictExpr(mem.Expression)) return obj;
 
         var key = rawExpr.TrimStart('_');
@@ -1273,13 +1484,16 @@ public sealed class ExpressionWriter : IExpressionWriter
                 if (recvSym is Microsoft.CodeAnalysis.INamedTypeSymbol namedSym
                     && namedSym.IsTupleType)
                 {
+                    // CS2SX_LIST_DEFINE_PTR stores T* — element access returns pointer → use ->
+                    bool tupleIsPtr = mem.Expression is ElementAccessExpressionSyntax;
+                    var tupleAccessor = tupleIsPtr ? "->" : ".";
                     var elements = namedSym.TupleElements;
                     for (int ti = 0; ti < elements.Length; ti++)
                     {
                         var elem = elements[ti];
                         if (elem.Name == prop || elem.Name == "Item" + (ti + 1))
                         {
-                            return obj + ".item" + (ti + 1);
+                            return obj + tupleAccessor + "item" + (ti + 1);
                         }
                     }
                 }
@@ -1287,13 +1501,33 @@ public sealed class ExpressionWriter : IExpressionWriter
             catch { }
         }
 
-        if ((_ctx.LocalTypes.TryGetValue(rawExpr, out var lt) && IsStructType(lt))
-         || (_ctx.FieldTypes.TryGetValue(key, out var ft) && IsStructType(ft)))
-            return obj + "." + prop;
+        // When 'obj' is already a pointer access (contains '->'), the result is a pointer.
+        // Using '.' on a pointer is invalid C — always use '->' in that case.
+        bool objIsPointerResult = obj.Contains("->") || obj.Contains("self->") || obj.StartsWith("(") ;
 
-        if ((_ctx.LocalTypes.TryGetValue(rawExpr, out var vlt) && _ctx.ValueTypeStructs.Contains(vlt))
-         || (_ctx.FieldTypes.TryGetValue(key, out var vft) && _ctx.ValueTypeStructs.Contains(vft)))
+        string? lt2 = null, ft2 = null;
+        bool isStruct2 =
+            (_ctx.LocalTypes.TryGetValue(rawExpr, out lt2) && IsStructType(lt2))
+         || (_ctx.FieldTypes.TryGetValue(key, out ft2) && IsStructType(ft2));
+        if (isStruct2)
+        {
+            if (objIsPointerResult && TypeRegistry.NeedsPointerSuffix(lt2 ?? ft2 ?? ""))
+                return obj + "->" + prop;
             return obj + "." + prop;
+        }
+
+        string? vlt2 = null, vft2 = null;
+        bool inValueTypeStructs =
+            (_ctx.LocalTypes.TryGetValue(rawExpr, out vlt2) && _ctx.ValueTypeStructs.Contains(vlt2))
+         || (_ctx.FieldTypes.TryGetValue(key, out vft2) && _ctx.ValueTypeStructs.Contains(vft2));
+        if (inValueTypeStructs)
+        {
+            // If the field type is a class (needs pointer), use -> even if in ValueTypeStructs
+            var recvT2 = vlt2 ?? vft2 ?? "";
+            if (TypeRegistry.NeedsPointerSuffix(recvT2))
+                return obj + "->" + (TypeRegistry.HasNoPrefix(prop) ? "" : "f_") + prop;
+            return obj + "." + prop;
+        }
 
         // SemanticModel: detect computed (non-auto) properties and inherited properties
         if (_ctx.SemanticModel != null && receiverType != null)
@@ -1336,7 +1570,9 @@ public sealed class ExpressionWriter : IExpressionWriter
 
                         if (isComputed)
                         {
-                            // Expression-body or explicit getter → call the getter function
+                            // Static property getter has no self parameter
+                            if (foundProp.IsStatic)
+                                return definingType.Name + "_get_" + prop + "()";
                             return definingType.Name + "_get_" + prop + "(" + obj + ")";
                         }
 
@@ -1458,6 +1694,48 @@ public sealed class ExpressionWriter : IExpressionWriter
         return WriteObjectCreationFromTypeName(typeName, obj.ArgumentList, obj.Initializer);
     }
 
+    private List<string> BuildCtorArgs(string typeName, ArgumentListSyntax? argList)
+    {
+        var supplied = argList?.Arguments.Select(a => Write(a.Expression)).ToList()
+                       ?? new List<string>();
+
+        // Use SemanticModel to find the constructor and fill in optional parameter defaults.
+        if (_ctx.SemanticModel != null && argList != null)
+        {
+            try
+            {
+                var symInfo = _ctx.SemanticModel.GetSymbolInfo(argList.Parent!);
+                if (symInfo.Symbol is IMethodSymbol ctor)
+                {
+                    var parameters = ctor.Parameters;
+                    if (supplied.Count < parameters.Length)
+                    {
+                        for (int i = supplied.Count; i < parameters.Length; i++)
+                        {
+                            var param = parameters[i];
+                            if (param.HasExplicitDefaultValue)
+                            {
+                                var defVal = param.ExplicitDefaultValue;
+                                supplied.Add(defVal == null ? "NULL"
+                                    : defVal is string s ? "\"" + s + "\""
+                                    : defVal is bool b ? (b ? "1" : "0")
+                                    : defVal.ToString() ?? "0");
+                            }
+                            else
+                            {
+                                // Non-optional param missing — can't fill, leave as-is
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+            catch { }
+        }
+
+        return supplied;
+    }
+
     private string WriteObjectCreationFromTypeName(
         string typeName,
         ArgumentListSyntax? argList,
@@ -1495,8 +1773,33 @@ public sealed class ExpressionWriter : IExpressionWriter
         if (TypeRegistry.IsList(typeName))
         {
             var inner = TypeRegistry.GetListInnerType(typeName)!;
-            var cInner = inner == "string" ? "str" : TypeRegistry.MapType(inner);
+            // Normalize cInner to a valid C identifier: void* → voidptr, spaces → _
+            var cInner = inner == "string" ? "str"
+                : TypeRegistry.MapType(inner).Replace("*", "ptr").Replace(" ", "_");
             var listCreate = "List_" + cInner + "_New()";
+
+            // new List<T>(source) — copy from an existing List<T> or IEnumerable<T> source
+            // e.g. new List<AppEntry>(_repository.GetFeatured())
+            if (argList?.Arguments.Count == 1 && initializer == null)
+            {
+                var arg = argList.Arguments[0];
+                var argTypeSem = _ctx.GetSemanticType(arg.Expression);
+                bool srcIsList = argTypeSem != null && (TypeRegistry.IsList(argTypeSem)
+                    || argTypeSem.StartsWith("IEnumerable<") || argTypeSem.StartsWith("IReadOnlyList<")
+                    || argTypeSem.StartsWith("ICollection<"));
+                if (srcIsList)
+                {
+                    var srcExpr = Write(arg.Expression);
+                    var srcTmp = _ctx.NextTmp("src");
+                    var tmp = _ctx.NextTmp("list");
+                    _ctx.Out.WriteLine(_ctx.Tab + "List_" + cInner + "* " + srcTmp + " = " + srcExpr + ";");
+                    _ctx.Out.WriteLine(_ctx.Tab + "List_" + cInner + "* " + tmp + " = " + listCreate + ";");
+                    _ctx.Out.WriteLine(_ctx.Tab + "if (" + srcTmp + ") { for (int _cpi = 0; _cpi < " + srcTmp + "->count; _cpi++) List_" + cInner + "_Add(" + tmp + ", " + srcTmp + "->data[_cpi]); }");
+                    return tmp;
+                }
+                // Single int argument is a capacity hint — ignore it, just create empty list
+            }
+
             if (initializer?.Expressions.Count > 0)
             {
                 var tmp = _ctx.NextTmp("list");
@@ -1504,7 +1807,20 @@ public sealed class ExpressionWriter : IExpressionWriter
                 foreach (var item in initializer.Expressions)
                 {
                     var itemVal = Write(item);
-                    _ctx.Out.WriteLine(_ctx.Tab + "List_" + cInner + "_Add(" + tmp + ", " + itemVal + ");");
+                    // CS2SX_LIST_DEFINE_PTR stores T* — tuple compound literals MUST be heap-allocated.
+                    // Using &(compound_literal) gives a pointer with automatic storage that becomes
+                    // dangling when the enclosing function returns, corrupting the list later.
+                    if (itemVal.StartsWith("(") && itemVal.Contains("item1"))
+                    {
+                        var tupleTmp = _ctx.NextTmp("t");
+                        _ctx.Out.WriteLine(_ctx.Tab + cInner + "* " + tupleTmp + " = (" + cInner + "*)malloc(sizeof(" + cInner + "));");
+                        _ctx.Out.WriteLine(_ctx.Tab + "if (" + tupleTmp + ") *" + tupleTmp + " = " + itemVal + ";");
+                        _ctx.Out.WriteLine(_ctx.Tab + "List_" + cInner + "_Add(" + tmp + ", " + tupleTmp + ");");
+                    }
+                    else
+                    {
+                        _ctx.Out.WriteLine(_ctx.Tab + "List_" + cInner + "_Add(" + tmp + ", " + itemVal + ");");
+                    }
                 }
                 return tmp;
             }
@@ -1515,7 +1831,27 @@ public sealed class ExpressionWriter : IExpressionWriter
             var types = TypeRegistry.GetDictionaryTypes(typeName)!.Value;
             var cKey = types.key == "string" ? "str" : TypeRegistry.MapType(types.key);
             var cVal = types.val == "string" ? "str" : TypeRegistry.MapType(types.val);
-            return "Dict_" + cKey + "_" + cVal + "_New()";
+            var dictCreate = "Dict_" + cKey + "_" + cVal + "_New()";
+
+            // new Dictionary<K,V> { { key1, val1 }, { key2, val2 }, ... }
+            // Each initializer element is an InitializerExpressionSyntax with 2 sub-expressions.
+            if (initializer?.Expressions.Count > 0)
+            {
+                var tmp = _ctx.NextTmp("dict");
+                _ctx.Out.WriteLine(_ctx.Tab + "Dict_" + cKey + "_" + cVal + "* " + tmp + " = " + dictCreate + ";");
+                foreach (var elem in initializer.Expressions)
+                {
+                    if (elem is InitializerExpressionSyntax pair && pair.Expressions.Count == 2)
+                    {
+                        var k = Write(pair.Expressions[0]);
+                        var v = Write(pair.Expressions[1]);
+                        _ctx.Out.WriteLine(_ctx.Tab + "Dict_" + cKey + "_" + cVal + "_Add(" + tmp + ", " + k + ", " + v + ");");
+                    }
+                }
+                return tmp;
+            }
+
+            return dictCreate;
         }
         if (TypeRegistry.IsStack(typeName))
         {
@@ -1585,8 +1921,7 @@ public sealed class ExpressionWriter : IExpressionWriter
             return "(" + cType + "){0}";
         }
 
-        var args = argList?.Arguments.Select(a => Write(a.Expression))
-                          ?? Enumerable.Empty<string>();
+        var args = BuildCtorArgs(typeName, argList);
         var creation = typeName + "_New(" + string.Join(", ", args) + ")";
 
         if (initializer?.Expressions.Count > 0)
@@ -1766,11 +2101,30 @@ public sealed class ExpressionWriter : IExpressionWriter
 
         bool isList = (lt != null && TypeRegistry.IsList(lt))
                    || (ft != null && TypeRegistry.IsList(ft));
+        // SemanticModel fallback: detect List/IReadOnlyList via type symbol
+        if (!isList && _ctx.SemanticModel != null)
+        {
+            try
+            {
+                var exprTypeSym = _ctx.SemanticModel.GetTypeInfo(elem.Expression).Type;
+                if (exprTypeSym != null)
+                {
+                    var exprType = TranspilerContext.FormatTypeSymbol(exprTypeSym);
+                    if (TypeRegistry.IsList(exprType))
+                    {
+                        isList = true;
+                        lt = exprType;
+                    }
+                }
+            }
+            catch { }
+        }
         if (isList)
         {
             var listType = lt ?? ft!;
-            var inner = TypeRegistry.GetListInnerType(listType)!;
-            var cInner = inner == "string" ? "str" : TypeRegistry.MapType(inner);
+            var inner = TypeRegistry.GetListInnerType(listType) ?? "int";
+            var cInner = inner == "string" ? "str"
+                : TypeRegistry.MapType(inner).Replace("*", "ptr").Replace(" ", "_");
             return "List_" + cInner + "_Get(" + objExpr + ", " + index + ")";
         }
 

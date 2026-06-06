@@ -34,7 +34,31 @@
       "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\Johannes\\\\source\\\\repos\\\\CS2SX\" -Recurse -Directory)",
       "Bash(awk '{print $1}')",
       "Read(//c/Users/Johannes/Documents/Privat/Neuer Ordner/BugRepro/**)",
-      "Read(//c/Users/Johannes/Documents/Privat/Neuer Ordner/BugRepro/cs2sx_out/**)"
+      "Read(//c/Users/Johannes/Documents/Privat/Neuer Ordner/BugRepro/cs2sx_out/**)",
+      "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\Johannes\\\\Documents\\\\Privat\" -Recurse -Filter \"AppCategory.cs\" -ErrorAction SilentlyContinue)",
+      "Bash(cd \"C:\\\\Users\\\\Johannes\\\\Documents\\\\Privat\\\\Neuer Ordner\\\\switch\\\\Netzwerk\\\\SXStore\" && cs2sx build 2>&1 | tail -20)",
+      "Read(//c/Users/Johannes/Documents/Privat/Neuer Ordner/switch/Netzwerk/SXStore/**)",
+      "PowerShell(cs2sx build \"C:\\\\Users\\\\Johannes\\\\Documents\\\\Privat\\\\Neuer Ordner\\\\switch\\\\Netzwerk\\\\SXStore\" 2>&1; Write-Host \"Exit: $LASTEXITCODE\")",
+      "PowerShell(cs2sx build \"C:\\\\Users\\\\Johannes\\\\Documents\\\\Privat\\\\Neuer Ordner\\\\switch\\\\Netzwerk\\\\SXStore\" 2>&1 | Out-String; Write-Host \"Exit: $LASTEXITCODE\")",
+      "PowerShell($env:CS2SX_VERBOSE = \"1\"; cs2sx build \"C:\\\\Users\\\\Johannes\\\\Documents\\\\Privat\\\\Neuer Ordner\\\\switch\\\\Netzwerk\\\\SXStore\" 2>&1 | Select-Object -Last 30; Write-Host \"Exit: $LASTEXITCODE\")",
+      "PowerShell(cs2sx build \"C:\\\\Users\\\\Johannes\\\\Documents\\\\Privat\\\\Neuer Ordner\\\\switch\\\\Netzwerk\\\\SXStore\" 2>&1 | Select-Object -Last 8; Write-Host \"Exit: $LASTEXITCODE\")",
+      "Read(//opt/devkitpro/**)",
+      "Bash(xargs grep -l \"armDCacheFlush\\\\|audoutAppend\")",
+      "Bash(xargs grep -l \"audout\")",
+      "Bash(ls /opt/devkitpro/ 2>/dev/null || ls C:/devkitPro/ 2>/dev/null || echo \"devkitPro not found in standard locations\")",
+      "Read(//c/devkitPro/**)",
+      "Bash(where cs2sx *)",
+      "Bash(cs2sx --version)",
+      "Bash(ls -la \"C:/Users/Johannes/.dotnet/tools/.store/cs2sx/\" 2>/dev/null | head -10; ls \"C:/Users/Johannes/.dotnet/tools/.store/cs2sx/\" 2>/dev/null)",
+      "Read(//c/Users/Johannes/.dotnet/tools/.store/cs2sx/**)",
+      "Bash(make)",
+      "Bash(echo \"EXIT:$?\")",
+      "Bash(echo \"EXIT: $?\")",
+      "Read(//tmp/**)",
+      "PowerShell(cs2sx build \"C:\\\\Users\\\\Johannes\\\\Documents\\\\Privat\\\\Neuer Ordner\\\\switch\\\\Datenstrukturen\\\\textEditor\\\\textEditor.csproj\" 2>&1)",
+      "PowerShell($proc = Start-Process -FilePath \"cs2sx\" -ArgumentList \"build\", \"C:\\\\Users\\\\Johannes\\\\Documents\\\\Privat\\\\Neuer Ordner\\\\switch\\\\Datenstrukturen\\\\textEditor\\\\textEditor.csproj\" -Wait -PassThru -RedirectStandardOutput \"C:\\\\Temp\\\\te_out.txt\" -RedirectStandardError \"C:\\\\Temp\\\\te_err.txt\" -NoNewWindow; $proc.ExitCode; Get-Content \"C:\\\\Temp\\\\te_out.txt\" -ErrorAction SilentlyContinue; Get-Content \"C:\\\\Temp\\\\te_err.txt\" -ErrorAction SilentlyContinue)",
+      "PowerShell(New-Item -ItemType Directory -Force \"C:\\\\Temp\" | Out-Null; $proc = Start-Process -FilePath \"cs2sx\" -ArgumentList @\\(\"build\", \"C:\\\\Users\\\\Johannes\\\\Documents\\\\Privat\\\\Neuer Ordner\\\\switch\\\\Datenstrukturen\\\\textEditor\\\\textEditor.csproj\"\\) -Wait -PassThru -RedirectStandardOutput \"C:\\\\Temp\\\\te_out.txt\" -RedirectStandardError \"C:\\\\Temp\\\\te_err.txt\" -NoNewWindow; Write-Host \"Exit: $\\($proc.ExitCode\\)\"; if \\(Test-Path \"C:\\\\Temp\\\\te_out.txt\"\\) { Get-Content \"C:\\\\Temp\\\\te_out.txt\" }; if \\(Test-Path \"C:\\\\Temp\\\\te_err.txt\"\\) { Get-Content \"C:\\\\Temp\\\\te_err.txt\" })",
+      "PowerShell($p = \"C:\\\\Users\\\\Johannes\\\\Documents\\\\Privat\\\\Neuer Ordner\\\\switch\\\\Datenstrukturen\\\\textEditor\\\\textEditor.csproj\"; cmd /c \"cs2sx build \"\"$p\"\" > C:\\\\Temp\\\\te_out.txt 2>&1\"; Get-Content \"C:\\\\Temp\\\\te_out.txt\")"
     ]
   }
 }

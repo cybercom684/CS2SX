@@ -52,6 +52,15 @@ public sealed class EventDelegateHandler : InvocationHandlerBase
                 return true;
             }
 
+            // Fallback: type not found in context dictionaries, but .Invoke() is only
+            // valid on delegate types in C# — emit as a direct function pointer call.
+            if (delType == null)
+            {
+                var argStr = args.Count > 0 ? string.Join(", ", args) : "";
+                result = delegateExpr + "(" + argStr + ")";
+                return true;
+            }
+
             // Multicast list invocation: e.g. OnScore_handlers (List of function pointers)
             var listKey = delegateKey + "_handlers";
             if (ctx.FieldTypes.TryGetValue(listKey, out var listType)

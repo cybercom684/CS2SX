@@ -81,6 +81,19 @@ public sealed class GenericExpander
             headerSb.AppendLine("// ── List<UserClass> Instantiierungen ─────────────────────────────────");
             foreach (var userClass in _collector.ListOfUserClassInstantiations.OrderBy(s => s))
             {
+                // For tuple struct types (_Tuple2_*): emit struct definition first
+                if (userClass.StartsWith("_Tuple"))
+                {
+                    var tupleStructDef = TypeRegistry.GetTupleStructDefinition(userClass);
+                    if (!string.IsNullOrEmpty(tupleStructDef))
+                    {
+                        var tupleGuard = "CS2SX_TUPLE_" + userClass + "_DEFINED";
+                        headerSb.AppendLine($"#ifndef {tupleGuard}");
+                        headerSb.AppendLine($"#define {tupleGuard}");
+                        headerSb.Append(tupleStructDef);
+                        headerSb.AppendLine($"#endif");
+                    }
+                }
                 var guard = "CS2SX_LIST_PTR_" + userClass + "_DEFINED";
                 headerSb.AppendLine($"#ifndef {guard}");
                 headerSb.AppendLine($"#define {guard}");
@@ -238,7 +251,8 @@ public sealed class GenericExpander
         if (csType.StartsWith("Dictionary<") && csType.EndsWith(">"))
         {
             var inner = csType[11..^1].Trim();
-            var comma = inner.IndexOf(',');
+            // Use top-level comma scan to handle nested generics like Dictionary<string, List<int>>
+            var comma = TypeRegistry.FindTopLevelComma(inner);
             if (comma >= 0)
             {
                 var k = inner[..comma].Trim();

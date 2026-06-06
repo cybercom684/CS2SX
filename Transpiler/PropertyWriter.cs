@@ -44,7 +44,9 @@ public static class PropertyWriter
         var cType = TypeRegistry.MapType(csType);
         var name = prop.Identifier.Text;
         var ptr = NeedsPtr(csType) ? "*" : "";
-        var self = className + "* self";
+        // Static properties: no self parameter
+        bool isStaticH = prop.Modifiers.Any(m => m.IsKind(SyntaxKind.StaticKeyword));
+        var self = isStaticH ? "" : className + "* self";
 
         // Expression-body Property → nur Getter
         if (prop.ExpressionBody != null)
@@ -76,9 +78,13 @@ public static class PropertyWriter
         var cType = TypeRegistry.MapType(csType);
         var name = prop.Identifier.Text;
         var ptr = NeedsPtr(csType) ? "*" : "";
-        var self = className + "* self";
+        // Static property (static class or static modifier) → no self parameter
+        bool isStaticProp = prop.Modifiers.Any(m => m.IsKind(SyntaxKind.StaticKeyword))
+                         || ctx.IsStaticMethod;
+        var self = isStaticProp ? "" : className + "* self";
 
         ctx.CurrentClass = className;
+        if (isStaticProp) ctx.IsStaticMethod = true;
 
         // FIX: Expression-body Property → Getter generieren
         // public int Speed => _speed * 2;

@@ -40,7 +40,14 @@ public sealed class TranspilerContext
 
     // ── Diagnose-System ───────────────────────────────────────────────────────
 
-    public DiagnosticReporter Diagnostics { get; } = new();
+    // Can be injected from outside to share source-map and diagnostics across files.
+    public DiagnosticReporter Diagnostics { get; }
+
+    public TranspilerContext(StringWriter writer, DiagnosticReporter? sharedDiagnostics = null)
+    {
+        Out = writer;
+        Diagnostics = sharedDiagnostics ?? new DiagnosticReporter();
+    }
 
     // ── Klassen-Kontext ───────────────────────────────────────────────────────
 
@@ -79,6 +86,8 @@ public sealed class TranspilerContext
 
     public Dictionary<string, string> LocalTypes { get; } = new(StringComparer.Ordinal);
     public Dictionary<string, string> ArrayLengths { get; } = new(StringComparer.Ordinal);
+    // Tracks instance field array sizes from assignments: field "keys" → "12"
+    public Dictionary<string, string> FieldArrayLengths { get; } = new(StringComparer.Ordinal);
 
     // ── Value-type und VTable Registries ──────────────────────────────────────
 
@@ -177,13 +186,6 @@ public sealed class TranspilerContext
     public int CurrentCLine { get; private set; } = 1;
     public string CurrentCFile { get; set; } = string.Empty;
 
-    // ── Konstruktor ───────────────────────────────────────────────────────────
-
-    public TranspilerContext(StringWriter writer)
-    {
-        Out = writer;
-    }
-
     // ── Convenience ──────────────────────────────────────────────────────────
 
     public void WriteLine(string line)
@@ -278,11 +280,12 @@ public sealed class TranspilerContext
     public string NextTmp(string prefix = "tmp") =>
         "_" + prefix + "_" + (_classTmpCounter++);
 
-    // FIX-1: NextStringBuf nutzt _classStringCounter — steigt pro Klasse monoton an.
+    // NextStringBuf: use _cs2sx_next_buf() from switchforms.h (rotating static pool)
+    // This avoids dangling pointer UB when the buffer is returned from a function.
     public string NextStringBuf(int size = 512)
     {
         var name = "_sb" + (_classStringCounter++);
-        WriteLine($"char {name}[{size}];");
+        WriteLine($"char* {name} = _cs2sx_next_buf();");
         return name;
     }
 
@@ -339,10 +342,32 @@ public sealed class TranspilerContext
         if (type is IArrayTypeSymbol arr)
             return FormatTypeSymbol(arr.ElementType) + "[]";
 
+        // Tuple types (ValueTuple) → (T1, T2, ...) short form
+        if (type is INamedTypeSymbol tupleType && tupleType.IsTupleType)
+        {
+            var parts = tupleType.TupleElements.Select(e => FormatTypeSymbol(e.Type)).ToList();
+            return "(" + string.Join(", ", parts) + ")";
+        }
+
         if (type is INamedTypeSymbol listType
-            && listType.Name == "List"
+            && (listType.Name is "List" or "IReadOnlyList" or "IList" or "IEnumerable" or "ICollection")
             && listType.TypeArguments.Length == 1)
             return "List<" + FormatTypeSymbol(listType.TypeArguments[0]) + ">";
+
+        if (type is INamedTypeSymbol stackType
+            && stackType.Name == "Stack"
+            && stackType.TypeArguments.Length == 1)
+            return "Stack<" + FormatTypeSymbol(stackType.TypeArguments[0]) + ">";
+
+        if (type is INamedTypeSymbol queueType
+            && queueType.Name == "Queue"
+            && queueType.TypeArguments.Length == 1)
+            return "Queue<" + FormatTypeSymbol(queueType.TypeArguments[0]) + ">";
+
+        if (type is INamedTypeSymbol hashSetType
+            && hashSetType.Name == "HashSet"
+            && hashSetType.TypeArguments.Length == 1)
+            return "HashSet<" + FormatTypeSymbol(hashSetType.TypeArguments[0]) + ">";
 
         if (type is INamedTypeSymbol dictType
             && dictType.Name == "Dictionary"
