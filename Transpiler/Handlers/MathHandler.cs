@@ -14,61 +14,62 @@ public sealed class MathHandler : InvocationHandlerBase
     // Methods that are type-neutral (always same C function regardless of arg type)
     private static readonly Dictionary<string, string> s_mathMap = new(StringComparer.Ordinal)
     {
-        // Math.*
+        // Math.* — System.Math is double-precision in C#, so use the double C
+        // functions (sqrt/floor/...), NOT the single-precision *f variants.
         ["Math.Min"]      = "MIN",
         ["Math.Max"]      = "MAX",
-        ["Math.Sqrt"]     = "sqrtf",
-        ["Math.Floor"]    = "floorf",
-        ["Math.Ceil"]     = "ceilf",
-        ["Math.Ceiling"]  = "ceilf",
-        ["Math.Pow"]      = "powf",
-        ["Math.Sin"]      = "sinf",
-        ["Math.Cos"]      = "cosf",
-        ["Math.Tan"]      = "tanf",
-        ["Math.Asin"]     = "asinf",
-        ["Math.Acos"]     = "acosf",
-        ["Math.Atan"]     = "atanf",
-        ["Math.Atan2"]    = "atan2f",
-        ["Math.Sinh"]     = "sinhf",
-        ["Math.Cosh"]     = "coshf",
-        ["Math.Tanh"]     = "tanhf",
-        ["Math.Exp"]      = "expf",
-        ["Math.Log"]      = "logf",
-        ["Math.Log2"]     = "log2f",
-        ["Math.Log10"]    = "log10f",
+        ["Math.Sqrt"]     = "sqrt",
+        ["Math.Floor"]    = "floor",
+        ["Math.Ceil"]     = "ceil",
+        ["Math.Ceiling"]  = "ceil",
+        ["Math.Pow"]      = "pow",
+        ["Math.Sin"]      = "sin",
+        ["Math.Cos"]      = "cos",
+        ["Math.Tan"]      = "tan",
+        ["Math.Asin"]     = "asin",
+        ["Math.Acos"]     = "acos",
+        ["Math.Atan"]     = "atan",
+        ["Math.Atan2"]    = "atan2",
+        ["Math.Sinh"]     = "sinh",
+        ["Math.Cosh"]     = "cosh",
+        ["Math.Tanh"]     = "tanh",
+        ["Math.Exp"]      = "exp",
+        ["Math.Log"]      = "log",
+        ["Math.Log2"]     = "log2",
+        ["Math.Log10"]    = "log10",
         ["Math.Clamp"]    = "CLAMP",
-        ["Math.Round"]    = "roundf",
-        ["Math.Truncate"] = "truncf",
-        ["Math.Cbrt"]     = "cbrtf",
+        ["Math.Round"]    = "round",
+        ["Math.Truncate"] = "trunc",
+        ["Math.Cbrt"]     = "cbrt",
         ["Math.Sign"]     = "CS2SX_Sign",
         ["Math.IEEERemainder"] = "remainder",
 
         // System.Math.*
         ["System.Math.Min"]      = "MIN",
         ["System.Math.Max"]      = "MAX",
-        ["System.Math.Sqrt"]     = "sqrtf",
-        ["System.Math.Floor"]    = "floorf",
-        ["System.Math.Ceil"]     = "ceilf",
-        ["System.Math.Ceiling"]  = "ceilf",
-        ["System.Math.Pow"]      = "powf",
-        ["System.Math.Sin"]      = "sinf",
-        ["System.Math.Cos"]      = "cosf",
-        ["System.Math.Tan"]      = "tanf",
-        ["System.Math.Asin"]     = "asinf",
-        ["System.Math.Acos"]     = "acosf",
-        ["System.Math.Atan"]     = "atanf",
-        ["System.Math.Atan2"]    = "atan2f",
-        ["System.Math.Sinh"]     = "sinhf",
-        ["System.Math.Cosh"]     = "coshf",
-        ["System.Math.Tanh"]     = "tanhf",
-        ["System.Math.Exp"]      = "expf",
-        ["System.Math.Log"]      = "logf",
-        ["System.Math.Log2"]     = "log2f",
-        ["System.Math.Log10"]    = "log10f",
+        ["System.Math.Sqrt"]     = "sqrt",
+        ["System.Math.Floor"]    = "floor",
+        ["System.Math.Ceil"]     = "ceil",
+        ["System.Math.Ceiling"]  = "ceil",
+        ["System.Math.Pow"]      = "pow",
+        ["System.Math.Sin"]      = "sin",
+        ["System.Math.Cos"]      = "cos",
+        ["System.Math.Tan"]      = "tan",
+        ["System.Math.Asin"]     = "asin",
+        ["System.Math.Acos"]     = "acos",
+        ["System.Math.Atan"]     = "atan",
+        ["System.Math.Atan2"]    = "atan2",
+        ["System.Math.Sinh"]     = "sinh",
+        ["System.Math.Cosh"]     = "cosh",
+        ["System.Math.Tanh"]     = "tanh",
+        ["System.Math.Exp"]      = "exp",
+        ["System.Math.Log"]      = "log",
+        ["System.Math.Log2"]     = "log2",
+        ["System.Math.Log10"]    = "log10",
         ["System.Math.Clamp"]    = "CLAMP",
-        ["System.Math.Round"]    = "roundf",
-        ["System.Math.Truncate"] = "truncf",
-        ["System.Math.Cbrt"]     = "cbrtf",
+        ["System.Math.Round"]    = "round",
+        ["System.Math.Truncate"] = "trunc",
+        ["System.Math.Cbrt"]     = "cbrt",
         ["System.Math.Sign"]     = "CS2SX_Sign",
 
         // MathF.* (single-precision variants — same C functions)
@@ -114,6 +115,16 @@ public sealed class MathHandler : InvocationHandlerBase
         if (s_absNames.Contains(calleeStr))
         {
             result = WriteAbs(inv, args, ctx);
+            return true;
+        }
+
+        // Math.Round(value, digits): C round() takes one arg, so scale manually.
+        if ((calleeStr is "Math.Round" or "System.Math.Round" or "MathF.Round")
+            && args.Count == 2)
+        {
+            var roundFn = calleeStr == "MathF.Round" ? "roundf" : "round";
+            var powFn   = calleeStr == "MathF.Round" ? "powf"   : "pow";
+            result = $"({roundFn}(({args[0]}) * {powFn}(10, ({args[1]}))) / {powFn}(10, ({args[1]})))";
             return true;
         }
 

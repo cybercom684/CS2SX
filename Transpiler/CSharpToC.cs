@@ -150,31 +150,10 @@ public sealed class CSharpToC : CSharpSyntaxWalker
         // Register as value type so NeedsPointerSuffix never adds * for enum fields/locals
         TypeRegistry.RegisterUserEnum(enumName);
 
-        if (_mode != TranspileMode.HeaderOnly) return;
-
-        // Determine the underlying C type (default: int)
-        string underlyingCType = "int";
-        if (node.BaseList?.Types.Count > 0)
-        {
-            var baseTypeName = node.BaseList.Types[0].ToString().Trim();
-            underlyingCType = TypeRegistry.MapType(baseTypeName);
-        }
-
-        // typedef form so 'EnumName' is usable without the 'enum' keyword in C.
-        _ctx.Out.WriteLine("typedef enum " + enumName);
-        _ctx.Out.WriteLine("{");
-        _ctx.Indent();
-        foreach (var member in node.Members)
-        {
-            var name = member.Identifier.Text;
-            if (member.EqualsValue != null)
-                _ctx.Out.WriteLine(name + " = " + _exprWriter.Write(member.EqualsValue.Value) + ",");
-            else
-                _ctx.Out.WriteLine(name + ",");
-        }
-        _ctx.Dedent();
-        _ctx.Out.WriteLine("} " + enumName + ";");
-        _ctx.Out.WriteLine();
+        // The enum's full `typedef enum {…}` definition is emitted once into
+        // _forward.h (see BuildPipeline.WriteForwardDeclarations) so it is visible
+        // across all translation units. Emitting it per-file too would be a C
+        // redefinition error, so we only register here.
     }
 
     // ── Klassen ───────────────────────────────────────────────────────────────
@@ -296,7 +275,12 @@ public sealed class CSharpToC : CSharpSyntaxWalker
                 && !IsControlSubclass(baseType)
                 && _ctx.VTableTypes.Contains(baseType))
             {
-                VTableBuilder.WriteVTableInstance(node, node.Identifier.Text, baseType, _ctx.Out, _ctx.SemanticModel);
+                // Use the vtable-declaring root as the instance's struct type
+                // (overrides reuse the root's `_vtable`, so a 3-level chain must
+                // not emit a nonexistent {immediateBase}_vtable).
+                var vtType = _ctx.VTableRoot.TryGetValue(node.Identifier.Text, out var vr)
+                    ? vr : baseType;
+                VTableBuilder.WriteVTableInstance(node, node.Identifier.Text, vtType, _ctx.Out, _ctx.SemanticModel);
             }
 
             if (_interfaceExpander != null)
@@ -1980,6 +1964,7 @@ public sealed class CSharpToC : CSharpSyntaxWalker
         var isPrim = TypeRegistry.IsPrimitive(csType)
                   || csType == "string"
                   || _ctx.EnumDefs.ContainsKey(csType)
+                  || TypeRegistry.IsUserDefinedEnum(csType) // enum from another file → value
                   || TypeRegistry.IsDelegate(csType); // function pointer typedefs — no extra *
 
         if (isRef)

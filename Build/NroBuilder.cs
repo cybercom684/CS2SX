@@ -22,8 +22,10 @@ public sealed class NroBuilder
         string? romfsBin = null;
         if (romfsDir != null && Directory.Exists(romfsDir))
         {
-            // elf2nro needs a pre-built romfs binary — build it with build_romfs
-            romfsBin = Path.Combine(Path.GetTempPath(), "cs2sx_romfs.bin");
+            // elf2nro needs a pre-built romfs binary — build it with build_romfs.
+            // Qualify the temp name with the PID so concurrent/watch builds don't collide.
+            romfsBin = Path.Combine(Path.GetTempPath(),
+                $"cs2sx_romfs_{System.Diagnostics.Process.GetCurrentProcess().Id}.bin");
             var buildRomfs = Path.Combine(_devkitPath, "tools", "bin", "build_romfs");
             ProcessRunner.Run(buildRomfs,
                 $"\"{romfsDir}\" \"{romfsBin}\"", "build_romfs");

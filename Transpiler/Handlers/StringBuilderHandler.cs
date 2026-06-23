@@ -81,7 +81,7 @@ public sealed class StringBuilderHandler : InvocationHandlerBase
             {
                 var argStr = string.Join(", ", args.Skip(1));
                 ctx.Out.WriteLine(ctx.Tab
-                    + $"snprintf({buf}, sizeof({buf}), \"{fmt}\", {argStr});");
+                    + $"snprintf({buf}, CS2SX_STRBUF_SIZE, \"{fmt}\", {argStr});");
             }
             return "StringBuilder_AppendStr(" + sbExpr + ", " + buf + ")";
         }

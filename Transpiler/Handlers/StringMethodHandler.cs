@@ -189,8 +189,19 @@ public sealed class StringMethodHandler : InvocationHandlerBase
             "string.Split" or "String.Split"
                 => HandleSplitStatic(inv, args),
 
-            _ => args.Count > 0 ? args[0] : "\"\"",
+            _ => WarnUnhandledString(inv, calleeStr, ctx, args),
         };
+    }
+
+    // Unhandled static/instance string method: warn loudly instead of silently
+    // returning the first argument (which compiles but is wrong at runtime).
+    private static string WarnUnhandledString(
+        InvocationExpressionSyntax inv, string name,
+        TranspilerContext ctx, List<string> args)
+    {
+        ctx.Warn(inv, $"unsupported string method '{name}' — emitted a passthrough; "
+                    + "result will be wrong. Verify generated C.");
+        return args.Count > 0 ? args[0] : "\"\"";
     }
 
     /// <summary>
@@ -287,7 +298,7 @@ public sealed class StringMethodHandler : InvocationHandlerBase
 
             "ToCharArray" => receiver + " /* ToCharArray — const char* is already a char array in C */",
 
-            _ => args.Count > 0 ? args[0] : "\"\"",
+            _ => WarnUnhandledString(inv, methodName, ctx, args),
         };
     }
 
@@ -345,9 +356,9 @@ public sealed class StringMethodHandler : InvocationHandlerBase
     private static string HandleSplitInstance(InvocationExpressionSyntax inv,
         string receiver, List<string> args)
     {
-        if (args.Count == 0) return "String_Split(" + receiver + ", \",\")";
+        if (args.Count == 0) return "String_Split_Whitespace(" + receiver + ")";
         var sep = ExtractSplitSeparator(inv, 0, args[0]);
-        if (sep == "\"\"") return "/* String.Split(\"\") — empty separator not supported; returning single-element list */ String_Split(" + receiver + ", \",\")";
+        if (sep == "\"\"") return "String_Split_Whitespace(" + receiver + ")";
         var removeEmpty = HasRemoveEmptyEntries(inv);
         var fn = removeEmpty ? "String_Split_RemoveEmpty" : "String_Split";
         return $"{fn}({receiver}, {sep})";
@@ -357,9 +368,9 @@ public sealed class StringMethodHandler : InvocationHandlerBase
     private static string HandleSplitStatic(InvocationExpressionSyntax inv, List<string> args)
     {
         if (args.Count == 0) return "NULL";
-        if (args.Count == 1) return "String_Split(" + args[0] + ", \",\")";
+        if (args.Count == 1) return "String_Split_Whitespace(" + args[0] + ")";
         var sep = ExtractSplitSeparator(inv, 1, args[1]);
-        if (sep == "\"\"") return "/* String.Split(\"\") — empty separator not supported; returning single-element list */ String_Split(" + args[0] + ", \",\")";
+        if (sep == "\"\"") return "String_Split_Whitespace(" + args[0] + ")";
         var removeEmpty = HasRemoveEmptyEntries(inv);
         var fn = removeEmpty ? "String_Split_RemoveEmpty" : "String_Split";
         return $"{fn}({args[0]}, {sep})";
@@ -529,7 +540,7 @@ public sealed class StringMethodHandler : InvocationHandlerBase
             'D' => numStr.Length > 0 ? $"%0{precision}d"  : "%d",
             'X' => numStr.Length > 0 ? $"%0{precision}X"  : "%X",
             'x' => numStr.Length > 0 ? $"%0{precision}x"  : "%x",
-            'P' => numStr.Length > 0 ? $"%.{precision}f%%%%"  : "%.2f%%",
+            'P' => numStr.Length > 0 ? $"%.{precision}f%%"  : "%.2f%%",
             'C' => "%.2f",
             _ => baseSpec,
         };

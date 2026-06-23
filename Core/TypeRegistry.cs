@@ -49,6 +49,7 @@ public static class TypeRegistry
         ["TouchState"] = "CS2SX_TouchState",
         ["BatteryInfo"] = "CS2SX_BatteryInfo",
         ["TimeInfo"] = "CS2SX_TimeInfo",
+        ["MotionState"] = "CS2SX_MotionState",
         ["Stopwatch"] = "CS2SX_Stopwatch",
         ["TimeSpan"] = "CS2SX_TimeSpan",
         ["Regex"] = "CS2SX_Regex",
@@ -81,7 +82,7 @@ public static class TypeRegistry
     {
         "FsDir", "FsFile", "FsFileSystem", "FsDirectoryEntry",
         "PadState", "HidTouchScreenState", "AccountUid", "PsmChargerType",
-        "CS2SX_StickPos", "CS2SX_TouchState", "CS2SX_BatteryInfo", "CS2SX_TimeInfo",
+        "CS2SX_StickPos", "CS2SX_TouchState", "CS2SX_BatteryInfo", "CS2SX_TimeInfo", "CS2SX_MotionState",
         // libnx enum types (value types — no pointer suffix)
         "NpadButton", "HidNpadButton", "HidTouchState",
     };
@@ -116,6 +117,7 @@ public static class TypeRegistry
         ["float"] = "%f",
         ["double"] = "%lf",
         ["bool"] = "%d",
+        ["char"] = "%c",
         ["const char*"] = "%s",
         ["intptr_t"]  = "%zd",
         ["uintptr_t"] = "%zu",
@@ -431,18 +433,34 @@ public static class TypeRegistry
     public static string MapProperty(string prop) =>
         s_propertyNames.TryGetValue(prop, out var c) ? c : "f_" + prop;
 
-    public static string FormatSpecifier(string cType) =>
-        s_formatSpecifiers.TryGetValue(cType, out var s) ? s : "%s";
+    public static string FormatSpecifier(string cType)
+    {
+        if (s_formatSpecifiers.TryGetValue(cType, out var s)) return s;
+        // String-like C types keep %s; everything else (enums, unknown scalars)
+        // defaults to %d — safer than %s, which would dereference a non-pointer.
+        if (cType != null && cType.Contains("char*")) return "%s";
+        return "%d";
+    }
 
     public static bool IsPrimitive(string csType) => s_primitives.ContainsKey(csType);
     public static bool IsLibNxStruct(string csType) => s_libNxStructs.Contains(csType);
 
+    // List-like generic types whose single type argument is the element type.
+    // Includes the enumerable interfaces LINQ operators return (e.g. OrderBy →
+    // IOrderedEnumerable) so chained LINQ resolves correctly.
+    private static readonly string[] s_listPrefixes =
+    {
+        "List<", "IEnumerable<", "IReadOnlyList<", "IList<",
+        "ICollection<", "IReadOnlyCollection<", "IOrderedEnumerable<",
+    };
+
     public static bool IsList(string csType)
     {
         csType = csType.Trim();
-        return (csType.StartsWith("List<") && csType.EndsWith(">"))
-            || (csType.StartsWith("IEnumerable<") && csType.EndsWith(">"))
-            || (csType.StartsWith("IReadOnlyList<") && csType.EndsWith(">"));
+        if (!csType.EndsWith(">")) return false;
+        foreach (var p in s_listPrefixes)
+            if (csType.StartsWith(p, StringComparison.Ordinal)) return true;
+        return false;
     }
 
     public static bool IsDictionary(string csType) =>
@@ -502,12 +520,10 @@ public static class TypeRegistry
     public static string? GetListInnerType(string csType)
     {
         csType = csType.Trim();
-        if (csType.StartsWith("List<") && csType.EndsWith(">"))
-            return csType[5..^1].Trim();
-        if (csType.StartsWith("IEnumerable<") && csType.EndsWith(">"))
-            return csType[12..^1].Trim();
-        if (csType.StartsWith("IReadOnlyList<") && csType.EndsWith(">"))
-            return csType[14..^1].Trim();
+        if (!csType.EndsWith(">")) return null;
+        foreach (var p in s_listPrefixes)
+            if (csType.StartsWith(p, StringComparison.Ordinal))
+                return csType[p.Length..^1].Trim();
         return null;
     }
 

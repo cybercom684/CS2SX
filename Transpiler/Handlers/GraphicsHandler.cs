@@ -10,6 +10,13 @@ public sealed class GraphicsHandler : InvocationHandlerBase
         new(StringComparer.Ordinal)
         {
             ["Graphics.Init"] = "Graphics_Init",
+            ["Graphics.LoadImage"] = "Graphics_LoadImage",
+            ["Graphics.LoadImageThumb"] = "Graphics_LoadImageThumb",
+            ["Graphics.ScaleTextureSmooth"] = "Graphics_ScaleTextureSmooth",
+            ["Graphics.BlitPhysical"] = "Graphics_BlitPhysical",
+            ["Graphics.SetOutputResolution"] = "Graphics_SetOutputResolution",
+            ["Graphics.GetScaleNum"] = "Graphics_GetScaleNum",
+            ["Graphics.GetScaleDen"] = "Graphics_GetScaleDen",
             ["Graphics.BeginFrame"] = "Graphics_BeginFrame",
             ["Graphics.EndFrame"] = "Graphics_EndFrame",
             ["Graphics.FillScreen"] = "Graphics_FillScreen",

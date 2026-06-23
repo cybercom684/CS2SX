@@ -60,7 +60,7 @@ public sealed class RegexHandler : InvocationHandlerBase
 
             case "Regex.Escape":
                 if (args.Count < 1) { result = "\"\""; return true; }
-                result = args[0];
+                result = $"CS2SX_Regex_Escape({args[0]})";
                 return true;
         }
 

@@ -12,6 +12,17 @@ public sealed class FormHandler : InvocationHandlerBase
         if (calleeStr is not ("Form.Add" or "Add" or "SwitchApp_RequestExit"))
             return NotHandled(out result);
 
+        // A bare `Add(...)` is the form-control-add ONLY inside a SwitchApp subclass.
+        // In any other class it's the user's own method (e.g. a List wrapper's Add),
+        // so defer — otherwise we'd hijack it and cast its argument to (Control*).
+        if (calleeStr == "Add")
+        {
+            bool isAppCtx = ctx.CurrentBaseType == "SwitchApp"
+                         || ctx.CurrentBaseType == "SwitchAppEx";
+            if (!isAppCtx || args.Count != 1)
+                return NotHandled(out result);
+        }
+
         result = calleeStr switch
         {
             "Form.Add" or "Add" =>

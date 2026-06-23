@@ -8,7 +8,17 @@
 #include <float.h>
 #include <math.h>
 #include "switchforms.h"
+
+// Forward-declare the global pad state so stub headers can call padGetStyleSet.
+// The actual definition lives in switchforms.c (emitted alongside SwitchApp_Run).
+extern PadState g_cs2sx_pad;
+
 #include "AudioStub.h"
+#include "VibrationStub.h"
+#include "MotionStub.h"
+#include "SwkbdStub.h"
+#include "SaveDataStub.h"
+#include "HttpStub.h"
 
 // ============================================================================
 // Farb-Hilfsmakros (RGBA8888)
@@ -316,16 +326,24 @@ struct Texture {
     u32* f_Pixels;
 };
 
+// Max texture dimension — guards against integer-overflow allocations from
+// untrusted/corrupt image headers (width*height*4 must stay well within size_t).
+#define CS2SX_TEX_MAX_DIM 16384
+
 static inline Texture* Texture_New(int width, int height, u32* pixels)
 {
+    if (width <= 0 || height <= 0
+        || width > CS2SX_TEX_MAX_DIM || height > CS2SX_TEX_MAX_DIM)
+        return NULL;
     Texture* t = (Texture*)malloc(sizeof(Texture));
     if (!t) return NULL;
     t->f_Width  = width;
     t->f_Height = height;
-    t->f_Pixels = (u32*)malloc(width * height * sizeof(u32));
+    size_t bytes = (size_t)width * (size_t)height * sizeof(u32);
+    t->f_Pixels = (u32*)malloc(bytes);
     if (!t->f_Pixels) { free(t); return NULL; }
-    if (pixels) memcpy(t->f_Pixels, pixels, width * height * sizeof(u32));
-    else        memset(t->f_Pixels, 0, width * height * sizeof(u32));
+    if (pixels) memcpy(t->f_Pixels, pixels, bytes);
+    else        memset(t->f_Pixels, 0, bytes);
     return t;
 }
 
@@ -334,6 +352,37 @@ static inline void Texture_Dispose(Texture* t)
     if (!t) return;
     free(t->f_Pixels);
     free(t);
+}
+
+// Decodes PNG/JPEG/BMP/GIF/TGA into an RGBA buffer. Provided by a project that
+// links the stb_image extern-lib (externLibs/stb/stb_image_build.c). Declared
+// here so Graphics_LoadImage compiles; the symbol is only required when an app
+// actually calls it (the static-inline shim below is otherwise discarded).
+extern unsigned int* CS2SX_Image_DecodeRGBA(const char* path, int* w, int* h);
+
+// Loads an image file (PNG/JPEG/BMP/GIF/TGA) into a Texture. Returns NULL on
+// failure. Caller owns the Texture and must call Texture_Dispose() / Dispose().
+static inline Texture* Graphics_LoadImage(const char* path)
+{
+    int w = 0, h = 0;
+    unsigned int* px = CS2SX_Image_DecodeRGBA(path, &w, &h);
+    if (!px) return NULL;
+    Texture* t = Texture_New(w, h, (u32*)px);   // Texture_New copies the pixels
+    free(px);
+    return t;
+}
+
+// Decodes + box-downscales an image to a small thumbnail Texture (fits maxSize).
+extern unsigned int* CS2SX_Image_DecodeThumb(const char* path, int maxW, int maxH, int* ow, int* oh);
+
+static inline Texture* Graphics_LoadImageThumb(const char* path, int maxSize)
+{
+    int w = 0, h = 0;
+    unsigned int* px = CS2SX_Image_DecodeThumb(path, maxSize, maxSize, &w, &h);
+    if (!px) return NULL;
+    Texture* t = Texture_New(w, h, (u32*)px);
+    free(px);
+    return t;
 }
 
 // Load a 24-bit or 32-bit BMP from the filesystem (use "romfs:/file.bmp" for embedded assets).
@@ -353,7 +402,9 @@ static inline Texture* CS2SX_Texture_LoadBMP(const char* path)
     int height     = (int)(hdr[22] | (hdr[23]<<8) | (hdr[24]<<16) | (hdr[25]<<24));
     int bpp        = hdr[28] | (hdr[29]<<8);
 
-    if (width <= 0 || height == 0 || (bpp != 24 && bpp != 32))
+    if (width <= 0 || height == 0 || (bpp != 24 && bpp != 32)
+        || width > CS2SX_TEX_MAX_DIM
+        || height > CS2SX_TEX_MAX_DIM || height < -CS2SX_TEX_MAX_DIM)
         { fclose(f); return NULL; }
 
     int flipped = height > 0; // positive height = bottom-up storage
@@ -401,8 +452,12 @@ static inline Texture* CS2SX_Texture_LoadBMP(const char* path)
 extern Framebuffer g_fb;
 extern u32* g_fb_addr;
 extern u32* g_sw_backbuf;
-extern int         g_fb_width;
-extern int         g_fb_height;
+extern int         g_fb_width;     // PHYSICAL render width  = output resolution
+extern int         g_fb_height;    // PHYSICAL render height = output resolution
+extern int         g_out_w;        // requested output width  (0 = auto = logical)
+extern int         g_out_h;        // requested output height (0 = auto = logical)
+extern int         g_sn;           // coord scale numerator   (logical -> physical)
+extern int         g_sd;           // coord scale denominator
 extern int         g_gfx_init;
 extern PadState    g_cs2sx_pad;
 extern u64         g_cs2sx_kDown;
@@ -413,12 +468,36 @@ extern u64         g_cs2sx_kUp;
 // Graphics primitives
 // ============================================================================
 
+// Scales one logical coordinate to physical (output) space. Identity when the
+// output resolution equals the logical size (g_sn == g_sd).
+#define CS2SX_SCL(v)  ((v) = (v) * g_sn / g_sd)
+
+// Render at a higher OUTPUT resolution than the logical design size. The whole
+// scene is drawn 1:1 into an output-sized framebuffer (no downsample), so in
+// docked mode the Switch displays it pixel-perfect instead of upscaling 720p.
+// Call Graphics_SetOutputResolution(1920,1080) BEFORE Graphics_Init. All app
+// coordinates stay logical — primitives scale them to physical via g_sn/g_sd.
+static inline void Graphics_SetOutputResolution(int w, int h)
+{
+    g_out_w = w;
+    g_out_h = h;
+}
+// Scale ratio (numerator/denominator) for callers that render their own pixels
+// (e.g. the FreeType text renderer): physical = logical * g_sn / g_sd.
+static inline int Graphics_GetScaleNum(void) { return g_sn; }
+static inline int Graphics_GetScaleDen(void) { return g_sd; }
+
 static inline void Graphics_Init(int width, int height)
 {
     if (g_gfx_init) return;
-    g_fb_width = width;
-    g_fb_height = height;
-    g_gfx_init = 1;
+    int ow = (g_out_w > 0) ? g_out_w : width;
+    int oh = (g_out_h > 0) ? g_out_h : height;
+    g_fb_width  = ow;
+    g_fb_height = oh;
+    // Uniform scale (aspect is preserved): physical = logical * ow / width.
+    g_sn = ow;
+    g_sd = width;
+    g_gfx_init  = 1;
 }
 
 static int _g_frame_owned = 0;
@@ -446,6 +525,10 @@ static inline void Graphics_SetPixel(int x, int y, u32 color)
     g_fb_addr[y * g_fb_width + x] = color;
 }
 
+// Forward declaration: the anti-aliased primitives below (FillCircle, DrawLine)
+// blend via Graphics_SetPixelAlpha, whose full definition appears further down.
+static inline void Graphics_SetPixelAlpha(int x, int y, u32 color, u8 alpha);
+
 static inline void Graphics_FillScreen(u32 color)
 {
     if (!g_fb_addr) return;
@@ -457,6 +540,7 @@ static inline void Graphics_FillScreen(u32 color)
 static inline void Graphics_DrawRect(int x, int y, int w, int h, u32 color)
 {
     if (!g_fb_addr) return;
+    CS2SX_SCL(x); CS2SX_SCL(y); CS2SX_SCL(w); CS2SX_SCL(h);   // logical → physical
     for (int i = x; i < x + w; i++)
     {
         Graphics_SetPixel(i, y, color);
@@ -472,6 +556,7 @@ static inline void Graphics_DrawRect(int x, int y, int w, int h, u32 color)
 static inline void Graphics_FillRect(int x, int y, int w, int h, u32 color)
 {
     if (!g_fb_addr) return;
+    CS2SX_SCL(x); CS2SX_SCL(y); CS2SX_SCL(w); CS2SX_SCL(h);   // logical → physical
     // Clip to screen bounds once — eliminates per-pixel bounds checks
     int x0 = x < 0 ? 0 : x;
     int y0 = y < 0 ? 0 : y;
@@ -486,27 +571,101 @@ static inline void Graphics_FillRect(int x, int y, int w, int h, u32 color)
     }
 }
 
+// Anti-aliased line (Xiaolin-Wu style). Axis-aligned lines stay crisp (full
+// coverage on one row/column); diagonals get smooth, non-stair-stepped edges.
+static inline void _cs2sx_plot_cov(int x, int y, u32 color, float c)
+{
+    if (c <= 0.0f) return;
+    if (c >= 1.0f) Graphics_SetPixel(x, y, color);
+    else Graphics_SetPixelAlpha(x, y, color, (u8)(c * 255.0f));
+}
+
 static inline void Graphics_DrawLine(int x0, int y0, int x1, int y1, u32 color)
 {
     if (!g_fb_addr) return;
-    int dx = abs(x1 - x0);
-    int dy = -abs(y1 - y0);
-    int sx = x0 < x1 ? 1 : -1;
-    int sy = y0 < y1 ? 1 : -1;
-    int err = dx + dy;
-    while (1)
+    CS2SX_SCL(x0); CS2SX_SCL(y0); CS2SX_SCL(x1); CS2SX_SCL(y1);   // logical → physical
+
+    int steep = abs(y1 - y0) > abs(x1 - x0);
+    if (steep) { int t; t = x0; x0 = y0; y0 = t;  t = x1; x1 = y1; y1 = t; }
+    if (x0 > x1) { int t; t = x0; x0 = x1; x1 = t;  t = y0; y0 = y1; y1 = t; }
+
+    int   dx   = x1 - x0;
+    int   dy   = y1 - y0;
+    float grad = (dx == 0) ? 1.0f : (float)dy / (float)dx;
+    float yf   = (float)y0;
+
+    for (int x = x0; x <= x1; x++)
     {
-        Graphics_SetPixel(x0, y0, color);
-        if (x0 == x1 && y0 == y1) break;
-        int e2 = 2 * err;
-        if (e2 >= dy) { err += dy; x0 += sx; }
-        if (e2 <= dx) { err += dx; y0 += sy; }
+        int   iy = (int)floorf(yf);
+        float f  = yf - (float)iy;
+        if (steep)
+        {
+            _cs2sx_plot_cov(iy,     x, color, 1.0f - f);
+            _cs2sx_plot_cov(iy + 1, x, color, f);
+        }
+        else
+        {
+            _cs2sx_plot_cov(x, iy,     color, 1.0f - f);
+            _cs2sx_plot_cov(x, iy + 1, color, f);
+        }
+        yf += grad;
     }
+}
+
+// 4×4 supersampled coverage of pixel (px,py) inside the circle (ccx,ccy,r).
+// Returns 0..16 (number of sub-samples inside) → 17 smooth gradations, sub-pixel
+// accurate, which removes the visible stair-stepping of a 1px coverage ramp.
+static inline int _cs2sx_circ_cov16(int px, int py, float ccx, float ccy, float r)
+{
+    float r2 = r * r;
+    int inside = 0;
+    for (int sj = 0; sj < 4; sj++)
+    {
+        float sy = (float)py + ((float)(sj * 2 + 1)) * 0.125f - ccy;   // +0.125,.375,.625,.875
+        float sy2 = sy * sy;
+        for (int si = 0; si < 4; si++)
+        {
+            float sx = (float)px + ((float)(si * 2 + 1)) * 0.125f - ccx;
+            if (sx * sx + sy2 <= r2) inside++;
+        }
+    }
+    return inside;
+}
+
+// Solid, clipped rectangle fill in PHYSICAL coordinates (no scaling). Used by the
+// rounded-rect interior so it can scale once and fill its straight parts fast.
+static inline void _cs2sx_fillrect_phys(int x, int y, int w, int h, u32 color)
+{
+    if (w <= 0 || h <= 0) return;
+    int x0 = x < 0 ? 0 : x;
+    int y0 = y < 0 ? 0 : y;
+    int x1 = x + w > g_fb_width  ? g_fb_width  : x + w;
+    int y1 = y + h > g_fb_height ? g_fb_height : y + h;
+    for (int yy = y0; yy < y1; yy++)
+    {
+        u32* row = &g_fb_addr[yy * g_fb_width];
+        for (int xx = x0; xx < x1; xx++) row[xx] = color;
+    }
+}
+
+// Anti-aliased quarter-circle corner: box [bx,bx+r)×[by,by+r), arc centered at
+// (ccx,ccy). Each pixel gets 4×4 coverage for a smooth, non-pixelated curve.
+static inline void _cs2sx_aa_corner(int bx, int by, int r, float ccx, float ccy, u32 color)
+{
+    for (int py = by; py < by + r; py++)
+        for (int px = bx; px < bx + r; px++)
+        {
+            int cov = _cs2sx_circ_cov16(px, py, ccx, ccy, (float)r);
+            if (cov == 0) continue;
+            if (cov >= 16) Graphics_SetPixel(px, py, color);
+            else Graphics_SetPixelAlpha(px, py, color, (u8)(cov * 255 / 16));
+        }
 }
 
 static inline void Graphics_DrawCircle(int cx, int cy, int r, u32 color)
 {
     if (!g_fb_addr) return;
+    CS2SX_SCL(cx); CS2SX_SCL(cy); CS2SX_SCL(r);   // logical → physical
     int x = 0, y = r, d = 3 - 2 * r;
     while (x <= y)
     {
@@ -524,13 +683,27 @@ static inline void Graphics_DrawCircle(int cx, int cy, int r, u32 color)
     }
 }
 
+// Anti-aliased filled circle: the interior is filled solid; the ~1px rim is
+// coverage-blended (distance to the edge → alpha) for smooth, non-pixelated
+// curves. Also smooths every FillRoundedRect, whose corners are FillCircles.
 static inline void Graphics_FillCircle(int cx, int cy, int r, u32 color)
 {
-    if (!g_fb_addr) return;
-    for (int dy = -r; dy <= r; dy++)
-        for (int dx = -r; dx <= r; dx++)
-            if (dx * dx + dy * dy <= r * r)
-                Graphics_SetPixel(cx + dx, cy + dy, color);
+    if (!g_fb_addr || r <= 0) return;
+    CS2SX_SCL(cx); CS2SX_SCL(cy); CS2SX_SCL(r);   // logical → physical
+    int rin  = (r - 1) * (r - 1);   // clearly inside  → solid (no per-pixel cost)
+    int rout = (r + 1) * (r + 1);   // clearly outside → skip
+    float ccx = (float)cx, ccy = (float)cy;
+    for (int dy = -r - 1; dy <= r + 1; dy++)
+        for (int dx = -r - 1; dx <= r + 1; dx++)
+        {
+            int d2 = dx * dx + dy * dy;
+            if (d2 <= rin) { Graphics_SetPixel(cx + dx, cy + dy, color); continue; }
+            if (d2 > rout) continue;
+            int cov = _cs2sx_circ_cov16(cx + dx, cy + dy, ccx, ccy, (float)r);
+            if (cov == 0) continue;
+            if (cov >= 16) Graphics_SetPixel(cx + dx, cy + dy, color);
+            else Graphics_SetPixelAlpha(cx + dx, cy + dy, color, (u8)(cov * 255 / 16));
+        }
 }
 
 static inline void Graphics_DrawChar(int x, int y, char c, u32 color, int scale)
@@ -559,15 +732,22 @@ static inline void Graphics_DrawText(int x, int y, const char* text, u32 color, 
 static inline void Graphics_DrawTexture(Texture* tex, int x, int y)
 {
     if (!tex || !tex->f_Pixels || !g_fb_addr) return;
-    for (int row = 0; row < tex->f_Height; row++)
+    // Keep the logical size: scale the texture to (W*g_sn/g_sd, H*g_sn/g_sd).
+    int dw = tex->f_Width  * g_sn / g_sd;
+    int dh = tex->f_Height * g_sn / g_sd;
+    CS2SX_SCL(x); CS2SX_SCL(y);
+    if (dw <= 0 || dh <= 0) return;
+    for (int row = 0; row < dh; row++)
     {
+        int srcRow = row * tex->f_Height / dh;
         int py = y + row;
         if (py < 0 || py >= g_fb_height) continue;
-        for (int col = 0; col < tex->f_Width; col++)
+        for (int col = 0; col < dw; col++)
         {
+            int srcCol = col * tex->f_Width / dw;
             int px = x + col;
             if (px < 0 || px >= g_fb_width) continue;
-            u32 c = tex->f_Pixels[row * tex->f_Width + col];
+            u32 c = tex->f_Pixels[srcRow * tex->f_Width + srcCol];
             if ((c >> 24) > 0)
                 g_fb_addr[py * g_fb_width + px] = c;
         }
@@ -587,6 +767,7 @@ static inline void Graphics_DrawTextureCentered(Texture* tex, int rx, int ry, in
 static inline void Graphics_DrawTextureScaled(Texture* tex, int x, int y, int dw, int dh)
 {
     if (!tex || !tex->f_Pixels || !g_fb_addr || dw <= 0 || dh <= 0) return;
+    CS2SX_SCL(x); CS2SX_SCL(y); CS2SX_SCL(dw); CS2SX_SCL(dh);   // logical → physical
     for (int row = 0; row < dh; row++)
     {
         int srcRow = row * tex->f_Height / dh;
@@ -612,6 +793,76 @@ static inline void Graphics_DrawTextureCenteredScaled(Texture* tex,
     int x = rx + (rw - tw) / 2;
     int y = ry + (rh - th) / 2;
     Graphics_DrawTextureScaled(tex, x, y, tw, th);
+}
+
+// Returns a NEW Texture of size dw×dh, bilinear-resampled from src (smooth, no
+// nearest-neighbour blockiness). Pure texture→texture; caller owns the result.
+// Use this once to pre-scale a photo, then blit the result each frame.
+static inline Texture* Graphics_ScaleTextureSmooth(Texture* src, int dw, int dh)
+{
+    if (!src || !src->f_Pixels || dw <= 0 || dh <= 0) return NULL;
+    int sw = src->f_Width, sh = src->f_Height;
+    if (sw <= 0 || sh <= 0) return NULL;
+
+    Texture* t = Texture_New(dw, dh, NULL);   // zero-filled; we overwrite every pixel
+    if (!t) return NULL;
+    u32* dpx = t->f_Pixels;
+    u32* spx = src->f_Pixels;
+
+    for (int y = 0; y < dh; y++)
+    {
+        float fy = ((float)y + 0.5f) * (float)sh / (float)dh - 0.5f;
+        int y0 = (int)floorf(fy);
+        float wy = fy - (float)y0;
+        int y1 = y0 + 1;
+        if (y0 < 0) y0 = 0; if (y0 > sh - 1) y0 = sh - 1;
+        if (y1 < 0) y1 = 0; if (y1 > sh - 1) y1 = sh - 1;
+        float iwy = 1.0f - wy;
+
+        for (int x = 0; x < dw; x++)
+        {
+            float fx = ((float)x + 0.5f) * (float)sw / (float)dw - 0.5f;
+            int x0 = (int)floorf(fx);
+            float wx = fx - (float)x0;
+            int x1 = x0 + 1;
+            if (x0 < 0) x0 = 0; if (x0 > sw - 1) x0 = sw - 1;
+            if (x1 < 0) x1 = 0; if (x1 > sw - 1) x1 = sw - 1;
+            float iwx = 1.0f - wx;
+
+            u32 c00 = spx[y0 * sw + x0], c01 = spx[y0 * sw + x1];
+            u32 c10 = spx[y1 * sw + x0], c11 = spx[y1 * sw + x1];
+            float w00 = iwx * iwy, w01 = wx * iwy, w10 = iwx * wy, w11 = wx * wy;
+
+            u32 r = (u32)(( c00        & 0xFF) * w00 + ( c01        & 0xFF) * w01 + ( c10        & 0xFF) * w10 + ( c11        & 0xFF) * w11 + 0.5f);
+            u32 g = (u32)(((c00 >>  8) & 0xFF) * w00 + ((c01 >>  8) & 0xFF) * w01 + ((c10 >>  8) & 0xFF) * w10 + ((c11 >>  8) & 0xFF) * w11 + 0.5f);
+            u32 b = (u32)(((c00 >> 16) & 0xFF) * w00 + ((c01 >> 16) & 0xFF) * w01 + ((c10 >> 16) & 0xFF) * w10 + ((c11 >> 16) & 0xFF) * w11 + 0.5f);
+            u32 a = (u32)(((c00 >> 24) & 0xFF) * w00 + ((c01 >> 24) & 0xFF) * w01 + ((c10 >> 24) & 0xFF) * w10 + ((c11 >> 24) & 0xFF) * w11 + 0.5f);
+            dpx[y * dw + x] = (a << 24) | (b << 16) | (g << 8) | r;
+        }
+    }
+    return t;
+}
+
+// Blits a texture 1:1 at PHYSICAL pixel coordinates (no g_sn/g_sd scaling). For
+// drawing an already-correctly-sized image without re-introducing scaling.
+static inline void Graphics_BlitPhysical(Texture* tex, int x, int y)
+{
+    if (!tex || !tex->f_Pixels || !g_fb_addr) return;
+    int w = tex->f_Width, h = tex->f_Height;
+    for (int row = 0; row < h; row++)
+    {
+        int py = y + row;
+        if (py < 0 || py >= g_fb_height) continue;
+        u32* dst  = &g_fb_addr[py * g_fb_width];
+        u32* srow = &tex->f_Pixels[row * w];
+        for (int col = 0; col < w; col++)
+        {
+            int px = x + col;
+            if (px < 0 || px >= g_fb_width) continue;
+            u32 c = srow[col];
+            if ((c >> 24) > 0) dst[px] = c;
+        }
+    }
 }
 
 static inline int Graphics_MeasureTextWidth(const char* text, int scale)
@@ -641,6 +892,7 @@ static inline void Graphics_DrawTriangle(int x0, int y0, int x1, int y1, int x2,
 static inline void Graphics_FillTriangle(int x0, int y0, int x1, int y1, int x2, int y2, u32 color)
 {
     if (!g_fb_addr) return;
+    CS2SX_SCL(x0); CS2SX_SCL(y0); CS2SX_SCL(x1); CS2SX_SCL(y1); CS2SX_SCL(x2); CS2SX_SCL(y2);
     if (y0 > y1) { int t;t = x0;x0 = x1;x1 = t;t = y0;y0 = y1;y1 = t; }
     if (y1 > y2) { int t;t = x1;x1 = x2;x2 = t;t = y1;y1 = y2;y2 = t; }
     if (y0 > y1) { int t;t = x0;x0 = x1;x1 = t;t = y0;y0 = y1;y1 = t; }
@@ -659,6 +911,7 @@ static inline void Graphics_FillTriangle(int x0, int y0, int x1, int y1, int x2,
 static inline void Graphics_DrawEllipse(int cx, int cy, int rx, int ry, u32 color)
 {
     if (!g_fb_addr || rx <= 0 || ry <= 0) return;
+    CS2SX_SCL(cx); CS2SX_SCL(cy); CS2SX_SCL(rx); CS2SX_SCL(ry);   // logical → physical
     int x = 0, y = ry;
     long rx2 = (long)rx * rx, ry2 = (long)ry * ry, d = ry2 - rx2 * ry + rx2 / 4;
     while (2 * ry2 * x < 2 * rx2 * y) {
@@ -677,6 +930,7 @@ static inline void Graphics_DrawEllipse(int cx, int cy, int rx, int ry, u32 colo
 static inline void Graphics_FillEllipse(int cx, int cy, int rx, int ry, u32 color)
 {
     if (!g_fb_addr || rx <= 0 || ry <= 0) return;
+    CS2SX_SCL(cx); CS2SX_SCL(cy); CS2SX_SCL(rx); CS2SX_SCL(ry);   // logical → physical
     long rx2 = (long)rx * rx, ry2 = (long)ry * ry;
     for (int dy = -ry;dy <= ry;dy++) {
         long dx2 = rx2 * (ry2 - (long)dy * dy) / ry2;
@@ -703,15 +957,23 @@ static inline void Graphics_DrawRoundedRect(int x, int y, int w, int h, int r, u
 
 static inline void Graphics_FillRoundedRect(int x, int y, int w, int h, int r, u32 color)
 {
-    if (!g_fb_addr) return;
-    if (r < 0)r = 0;if (r > w / 2)r = w / 2;if (r > h / 2)r = h / 2;
-    Graphics_FillRect(x, y + r, w, h - 2 * r, color);
-    Graphics_FillRect(x + r, y, w - 2 * r, r, color);
-    Graphics_FillRect(x + r, y + h - r, w - 2 * r, r, color);
-    Graphics_FillCircle(x + r, y + r, r, color);
-    Graphics_FillCircle(x + w - 1 - r, y + r, r, color);
-    Graphics_FillCircle(x + r, y + h - 1 - r, r, color);
-    Graphics_FillCircle(x + w - 1 - r, y + h - 1 - r, r, color);
+    if (!g_fb_addr || w <= 0 || h <= 0) return;
+    CS2SX_SCL(x); CS2SX_SCL(y); CS2SX_SCL(w); CS2SX_SCL(h); CS2SX_SCL(r);
+    if (r < 0) r = 0;
+    if (r > w / 2) r = w / 2;
+    if (r > h / 2) r = h / 2;
+    if (r == 0) { _cs2sx_fillrect_phys(x, y, w, h, color); return; }
+
+    // Straight interior (no AA needed) — tiles the whole rect with no gaps:
+    _cs2sx_fillrect_phys(x,     y + r,     w,         h - 2 * r, color);  // middle band
+    _cs2sx_fillrect_phys(x + r, y,         w - 2 * r, r,         color);  // top band
+    _cs2sx_fillrect_phys(x + r, y + h - r, w - 2 * r, r,         color);  // bottom band
+
+    // Four anti-aliased corners (centers at the inner-rounding points).
+    _cs2sx_aa_corner(x,         y,         r, (float)(x + r),     (float)(y + r),     color); // TL
+    _cs2sx_aa_corner(x + w - r, y,         r, (float)(x + w - r), (float)(y + r),     color); // TR
+    _cs2sx_aa_corner(x,         y + h - r, r, (float)(x + r),     (float)(y + h - r), color); // BL
+    _cs2sx_aa_corner(x + w - r, y + h - r, r, (float)(x + w - r), (float)(y + h - r), color); // BR
 }
 
 static inline void Graphics_SetPixelAlpha(int x, int y, u32 color, u8 alpha)
@@ -734,6 +996,7 @@ static inline void Graphics_FillRectAlpha(int x, int y, int w, int h, u32 color,
 {
     if (!g_fb_addr || alpha == 0) return;
     if (alpha == 255) { Graphics_FillRect(x, y, w, h, color); return; }
+    CS2SX_SCL(x); CS2SX_SCL(y); CS2SX_SCL(w); CS2SX_SCL(h);   // after the FillRect delegate
     // Clip to screen bounds once — avoids per-pixel bounds check
     int x0 = x < 0 ? 0 : x;
     int y0 = y < 0 ? 0 : y;
@@ -769,6 +1032,7 @@ static inline void Graphics_DrawTextAlpha(int x, int y, const char* text, u32 co
 {
     if (!g_fb_addr || !text || alpha == 0) return;
     if (alpha == 255) { Graphics_DrawText(x, y, text, color, scale);return; }
+    CS2SX_SCL(x); CS2SX_SCL(y); CS2SX_SCL(scale);   // after the DrawText delegate
     int ox = x;
     for (int i = 0;text[i] != '\0';i++) {
         if (text[i] == '\n') { y += 8 * scale + 2;x = ox;continue; }
@@ -918,6 +1182,9 @@ static inline void SwitchApp_Run(SwitchApp* self)
     if (use_gfx)
     {
         NWindow* win = nwindowGetDefault();
+        // Hardware framebuffer at the OUTPUT resolution (g_fb_width/height). When
+        // the app requests e.g. 1080p the Switch shows it 1:1 in docked mode
+        // instead of upscaling a 720p buffer. Rendering is 1:1 — no downsample.
         framebufferCreate(&g_fb, win,
             (u32)g_fb_width, (u32)g_fb_height,
             PIXEL_FORMAT_RGBA_8888, 2);
@@ -1004,4 +1271,5 @@ static inline void SwitchApp_Run(SwitchApp* self)
         consoleExit(NULL);
 
     psmExit();
+    romfsExit();   // paired with romfsInit() at startup — avoids leaking the mount
 }

@@ -37,6 +37,13 @@ public sealed class CCompiler
         var libnxLib = Path.Combine(_devkitPath, "libnx", "lib");
         var switchSpecs = Path.Combine(_devkitPath, "libnx", "switch.specs");
 
+        // portlibs (curl, zlib, png, freetype, ...) — added to the search paths so
+        // externLibs depending on them can compile and link. Only included if present.
+        var portlibsInc = Path.Combine(_devkitPath, "portlibs", "switch", "include");
+        var portlibsLib = Path.Combine(_devkitPath, "portlibs", "switch", "lib");
+        var portlibsIncArg = Directory.Exists(portlibsInc) ? $" -I\"{portlibsInc}\"" : "";
+        var portlibsLibArg = Directory.Exists(portlibsLib) ? $" -L\"{portlibsLib}\"" : "";
+
         if (!File.Exists(switchSpecs))
             throw new FileNotFoundException(
                 $"Switch specs nicht gefunden: {switchSpecs}\n"
@@ -79,6 +86,7 @@ public sealed class CCompiler
                  + $" -I\"{includeDir}\""
                  + (projectDir != null ? $" -I\"{projectDir}\"" : "")
                  + $" -I\"{libnxInc}\""
+                 + portlibsIncArg
                  + extraIncludeArgs
                  + defineArgs
                  + " -march=armv8-a+crc+crypto -mtune=cortex-a57 -mtp=soft -fPIE"
@@ -89,17 +97,34 @@ public sealed class CCompiler
                  + " -Wno-unused-function"
                  + " -Wno-misleading-indentation"
                  + $" -specs=\"{switchSpecs}\""
+                 + portlibsLibArg
                  + $" -L\"{libnxLib}\" -lnx -lm"
                  + " -Wl,--gc-sections";
 
+        // Windows caps a process command line at ~32 KB. A project with many
+        // translation units (each an absolute path) can exceed that, so for long
+        // command lines fall back to a GCC @response-file (one arg per line).
+        string? responseFile = null;
+        if (args.Length > 28000)
+        {
+            responseFile = Path.Combine(Path.GetTempPath(),
+                $"cs2sx_gcc_{System.Diagnostics.Process.GetCurrentProcess().Id}.rsp");
+            File.WriteAllText(responseFile, args);
+        }
+
         try
         {
-            ProcessRunner.Run(gcc, args, "GCC");
+            ProcessRunner.Run(gcc, responseFile != null ? $"@\"{responseFile}\"" : args, "GCC");
         }
         catch (Exception ex) when (diagnostics != null)
         {
             var enhanced = diagnostics.MapGccErrors(ex.Message, includeDir);
             throw new GccCompileException(enhanced, ex);
+        }
+        finally
+        {
+            if (responseFile != null && File.Exists(responseFile))
+                try { File.Delete(responseFile); } catch { }
         }
     }
 

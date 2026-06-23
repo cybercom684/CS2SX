@@ -69,6 +69,18 @@ namespace CS2SX.SwitchFormsLib
         public static uint Magenta = 0xFFFF00FF;
         public static uint Gray = 0xFF808080;
         public static uint Orange = 0xFF00A5FF;
+        // Extended palette — must mirror the COLOR_* macros the transpiler maps to.
+        public static uint Pink = 0xFFB469FF;
+        public static uint Purple = 0xFF800080;
+        public static uint Brown = 0xFF13458B;
+        public static uint Teal = 0xFF808000;
+        public static uint Lime = 0xFF00FF00;
+        public static uint Navy = 0xFF800000;
+        public static uint Silver = 0xFFC0C0C0;
+        public static uint DarkGray = 0xFF404040;
+        public static uint LightGray = 0xFFC0C0C0;
+        public static uint Maroon = 0xFF000080;
+        public static uint Olive = 0xFF008080;
 
         public static uint RGBA(byte r, byte g, byte b, byte a)
             => (uint)((a << 24) | (b << 16) | (g << 8) | r);

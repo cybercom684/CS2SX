@@ -76,7 +76,7 @@ public sealed class ConvertHandler : InvocationHandlerBase
 
             var buf = ctx.NextStringBuf();
             ctx.Out.WriteLine(ctx.Tab
-                + "snprintf(" + buf + ", sizeof(" + buf + "), \"" + spec + "\", " + args[0] + ");");
+                + "snprintf(" + buf + ", CS2SX_STRBUF_SIZE, \"" + spec + "\", " + args[0] + ");");
             result = buf;
             return true;
         }

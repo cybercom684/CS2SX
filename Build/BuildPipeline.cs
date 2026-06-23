@@ -259,6 +259,29 @@ public sealed class BuildPipeline
             // suffixed C name (e.g. Desktop.cs calling Window.Draw(dimmed) → Window_Draw_1).
             var sharedOverloadedMethods = PreScanOverloadedMethods(transpiledFiles);
 
+            // Pre-scan virtual-method slots so only virtual calls route through vtables.
+            var sharedVTableMethods = PreScanVTableMethods(transpiledFiles);
+
+            // Pre-scan multi-level inheritance (vtable-root type + hops to root).
+            var (sharedVTableRoot, sharedRootHops) = PreScanInheritance(transpiledFiles);
+
+            // Pre-scan class member types so the inferrer can type obj.Member.
+            var sharedClassMemberTypes = PreScanClassMemberTypes(transpiledFiles);
+
+            // Pre-register ALL user enums up front so every file (regardless of
+            // transpile order) treats enum fields/params as value types, not
+            // reference-type pointers.
+            foreach (var f in transpiledFiles)
+            {
+                try
+                {
+                    var tree = CSharpSyntaxTree.ParseText(File.ReadAllText(f));
+                    foreach (var en in tree.GetRoot().DescendantNodes().OfType<EnumDeclarationSyntax>())
+                        TypeRegistry.RegisterUserEnum(en.Identifier.Text);
+                }
+                catch { }
+            }
+
             for (int i = 0; i < transpiledFiles.Count; i++)
             {
                 var csFile = transpiledFiles[i];
@@ -296,6 +319,14 @@ public sealed class BuildPipeline
                     hTranspiler.GetContext().VTableTypes.Add(vt);
                 foreach (var (cls, set) in sharedOverloadedMethods)
                     hTranspiler.GetContext().OverloadedMethods[cls] = set;
+                foreach (var (cls, set) in sharedVTableMethods)
+                    hTranspiler.GetContext().VTableMethods[cls] = set;
+                foreach (var (cls, r) in sharedVTableRoot)
+                    hTranspiler.GetContext().VTableRoot[cls] = r;
+                foreach (var (cls, h) in sharedRootHops)
+                    hTranspiler.GetContext().RootHops[cls] = h;
+                foreach (var (cls, m) in sharedClassMemberTypes)
+                    hTranspiler.GetContext().ClassMemberTypes[cls] = m;
 
                 var hResult = hTranspiler.Transpile(source, csFile, semanticModel);
 
@@ -335,6 +366,14 @@ public sealed class BuildPipeline
                     cTranspiler.GetContext().VTableTypes.Add(vt);
                 foreach (var (cls, set) in sharedOverloadedMethods)
                     cTranspiler.GetContext().OverloadedMethods[cls] = set;
+                foreach (var (cls, set) in sharedVTableMethods)
+                    cTranspiler.GetContext().VTableMethods[cls] = set;
+                foreach (var (cls, r) in sharedVTableRoot)
+                    cTranspiler.GetContext().VTableRoot[cls] = r;
+                foreach (var (cls, h) in sharedRootHops)
+                    cTranspiler.GetContext().RootHops[cls] = h;
+                foreach (var (cls, m) in sharedClassMemberTypes)
+                    cTranspiler.GetContext().ClassMemberTypes[cls] = m;
 
                 var cResult = cTranspiler.Transpile(source, csFile, semanticModel);
 
@@ -634,6 +673,172 @@ public sealed class BuildPipeline
     }
 
     /// <summary>
+    /// For each class, the set of method names that are actual virtual slots
+    /// (own virtual/abstract/override + inherited). Lets call sites route ONLY
+    /// virtual methods through the vtable; non-virtual methods on the same class
+    /// use a direct call instead of a nonexistent vtable member.
+    /// </summary>
+    internal static Dictionary<string, HashSet<string>> PreScanVTableMethods(
+        IEnumerable<string> sourceFiles)
+    {
+        var own = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
+        var classToBase = new Dictionary<string, string>(StringComparer.Ordinal);
+
+        foreach (var file in sourceFiles)
+        {
+            try
+            {
+                var src = File.ReadAllText(file);
+                var tree = CSharpSyntaxTree.ParseText(src,
+                    new CSharpParseOptions(LanguageVersion.CSharp12));
+                foreach (var cls in tree.GetRoot().DescendantNodes()
+                    .OfType<ClassDeclarationSyntax>())
+                {
+                    var set = own.TryGetValue(cls.Identifier.Text, out var ex)
+                        ? ex : new HashSet<string>(StringComparer.Ordinal);
+                    foreach (var m in cls.Members.OfType<MethodDeclarationSyntax>())
+                        if (m.Modifiers.Any(mod =>
+                            mod.ValueText is "virtual" or "abstract" or "override"))
+                            set.Add(m.Identifier.Text);
+                    own[cls.Identifier.Text] = set;
+
+                    var baseTypeName = cls.BaseList?.Types.FirstOrDefault()?.Type.ToString().Trim();
+                    if (!string.IsNullOrEmpty(baseTypeName))
+                        classToBase[cls.Identifier.Text] = baseTypeName!;
+                }
+            }
+            catch { }
+        }
+
+        // Merge inherited slots from the base chain into each class.
+        var result2 = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
+        foreach (var cls in own.Keys)
+        {
+            var merged = new HashSet<string>(own[cls], StringComparer.Ordinal);
+            var cur = cls;
+            int guard = 0;
+            while (classToBase.TryGetValue(cur, out var b) && guard++ < 32)
+            {
+                if (own.TryGetValue(b, out var bset)) merged.UnionWith(bset);
+                cur = b;
+            }
+            result2[cls] = merged;
+        }
+        return result2;
+    }
+
+    /// <summary>
+    /// Per-class map of member (field/property/auto-property) name → C# type, with
+    /// inherited members merged in. Used by the type inferrer to resolve `obj.Member`
+    /// types when the semantic model can't (e.g. LINQ-lambda parameters).
+    /// </summary>
+    internal static Dictionary<string, Dictionary<string, string>>
+        PreScanClassMemberTypes(IEnumerable<string> sourceFiles)
+    {
+        var own    = new Dictionary<string, Dictionary<string, string>>(StringComparer.Ordinal);
+        var baseOf = new Dictionary<string, string>(StringComparer.Ordinal);
+
+        foreach (var file in sourceFiles)
+        {
+            try
+            {
+                var src = File.ReadAllText(file);
+                var tree = CSharpSyntaxTree.ParseText(src,
+                    new CSharpParseOptions(LanguageVersion.CSharp12));
+                foreach (var cls in tree.GetRoot().DescendantNodes()
+                    .OfType<ClassDeclarationSyntax>())
+                {
+                    var map = own.TryGetValue(cls.Identifier.Text, out var ex)
+                        ? ex : new Dictionary<string, string>(StringComparer.Ordinal);
+                    foreach (var f in cls.Members.OfType<FieldDeclarationSyntax>())
+                    {
+                        var ft = f.Declaration.Type.ToString().Trim();
+                        foreach (var dv in f.Declaration.Variables)
+                            map[dv.Identifier.Text] = ft;
+                    }
+                    foreach (var p in cls.Members.OfType<PropertyDeclarationSyntax>())
+                        map[p.Identifier.Text] = p.Type.ToString().Trim();
+                    own[cls.Identifier.Text] = map;
+
+                    var b = cls.BaseList?.Types.FirstOrDefault()?.Type.ToString().Trim();
+                    if (!string.IsNullOrEmpty(b)) baseOf[cls.Identifier.Text] = b!;
+                }
+            }
+            catch { }
+        }
+
+        // Merge inherited members down the chain.
+        var result = new Dictionary<string, Dictionary<string, string>>(StringComparer.Ordinal);
+        foreach (var cls in own.Keys)
+        {
+            var merged = new Dictionary<string, string>(own[cls], StringComparer.Ordinal);
+            var cur = cls; int guard = 0;
+            while (baseOf.TryGetValue(cur, out var b) && guard++ < 32)
+            {
+                if (own.TryGetValue(b, out var bmap))
+                    foreach (var kv in bmap) merged.TryAdd(kv.Key, kv.Value);
+                cur = b;
+            }
+            result[cls] = merged;
+        }
+        return result;
+    }
+
+    /// <summary>
+    /// For multi-level user inheritance: computes, per class, (a) the ancestor that
+    /// declares the vtable struct (the `_vtable` type name to use), and (b) how many
+    /// `base.` hops reach the absolute user root (where _rc / vtable physically live).
+    /// </summary>
+    internal static (Dictionary<string, string> VTableRoot, Dictionary<string, int> RootHops)
+        PreScanInheritance(IEnumerable<string> sourceFiles)
+    {
+        var baseOf    = new Dictionary<string, string>(StringComparer.Ordinal);
+        var hasVirt   = new Dictionary<string, bool>(StringComparer.Ordinal);
+        var userClasses = new HashSet<string>(StringComparer.Ordinal);
+
+        foreach (var file in sourceFiles)
+        {
+            try
+            {
+                var src = File.ReadAllText(file);
+                var tree = CSharpSyntaxTree.ParseText(src,
+                    new CSharpParseOptions(LanguageVersion.CSharp12));
+                foreach (var cls in tree.GetRoot().DescendantNodes()
+                    .OfType<ClassDeclarationSyntax>())
+                {
+                    userClasses.Add(cls.Identifier.Text);
+                    hasVirt[cls.Identifier.Text] = VTableBuilder.HasVirtualMethods(cls);
+                    var b = cls.BaseList?.Types.FirstOrDefault()?.Type.ToString().Trim();
+                    if (!string.IsNullOrEmpty(b)) baseOf[cls.Identifier.Text] = b!;
+                }
+            }
+            catch { }
+        }
+
+        var vtableRoot = new Dictionary<string, string>(StringComparer.Ordinal);
+        var rootHops   = new Dictionary<string, int>(StringComparer.Ordinal);
+
+        foreach (var cls in userClasses)
+        {
+            // Walk up the chain of USER bases only (stop at runtime/SwitchApp bases).
+            int hops = 0;
+            string cur = cls;
+            string? topVirt = hasVirt.TryGetValue(cls, out var hv0) && hv0 ? cls : null;
+            int guard = 0;
+            while (baseOf.TryGetValue(cur, out var b)
+                   && userClasses.Contains(b) && guard++ < 32)
+            {
+                hops++;
+                if (hasVirt.TryGetValue(b, out var hvb) && hvb) topVirt = b;
+                cur = b;
+            }
+            rootHops[cls] = hops;
+            if (topVirt != null) vtableRoot[cls] = topVirt;
+        }
+        return (vtableRoot, rootHops);
+    }
+
+    /// <summary>
     /// Scans all source files for classes with overloaded methods (same name, different param count).
     /// Returns a map of class name → set of overloaded method names.
     /// Shared across all per-file TranspilerContexts so that cross-file call sites can
@@ -739,6 +944,24 @@ public sealed class BuildPipeline
                 if (typeDecl is ClassDeclarationSyntax clsWithVirtuals
                     && Transpiler.VTableBuilder.HasVirtualMethods(clsWithVirtuals))
                     sb.AppendLine($"typedef struct {typeName}_vtable {typeName}_vtable;");
+            }
+
+            // User enums must be globally visible (other files use them as field /
+            // parameter types). Emit the full definition here, in _forward.h, since
+            // a C enum cannot be forward-declared. Per-file emission is suppressed.
+            foreach (var en in tree.GetRoot().DescendantNodes().OfType<EnumDeclarationSyntax>())
+            {
+                var enName = en.Identifier.Text;
+                if (!alreadyDeclared.Add("enum:" + enName)) continue;
+                sb.AppendLine($"typedef enum {enName} {{");
+                foreach (var m in en.Members)
+                {
+                    if (m.EqualsValue != null)
+                        sb.AppendLine($"    {m.Identifier.Text} = {m.EqualsValue.Value.ToString()},");
+                    else
+                        sb.AppendLine($"    {m.Identifier.Text},");
+                }
+                sb.AppendLine($"}} {enName};");
             }
         }
 
@@ -915,8 +1138,12 @@ public sealed class BuildPipeline
         w.WriteLine("Framebuffer  g_fb;");
         w.WriteLine("u32*         g_fb_addr       = NULL;");
         w.WriteLine("u32*         g_sw_backbuf    = NULL;");
-        w.WriteLine("int          g_fb_width      = 1280;");
+        w.WriteLine("int          g_fb_width      = 1280;");   // physical render = output resolution
         w.WriteLine("int          g_fb_height     = 720;");
+        w.WriteLine("int          g_out_w         = 0;");      // requested output (0 = auto = logical)
+        w.WriteLine("int          g_out_h         = 0;");
+        w.WriteLine("int          g_sn            = 1;");      // coord scale numerator   (logical→physical)
+        w.WriteLine("int          g_sd            = 1;");      // coord scale denominator
         w.WriteLine("int          g_gfx_init      = 0;");
         w.WriteLine("PadState     g_cs2sx_pad;");
         w.WriteLine("u64          g_cs2sx_kDown = 0;");
@@ -933,6 +1160,8 @@ public sealed class BuildPipeline
         w.WriteLine("CS2SX_AudioBuffer _cs2sx_audio_bufs[CS2SX_AUDIO_NUM_BUFS];");
         w.WriteLine("int               _cs2sx_audio_buf_idx      = 0;");
         w.WriteLine("int               _cs2sx_audio_submitted    = 0;");
+        w.WriteLine("int               _cs2sx_audio_target       = 2;");   // queued buffers to maintain
+        w.WriteLine("int               _cs2sx_audio_outrate      = 48000;");// real audout playback rate
         w.WriteLine("CS2SX_AudioVoice  _cs2sx_voices[CS2SX_MAX_VOICES];");
         w.WriteLine("CS2SX_Sound       _cs2sx_sounds[CS2SX_MAX_SOUNDS];");
         w.WriteLine("CS2SX_SampleVoice _cs2sx_sample_voices[CS2SX_MAX_SAMPLE_VOICES];");

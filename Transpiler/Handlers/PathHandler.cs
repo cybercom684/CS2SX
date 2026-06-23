@@ -41,25 +41,25 @@ public sealed class PathHandler : InvocationHandlerBase
             if (args.Count == 2)
             {
                 ctx.Out.WriteLine(ctx.Tab
-                    + $"snprintf({buf}, sizeof({buf}), \"%s/%s\", "
+                    + $"snprintf({buf}, CS2SX_STRBUF_SIZE, \"%s/%s\", "
                     + ArgAt(args, 0) + ", " + ArgAt(args, 1) + ");");
             }
             else if (args.Count == 3)
             {
                 ctx.Out.WriteLine(ctx.Tab
-                    + $"snprintf({buf}, sizeof({buf}), \"%s/%s/%s\", "
+                    + $"snprintf({buf}, CS2SX_STRBUF_SIZE, \"%s/%s/%s\", "
                     + ArgAt(args, 0) + ", " + ArgAt(args, 1) + ", " + ArgAt(args, 2) + ");");
             }
             else
             {
                 // 4+ Argumente: iterativ zusammenbauen — buf ist der Akkumulator
                 var tmp = ctx.NextStringBuf(1024);
-                ctx.Out.WriteLine(ctx.Tab + $"snprintf({buf}, sizeof({buf}), \"%s/%s\", "
+                ctx.Out.WriteLine(ctx.Tab + $"snprintf({buf}, CS2SX_STRBUF_SIZE, \"%s/%s\", "
                     + ArgAt(args, 0) + ", " + ArgAt(args, 1) + ");");
                 for (int i = 2; i < args.Count; i++)
                 {
-                    ctx.Out.WriteLine(ctx.Tab + $"snprintf({tmp}, sizeof({tmp}), \"%s/%s\", {buf}, {ArgAt(args, i)});");
-                    ctx.Out.WriteLine(ctx.Tab + $"memcpy({buf}, {tmp}, sizeof({buf}));");
+                    ctx.Out.WriteLine(ctx.Tab + $"snprintf({tmp}, CS2SX_STRBUF_SIZE, \"%s/%s\", {buf}, {ArgAt(args, i)});");
+                    ctx.Out.WriteLine(ctx.Tab + $"memcpy({buf}, {tmp}, CS2SX_STRBUF_SIZE);");
                 }
                 result = buf;
                 return true;

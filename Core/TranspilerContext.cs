@@ -82,6 +82,12 @@ public sealed class TranspilerContext
     // EnumName → ordered list of member names (for Enum.GetValues)
     public Dictionary<string, List<string>> EnumDefs { get; } = new(StringComparer.Ordinal);
 
+    // LINQ OrderBy/ThenBy: result-var → ordered key chain (C key-fn name, descending).
+    // Lets ThenBy build a composite comparator instead of re-sorting by the
+    // secondary key alone (which would destroy the primary ordering).
+    public Dictionary<string, List<(string KeyFn, bool Desc)>> OrderKeyChains { get; }
+        = new(StringComparer.Ordinal);
+
     // ── Methoden-Kontext ──────────────────────────────────────────────────────
 
     public Dictionary<string, string> LocalTypes { get; } = new(StringComparer.Ordinal);
@@ -94,6 +100,27 @@ public sealed class TranspilerContext
     public HashSet<string> ValueTypeStructs { get; } = new(StringComparer.Ordinal);
     public HashSet<string> VTableTypes { get; } = new(StringComparer.Ordinal);
     public HashSet<string> InterfaceTypes { get; } = new(StringComparer.Ordinal);
+
+    // Maps a vtable class → the set of method names that are actual virtual slots
+    // (own virtual/abstract/override + inherited). Used so non-virtual methods on a
+    // vtable-bearing class are NOT dispatched through the (nonexistent) vtable slot.
+    public Dictionary<string, HashSet<string>> VTableMethods { get; }
+        = new(StringComparer.Ordinal);
+
+    // Multi-level inheritance support:
+    //  VTableRoot: class → name of the ancestor that DECLARES the vtable struct
+    //              (the `_vtable` type to use for its instance). Overrides don't
+    //              create a new vtable type, so a 3-level chain reuses the root's.
+    //  RootHops:   class → number of `base.` hops up to the absolute user root
+    //              (where _rc and the vtable pointer physically live).
+    public Dictionary<string, string> VTableRoot { get; } = new(StringComparer.Ordinal);
+    public Dictionary<string, int> RootHops { get; } = new(StringComparer.Ordinal);
+
+    // class name → (member name → C# type) for all user classes. Lets the type
+    // inferrer resolve `obj.Member` types syntactically — essential because the
+    // semantic model can't type LINQ-lambda parameters (System.Linq not referenced).
+    public Dictionary<string, Dictionary<string, string>> ClassMemberTypes { get; }
+        = new(StringComparer.Ordinal);
 
     // Maps class name → set of method names that have overloads (same name, different param count).
     // Used to generate unique C function names via _N suffix (N = user param count).

@@ -273,6 +273,11 @@ public static class PatternMatchingWriter
         // Für Primitive (int, float, ...) ist die Bedingung immer wahr.
         if (TypeRegistry.IsPrimitive(typeName) && typeName != "string")
             return "1";
+        // No RTTI on Switch: `x is T` cannot do a real type test — it matches ANY
+        // non-null object and blind-casts. Warn loudly so this silent-corruption
+        // source is visible (matching a Cat as Dog reads garbage fields).
+        ctx.Warn(dp, $"`is {typeName}` has no runtime type check (no RTTI) — matches any "
+                   + "non-null value and casts unconditionally; verify this is safe.");
         return "(" + subject + " != NULL)";
     }
 

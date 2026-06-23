@@ -32,6 +32,17 @@ public sealed class AudioHandler : InvocationHandlerBase
             ["Audio.StopAllSounds"] = "CS2SX_Audio_StopAllSounds",
             ["Audio.IsPlaying"]     = "CS2SX_Audio_IsPlaying",
 
+            // Music playback (full files: WAV/MP3/FLAC/OGG)
+            ["Audio.LoadMusic"]         = "CS2SX_Audio_LoadMusic",
+            ["Audio.Pause"]             = "CS2SX_Audio_Pause",
+            ["Audio.Resume"]            = "CS2SX_Audio_Resume",
+            ["Audio.IsPaused"]          = "CS2SX_Audio_IsPaused",
+            ["Audio.GetPositionFrames"] = "CS2SX_Audio_GetPositionFrames",
+            ["Audio.Seek"]              = "CS2SX_Audio_Seek",
+            ["Audio.GetSoundFrames"]    = "CS2SX_Audio_GetSoundFrames",
+            ["Audio.GetSoundRate"]      = "CS2SX_Audio_GetSoundRate",
+            ["Audio.SetLatencyBuffers"] = "CS2SX_Audio_SetLatencyBuffers",
+
             // Effects
             ["Audio.SetLowPass"]    = "CS2SX_Audio_SetLowPass",
             ["Audio.SetEcho"]       = "CS2SX_Audio_SetEcho",

@@ -62,13 +62,20 @@ public sealed class DefaultConstructorStrategy : IConstructorStrategy
         // insert any lambda preludes (from property initializers) in front of them.
         var preSigPos = ctx.Out.GetStringBuilder().Length;
 
+        // Multi-level inheritance: _rc and the vtable pointer live in the absolute
+        // user root. `baseChain` is "base." repeated to reach it; `vtType` is the
+        // ancestor that declares the vtable struct (overrides reuse the root's type).
+        int rootHops = ctx.RootHops.TryGetValue(name, out var rh) && rh > 0 ? rh : 1;
+        var baseChain = string.Concat(System.Linq.Enumerable.Repeat("base.", rootHops));
+        var vtType = ctx.VTableRoot.TryGetValue(name, out var vr) ? vr : baseType;
+
         // Forward-declare the vtable instance before _New() so the constructor can
         // reference it even though the full definition appears after all method bodies.
         if (!string.IsNullOrEmpty(baseType) && baseType != "SwitchApp"
             && !CSharpToC.IsControlSubclass(baseType)
             && ctx.VTableTypes.Contains(baseType))
         {
-            ctx.Out.WriteLine($"static {baseType}_vtable {name}_vtable_instance;");
+            ctx.Out.WriteLine($"static {vtType}_vtable {name}_vtable_instance;");
             ctx.Out.WriteLine();
         }
 
@@ -83,22 +90,51 @@ public sealed class DefaultConstructorStrategy : IConstructorStrategy
             ctx.WriteLine("self->_rc = 1;");
         else if (baseType != "SwitchApp" && !CSharpToC.IsControlSubclass(baseType)
                  && !ctx.InterfaceTypes.Contains(baseType))  // interface base has no _rc
-            ctx.WriteLine("self->base._rc = 1;");
+            ctx.WriteLine("self->" + baseChain + "_rc = 1;");
 
         // VTable-Zeiger setzen: vtable lives in the embedded base struct, not in self directly.
-        // self->base.vtable points to the correct vtable for this subclass so that
+        // self->base[.base]*.vtable points to the correct vtable for this subclass so that
         // (BaseType*)self casts give correct vtable dispatch.
         if (!string.IsNullOrEmpty(baseType) && baseType != "SwitchApp"
             && !CSharpToC.IsControlSubclass(baseType)
             && ctx.VTableTypes.Contains(baseType))
         {
-            ctx.WriteLine("self->base.vtable = &" + name + "_vtable_instance;");
+            ctx.WriteLine("self->" + baseChain + "vtable = &" + name + "_vtable_instance;");
         }
 
+        // Constructor initializer: `: base(args)` / `: this(args)`.
+        var ctorInit = explicitCtor?.Initializer;
+        bool isUserBase = !string.IsNullOrEmpty(baseType) && baseType != "SwitchApp"
+            && !CSharpToC.IsControlSubclass(baseType) && !ctx.InterfaceTypes.Contains(baseType);
+        bool hasBaseCall = ctorInit != null
+            && ctorInit.ThisOrBaseKeyword.IsKind(SyntaxKind.BaseKeyword);
+
+        if (isUserBase && hasBaseCall)
+        {
+            // Run the base constructor with the supplied arguments and copy the
+            // result into the embedded base struct (the base is a value member).
+            // This is what was previously dropped, leaving base fields at 0.
+            var baseArgs = ctorInit!.ArgumentList.Arguments
+                .Select(a => exprWriter.Write(a.Expression));
+            var bTmp = ctx.NextTmp("base");
+            ctx.WriteLine($"{baseType}* {bTmp} = {baseType}_New({string.Join(", ", baseArgs)});");
+            ctx.WriteLine($"if ({bTmp}) {{ self->base = *{bTmp}; free({bTmp}); }}");
+            // The copy clobbers vtable/_rc — restore them at the correct depth.
+            if (ctx.VTableTypes.Contains(baseType))
+                ctx.WriteLine($"self->{baseChain}vtable = &{name}_vtable_instance;");
+            ctx.WriteLine($"self->{baseChain}_rc = 1;");
+        }
+        else if (ctorInit != null && ctorInit.ThisOrBaseKeyword.IsKind(SyntaxKind.ThisKeyword))
+        {
+            ctx.Warn(explicitCtor!, "constructor `: this(...)` delegation is not supported "
+                + "(only one constructor per class is emitted); ignored.");
+            if (isUserBase) transpiler.WriteInstanceFieldInitializersForBaseClass(baseType);
+        }
         // Base-class property/field initializers (e.g. Visible = true from UIControl).
         // Without this, memset zeros the embedded base struct and subclass controls
-        // are invisible by default.
-        if (!string.IsNullOrEmpty(baseType) && baseType != "SwitchApp"
+        // are invisible by default. Skipped when a base(...) call already ran the
+        // base constructor (which performs those initializers itself).
+        else if (!string.IsNullOrEmpty(baseType) && baseType != "SwitchApp"
             && !CSharpToC.IsControlSubclass(baseType))
         {
             transpiler.WriteInstanceFieldInitializersForBaseClass(baseType);

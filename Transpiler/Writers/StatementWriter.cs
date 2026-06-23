@@ -229,18 +229,81 @@ public sealed class StatementWriter
             var (cTypeFinal, isPtr) = InferLocalType(declType, v);
             if (string.IsNullOrWhiteSpace(cTypeFinal)) cTypeFinal = "int";
 
-            var ptr = isPtr ? "*" : "";
+            // Build the initializer first (this emits any LINQ/collection expansion
+            // and returns the resulting expression — often a registered temp var).
             var init = BuildLocalInit(v, isPtr, declType, cTypeFinal);
 
+            // Resolve the C# type of a `var` initializer. The semantic model often
+            // can't type LINQ extension-method results, so prefer the type the
+            // handler registered for the produced temp var; fall back to semantic.
+            string? varCs = null;
+            if (declType is "var" or "var?")
+            {
+                var rhsKey = init.StartsWith(" = ", StringComparison.Ordinal)
+                    ? init.Substring(3).Trim() : "";
+                if (rhsKey.Length > 0 && _ctx.LocalTypes.TryGetValue(rhsKey, out var rhsType))
+                    varCs = rhsType;
+                varCs ??= ResolveVarCsType(v);
+
+                // Correct the C declaration type when `var` resolved to a collection
+                // /reference type but InferVarType fell back to a scalar.
+                if (varCs != null && cTypeFinal == "int"
+                    && (TypeRegistry.IsList(varCs) || TypeRegistry.IsDictionary(varCs)
+                        || TypeRegistry.IsStack(varCs) || TypeRegistry.IsQueue(varCs)
+                        || TypeRegistry.IsHashSet(varCs) || TypeRegistry.IsStringBuilder(varCs)
+                        || TypeRegistry.NeedsPointerSuffix(varCs)))
+                {
+                    var mapped = TypeRegistry.MapType(varCs);
+                    cTypeFinal = mapped;
+                    isPtr = !mapped.EndsWith("*");
+                }
+            }
+
+            var ptr = isPtr ? "*" : "";
             _ctx.WriteLine(cTypeFinal + ptr + " " + v.Identifier + init + ";");
 
-            var registeredType = cTypeFinal == "List_str"
-                ? "List<string>"
-                : (declType is "var" or "var?" ? cTypeFinal : declType);
+            // Register the C# type (not the C name) so collection/LINQ handlers,
+            // which key off `List<T>` etc. via IsList, recognise `var` locals too.
+            // (Previously a `var` local stored "List_int*", which IsList rejects, so
+            // LINQ silently mangled to List_int_OrderBy.)
+            string registeredType;
+            if (cTypeFinal is "List_str" or "List_str*")
+                registeredType = "List<string>";
+            else if (declType is "var" or "var?")
+                registeredType = varCs ?? cTypeFinal;
+            else
+                registeredType = declType;
             _ctx.LocalTypes[v.Identifier.Text] = registeredType;
 
             if (isUsingDecl) ScheduleUsingVarCleanup(v.Identifier.Text, registeredType);
         }
+    }
+
+    // Resolves the C# type of a `var` initializer (e.g. "List<int>", "Dog") so it
+    // can be registered in LocalTypes in the form handlers expect. Returns null if
+    // it can't be determined (caller falls back to the C type).
+    private string? ResolveVarCsType(VariableDeclaratorSyntax v)
+    {
+        var init = v.Initializer?.Value;
+        if (init == null) return null;
+        if (init is ObjectCreationExpressionSyntax oc)
+            return oc.Type.ToString().Trim();
+        if (_ctx.SemanticModel != null)
+        {
+            try
+            {
+                var ti = _ctx.SemanticModel.GetTypeInfo(init);
+                var sym = ti.Type ?? ti.ConvertedType;
+                if (sym != null && sym is not IErrorTypeSymbol)
+                {
+                    var s = TranspilerContext.FormatTypeSymbol(sym);
+                    if (!string.IsNullOrEmpty(s) && s != "?" && s != "object" && s != "var")
+                        return s;
+                }
+            }
+            catch { }
+        }
+        return null;
     }
 
     // Schedules a cleanup action for a "using var" declaration.
@@ -504,7 +567,7 @@ public sealed class StatementWriter
     }
 
     private static bool IsExtensionStructType(string csType) =>
-        csType is "TouchState" or "StickPos" or "BatteryInfo" or "TimeInfo";
+        csType is "TouchState" or "StickPos" or "BatteryInfo" or "TimeInfo" or "MotionState";
 
     private void WriteNullableLocal(VariableDeclaratorSyntax v, string declType)
     {
@@ -608,6 +671,9 @@ public sealed class StatementWriter
                           or "NX.GetTime")
                 return ("CS2SX_TimeInfo", false);
 
+            if (calleeStr is "Motion.Get" or "CS2SX_Motion_Get")
+                return ("CS2SX_MotionState", false);
+
             if (calleeStr is "Stopwatch.StartNew"
                           or "CS2SX_Stopwatch_StartNew")
                 return ("CS2SX_Stopwatch", true);
@@ -628,6 +694,7 @@ public sealed class StatementWriter
             if (inferred is "StickPos") return ("CS2SX_StickPos", false);
             if (inferred is "BatteryInfo") return ("CS2SX_BatteryInfo", false);
             if (inferred is "TimeInfo") return ("CS2SX_TimeInfo", false);
+            if (inferred is "MotionState") return ("CS2SX_MotionState", false);
 
             if (TypeRegistry.IsList(inferred)
                 || TypeRegistry.IsDictionary(inferred)
@@ -680,11 +747,43 @@ public sealed class StatementWriter
         bool isPtr, string declType, string cType)
     {
         if (v.Initializer != null)
-            return " = " + _expr.Write(v.Initializer.Value);
+        {
+            var rhs = _expr.Write(v.Initializer.Value);
+            // Covariant assignment `Animal a = new Dog(...)`: the declared base type
+            // and the derived RHS are distinct C struct pointers, so cast to the
+            // base (valid — the base struct is the first member). GCC 14 treats the
+            // mismatch as an error, not a warning.
+            if (isPtr && declType is not ("var" or "var?")
+                && TypeRegistry.NeedsPointerSuffix(declType)
+                && NeedsCovariantCast(declType, v.Initializer.Value))
+                rhs = "(" + declType + "*)(" + rhs + ")";
+            return " = " + rhs;
+        }
         if (!isPtr && TypeRegistry.IsPrimitive(
                 declType is "var" or "var?" ? cType : declType))
             return " = 0";
         return "";
+    }
+
+    // True when the initializer's static type is a strict subclass of declType
+    // (so the C pointer types differ and a cast is required).
+    private bool NeedsCovariantCast(string declType, ExpressionSyntax init)
+    {
+        if (_ctx.SemanticModel == null) return false;
+        try
+        {
+            var ti = _ctx.SemanticModel.GetTypeInfo(init);
+            var rhsSym = (ti.Type ?? ti.ConvertedType) as INamedTypeSymbol;
+            if (rhsSym == null || rhsSym.Name == declType) return false;
+            var t = rhsSym.BaseType;
+            while (t != null && t.SpecialType == SpecialType.None)
+            {
+                if (t.Name == declType) return true;
+                t = t.BaseType;
+            }
+        }
+        catch { }
+        return false;
     }
 
     // ── If ────────────────────────────────────────────────────────────────────
@@ -1169,6 +1268,15 @@ public sealed class StatementWriter
             WritePatternSwitch(sw);
             return;
         }
+
+        // C `switch` only accepts integer subjects. A string switch must be
+        // lowered to an if/else chain over CS2SX_strcmp_safe(...) == 0.
+        if (TypeInferrer.InferCSharpType(sw.Expression, _ctx) == "string")
+        {
+            WriteStringSwitch(sw);
+            return;
+        }
+
         _ctx.WriteLine("switch (" + _expr.Write(sw.Expression) + ")");
         _ctx.WriteLine("{");
         _ctx.Indent();
@@ -1184,6 +1292,56 @@ public sealed class StatementWriter
             _ctx.Indent();
             foreach (var s in section.Statements) Write(s);
             _ctx.Dedent();
+        }
+        _ctx.Dedent();
+        _ctx.WriteLine("}");
+    }
+
+    // Lowers `switch (str) { case "a": ...; default: ... }` to an if/else chain
+    // using CS2SX_strcmp_safe, since C switch cannot branch on strings.
+    private void WriteStringSwitch(SwitchStatementSyntax sw)
+    {
+        var subject = _expr.Write(sw.Expression);
+        // Evaluate the subject once into a temp to avoid re-running side effects.
+        var tmp = "_swstr" + _ctx.NextTmp();
+        _ctx.WriteLine("const char* " + tmp + " = " + subject + ";");
+
+        SwitchSectionSyntax? defaultSection = null;
+        bool first = true;
+        foreach (var section in sw.Sections)
+        {
+            var caseValues = section.Labels.OfType<CaseSwitchLabelSyntax>()
+                .Select(l => _expr.Write(l.Value)).ToList();
+            if (section.Labels.OfType<DefaultSwitchLabelSyntax>().Any())
+            {
+                defaultSection = section;
+                if (caseValues.Count == 0) continue;
+            }
+
+            var cond = string.Join(" || ",
+                caseValues.Select(v => "CS2SX_strcmp_safe(" + tmp + ", " + v + ") == 0"));
+            _ctx.WriteLine((first ? "if (" : "else if (") + cond + ")");
+            WriteStringSwitchBody(section);
+            first = false;
+        }
+
+        if (defaultSection != null)
+        {
+            _ctx.WriteLine(first ? "" : "else");
+            WriteStringSwitchBody(defaultSection);
+        }
+    }
+
+    private void WriteStringSwitchBody(SwitchSectionSyntax section)
+    {
+        _ctx.WriteLine("{");
+        _ctx.Indent();
+        foreach (var s in section.Statements)
+        {
+            // Drop the trailing `break;` — in an if/else it would wrongly break an
+            // enclosing loop. return/continue/throw are preserved.
+            if (s is BreakStatementSyntax) continue;
+            Write(s);
         }
         _ctx.Dedent();
         _ctx.WriteLine("}");

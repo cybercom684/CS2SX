@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 	<PropertyGroup>
 		<OutputType>Exe</OutputType>
 		<TargetFramework>net8.0</TargetFramework>
@@ -8,16 +8,26 @@
 		<PackAsTool>true</PackAsTool>
 		<ToolCommandName>cs2sx</ToolCommandName>
 		<PackageId>CS2SX</PackageId>
-		<Version>0.4.9.131</Version>
+		<Version>0.4.9.181</Version>
 	</PropertyGroup>
 	<ItemGroup>
 		<PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="5.3.0" />
 		<EmbeddedResource Include="Runtime\switchapp.h" />
 		<EmbeddedResource Include="Runtime\switchforms.h" />
 		<EmbeddedResource Include="Runtime\AudioStub.h" />
+		<EmbeddedResource Include="Runtime\VibrationStub.h" />
+		<EmbeddedResource Include="Runtime\MotionStub.h" />
+		<EmbeddedResource Include="Runtime\SwkbdStub.h" />
+		<EmbeddedResource Include="Runtime\SaveDataStub.h" />
+		<EmbeddedResource Include="Runtime\HttpStub.h" />
 		<EmbeddedResource Include="Stubs\SwitchApp.cs" />
 		<EmbeddedResource Include="Stubs\Input.cs" />
 		<EmbeddedResource Include="Stubs\Audio.cs" />
+		<EmbeddedResource Include="Stubs\Vibration.cs" />
+		<EmbeddedResource Include="Stubs\Motion.cs" />
+		<EmbeddedResource Include="Stubs\Keyboard.cs" />
+		<EmbeddedResource Include="Stubs\SaveData.cs" />
+		<EmbeddedResource Include="Stubs\Http.cs" />
 		<EmbeddedResource Include="Stubs\LibNX\**\*" />
 		<EmbeddedResource Include="SwitchFormsLib\**\*.cs" />
 	</ItemGroup>

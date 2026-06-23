@@ -31,6 +31,10 @@ internal static class ProcessRunner
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false,
+            // GCC/devkitPro tools emit UTF-8; force UTF-8 decoding so non-ASCII
+            // paths/diagnostics aren't mojibake'd (breaks gcc→C# error mapping).
+            StandardOutputEncoding = System.Text.Encoding.UTF8,
+            StandardErrorEncoding = System.Text.Encoding.UTF8,
         };
 
         var proc = Process.Start(psi)

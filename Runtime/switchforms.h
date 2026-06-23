@@ -53,6 +53,14 @@ static inline char* _cs2sx_heap_strdup(const char* src)
     return buf;
 }
 
+// Frees a heap string returned by _cs2sx_heap_strdup. NULL-safe. Used by Sys.FreeStr
+// for manual cleanup of owned string fields (the auto-destructor skips string fields,
+// since they may alias static literals). Never pass a string literal here.
+static inline void CS2SX_FreeStr(const char* s)
+{
+    if (s) free((void*)s);
+}
+
 // ============================================================================
 // Action
 // ============================================================================
@@ -238,7 +246,9 @@ static inline void StringBuilder__grow(StringBuilder* sb, int needed)
     if (sb->length + needed + 1 <= sb->capacity) return;
     int cap = sb->capacity * 2;
     while (cap < sb->length + needed + 1) cap *= 2;
-    sb->buf = (char*)realloc(sb->buf, cap);
+    char* nb = (char*)realloc(sb->buf, cap);
+    if (!nb) return;   // OOM: keep the existing buffer rather than leaking/NULL-derefing
+    sb->buf = nb;
     sb->capacity = cap;
 }
 
@@ -496,7 +506,13 @@ static inline const char* String_TrimStart(const char* s)
 {
     if (!s) return "";
     while (*s == ' ' || *s == '\t') s++;
-    return s;
+    // Copy into a pooled buffer instead of returning an interior pointer into
+    // the source (which would alias/dangle if the source is freed or reused).
+    char* buf = _cs2sx_next_buf();
+    int i = 0;
+    for (; s[i] && i < CS2SX_STRBUF_SIZE - 1; i++) buf[i] = s[i];
+    buf[i] = '\0';
+    return buf;
 }
 
 static inline const char* String_TrimEnd(const char* s)
@@ -553,7 +569,12 @@ static inline const char* String_SubstringFrom(const char* s, int start)
     int slen = (int)strlen(s);
     if (start < 0) start = 0;
     if (start >= slen) return "";
-    return s + start;
+    // Copy into a pooled buffer rather than returning an interior pointer.
+    char* buf = _cs2sx_next_buf();
+    int i = 0;
+    for (; s[start + i] && i < CS2SX_STRBUF_SIZE - 1; i++) buf[i] = s[start + i];
+    buf[i] = '\0';
+    return buf;
 }
 
 static inline int String_IndexOf(const char* s, const char* sub)
@@ -901,6 +922,8 @@ static inline void List_##T##_Add(List_##T* l, T val) {                         
         l->data = (T*)realloc(l->data, l->capacity * sizeof(T)); }                                 \
     l->data[l->count++] = val; }                                                                    \
 static inline T    List_##T##_Get(List_##T* l, int i) { return l->data[i]; }                       \
+static inline void List_##T##_Set(List_##T* l, int i, T val) {                                     \
+    if (l && i >= 0 && i < l->count) l->data[i] = val; }                                           \
 static inline int  List_##T##_Count(List_##T* l)       { return l ? l->count : 0; }                \
 static inline void List_##T##_Clear(List_##T* l)       { if (l) l->count = 0; }                    \
 static inline void List_##T##_Free(List_##T* l)        { if (l) { free(l->data); free(l); } }      \
@@ -945,6 +968,8 @@ static inline void List_##T##_Add(List_##T* l, T* val) {                        
         l->data = (T**)realloc(l->data, l->capacity * sizeof(T*)); }                               \
     l->data[l->count++] = val; }                                                                    \
 static inline T*   List_##T##_Get(List_##T* l, int i) { return (l && i >= 0 && i < l->count) ? l->data[i] : NULL; } \
+static inline void List_##T##_Set(List_##T* l, int i, T* val) {                                    \
+    if (l && i >= 0 && i < l->count) l->data[i] = val; }                                           \
 static inline int  List_##T##_Count(List_##T* l)       { return l ? l->count : 0; }                \
 static inline void List_##T##_Clear(List_##T* l)       { if (l) l->count = 0; }                    \
 static inline void List_##T##_Free(List_##T* l)        { if (l) { free(l->data); free(l); } }      \
@@ -1267,6 +1292,32 @@ static inline List_str* String_Split_RemoveEmpty(const char* s, const char* sep)
         if (raw->data[_i] && raw->data[_i][0] != '\0')
             List_str_Add(result, raw->data[_i]);
     List_str_Free(raw);
+    return result;
+}
+
+// C#'s parameterless string.Split() splits on any run of whitespace and
+// drops empty entries (e.g. "  a  b ".Split() => ["a","b"]).
+static inline List_str* String_Split_Whitespace(const char* s)
+{
+    List_str* result = List_str_New();
+    if (!s || !result) return result;
+
+    int srclen = (int)strlen(s);
+    char* src = (char*)malloc(srclen + 1);
+    if (!src) return result;
+    memcpy(src, s, srclen + 1);
+
+    char* cur = src;
+    while (*cur)
+    {
+        while (*cur == ' ' || *cur == '\t' || *cur == '\n' || *cur == '\r') cur++;
+        if (!*cur) break;
+        char* start = cur;
+        while (*cur && *cur != ' ' && *cur != '\t' && *cur != '\n' && *cur != '\r') cur++;
+        if (*cur) { *cur = '\0'; cur++; }
+        List_str_Add(result, start);
+    }
+    free(src);
     return result;
 }
 
@@ -1650,6 +1701,317 @@ static inline int CS2SX_Dir_Delete(const char* path)
     return R_SUCCEEDED(rc);
 }
 
+// Binary-safe file copy (chunked). Unlike CS2SX_File_Copy (text-based, corrupts
+// non-text data) this preserves images, NRO, archives, etc. byte-for-byte.
+static inline int CS2SX_File_CopyBinary(const char* src, const char* dst)
+{
+    FsFileSystem fs;
+    if (R_FAILED(fsOpenSdCardFileSystem(&fs))) return 0;
+
+    FsFile in;
+    if (R_FAILED(fsFsOpenFile(&fs, src, FsOpenMode_Read, &in)))
+    { fsFsClose(&fs); return 0; }
+
+    s64 size = 0;
+    fsFileGetSize(&in, &size);
+
+    fsFsDeleteFile(&fs, dst);
+    if (R_FAILED(fsFsCreateFile(&fs, dst, size, 0)))
+    { fsFileClose(&in); fsFsClose(&fs); return 0; }
+
+    FsFile out;
+    if (R_FAILED(fsFsOpenFile(&fs, dst, FsOpenMode_Write, &out)))
+    { fsFileClose(&in); fsFsClose(&fs); return 0; }
+
+    const int CHUNK = 256 * 1024;
+    char* buf = (char*)malloc((size_t)CHUNK);
+    int ok = (buf != NULL);
+    s64 off = 0;
+    while (ok && off < size)
+    {
+        u64 toRead = (u64)((size - off) < CHUNK ? (size - off) : CHUNK);
+        u64 got = 0;
+        if (R_FAILED(fsFileRead(&in, (u64)off, buf, toRead, FsReadOption_None, &got)) || got == 0)
+        { ok = 0; break; }
+        if (R_FAILED(fsFileWrite(&out, (u64)off, buf, got, FsWriteOption_None)))
+        { ok = 0; break; }
+        off += (s64)got;
+    }
+    if (ok) fsFileFlush(&out);
+    if (buf) free(buf);
+    fsFileClose(&out);
+    fsFileClose(&in);
+    fsFsClose(&fs);
+    return ok;
+}
+
+// Reads up to maxBytes and returns a formatted hex dump (offset · hex · ascii),
+// one 16-byte row per line. Handles binary data (incl. NUL bytes). "" on failure.
+static inline const char* CS2SX_File_ReadHexDump(const char* path, int maxBytes)
+{
+    static char* buf = NULL;
+    static int   cap = 0;
+
+    FsFileSystem fs;
+    if (R_FAILED(fsOpenSdCardFileSystem(&fs))) return "";
+    FsFile f;
+    if (R_FAILED(fsFsOpenFile(&fs, path, FsOpenMode_Read, &f))) { fsFsClose(&fs); return ""; }
+
+    s64 size = 0;
+    fsFileGetSize(&f, &size);
+    if (maxBytes <= 0) maxBytes = 4096;
+    s64 toRead = (size < maxBytes) ? size : (s64)maxBytes;
+
+    unsigned char* raw = (unsigned char*)malloc((size_t)(toRead > 0 ? toRead : 1));
+    u64 got = 0;
+    if (raw && toRead > 0)
+        fsFileRead(&f, 0, raw, (u64)toRead, FsReadOption_None, &got);
+    fsFileClose(&f);
+    fsFsClose(&fs);
+    if (!raw) return "";
+
+    int rows = (int)((got + 15) / 16);
+    int needed = rows * 80 + 16;
+    if (cap < needed)
+    {
+        char* nb = (char*)realloc(buf, needed);
+        if (!nb) { free(raw); return ""; }
+        buf = nb; cap = needed;
+    }
+
+    int p = 0;
+    for (u64 r = 0; r < got; r += 16)
+    {
+        p += snprintf(buf + p, cap - p, "%08x  ", (unsigned)r);
+        for (int c = 0; c < 16; c++)
+        {
+            if (r + (u64)c < got) p += snprintf(buf + p, cap - p, "%02x ", raw[r + c]);
+            else                  p += snprintf(buf + p, cap - p, "   ");
+        }
+        p += snprintf(buf + p, cap - p, " |");
+        for (int c = 0; c < 16 && r + (u64)c < got; c++)
+        {
+            unsigned char ch = raw[r + c];
+            buf[p++] = (ch >= 32 && ch < 127) ? (char)ch : '.';
+        }
+        buf[p++] = '|';
+        buf[p++] = '\n';
+    }
+    buf[p] = '\0';
+    free(raw);
+    return buf;
+}
+
+// ── Chunked copy (frame-stepped, for a live progress bar) ───────────────────
+// Single in-flight copy context; the app is single-threaded so one is enough.
+typedef struct {
+    FsFileSystem fs;
+    FsFile in;
+    FsFile out;
+    s64    size;
+    s64    off;
+    char*  buf;
+    int    active;
+} CS2SX_CopyCtx;
+static CS2SX_CopyCtx g_cs2sx_copy = {0};
+
+#define CS2SX_COPY_BUF (4 * 1024 * 1024)   // 4 MB working buffer
+
+static inline void CS2SX_File_CopyEnd(void)
+{
+    if (!g_cs2sx_copy.active) return;
+    fsFileClose(&g_cs2sx_copy.out);
+    fsFileClose(&g_cs2sx_copy.in);
+    fsFsClose(&g_cs2sx_copy.fs);
+    if (g_cs2sx_copy.buf) { free(g_cs2sx_copy.buf); g_cs2sx_copy.buf = NULL; }
+    g_cs2sx_copy.active = 0;
+}
+
+// Opens src+dst for a chunked copy. Returns total size (>=0), or -1 on error.
+static inline long long CS2SX_File_CopyBegin(const char* src, const char* dst)
+{
+    CS2SX_File_CopyEnd();
+    if (R_FAILED(fsOpenSdCardFileSystem(&g_cs2sx_copy.fs))) return -1;
+    if (R_FAILED(fsFsOpenFile(&g_cs2sx_copy.fs, src, FsOpenMode_Read, &g_cs2sx_copy.in)))
+    { fsFsClose(&g_cs2sx_copy.fs); return -1; }
+
+    s64 size = 0;
+    fsFileGetSize(&g_cs2sx_copy.in, &size);
+
+    fsFsDeleteFile(&g_cs2sx_copy.fs, dst);
+    if (R_FAILED(fsFsCreateFile(&g_cs2sx_copy.fs, dst, size, 0)))
+    { fsFileClose(&g_cs2sx_copy.in); fsFsClose(&g_cs2sx_copy.fs); return -1; }
+    if (R_FAILED(fsFsOpenFile(&g_cs2sx_copy.fs, dst, FsOpenMode_Write, &g_cs2sx_copy.out)))
+    { fsFileClose(&g_cs2sx_copy.in); fsFsClose(&g_cs2sx_copy.fs); return -1; }
+
+    g_cs2sx_copy.buf = (char*)malloc(CS2SX_COPY_BUF);
+    if (!g_cs2sx_copy.buf)
+    { fsFileClose(&g_cs2sx_copy.out); fsFileClose(&g_cs2sx_copy.in); fsFsClose(&g_cs2sx_copy.fs); return -1; }
+
+    g_cs2sx_copy.size = size;
+    g_cs2sx_copy.off  = 0;
+    g_cs2sx_copy.active = 1;
+    return (long long)size;
+}
+
+// Copies up to chunkBytes more. Returns bytes copied so far (== size when done),
+// or -1 on error. Caller calls CopyEnd() when done/aborting.
+static inline long long CS2SX_File_CopyStep(int chunkBytes)
+{
+    if (!g_cs2sx_copy.active || !g_cs2sx_copy.buf) return -1;
+    if (chunkBytes <= 0 || chunkBytes > CS2SX_COPY_BUF) chunkBytes = CS2SX_COPY_BUF;
+
+    s64 remaining = g_cs2sx_copy.size - g_cs2sx_copy.off;
+    if (remaining <= 0) return (long long)g_cs2sx_copy.off;   // already complete
+
+    u64 toRead = (u64)(remaining < chunkBytes ? remaining : chunkBytes);
+    u64 got = 0;
+    if (R_FAILED(fsFileRead(&g_cs2sx_copy.in, (u64)g_cs2sx_copy.off, g_cs2sx_copy.buf,
+                            toRead, FsReadOption_None, &got)) || got == 0)
+        return -1;
+    if (R_FAILED(fsFileWrite(&g_cs2sx_copy.out, (u64)g_cs2sx_copy.off, g_cs2sx_copy.buf,
+                             got, FsWriteOption_None)))
+        return -1;
+
+    g_cs2sx_copy.off += (s64)got;
+    if (g_cs2sx_copy.off >= g_cs2sx_copy.size) fsFileFlush(&g_cs2sx_copy.out);
+    return (long long)g_cs2sx_copy.off;
+}
+
+// File size in bytes (-1 if missing/unreadable).
+static inline long long CS2SX_File_GetSize(const char* path)
+{
+    FsFileSystem fs;
+    if (R_FAILED(fsOpenSdCardFileSystem(&fs))) return -1;
+    FsFile f;
+    if (R_FAILED(fsFsOpenFile(&fs, path, FsOpenMode_Read, &f))) { fsFsClose(&fs); return -1; }
+    s64 size = 0;
+    fsFileGetSize(&f, &size);
+    fsFileClose(&f);
+    fsFsClose(&fs);
+    return (long long)size;
+}
+
+// Last-modified time as a POSIX timestamp (0 if unavailable). Use for sorting.
+static inline long long CS2SX_File_GetMTime(const char* path)
+{
+    FsFileSystem fs;
+    if (R_FAILED(fsOpenSdCardFileSystem(&fs))) return 0;
+    FsTimeStampRaw ts;
+    Result rc = fsFsGetFileTimeStampRaw(&fs, path, &ts);
+    fsFsClose(&fs);
+    if (R_FAILED(rc) || !ts.is_valid) return 0;
+    return (long long)ts.modified;
+}
+
+// Renames/moves a file within the SD filesystem (cheap — no data copy).
+static inline int CS2SX_File_Rename(const char* src, const char* dst)
+{
+    FsFileSystem fs;
+    if (R_FAILED(fsOpenSdCardFileSystem(&fs))) return 0;
+    Result rc = fsFsRenameFile(&fs, src, dst);
+    fsFsClose(&fs);
+    return R_SUCCEEDED(rc);
+}
+
+static inline int CS2SX_Dir_Rename(const char* src, const char* dst)
+{
+    FsFileSystem fs;
+    if (R_FAILED(fsOpenSdCardFileSystem(&fs))) return 0;
+    Result rc = fsFsRenameDirectory(&fs, src, dst);
+    fsFsClose(&fs);
+    return R_SUCCEEDED(rc);
+}
+
+// Recursively deletes a directory and everything in it.
+static inline int CS2SX_Dir_DeleteRecursive(const char* path)
+{
+    FsFileSystem fs;
+    if (R_FAILED(fsOpenSdCardFileSystem(&fs))) return 0;
+    Result rc = fsFsDeleteDirectoryRecursively(&fs, path);
+    fsFsClose(&fs);
+    return R_SUCCEEDED(rc);
+}
+
+// SD-card free / total space in bytes (-1 if unavailable).
+static inline long long CS2SX_Fs_GetFreeSpace(void)
+{
+    FsFileSystem fs;
+    if (R_FAILED(fsOpenSdCardFileSystem(&fs))) return -1;
+    s64 out = 0;
+    Result rc = fsFsGetFreeSpace(&fs, "/", &out);
+    fsFsClose(&fs);
+    return R_SUCCEEDED(rc) ? (long long)out : -1;
+}
+
+static inline long long CS2SX_Fs_GetTotalSpace(void)
+{
+    FsFileSystem fs;
+    if (R_FAILED(fsOpenSdCardFileSystem(&fs))) return -1;
+    s64 out = 0;
+    Result rc = fsFsGetTotalSpace(&fs, "/", &out);
+    fsFsClose(&fs);
+    return R_SUCCEEDED(rc) ? (long long)out : -1;
+}
+
+// Recursively sums file sizes under a directory using directory ENTRIES (each
+// entry already carries its size — no per-file open), so it is fast even for
+// folders with many files. Returns total bytes (0 if empty/unreadable).
+static long long _cs2sx_dirsize_rec(FsFileSystem* fs, const char* path)
+{
+    FsDir d;
+    if (R_FAILED(fsFsOpenDirectory(fs, path, FsDirOpenMode_ReadDirs | FsDirOpenMode_ReadFiles, &d)))
+        return 0;
+
+    long long total = 0;
+    FsDirectoryEntry ent;
+    s64 read = 0;
+    while (R_SUCCEEDED(fsDirRead(&d, &read, 1, &ent)) && read == 1)
+    {
+        if (ent.name[0] == '.' &&
+            (ent.name[1] == '\0' || (ent.name[1] == '.' && ent.name[2] == '\0')))
+            continue;
+
+        char child[769];   // FS_MAX_PATH
+        if (path[0] == '/' && path[1] == '\0')
+            snprintf(child, sizeof(child), "/%s", ent.name);
+        else
+            snprintf(child, sizeof(child), "%s/%s", path, ent.name);
+
+        if (ent.type == FsDirEntryType_Dir) total += _cs2sx_dirsize_rec(fs, child);
+        else                                total += (long long)ent.file_size;
+    }
+    fsDirClose(&d);
+    return total;
+}
+
+static inline long long CS2SX_Fs_DirSize(const char* path)
+{
+    FsFileSystem fs;
+    if (R_FAILED(fsOpenSdCardFileSystem(&fs))) return -1;
+    long long t = _cs2sx_dirsize_rec(&fs, path);
+    fsFsClose(&fs);
+    return t;
+}
+
+// ZIP archive support — provided by a project that links the miniz extern-lib
+// (externLibs/miniz). Declared here so Archive.* calls compile; the symbols are
+// only required when an app actually calls them.
+extern int CS2SX_Zip_Extract(const char* zipPath, const char* destDir);          // → #files, -1 err
+extern int CS2SX_Zip_Compress(const char* srcPath, int isDir, const char* zipPath); // → #files, -1 err
+
+// Frame-stepped variants — Begin*, then call Step() a few times per frame until
+// Busy() is false; the UI + music keep running between entries (no thread).
+extern int CS2SX_Zip_BeginExtract(const char* zipPath, const char* destDir);     // → total, -1 err
+extern int CS2SX_Zip_BeginCompress(const char* list, const char* zipPath);       // list: "<isDir>\t<path>\n"…
+extern int CS2SX_Zip_Step(void);                                                 // 1 = more, 0 = done
+extern int CS2SX_Zip_StepBudget(int maxBytes);                                   // process ~maxBytes per call
+extern int CS2SX_Zip_Busy(void);
+extern int CS2SX_Zip_Result(void);                                               // → #files, -1 err, -2 cancelled
+extern int CS2SX_Zip_Progress(void);                                             // entries/files processed
+extern int CS2SX_Zip_Total(void);
+extern void CS2SX_Zip_Cancel(void);
+
 static inline const char* CS2SX_Dir_GetCurrent(void)
 {
     return "/switch";
@@ -1951,6 +2313,20 @@ static inline struct tm* _cs2sx_now(void)
     return localtime(&t);
 }
 
+// "YYYY-MM-DD HH:MM" for a file's last-modified time ("" if unavailable).
+static inline const char* CS2SX_File_GetModifiedString(const char* path)
+{
+    static char buf[32];
+    long long t = CS2SX_File_GetMTime(path);
+    if (t <= 0) { buf[0] = '\0'; return buf; }
+    time_t tt = (time_t)t;
+    struct tm* lt = localtime(&tt);
+    if (!lt) { buf[0] = '\0'; return buf; }
+    snprintf(buf, sizeof(buf), "%04d-%02d-%02d %02d:%02d",
+        lt->tm_year + 1900, lt->tm_mon + 1, lt->tm_mday, lt->tm_hour, lt->tm_min);
+    return buf;
+}
+
 #define CS2SX_DateTime_Now_Year()       (_cs2sx_now()->tm_year + 1900)
 #define CS2SX_DateTime_Now_Month()      (_cs2sx_now()->tm_mon  + 1)
 #define CS2SX_DateTime_Now_Day()        _cs2sx_now()->tm_mday
@@ -2124,6 +2500,25 @@ static inline int CS2SX_Regex_IsMatch(const char* input, const char* pattern)
     int r = regexec(&rx, input, 0, NULL, 0) == 0 ? 1 : 0;
     regfree(&rx);
     return r;
+}
+
+// Escapes regex metacharacters so the input is matched literally.
+// Returns a pooled buffer (valid for the current frame).
+static inline const char* CS2SX_Regex_Escape(const char* s)
+{
+    char* out = _cs2sx_next_buf();
+    if (!s) { out[0] = '\0'; return out; }
+    int j = 0;
+    for (int i = 0; s[i] && j < CS2SX_STRBUF_SIZE - 2; i++)
+    {
+        char c = s[i];
+        if (c=='.'||c=='^'||c=='$'||c=='*'||c=='+'||c=='?'||c=='('||c==')'||
+            c=='['||c==']'||c=='{'||c=='}'||c=='|'||c=='\\')
+            out[j++] = '\\';
+        out[j++] = c;
+    }
+    out[j] = '\0';
+    return out;
 }
 
 static inline void CS2SX_Regex_Match(const char* input, const char* pattern,

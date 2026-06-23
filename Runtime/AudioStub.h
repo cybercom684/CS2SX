@@ -104,6 +104,7 @@ typedef struct {
     float posInc;      // frames per output sample (srcRate/48000 * pitch)
     float volL, volR;  // equal-power panning applied to volume
     int   loop, active;
+    int   paused;      // 1 = keep position but produce no output / no advance
 } CS2SX_SampleVoice;
 
 // Synth: oscillator configuration
@@ -188,6 +189,8 @@ extern float             _cs2sx_audio_volume;
 extern CS2SX_AudioBuffer _cs2sx_audio_bufs[CS2SX_AUDIO_NUM_BUFS];
 extern int               _cs2sx_audio_buf_idx;
 extern int               _cs2sx_audio_submitted;
+extern int               _cs2sx_audio_target;
+extern int               _cs2sx_audio_outrate;   // actual audout playback rate (Hz)
 
 extern CS2SX_AudioVoice  _cs2sx_voices[CS2SX_MAX_VOICES];
 extern CS2SX_Sound       _cs2sx_sounds[CS2SX_MAX_SOUNDS];
@@ -380,16 +383,23 @@ static inline int _cs2sx_load_wav(const char* path, CS2SX_Sound* out)
             if (audioFmt != 1 || bitsPerSample != 16 || channels == 0 || channels > 2)
                 { fclose(f); return 0; }
 
-            int frames = (int)chunkSz / 2 / (int)channels;
+            // chunkSz is attacker/corruption-controlled — guard against a negative
+            // or absurd frame count (integer overflow / huge allocation).
+            int frames = (int)((u32)chunkSz / 2u / (u32)channels);
+            if (frames <= 0 || frames > 48000 * 600 /* ~10 min stereo cap */)
+                { fclose(f); return 0; }
             out->data = (s16*)malloc((size_t)frames * 2 * sizeof(s16));
             if (!out->data) { fclose(f); return 0; }
 
+            size_t got;
             if (channels == 2) {
-                fread(out->data, sizeof(s16), (size_t)frames * 2, f);
+                got = fread(out->data, sizeof(s16), (size_t)frames * 2, f);
+                frames = (int)(got / 2);   // clamp to what was actually read
             } else {
                 s16* tmp = (s16*)malloc((size_t)frames * sizeof(s16));
                 if (!tmp) { free(out->data); out->data = NULL; fclose(f); return 0; }
-                fread(tmp, sizeof(s16), (size_t)frames, f);
+                got = fread(tmp, sizeof(s16), (size_t)frames, f);
+                frames = (int)got;
                 for (int i = 0; i < frames; i++)
                     { out->data[i*2] = tmp[i]; out->data[i*2+1] = tmp[i]; }
                 free(tmp);
@@ -449,7 +459,7 @@ static inline void _cs2sx_mix_and_submit(void)
     // ── WAV sample voices ─────────────────────────────────────────────────────
     for (int v = 0; v < CS2SX_MAX_SAMPLE_VOICES; v++) {
         CS2SX_SampleVoice* sv = &_cs2sx_sample_voices[v];
-        if (!sv->active) continue;
+        if (!sv->active || sv->paused) continue;   // paused: hold position, no output
         CS2SX_Sound* snd = &_cs2sx_sounds[sv->soundIdx];
         if (!snd->valid) { sv->active = 0; continue; }
 
@@ -615,11 +625,17 @@ static inline void _cs2sx_mix_and_submit(void)
     }
 
     buf->libnx_buf.data_size = (u64)(CS2SX_AUDIO_BUF_SAMPLES * CS2SX_AUDIO_CHANNELS * sizeof(s16));
+    // CRITICAL: the audout DSP reads this buffer from RAM via DMA. Flush the CPU
+    // data cache so it sees the samples we just wrote — without this the DSP plays
+    // stale/partial cache contents → constant crackling regardless of queue depth.
+    armDCacheFlush(buf->libnx_buf.buffer, buf->libnx_buf.buffer_size);
     audoutAppendAudioOutBuffer(&buf->libnx_buf);
     _cs2sx_audio_submitted++;
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────
+
+static inline void CS2SX_Audio_Exit(void);   // forward decl for atexit registration
 
 static inline int CS2SX_Audio_Init(int sampleRate)
 {
@@ -627,6 +643,18 @@ static inline int CS2SX_Audio_Init(int sampleRate)
     if (_cs2sx_audio_init) return 1;
     if (R_FAILED(audoutInitialize()))    return 0;
     if (R_FAILED(audoutStartAudioOut())) { audoutExit(); return 0; }
+
+    // Use the device's REAL output rate for resampling. If we assume 48000 but the
+    // hardware runs at another rate, every sound plays at the wrong speed.
+    {
+        u32 hwRate = audoutGetSampleRate();
+        _cs2sx_audio_outrate = (hwRate > 0) ? (int)hwRate : CS2SX_AUDIO_SAMPLE_RATE;
+    }
+
+    // Ensure audout is torn down even if the app exits via the + button
+    // (SwitchApp_Run does not call Audio_Exit). Leaving audout open is a
+    // known Atmosphere crash-on-exit vector.
+    atexit(CS2SX_Audio_Exit);
 
     int bufBytes = CS2SX_AUDIO_BUF_SAMPLES * CS2SX_AUDIO_CHANNELS * sizeof(s16);
     int aligned  = (bufBytes + 0xFFF) & ~0xFFF;
@@ -977,11 +1005,12 @@ static inline int CS2SX_Audio_PlaySound(int handle, float volume, int loop, floa
 
     _cs2sx_sample_voices[slot].soundIdx = handle;
     _cs2sx_sample_voices[slot].pos      = 0.0f;
-    _cs2sx_sample_voices[slot].posInc   = (float)snd->sampleRate / (float)CS2SX_AUDIO_SAMPLE_RATE * pitch;
+    _cs2sx_sample_voices[slot].posInc   = (float)snd->sampleRate / (float)_cs2sx_audio_outrate * pitch;
     _cs2sx_sample_voices[slot].volL     = volume * pL;
     _cs2sx_sample_voices[slot].volR     = volume * pR;
     _cs2sx_sample_voices[slot].loop     = loop;
     _cs2sx_sample_voices[slot].active   = 1;
+    _cs2sx_sample_voices[slot].paused   = 0;
 
     if (_cs2sx_audio_submitted < CS2SX_AUDIO_NUM_BUFS)
         _cs2sx_mix_and_submit();
@@ -1010,6 +1039,96 @@ static inline int CS2SX_Audio_IsPlaying(int instanceId)
 {
     if (instanceId < 0 || instanceId >= CS2SX_MAX_SAMPLE_VOICES) return 0;
     return _cs2sx_sample_voices[instanceId].active;
+}
+
+// ── Music playback (full files: WAV native, MP3/FLAC/OGG via extern decoder) ───
+
+// Decodes a compressed audio file to interleaved stereo s16. Provided by a
+// project linking the draudio extern-lib (externLibs/draudio). Declared here so
+// CS2SX_Audio_LoadMusic compiles; only required when an app actually calls it.
+extern short* CS2SX_Audio_DecodePCM(const char* path, int* outFrames, int* outRate);
+
+// Loads a full music file into a sound slot. .wav uses the built-in loader;
+// other formats go through the extern decoder. Returns a sound handle or -1.
+static inline int CS2SX_Audio_LoadMusic(const char* path)
+{
+    if (!_cs2sx_audio_init || !path) return -1;
+    int slot = -1;
+    for (int i = 0; i < CS2SX_MAX_SOUNDS; i++)
+        if (!_cs2sx_sounds[i].valid) { slot = i; break; }
+    if (slot < 0) return -1;
+
+    // Extension check (case-insensitive) — .wav handled natively.
+    int n = 0; while (path[n]) n++;
+    int isWav = 0;
+    if (n >= 4)
+    {
+        char a = path[n-3], b = path[n-2], c = path[n-1];
+        if ((a=='w'||a=='W') && (b=='a'||b=='A') && (c=='v'||c=='V')) isWav = 1;
+    }
+
+    if (isWav)
+    {
+        if (_cs2sx_load_wav(path, &_cs2sx_sounds[slot])) return slot;
+        return -1;
+    }
+
+    int frames = 0, rate = 0;
+    short* pcm = CS2SX_Audio_DecodePCM(path, &frames, &rate);   // stereo interleaved s16
+    if (!pcm || frames <= 0 || rate <= 0) { if (pcm) free(pcm); return -1; }
+    _cs2sx_sounds[slot].data       = (s16*)pcm;   // sound takes ownership
+    _cs2sx_sounds[slot].frames     = frames;
+    _cs2sx_sounds[slot].sampleRate = rate;
+    _cs2sx_sounds[slot].valid      = 1;
+    return slot;
+}
+
+static inline void CS2SX_Audio_Pause(int instanceId)
+{
+    if (instanceId >= 0 && instanceId < CS2SX_MAX_SAMPLE_VOICES)
+        _cs2sx_sample_voices[instanceId].paused = 1;
+}
+
+static inline void CS2SX_Audio_Resume(int instanceId)
+{
+    if (instanceId >= 0 && instanceId < CS2SX_MAX_SAMPLE_VOICES)
+        _cs2sx_sample_voices[instanceId].paused = 0;
+}
+
+static inline int CS2SX_Audio_IsPaused(int instanceId)
+{
+    if (instanceId < 0 || instanceId >= CS2SX_MAX_SAMPLE_VOICES) return 0;
+    return _cs2sx_sample_voices[instanceId].paused;
+}
+
+// Current playback position (in source frames) of a playing instance.
+static inline int CS2SX_Audio_GetPositionFrames(int instanceId)
+{
+    if (instanceId < 0 || instanceId >= CS2SX_MAX_SAMPLE_VOICES) return 0;
+    return (int)_cs2sx_sample_voices[instanceId].pos;
+}
+
+static inline void CS2SX_Audio_Seek(int instanceId, int frame)
+{
+    if (instanceId < 0 || instanceId >= CS2SX_MAX_SAMPLE_VOICES) return;
+    CS2SX_SampleVoice* sv = &_cs2sx_sample_voices[instanceId];
+    if (!sv->active) return;
+    int total = _cs2sx_sounds[sv->soundIdx].frames;
+    if (frame < 0) frame = 0;
+    if (frame > total - 1) frame = total - 1;
+    sv->pos = (float)frame;
+}
+
+static inline int CS2SX_Audio_GetSoundFrames(int handle)
+{
+    if (handle < 0 || handle >= CS2SX_MAX_SOUNDS || !_cs2sx_sounds[handle].valid) return 0;
+    return _cs2sx_sounds[handle].frames;
+}
+
+static inline int CS2SX_Audio_GetSoundRate(int handle)
+{
+    if (handle < 0 || handle >= CS2SX_MAX_SOUNDS || !_cs2sx_sounds[handle].valid) return 0;
+    return _cs2sx_sounds[handle].sampleRate;
 }
 
 // ── Effects ───────────────────────────────────────────────────────────────────
@@ -1053,9 +1172,14 @@ static inline void CS2SX_Audio_Update(void)
 {
     if (!_cs2sx_audio_init) return;
 
-    if (_cs2sx_audio_submitted > 0) {
+    // Reclaim ALL finished buffers (loop, not once): if the frame rate drops below
+    // ~47 fps, more than one buffer finishes per frame — reclaiming only one would
+    // desync the in-flight count and starve the queue → crackle.
+    {
         AudioOutBuffer* rel; u32 cnt;
-        if (R_SUCCEEDED(audoutWaitPlayFinish(&rel, &cnt, 0)) && cnt > 0) {
+        while (_cs2sx_audio_submitted > 0
+            && R_SUCCEEDED(audoutGetReleasedAudioOutBuffer(&rel, &cnt)) && cnt > 0)
+        {
             _cs2sx_audio_submitted -= (int)cnt;
             if (_cs2sx_audio_submitted < 0) _cs2sx_audio_submitted = 0;
         }
@@ -1067,8 +1191,24 @@ static inline void CS2SX_Audio_Update(void)
     for (int v = 0; v < CS2SX_MAX_SYNTH_VOICES  && !anyActive; v++) if (_cs2sx_synth_voices[v].active)  anyActive = 1;
     if (!anyActive) return;
 
-    while (_cs2sx_audio_submitted < 2)
+    // Keep the DMA queue topped up to _cs2sx_audio_target buffers. A deeper queue
+    // tolerates frame-time jitter (heavy rendering, decode hitches) without the
+    // underruns that cause crackling/stuttering. Default 2 (~42 ms, low latency);
+    // raise via Audio.SetLatencyBuffers for music-style playback.
+    int target = _cs2sx_audio_target;
+    if (target < 2) target = 2;
+    if (target > CS2SX_AUDIO_NUM_BUFS) target = CS2SX_AUDIO_NUM_BUFS;
+    while (_cs2sx_audio_submitted < target)
         _cs2sx_mix_and_submit();
+}
+
+// Sets how many audio buffers (each ~21 ms) to keep queued. Higher = more robust
+// against frame stalls (no crackling), at the cost of audio latency. Range 2..8.
+static inline void CS2SX_Audio_SetLatencyBuffers(int n)
+{
+    if (n < 2) n = 2;
+    if (n > CS2SX_AUDIO_NUM_BUFS) n = CS2SX_AUDIO_NUM_BUFS;
+    _cs2sx_audio_target = n;
 }
 
 // ── Cleanup ───────────────────────────────────────────────────────────────────

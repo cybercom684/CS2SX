@@ -100,8 +100,43 @@ public sealed class ExpressionWriter : IExpressionWriter
             TypeOfExpressionSyntax typeOf => WriteTypeOf(typeOf),
             SizeOfExpressionSyntax sizeOf => "sizeof(" + TypeRegistry.MapType(sizeOf.Type.ToString().Trim()) + ")",
             RangeExpressionSyntax range => WriteRange(range),
+            InitializerExpressionSyntax initz => WriteArrayInitializerLiteral(initz),
             _ => WriteFallback(node),
         };
+    }
+
+    // A bare array/collection initializer used as an expression: `{ 1, 2, 3 }` →
+    // a C99 compound literal `(int[]){ 1, 2, 3 }`. Object initializers (`{ A = 1 }`)
+    // are consumed by object-creation, not here, so defer those to the fallback.
+    private string WriteArrayInitializerLiteral(InitializerExpressionSyntax init)
+    {
+        if (init.Expressions.Any(e => e is AssignmentExpressionSyntax))
+            return WriteFallback(init);
+
+        var elems = init.Expressions.Select(e => Write(e)).ToList();
+
+        string elemC = "int";
+        bool resolved = false;
+        if (_ctx.SemanticModel != null)
+        {
+            try
+            {
+                var ti = _ctx.SemanticModel.GetTypeInfo(init);
+                if ((ti.ConvertedType ?? ti.Type) is IArrayTypeSymbol ats)
+                {
+                    var csElem = TranspilerContext.FormatTypeSymbol(ats.ElementType);
+                    elemC = csElem == "string" ? "const char*" : TypeRegistry.MapType(csElem);
+                    resolved = true;
+                }
+            }
+            catch { }
+        }
+        if (!resolved && init.Expressions.Count > 0)
+        {
+            var csElem = TypeInferrer.InferCSharpType(init.Expressions[0], _ctx);
+            elemC = csElem == "string" ? "const char*" : TypeRegistry.MapType(csElem);
+        }
+        return "(" + elemC + "[]){ " + string.Join(", ", elems) + " }";
     }
 
     private string WriteFallback(SyntaxNode node)
@@ -538,6 +573,17 @@ public sealed class ExpressionWriter : IExpressionWriter
 
     // ── Assignment ────────────────────────────────────────────────────────────
 
+    // Wraps a string RHS in _cs2sx_heap_strdup so a field gets a stable, owned
+    // copy. String literals (static) and already-heap/NULL values are left as-is.
+    private string StableStringRhs(SyntaxNode? rightExpr, string right)
+    {
+        if (rightExpr is LiteralExpressionSyntax) return right;
+        var t = right.Trim();
+        if (t == "NULL" || t == "\"\"" || t.StartsWith("_cs2sx_heap_strdup", StringComparison.Ordinal))
+            return right;
+        return "_cs2sx_heap_strdup(" + right + ")";
+    }
+
     private string WriteAssignment(AssignmentExpressionSyntax assign)
     {
         var op = assign.OperatorToken.Text;
@@ -578,6 +624,19 @@ public sealed class ExpressionWriter : IExpressionWriter
         if (op == "??=")
             return WriteNullCoalescingAssignment(assign, right);
 
+        // string s += "x"  →  s = <concat into pooled buffer>(s, "x")
+        // C has no `+=` for const char*, so lower it to a concat + reassign.
+        if (op == "+=" && TypeInferrer.InferCSharpType(assign.Left, _ctx) == "string")
+        {
+            var leftStr = Write(assign.Left);
+            var buf = _ctx.NextStringBuf();
+            _ctx.Out.WriteLine(_ctx.Tab
+                + "snprintf(" + buf + ", CS2SX_STRBUF_SIZE, \"%s%s\", "
+                + leftStr + " ? " + leftStr + " : \"\", "
+                + right + " ? " + right + " : \"\");");
+            return leftStr + " = " + buf;
+        }
+
         if (assign.Left is MemberAccessExpressionSyntax mem)
             return WriteMemberAssignment(assign, mem, op, right);
 
@@ -590,6 +649,16 @@ public sealed class ExpressionWriter : IExpressionWriter
             if (_ctx.LocalTypes.TryGetValue(lname, out var lt2)
                 && lt2.StartsWith("@ref:", StringComparison.Ordinal))
                 return "*" + lname + " " + op + " " + right;
+
+            // A `string` FIELD must own a stable heap copy: the RHS may be a
+            // frame-arena buffer (string method result) or a value freed later
+            // (e.g. a List<string> element). Without this the field dangles.
+            if (op == "=" && !_ctx.LocalTypes.ContainsKey(lname)
+                && _ctx.FieldTypes.TryGetValue(lname.TrimStart('_'), out var lfld)
+                && lfld == "string")
+            {
+                return Write(assign.Left) + " = " + StableStringRhs(assign.Right, right);
+            }
 
             string? ltIface = null;
             _ctx.LocalTypes.TryGetValue(lname, out ltIface);
@@ -771,10 +840,42 @@ public sealed class ExpressionWriter : IExpressionWriter
 
         if (!_ctx.VTableTypes.Contains(receiverType)) return null;
 
+        // Only route through the vtable if the method is an actual virtual slot.
+        // A non-virtual method on a vtable-bearing class has no vtable member, so
+        // dispatching it through ->vtable-> would emit invalid C. When slot info is
+        // available and the method isn't a slot, fall through to a direct call.
+        if (_ctx.VTableMethods.TryGetValue(receiverType, out var slots)
+            && !slots.Contains(methodName))
+            return null;
+
         var recv = Write(mem.Expression);
         var vtableArgs = new List<string> { recv };
         vtableArgs.AddRange(callArgs);
-        return recv + "->vtable->" + methodName
+
+        // The vtable pointer lives in the ROOT class of the hierarchy; a derived
+        // class reaches it through its embedded base struct(s). Count the hops up
+        // to the topmost vtable ancestor so we emit recv->base.[base.]*vtable.
+        int vtHops = 0;
+        if (_ctx.SemanticModel != null)
+        {
+            try
+            {
+                var ti = _ctx.SemanticModel.GetTypeInfo(mem.Expression);
+                var rs = (ti.Type ?? ti.ConvertedType) as INamedTypeSymbol;
+                while (rs != null)
+                {
+                    var b = rs.BaseType;
+                    if (b != null && b.TypeKind == TypeKind.Class
+                        && b.SpecialType == SpecialType.None
+                        && _ctx.VTableTypes.Contains(b.Name))
+                    { vtHops++; rs = b; }
+                    else break;
+                }
+            }
+            catch { }
+        }
+        var vtChain = string.Concat(Enumerable.Repeat("base.", vtHops));
+        return recv + "->" + vtChain + "vtable->" + methodName
              + "(" + string.Join(", ", vtableArgs) + ")";
     }
 
@@ -830,9 +931,33 @@ public sealed class ExpressionWriter : IExpressionWriter
         }
 
         var recv = Write(mem.Expression);
+
+        // A non-virtual method inherited from a base class is emitted as
+        // BaseType_Method, and the receiver must be cast to (BaseType*) (valid
+        // because the base struct is the first member). Without this we'd emit a
+        // nonexistent DerivedType_Method.
+        var methodOwner = receiverType;
+        if (_ctx.SemanticModel != null)
+        {
+            try
+            {
+                var ms = _ctx.SemanticModel.GetSymbolInfo(inv).Symbol as IMethodSymbol;
+                var owner = ms?.ContainingType;
+                if (ms != null && !ms.IsStatic && owner != null
+                    && owner.TypeKind == TypeKind.Class
+                    && owner.SpecialType == SpecialType.None
+                    && owner.Name != receiverType)
+                {
+                    methodOwner = owner.Name;
+                    recv = "(" + owner.Name + "*)" + recv;
+                }
+            }
+            catch { }
+        }
+
         var allArgs = new List<string> { recv };
         allArgs.AddRange(callArgs);
-        var cName = CSharpToC.BuildCMethodName(receiverType, methodName,
+        var cName = CSharpToC.BuildCMethodName(methodOwner, methodName,
             inv.ArgumentList.Arguments.Count, _ctx.OverloadedMethods);
         return cName + "(" + string.Join(", ", allArgs) + ")";
     }
@@ -1087,31 +1212,41 @@ public sealed class ExpressionWriter : IExpressionWriter
                 var recvSym2 = (typeInfo2.ConvertedType ?? typeInfo2.Type) as INamedTypeSymbol;
                 if (recvSym2 != null)
                 {
-                    IPropertySymbol? foundProp2 = null;
+                    // Walk for an inherited property OR field, counting base-levels.
                     INamedTypeSymbol? definingType2 = null;
                     var t = recvSym2;
+                    int hops = 0;
                     while (t != null)
                     {
-                        var p = t.GetMembers(prop).OfType<IPropertySymbol>().FirstOrDefault();
-                        if (p != null) { foundProp2 = p; definingType2 = t; break; }
-                        t = t.BaseType;
+                        var members = t.GetMembers(prop);
+                        if (members.OfType<IPropertySymbol>().Any()
+                            || members.OfType<IFieldSymbol>().Any())
+                        { definingType2 = t; break; }
+                        t = t.BaseType; hops++;
                     }
-                    if (foundProp2 != null && definingType2 != null
-                        && definingType2.Name != recvSym2.Name)
+                    if (definingType2 != null && hops > 0)
                     {
+                        var baseChain = string.Concat(Enumerable.Repeat("base.", hops));
                         var pfx2 = TypeRegistry.HasNoPrefix(prop) ? "" : "f_";
-                        cProp = "base." + pfx2 + prop;
+                        cProp = baseChain + pfx2 + prop;
                     }
                 }
             }
             catch { }
         }
 
-        // Interpolated strings produce a stack snprintf-buffer → dangling pointer if stored in a field.
-        // Wrap with _cs2sx_heap_strdup() so the field gets a heap copy.
-        // Only applies to user-class fields (Control.Text uses Label_SetText, already handled above).
+        // Interpolated strings AND string concatenations (`"x" + y`) produce a
+        // pooled/arena buffer that is recycled next frame → a dangling pointer if
+        // stored in a field. Wrap with _cs2sx_heap_strdup() for a stable heap copy.
+        // Only applies to user-class fields (Control.Text uses Label_SetText above).
+        bool rhsIsTransientString =
+            assign.Right is InterpolatedStringExpressionSyntax
+            || (assign.Right is BinaryExpressionSyntax addBe
+                && addBe.IsKind(SyntaxKind.AddExpression)
+                && TypeInferrer.InferCSharpType(assign.Right, _ctx) == "string");
+
         var finalRight = right;
-        if (assign.Right is InterpolatedStringExpressionSyntax
+        if (rhsIsTransientString
             && assignReceiverType != null
             && !TypeRegistry.IsLibNxStruct(assignReceiverType)
             && !TypeRegistry.IsControlType(assignReceiverType)
@@ -1538,15 +1673,17 @@ public sealed class ExpressionWriter : IExpressionWriter
                 var recvSym2 = (typeInfo2.ConvertedType ?? typeInfo2.Type) as INamedTypeSymbol;
                 if (recvSym2 != null)
                 {
-                    // Walk up the type hierarchy to find the property
+                    // Walk up the type hierarchy to find the property, counting how
+                    // many base-levels up it is declared (for nested `base.base.`).
                     IPropertySymbol? foundProp = null;
                     INamedTypeSymbol? definingType = null;
                     var t = recvSym2;
+                    int propHops = 0;
                     while (t != null)
                     {
                         var p = t.GetMembers(prop).OfType<IPropertySymbol>().FirstOrDefault();
                         if (p != null) { foundProp = p; definingType = t; break; }
-                        t = t.BaseType;
+                        t = t.BaseType; propHops++;
                     }
 
                     if (foundProp != null && definingType != null)
@@ -1578,13 +1715,35 @@ public sealed class ExpressionWriter : IExpressionWriter
 
                         if (isInherited)
                         {
-                            // Property defined in a base class → access via ->base.
+                            // Property defined in a base class → access via ->base.[base.]*
+                            var baseChain = string.Concat(Enumerable.Repeat("base.", propHops));
                             var lower = prop.ToLowerInvariant();
                             if (TypeRegistry.IsBuiltinControlType(definingType.Name)
                                 && TypeRegistry.ControlFields.Contains(lower))
-                                return obj + "->base." + lower;
+                                return obj + "->" + baseChain + lower;
                             var pfx2 = TypeRegistry.HasNoPrefix(prop) ? "" : "f_";
-                            return obj + "->base." + pfx2 + prop;
+                            return obj + "->" + baseChain + pfx2 + prop;
+                        }
+                    }
+
+                    // Inherited FIELD (public int Legs;) — same base-chain routing.
+                    {
+                        var t2 = recvSym2;
+                        int fieldHops = 0;
+                        while (t2 != null)
+                        {
+                            var fsym = t2.GetMembers(prop).OfType<IFieldSymbol>().FirstOrDefault();
+                            if (fsym != null)
+                            {
+                                if (fieldHops > 0)  // declared in a base class
+                                {
+                                    var baseChain = string.Concat(Enumerable.Repeat("base.", fieldHops));
+                                    var pfx2 = TypeRegistry.HasNoPrefix(prop) ? "" : "f_";
+                                    return obj + "->" + baseChain + pfx2 + prop;
+                                }
+                                break; // on receiver itself → normal fallback below
+                            }
+                            t2 = t2.BaseType; fieldHops++;
                         }
                     }
                 }
@@ -1898,7 +2057,7 @@ public sealed class ExpressionWriter : IExpressionWriter
             return typeName + "_New(" + txt + ")";
         }
         // CS2SX/LibNx value types not in ValueTypeStructs (they come from embedded stubs)
-        if (typeName is "TouchState" or "StickPos" or "BatteryInfo" or "TimeInfo")
+        if (typeName is "TouchState" or "StickPos" or "BatteryInfo" or "TimeInfo" or "MotionState")
         {
             var cType = TypeRegistry.MapType(typeName);
             return "(" + cType + "){0}";
@@ -1988,17 +2147,19 @@ public sealed class ExpressionWriter : IExpressionWriter
             // C99 compound literal — valid as an expression (assignment, return, argument)
             return "(" + cType + (isRefType ? "*" : "") + "[]){ " + string.Join(", ", elems) + " }";
         }
+        // C# arrays are zero/null-initialised — use calloc, not malloc, so element
+        // reads before an explicit write are deterministic (0 / NULL), not garbage.
         if (arr.Type.RankSpecifiers.Count > 0
             && arr.Type.RankSpecifiers[0].Sizes.Count > 0)
         {
             var size = Write(arr.Type.RankSpecifiers[0].Sizes[0]);
             if (isRefType)
-                return "(" + cType + "**)malloc(" + size + " * sizeof(" + cType + "*))";
-            return "(" + cType + "*)malloc(" + size + " * sizeof(" + cType + "))";
+                return "(" + cType + "**)calloc((size_t)(" + size + "), sizeof(" + cType + "*))";
+            return "(" + cType + "*)calloc((size_t)(" + size + "), sizeof(" + cType + "))";
         }
         if (isRefType)
-            return "(" + cType + "**)malloc(sizeof(" + cType + "*))";
-        return "(" + cType + "*)malloc(sizeof(" + cType + "))";
+            return "(" + cType + "**)calloc(1, sizeof(" + cType + "*))";
+        return "(" + cType + "*)calloc(1, sizeof(" + cType + "))";
     }
 
     private string WriteImplicitArrayCreation(ImplicitArrayCreationExpressionSyntax implArr)
@@ -2019,7 +2180,7 @@ public sealed class ExpressionWriter : IExpressionWriter
     private static bool IsStructType(string csType) =>
         TypeRegistry.IsLibNxStruct(csType)
         || TypeRegistry.IsLibNxStruct(TypeRegistry.MapType(csType).TrimEnd('*'))
-        || csType is "TouchState" or "StickPos" or "BatteryInfo" or "TimeInfo";
+        || csType is "TouchState" or "StickPos" or "BatteryInfo" or "TimeInfo" or "MotionState";
 
     private string WriteConditional(ConditionalExpressionSyntax cond)
         => "(" + Write(cond.Condition) + " ? " + Write(cond.WhenTrue) + " : " + Write(cond.WhenFalse) + ")";

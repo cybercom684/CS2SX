@@ -58,6 +58,28 @@ public static class Audio
     /// Gibt true zurück, wenn die Wiedergabe-Instanz noch aktiv ist.
     public static bool IsPlaying(int instanceId) => false;
 
+    // ── Musik (ganze Dateien: WAV nativ, MP3/FLAC/OGG via Decoder) ───────────────
+
+    /// Lädt eine komplette Audiodatei (WAV/MP3/FLAC/OGG) als Sound-Handle (-1 = Fehler).
+    public static int LoadMusic(string path) => -1;
+    /// Pausiert eine Wiedergabe-Instanz (Position bleibt erhalten).
+    public static void Pause(int instanceId) { }
+    /// Setzt eine pausierte Instanz fort.
+    public static void Resume(int instanceId) { }
+    /// True, wenn die Instanz pausiert ist.
+    public static bool IsPaused(int instanceId) => false;
+    /// Aktuelle Wiedergabeposition in Quell-Frames.
+    public static int GetPositionFrames(int instanceId) => 0;
+    /// Springt zu einer Frame-Position.
+    public static void Seek(int instanceId, int frame) { }
+    /// Gesamtzahl der Frames eines geladenen Sounds.
+    public static int GetSoundFrames(int handle) => 0;
+    /// Samplerate eines geladenen Sounds (z. B. 44100).
+    public static int GetSoundRate(int handle) => 0;
+    /// Anzahl der vorgehaltenen Audiopuffer (je ~21 ms), 2–8. Höher = ruckelfreier
+    /// bei schwankender Framerate, aber mehr Latenz. Standard 2; für Musik z. B. 6.
+    public static void SetLatencyBuffers(int n) { }
+
     // ── Effekte ───────────────────────────────────────────────────────────────
 
     /// Tiefpassfilter auf den Gesamtmix.

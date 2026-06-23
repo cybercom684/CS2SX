@@ -191,6 +191,57 @@ public sealed class LinqHandler : InvocationHandlerBase
             return lifter;
         }
 
+        // Infer a lambda body's C# type with the parameter bound to the element
+        // type, so member access on the parameter (e.g. p => p.Name) resolves to
+        // the real member type instead of the `int` fallback.
+        string InferLambdaBody(LambdaExpressionSyntax? lam, string elemCs)
+        {
+            if (lam == null) return "int";
+            string? pName = null;
+            SyntaxNode? body = null;
+            if (lam is SimpleLambdaExpressionSyntax s)
+            { pName = s.Parameter.Identifier.Text; body = s.Body; }
+            else if (lam is ParenthesizedLambdaExpressionSyntax p)
+            {
+                if (p.ParameterList.Parameters.Count == 1)
+                    pName = p.ParameterList.Parameters[0].Identifier.Text;
+                body = p.Body;
+            }
+            if (body == null) return "int";
+
+            // The semantic model knows the real member type (e.g. p.Name → string)
+            // even when the syntactic inferrer can't resolve the parameter's members.
+            if (ctx.SemanticModel != null && body is ExpressionSyntax bex)
+            {
+                try
+                {
+                    var ti = ctx.SemanticModel.GetTypeInfo(bex);
+                    var sym = ti.Type ?? ti.ConvertedType;
+                    if (sym != null && sym is not IErrorTypeSymbol)
+                    {
+                        var st = TranspilerContext.FormatTypeSymbol(sym);
+                        if (!string.IsNullOrEmpty(st) && st != "?" && st != "object" && st != "var")
+                            return st;
+                    }
+                }
+                catch { }
+            }
+
+            string? prev = null; bool had = false;
+            if (pName != null)
+            {
+                had = ctx.LocalTypes.TryGetValue(pName, out prev);
+                ctx.LocalTypes[pName] = elemCs;
+            }
+            var t = TypeInferrer.InferCSharpType(body, ctx);
+            if (pName != null)
+            {
+                if (had) ctx.LocalTypes[pName] = prev!;
+                else ctx.LocalTypes.Remove(pName);
+            }
+            return t;
+        }
+
         switch (methodName)
         {
             case "Where":
@@ -216,11 +267,7 @@ public sealed class LinqHandler : InvocationHandlerBase
             case "Select":
                 {
                     if (lambdaArg == null) return NotHandled(out result);
-                    string projInner = "int";
-                    if (lambdaArg is SimpleLambdaExpressionSyntax simpleLam)
-                        projInner = TypeInferrer.InferCSharpType(simpleLam.Body, ctx);
-                    else if (lambdaArg is ParenthesizedLambdaExpressionSyntax parenLam)
-                        projInner = TypeInferrer.InferCSharpType(parenLam.Body, ctx);
+                    string projInner = InferLambdaBody(lambdaArg, inner);
                     var cProjInner = projInner == "string" ? "str" : TypeRegistry.MapType(projInner);
                     var cProjType = projInner == "string" ? "const char*" : TypeRegistry.MapType(projInner);
                     var projElemPtr = TypeRegistry.IsPrimitive(projInner) || projInner == "string" ? "" : "*";
@@ -597,26 +644,45 @@ public sealed class LinqHandler : InvocationHandlerBase
 
                     if (lambdaArg != null)
                     {
-                        string keyType = "int";
-                        if (lambdaArg is SimpleLambdaExpressionSyntax okl)
-                            keyType = TypeInferrer.InferCSharpType(okl.Body, ctx);
-                        else if (lambdaArg is ParenthesizedLambdaExpressionSyntax opkl)
-                            keyType = TypeInferrer.InferCSharpType(opkl.Body, ctx);
+                        string keyType = InferLambdaBody(lambdaArg, inner);
                         var keyFn = MakeLifter().LiftLambda(lambdaArg, hintType: $"Func<{inner},{keyType}>", elementTypeHint: inner);
+
+                        // Build the key chain: ThenBy extends the source's OrderBy chain
+                        // so the comparison is composite (primary, then secondary, ...).
+                        var chain = new List<(string KeyFn, bool Desc)>();
+                        bool isThen = methodName.StartsWith("ThenBy", StringComparison.Ordinal);
+                        if (isThen && ctx.OrderKeyChains.TryGetValue(sourceExpr, out var prev))
+                            chain.AddRange(prev);
+                        chain.Add((keyFn, descending));
+
+                        // Composite "data[j] should come after tmp" test: compare keys in
+                        // order; the first differing key decides, ties fall through (stable).
+                        string Cmp(string a, string b)
+                        {
+                            string expr = "0";
+                            for (int k = chain.Count - 1; k >= 0; k--)
+                            {
+                                var kf = chain[k].KeyFn;
+                                var gt = chain[k].Desc
+                                    ? $"{kf}({a}) < {kf}({b})"
+                                    : $"{kf}({a}) > {kf}({b})";
+                                expr = $"({kf}({a}) != {kf}({b}) ? ({gt}) : {expr})";
+                            }
+                            return expr;
+                        }
 
                         ctx.WriteLine($"for (int {idxVar} = 1; {idxVar} < {outVar}->count; {idxVar}++)");
                         ctx.WriteLine("{");
                         ctx.Indent();
                         ctx.WriteLine($"{cInnerType}{elemPtr} {tmpVar} = {outVar}->data[{idxVar}];");
                         ctx.WriteLine($"int {jVar} = {idxVar} - 1;");
-                        var cmp = descending
-                            ? $"{keyFn}({outVar}->data[{jVar}]) < {keyFn}({tmpVar})"
-                            : $"{keyFn}({outVar}->data[{jVar}]) > {keyFn}({tmpVar})";
-                        ctx.WriteLine($"while ({jVar} >= 0 && ({cmp}))");
+                        ctx.WriteLine($"while ({jVar} >= 0 && {Cmp($"{outVar}->data[{jVar}]", tmpVar)})");
                         ctx.WriteLine($"  {{ {outVar}->data[{jVar}+1] = {outVar}->data[{jVar}]; {jVar}--; }}");
                         ctx.WriteLine($"{outVar}->data[{jVar}+1] = {tmpVar};");
                         ctx.Dedent();
                         ctx.WriteLine("}");
+
+                        ctx.OrderKeyChains[outVar] = chain;
                     }
                     else
                     {

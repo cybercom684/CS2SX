@@ -84,6 +84,18 @@ public sealed class ProjectReader
             if (seg.EndsWith("Stubs", StringComparison.OrdinalIgnoreCase))
                 return false;
         }
+
+        // Dateien die mit "// CS2SX Stub" beginnen sind reine IntelliSense-Stubs
+        // und dürfen nicht transpiliert werden (keine echten Implementierungen).
+        try
+        {
+            using var reader = System.IO.File.OpenText(fullPath);
+            var firstLine = reader.ReadLine();
+            if (firstLine != null && firstLine.StartsWith("// CS2SX Stub", StringComparison.Ordinal))
+                return false;
+        }
+        catch { }
+
         return true;
     }
 }

@@ -186,12 +186,12 @@ public sealed class EnumHandler : InvocationHandlerBase
         if (enumTypeName != null && ctx.EnumDefs.TryGetValue(enumTypeName, out var members))
         {
             var buf = ctx.NextStringBuf();
-            ctx.WriteLine($"snprintf({buf}, sizeof({buf}), \"%d\", (int)({valArg}));");
+            ctx.WriteLine($"snprintf({buf}, CS2SX_STRBUF_SIZE, \"%d\", (int)({valArg}));");
             bool first = true;
             foreach (var m in members)
             {
                 var kw = first ? "if" : "else if";
-                ctx.WriteLine($"{kw} ({valArg} == {m}) snprintf({buf}, sizeof({buf}), \"%s\", \"{m}\");");
+                ctx.WriteLine($"{kw} ({valArg} == {m}) snprintf({buf}, CS2SX_STRBUF_SIZE, \"%s\", \"{m}\");");
                 first = false;
             }
             return buf;
@@ -199,7 +199,7 @@ public sealed class EnumHandler : InvocationHandlerBase
 
         // Fallback: numeric string
         var fb = ctx.NextStringBuf();
-        ctx.Out.WriteLine(ctx.Tab + $"snprintf({fb}, sizeof({fb}), \"%d\", (int)({valArg}));");
+        ctx.Out.WriteLine(ctx.Tab + $"snprintf({fb}, CS2SX_STRBUF_SIZE, \"%d\", (int)({valArg}));");
         return fb;
     }
 }

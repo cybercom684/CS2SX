@@ -69,7 +69,7 @@ public static class StringConcatFixer
 
         var buf = ctx.NextStringBuf();
         ctx.Out.WriteLine(ctx.Tab
-            + "snprintf(" + buf + ", sizeof(" + buf + "), \""
+            + "snprintf(" + buf + ", CS2SX_STRBUF_SIZE, \""
             + fmt + "\", " + string.Join(", ", args) + ");");
         return buf;
     }

@@ -39,6 +39,16 @@ public sealed class SystemExtHandler : InvocationHandlerBase
             return true;
         }
 
+        // Sys.FreeStr(s) — explicitly free a heap-allocated string (from
+        // _cs2sx_heap_strdup). For manual memory management of owned string fields
+        // in a finalizer. NULL-safe; must NOT be called on string literals.
+        if (calleeStr == "Sys.FreeStr")
+        {
+            var s = args.Count > 0 ? args[0] : "NULL";
+            result = "CS2SX_FreeStr(" + s + ")";
+            return true;
+        }
+
         if (calleeStr == "Graphics.DrawTextureCentered")
         {
             result = "Graphics_DrawTextureCentered(" + string.Join(", ", args) + ")";

@@ -50,7 +50,16 @@ public static class TypeInferrer
                 return InferSyntactic(post.Operand, ctx);
 
             case ConditionalExpressionSyntax cond:
-                return InferSyntactic(cond.WhenTrue, ctx);
+            {
+                // Unify both branches like C#'s common-type rule, instead of
+                // blindly taking the true-branch.
+                var tt = InferSyntactic(cond.WhenTrue, ctx);
+                var ft = InferSyntactic(cond.WhenFalse, ctx);
+                if (tt == "string" || ft == "string") return "string";
+                if (tt == "double" || ft == "double") return "double";
+                if (tt == "float" || ft == "float") return "float";
+                return tt;
+            }
 
             case ParenthesizedExpressionSyntax par:
                 return InferSyntactic(par.Expression, ctx);
@@ -153,6 +162,11 @@ public static class TypeInferrer
             return typeName switch
             {
                 "float" or "double" => typeName,
+                "long" or "Int64"   => "long",
+                "ulong" or "UInt64" => "ulong",
+                "uint" or "UInt32"  => "uint",
+                "short" or "Int16"  => "short",
+                "byte" or "Byte"    => "byte",
                 _ => "int",
             };
         }
@@ -172,6 +186,16 @@ public static class TypeInferrer
         {
             if (ctx.FieldTypes.TryGetValue(prop, out var selfFt)) return selfFt;
             if (ctx.PropertyTypes.TryGetValue(prop, out var selfPt)) return selfPt;
+        }
+
+        // Receiver is a known user class → look up the member's declared type.
+        // Resolves obj.Member where the semantic model can't (LINQ-lambda params).
+        if (objType != null)
+        {
+            var ut = objType.TrimEnd('*').Trim();
+            if (ctx.ClassMemberTypes.TryGetValue(ut, out var members)
+                && members.TryGetValue(prop, out var memberType))
+                return memberType;
         }
 
         if (ctx.PropertyTypes.TryGetValue(prop, out var directPt)) return directPt;
@@ -230,6 +254,9 @@ public static class TypeInferrer
         if (callee is "System.GetTime" or "CS2SX_GetTime" or "NX.GetTime")
             return "TimeInfo";
 
+        if (callee is "Motion.Get" or "CS2SX_Motion_Get")
+            return "MotionState";
+
         if (callee is "Stopwatch.StartNew" or "CS2SX_Stopwatch_StartNew")
             return "Stopwatch";
 
@@ -246,24 +273,26 @@ public static class TypeInferrer
         if (callee is "CS2SX_Rand_Float")
             return "float";
 
-        // FIX 2: Math-Methoden
-        if (callee is "Math.Abs" or "System.Math.Abs"
-                   or "Math.Min" or "System.Math.Min"
-                   or "Math.Max" or "System.Math.Max"
-                   or "Math.Clamp" or "System.Math.Clamp"
-                   or "Math.Sign" or "System.Math.Sign"
-                   or "Math.Round" or "System.Math.Round")
+        // Math.Sign always returns int in C#.
+        if (callee is "Math.Sign" or "System.Math.Sign" or "MathF.Sign")
             return "int";
 
-        if (callee is "Math.Sqrt" or "System.Math.Sqrt"
-                   or "Math.Sin" or "System.Math.Sin"
-                   or "Math.Cos" or "System.Math.Cos"
-                   or "Math.Tan" or "System.Math.Tan"
-                   or "Math.Pow" or "System.Math.Pow"
-                   or "Math.Floor" or "System.Math.Floor"
-                   or "Math.Ceil" or "System.Math.Ceil"
-                   or "Math.Ceiling" or "System.Math.Ceiling"
-                   or "Math.Atan2" or "System.Math.Atan2")
+        // Abs/Min/Max/Clamp are overloaded — the result follows the argument type.
+        if (callee is "Math.Abs" or "System.Math.Abs" or "MathF.Abs"
+                   or "Math.Min" or "System.Math.Min" or "MathF.Min"
+                   or "Math.Max" or "System.Math.Max" or "MathF.Max"
+                   or "Math.Clamp" or "System.Math.Clamp" or "MathF.Clamp")
+        {
+            var firstArg = inv.ArgumentList.Arguments.FirstOrDefault()?.Expression;
+            return firstArg != null ? InferSyntactic(firstArg, ctx) : "double";
+        }
+
+        // System.Math.* (Round/Sqrt/trig/...) is double-precision in C#.
+        if (callee != null && (callee.StartsWith("Math.") || callee.StartsWith("System.Math.")))
+            return "double";
+
+        // MathF.* is single-precision.
+        if (callee != null && callee.StartsWith("MathF."))
             return "float";
 
         if (inv.Expression is IdentifierNameSyntax idName
