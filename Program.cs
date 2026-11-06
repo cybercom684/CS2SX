@@ -2,6 +2,9 @@
 using CS2SX.Cli;
 using CS2SX.Logging;
 
+// UTF-8 everywhere — otherwise redirected output (CI logs, IDE build panes, tests)
+// is written in the OEM code page and umlauts/arrows in diagnostics get mangled.
+Console.OutputEncoding = System.Text.Encoding.UTF8;
 BuildRenderer.EnableAnsi();
 
 var cli = CliParser.Parse(args);
@@ -18,8 +21,16 @@ switch (cli.Command)
             if (string.IsNullOrWhiteSpace(cli.BuildTarget)) return Usage();
             var csprojPath = ResolveCsproj(cli.BuildTarget);
             if (csprojPath == null) return 1;
-            new BuildPipeline(csprojPath).Run();
-            return 0;
+            try
+            {
+                new BuildPipeline(csprojPath, cli.TranspileOnly).Run();
+                return 0;
+            }
+            catch (Exception)
+            {
+                // BuildPipeline has already logged the error and rendered the failed stage.
+                return 1;
+            }
         }
 
     case "check":
@@ -110,6 +121,7 @@ static int Usage()
     Log.Info("Usage:");
     Log.Info("  cs2sx new    <AppName>                    Create a new project");
     Log.Info("  cs2sx build  <path/to/App.csproj|folder>  Build project to .nro");
+    Log.Info("               [--transpile-only]           Stop after generating C (no GCC)");
     Log.Info("  cs2sx check  <path/to/App.csproj>         Transpile-only check");
     Log.Info("  cs2sx dump   <path/to/App.csproj> [file] Print generated C to stdout");
     Log.Info("  cs2sx watch  <path/to/App.csproj|folder>  Watch & rebuild on change");

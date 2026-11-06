@@ -1,0 +1,1 @@
+﻿User generic class Box<T>: 'struct Box_int' is defined twice and 'new Box<int>(..)' / 'box.Get()' are not rewritten to Box_int_*.

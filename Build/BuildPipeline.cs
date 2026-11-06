@@ -44,8 +44,11 @@ public sealed class BuildPipeline
         "switchforms.h", "switchapp.h", "AudioStub.h", "FtpStub.h",
     };
 
-    public BuildPipeline(string csprojPath)
+    private readonly bool _transpileOnly;
+
+    public BuildPipeline(string csprojPath, bool transpileOnly = false)
     {
+        _transpileOnly = transpileOnly;
         _projectDir = Path.GetDirectoryName(Path.GetFullPath(csprojPath))
             ?? throw new ArgumentException("Ungültiger Pfad", nameof(csprojPath));
         _config = ProjectConfig.Load(_projectDir);
@@ -413,6 +416,13 @@ public sealed class BuildPipeline
             sTranspile.Progress = 100;
             sTranspile.Status = StageStatus.Done;
             sTranspile.Elapsed = $"{(DateTime.Now - started).TotalMilliseconds:F0}ms";
+
+            if (_transpileOnly)
+            {
+                Log.Ok($"→ {_buildDir} (transpile only)");
+                renderer.Complete(DateTime.Now - started, warnings, errors: 0);
+                return;
+            }
 
             // ── compile ───────────────────────────────────────────────────
             var sCompile = renderer.GetStage("compile");

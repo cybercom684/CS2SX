@@ -1,0 +1,1 @@
+﻿arr.Length on local int[] emits '.f_Length'; implicitly-typed 'new[] {...}' local emits invalid C; instance array field initializer lacks '_count' member.

@@ -37,8 +37,9 @@ public static class CliParser
     private static CliArgs ParseBuild(string[] args) => new()
     {
         Command = "build",
-        BuildTarget = args.ElementAtOrDefault(0) ?? string.Empty,
+        BuildTarget = args.FirstOrDefault(a => !a.StartsWith('-')) ?? string.Empty,
         Verbose = args.Contains("--verbose") || args.Contains("-v"),
+        TranspileOnly = args.Contains("--transpile-only"),
     };
 
     private static CliArgs ParseGenstubs(string[] args) => new()

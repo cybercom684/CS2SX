@@ -1,0 +1,1 @@
+﻿Positional record 'record Score(string, int)' has no struct definition; user struct fields accessed as 'f_X'.

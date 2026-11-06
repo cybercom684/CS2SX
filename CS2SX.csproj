@@ -36,6 +36,8 @@
 		<Compile Remove="Stubs\**\*" />
 		<Compile Remove="SwitchFormsLib\**\*" />
 		<Compile Remove="cs2sx_out\**\*" />
+		<Compile Remove="tests\**\*" />
+		<None Remove="tests\**\*" />
 	</ItemGroup>
 	<ItemGroup>
 	  <Folder Include="Core\Models\" />

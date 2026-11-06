@@ -31,4 +31,11 @@ public sealed class CliArgs
     {
         get; init;
     }
+
+    /// build: stop after the transpile stage (no GCC / packaging). Used by tests and
+    /// for fast iteration on machines without devkitPro.
+    public bool TranspileOnly
+    {
+        get; init;
+    }
 }

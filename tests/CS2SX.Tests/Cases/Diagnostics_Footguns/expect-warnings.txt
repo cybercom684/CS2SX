@@ -1,0 +1,5 @@
+# One substring per line that `cs2sx check` must report.
+kollidiert mit der generierten Player_Free
+heißt wie sein Typ
+hat 2 Konstruktoren
+Konstruktor-Delegation

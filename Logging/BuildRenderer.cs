@@ -23,6 +23,12 @@ public sealed class BuildRenderer : IDisposable
     private int _disposed;           // 0 = live, 1 = disposed
     private volatile bool _completed;
 
+    // Live rendering repositions the cursor, which only works on a real terminal.
+    // When output is redirected (CI, IDE build panes, tests) stages are printed once
+    // at the end instead — and nothing may depend on Console.WindowWidth/CursorTop,
+    // which throw in that case.
+    private readonly bool _interactive = !Console.IsOutputRedirected;
+
     // ── ANSI-Codes ────────────────────────────────────────────────────────
     private const string Reset  = "\x1b[0m";
     private const string Dim    = "\x1b[2m";
@@ -67,13 +73,17 @@ public sealed class BuildRenderer : IDisposable
     {
         EnableAnsi();
         _stages.AddRange(stages);
+        _ticker = new System.Timers.Timer(80);
+        PrintHeader();
+        if (!_interactive) return;
+
         try { _originRow = Console.CursorTop; }
         catch { _originRow = 0; }
+        _originRow -= 2; // header lines already written
+        if (_originRow < 0) _originRow = 0;
         try { Console.CursorVisible = false; }
         catch { }
-        PrintHeader();
         Render();
-        _ticker = new System.Timers.Timer(80);
         _ticker.Elapsed += OnTick;
         _ticker.Start();
     }
@@ -104,17 +114,27 @@ public sealed class BuildRenderer : IDisposable
         _completed = true;
         _ticker.Stop();
 
-        // Letzter Render der Stage-Zeilen mit finalen Zuständen
-        Render();
-
-        // Cursor direkt unterhalb der Stage-Area positionieren
-        var belowStages = _originRow + 2 + _stages.Count;
-        try { Console.SetCursorPosition(0, belowStages); }
-        catch { }
+        if (_interactive)
+        {
+            // Letzter Render der Stage-Zeilen mit finalen Zuständen,
+            // dann Cursor direkt unterhalb der Stage-Area positionieren
+            Render();
+            try { Console.SetCursorPosition(0, _originRow + 2 + _stages.Count); }
+            catch { }
+        }
+        else
+        {
+            lock (_lock)
+                foreach (var stage in _stages)
+                {
+                    RenderStage(stage);
+                    Console.WriteLine();
+                }
+        }
 
         try
         {
-            var w = Math.Min(Console.WindowWidth - 4, 60);
+            var w = Math.Min(SafeWindowWidth() - 4, 60);
             Console.WriteLine();
             Console.WriteLine($"  {Dim}{Repeat("─", w)}{Reset}");
             Console.WriteLine();
@@ -162,7 +182,7 @@ public sealed class BuildRenderer : IDisposable
 
     private void Render()
     {
-        if (Volatile.Read(ref _disposed) == 1) return;
+        if (!_interactive || Volatile.Read(ref _disposed) == 1) return;
 
         lock (_lock)
         {
@@ -181,9 +201,7 @@ public sealed class BuildRenderer : IDisposable
 
     private void PrintHeader()
     {
-        int w;
-        try { w = Math.Min(Console.WindowWidth, 72); }
-        catch { w = 72; }
+        var w = Math.Min(SafeWindowWidth(), 72);
         Console.WriteLine($"{Bold}{Gray}  cs2sx{Reset}  {Dim}{Repeat("─", w - 10)}{Reset}");
         Console.WriteLine();
     }
@@ -224,6 +242,16 @@ public sealed class BuildRenderer : IDisposable
     private static int _spinFrame;
     private static readonly char[] SpinFrames = ['⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏'];
     private static string Spinner() => SpinFrames[_spinFrame++ % SpinFrames.Length].ToString();
+
+    private static int SafeWindowWidth()
+    {
+        try
+        {
+            var w = Console.WindowWidth;
+            return w > 20 ? w : 80;
+        }
+        catch { return 80; }
+    }
 
     private static string Repeat(string s, int n) => string.Concat(Enumerable.Repeat(s, n));
     private static string Truncate(string s, int max) => s.Length <= max ? s : s[..(max - 1)] + "…";

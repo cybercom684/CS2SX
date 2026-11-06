@@ -1,0 +1,1 @@
+﻿string.Split result (List_str) accessed via '.f_Length'; StringBuilder.Append chaining returns void.
