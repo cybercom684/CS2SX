@@ -10,6 +10,97 @@
 extern char _cs2sx_strbuf[1024];
 
 // ============================================================================
+// Arrays (C# T[])
+//
+// A C# array is a plain C pointer to its first element (so a[i] is ordinary C
+// indexing), preceded in memory by a 16-byte header that carries the length:
+//
+//     [ CS2SX_ArrHdr | e0 | e1 | ... ]
+//                      ^-- T* the program works with
+//
+// a.Length → CS2SX_ArrLen(a) works wherever the array travels: parameters,
+// fields, return values. The 16-byte header keeps the elements 16-aligned.
+// Arrays are created by the transpiler via
+//   CS2SX_ArrNew(n, sizeof(T))                 heap, zero-initialised (new T[n])
+//   CS2SX_ArrFromInit((T[]){...}, n, sizeof(T)) heap copy of an initializer
+//   CS2SX_ARR_LOCAL(T, name, n, ...)           stack array for non-escaping locals
+// The magic word lets CS2SX_ArrLen return 0 instead of garbage for a pointer that
+// was not created as a C# array (e.g. raw native memory).
+// ============================================================================
+
+#define CS2SX_ARR_MAGIC       0xA77A1A5Eu   // heap array (owned, freeable)
+#define CS2SX_ARR_MAGIC_STACK 0xA77A57ACu   // stack array (never freed)
+
+typedef struct CS2SX_ArrHdr
+{
+    u32 magic;
+    s32 length;
+    u64 _reserved;
+} CS2SX_ArrHdr;
+
+static inline void* CS2SX_ArrNew(int count, size_t elemSize)
+{
+    if (count < 0) count = 0;
+    CS2SX_ArrHdr* h = (CS2SX_ArrHdr*)calloc(1, sizeof(CS2SX_ArrHdr) + (size_t)count * elemSize);
+    if (!h) return NULL;
+    h->magic = CS2SX_ARR_MAGIC;
+    h->length = count;
+    return h + 1;
+}
+
+static inline void* CS2SX_ArrFromInit(const void* src, int count, size_t elemSize)
+{
+    void* a = CS2SX_ArrNew(count, elemSize);
+    if (a && src && count > 0) memcpy(a, src, (size_t)count * elemSize);
+    return a;
+}
+
+static inline int CS2SX_ArrLen(const void* a)
+{
+    if (!a) return 0;
+    const CS2SX_ArrHdr* h = (const CS2SX_ArrHdr*)a - 1;
+    return (h->magic == CS2SX_ARR_MAGIC || h->magic == CS2SX_ARR_MAGIC_STACK) ? h->length : 0;
+}
+
+/// Frees a heap array created by CS2SX_ArrNew/CS2SX_ArrFromInit (NULL-safe).
+static inline void CS2SX_ArrFree(void* a)
+{
+    if (!a) return;
+    CS2SX_ArrHdr* h = (CS2SX_ArrHdr*)a - 1;
+    if (h->magic != CS2SX_ARR_MAGIC) return;   // not ours (or a stack array) — never free
+    h->magic = 0;
+    free(h);
+}
+
+/// Array.Resize: a new heap array of newCount elements holding the first
+/// min(old, new) elements; the old array is freed if it was a heap array.
+static inline void* CS2SX_ArrResize(void* a, int newCount, size_t elemSize)
+{
+    void* r = CS2SX_ArrNew(newCount, elemSize);
+    if (!r) return a;
+    int keep = CS2SX_ArrLen(a);
+    if (keep > newCount) keep = newCount;
+    if (a && keep > 0) memcpy(r, a, (size_t)keep * elemSize);
+    CS2SX_ArrFree(a);
+    return r;
+}
+
+/// Stack-allocated array with a header, for locals that never leave their method.
+/// Usage: CS2SX_ARR_LOCAL(int, grid, 4);  CS2SX_ARR_LOCAL(int, d, 3, 9, 4, 7);
+/// The stack header uses CS2SX_ARR_MAGIC_STACK so CS2SX_ArrFree ignores it.
+#define CS2SX_ARR_LOCAL(T, name, n, ...)                                           \
+    struct { CS2SX_ArrHdr h; T d[(n) > 0 ? (n) : 1]; } name##_arr =               \
+        { { CS2SX_ARR_MAGIC_STACK, (n), 0 }, { __VA_ARGS__ } };                    \
+    T* name = name##_arr.d
+
+/// Static (global) array with a header: CS2SX_ARR_STATIC(int, Cls_table, 8);
+/// defines Cls_table as a T* to zero-initialised (or listed) elements.
+#define CS2SX_ARR_STATIC(T, name, n, ...)                                          \
+    static struct { CS2SX_ArrHdr h; T d[(n) > 0 ? (n) : 1]; } name##_arr =        \
+        { { CS2SX_ARR_MAGIC_STACK, (n), 0 }, { __VA_ARGS__ } };                    \
+    T* name = name##_arr.d
+
+// ============================================================================
 // Per-Frame String Arena
 //
 // Replaces the 64-slot ring buffer with a flat bump-pointer arena.
@@ -1193,6 +1284,18 @@ static inline void List_str_Free(List_str* l)
     free(l);
 }
 
+/// List<string> → C# string[] (header array). Ownership of the strings moves to
+/// the array; the list container itself is released. Used where a runtime helper
+/// builds a List_str but the C# API returns string[] (Split, ReadAllLines, GetFiles).
+static inline const char** CS2SX_StrArr_FromList(List_str* l)
+{
+    int n = l ? l->count : 0;
+    const char** a = (const char**)CS2SX_ArrNew(n, sizeof(const char*));
+    if (a && n > 0) memcpy((void*)a, l->data, (size_t)n * sizeof(char*));
+    if (l) { free(l->data); free(l); }
+    return a;
+}
+
 static inline void List_str_Remove(List_str* l, int idx)
 {
     if (!l || idx < 0 || idx >= l->count) return;
@@ -1265,6 +1368,14 @@ static inline const char* String_Join(const char* sep, List_str* list)
     }
     buf[out] = '\0';
     return buf;
+}
+
+/// string.Join(sep, string[]) — joins a C# string array (length from its header).
+static inline const char* String_JoinArr(const char* sep, const char** arr)
+{
+    int n = CS2SX_ArrLen(arr);
+    List_str view = { (char**)arr, n, n };   // read-only view, no copy
+    return String_Join(sep, &view);
 }
 
 // FIX: String_Split legt Heap-Kopien an (via List_str_Add) statt Pool-Slots.

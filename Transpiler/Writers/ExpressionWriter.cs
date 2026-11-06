@@ -43,6 +43,46 @@ public sealed class ExpressionWriter : IExpressionWriter
 
     public string Write(SyntaxNode? node)
     {
+        var code = WriteCore(node);
+        return node is ExpressionSyntax expr ? ApplyNullableConversion(expr, code) : code;
+    }
+
+    /// <summary>
+    /// The implicit conversions T → T? and null → T? (for nullable VALUE types), applied
+    /// wherever C# applies them — assignment, initializer, argument, return — because the
+    /// semantic model reports them on exactly that node: <c>5</c> → <c>((Nullable_int){ 5, 1 })</c>,
+    /// <c>null</c> → <c>((Nullable_int){0})</c>.
+    /// </summary>
+    private string ApplyNullableConversion(ExpressionSyntax expr, string code)
+    {
+        if (_ctx.SemanticModel == null || code.Length == 0) return code;
+        try
+        {
+            var ti = _ctx.SemanticModel.GetTypeInfo(expr);
+            if (ti.ConvertedType is not INamedTypeSymbol
+                { OriginalDefinition.SpecialType: SpecialType.System_Nullable_T } target)
+                return code;
+            if (ti.Type != null && SymbolEqualityComparer.Default.Equals(ti.Type, ti.ConvertedType))
+                return code; // already T?
+            bool isNullOrDefault = expr.IsKind(SyntaxKind.NullLiteralExpression)
+                                || expr.IsKind(SyntaxKind.DefaultLiteralExpression);
+            // No natural type (target-typed `c ? 1 : null`, switch expression, new()):
+            // its branches are converted individually — don't wrap the whole again.
+            if (ti.Type == null && !isNullOrDefault) return code;
+
+            var inner = TranspilerContext.FormatTypeSymbol(target.TypeArguments[0]);
+            if (!TypeRegistry.IsNullableValueInner(inner)) return code;
+            var cName = TypeRegistry.NullableCName(inner);
+
+            return isNullOrDefault
+                ? NullableHandler.Null(cName)
+                : NullableHandler.WrapValue(cName, code);
+        }
+        catch { return code; }
+    }
+
+    private string WriteCore(SyntaxNode? node)
+    {
         if (node == null) return "";
 
         if (node is InvocationExpressionSyntax nameofInv
@@ -115,28 +155,20 @@ public sealed class ExpressionWriter : IExpressionWriter
 
         var elems = init.Expressions.Select(e => Write(e)).ToList();
 
-        string elemC = "int";
-        bool resolved = false;
+        string? csElem = null;
         if (_ctx.SemanticModel != null)
         {
             try
             {
                 var ti = _ctx.SemanticModel.GetTypeInfo(init);
                 if ((ti.ConvertedType ?? ti.Type) is IArrayTypeSymbol ats)
-                {
-                    var csElem = TranspilerContext.FormatTypeSymbol(ats.ElementType);
-                    elemC = csElem == "string" ? "const char*" : TypeRegistry.MapType(csElem);
-                    resolved = true;
-                }
+                    csElem = TranspilerContext.FormatTypeSymbol(ats.ElementType);
             }
             catch { }
         }
-        if (!resolved && init.Expressions.Count > 0)
-        {
-            var csElem = TypeInferrer.InferCSharpType(init.Expressions[0], _ctx);
-            elemC = csElem == "string" ? "const char*" : TypeRegistry.MapType(csElem);
-        }
-        return "(" + elemC + "[]){ " + string.Join(", ", elems) + " }";
+        if (csElem == null && init.Expressions.Count > 0)
+            csElem = TypeInferrer.InferCSharpType(init.Expressions[0], _ctx);
+        return ArrayModel.FromInit(ArrayModel.ElemCType(csElem ?? "int"), elems);
     }
 
     private string WriteFallback(SyntaxNode node)
@@ -449,6 +481,9 @@ public sealed class ExpressionWriter : IExpressionWriter
         var right = Write(bin.Right);
         var op = bin.OperatorToken.Text;
 
+        var lifted = TryWriteLiftedNullable(bin, left, right, op);
+        if (lifted != null) return lifted;
+
         // Operator overload check — try left type first
         var leftCsType = TypeInferrer.InferCSharpType(bin.Left, _ctx);
         var overloaded = OperatorOverloadWriter.TryRewriteBinary(bin, leftCsType, left, right);
@@ -495,17 +530,60 @@ public sealed class ExpressionWriter : IExpressionWriter
         return left + " " + op + " " + right;
     }
 
+    /// <summary>
+    /// Operators on nullable value types follow C#'s lifting rules. After the implicit
+    /// T → T? conversion both operands are Nullable_T structs, each evaluated once:
+    ///   x == null / x != null → !(x).has / (x).has
+    ///   a == b                → both null, or both set and equal
+    ///   a &lt; b (etc.)          → both set and a.value &lt; b.value (false otherwise)
+    ///   a + b (etc.)          → null if either is null, else (Nullable_T){ a+b, 1 }
+    /// </summary>
+    private string? TryWriteLiftedNullable(BinaryExpressionSyntax bin, string left, string right, string op)
+    {
+        if (!IsNullableExpr(bin.Left) && !IsNullableExpr(bin.Right)) return null;
+
+        if (op is "==" or "!=")
+        {
+            if (IsNullLiteral(bin.Right)) return op == "==" ? "!(" + left + ").has" : "(" + left + ").has";
+            if (IsNullLiteral(bin.Left)) return op == "==" ? "!(" + right + ").has" : "(" + right + ").has";
+        }
+
+        var a = _ctx.NextTmp("na");
+        var b = _ctx.NextTmp("nb");
+        var bind = "__auto_type " + a + " = " + left + "; __auto_type " + b + " = " + right + "; ";
+        switch (op)
+        {
+            case "==":
+                return "({ " + bind + a + ".has == " + b + ".has && (!" + a + ".has || " + a + ".value == " + b + ".value); })";
+            case "!=":
+                return "({ " + bind + "!(" + a + ".has == " + b + ".has && (!" + a + ".has || " + a + ".value == " + b + ".value)); })";
+            case "<" or ">" or "<=" or ">=":
+                return "({ " + bind + a + ".has && " + b + ".has && " + a + ".value " + op + " " + b + ".value; })";
+            case "+" or "-" or "*" or "/" or "%" or "&" or "|" or "^" or "<<" or ">>":
+            {
+                var resultC = TypeRegistry.MapType(_ctx.GetSemanticType(bin) ?? "int?");
+                return "({ " + bind + "(" + a + ".has && " + b + ".has) ? ((" + resultC + "){ "
+                     + a + ".value " + op + " " + b + ".value, 1 }) : ((" + resultC + "){0}); })";
+            }
+            default:
+                return null;
+        }
+    }
+
     private string WriteCoalesce(BinaryExpressionSyntax coalesce)
     {
         var left = Write(coalesce.Left);
         var right = Write(coalesce.Right);
-        var leftType = TypeInferrer.InferCSharpType(coalesce.Left, _ctx);
 
-        if (NullableHandler.IsNullable(leftType))
+        if (IsNullableExpr(coalesce.Left))
         {
-            var innerType = NullableHandler.GetInnerType(leftType);
-            var isValueType = TypeRegistry.IsPrimitive(innerType);
-            return NullableHandler.WriteNullCoalescing(left, right, isValueType);
+            // The result is T? only when the fallback is itself nullable (a ?? b with b: T?).
+            var resultIsNullable = _ctx.GetSemanticType(coalesce) is { } rt && NullableHandler.IsNullable(rt);
+            if (coalesce.Left is IdentifierNameSyntax or MemberAccessExpressionSyntax)
+                return NullableHandler.WriteNullCoalescing(left, right, resultIsNullable);
+            var t = _ctx.NextTmp("nc");
+            return "({ __auto_type " + t + " = " + left + "; "
+                 + NullableHandler.WriteNullCoalescing(t, right, resultIsNullable) + "; })";
         }
 
         // Only skip the null-check when the semantic model positively confirms a
@@ -517,7 +595,9 @@ public sealed class ExpressionWriter : IExpressionWriter
             && TypeRegistry.IsPrimitive(semanticType) && semanticType != "string";
         if (confirmedPrim) return left;
 
-        return "(" + left + " != NULL ? " + left + " : " + right + ")";
+        // Reference types: GNU `a ?: b` evaluates `a` exactly once (`GetName() ?? "x"`
+        // must not call GetName twice).
+        return "(" + left + " ?: " + right + ")";
     }
 
     private string WriteConditionalAccess(ConditionalAccessExpressionSyntax condAccess)
@@ -786,12 +866,11 @@ public sealed class ExpressionWriter : IExpressionWriter
             && IsNullableExpr(nvMem.Expression))
         {
             var nvObj = Write(nvMem.Expression);
+            // A null Nullable_T has value == 0 (zero-initialised), i.e. default(T).
             if (inv.ArgumentList.Arguments.Count > 0)
-            {
-                var defVal = Write(inv.ArgumentList.Arguments[0].Expression);
-                return "(" + nvObj + " != NULL ? *" + nvObj + " : " + defVal + ")";
-            }
-            return "(" + nvObj + " != NULL ? *" + nvObj + " : 0)";
+                return NullableHandler.WriteNullCoalescing(nvObj,
+                    Write(inv.ArgumentList.Arguments[0].Expression), resultIsNullable: false);
+            return NullableHandler.WriteGetValue(nvObj);
         }
 
         var result = _dispatcher.Dispatch(inv);
@@ -1261,19 +1340,6 @@ public sealed class ExpressionWriter : IExpressionWriter
             return obj + "->OnClick = (Action_t)" + methodExpr;
         }
 
-        var fieldType = lt ?? ft;
-        if (fieldType != null && NullableHandler.IsNullable(fieldType) && right != "NULL")
-        {
-            var inner = NullableHandler.GetInnerType(fieldType);
-            var innerC = TypeRegistry.MapType(inner);
-            var fieldExpr = obj + arrow + "f_" + objKey;
-            // FIX: heap-allokiert pro Instanz statt static (alle Instanzen teilten denselben Speicher)
-            _ctx.Out.WriteLine(_ctx.Tab + "if (!" + fieldExpr + ")");
-            _ctx.Out.WriteLine(_ctx.Tab + "    " + fieldExpr + " = (" + innerC + "*)malloc(sizeof(" + innerC + "));");
-            _ctx.Out.WriteLine(_ctx.Tab + "*(" + fieldExpr + ") = " + right + ";");
-            return "";
-        }
-
         var assignReceiverType = lt ?? ft;
         string cProp;
         if (assignReceiverType != null
@@ -1439,7 +1505,7 @@ public sealed class ExpressionWriter : IExpressionWriter
             catch { }
         }
 
-        var storedMember = TryWriteUserClassStoredMember(mem);
+        var storedMember = TryWriteUserClassStoredMember(mem) ?? TryWriteUserStructMember(mem);
         if (storedMember != null) return storedMember;
 
         // typeof(T).Name / typeof(T).FullName → string constant
@@ -1636,24 +1702,11 @@ public sealed class ExpressionWriter : IExpressionWriter
             if ((_ctx.LocalTypes.TryGetValue(rk2, out var rlt) && rlt is "string" or "char[]" or "const char*")
              || (_ctx.FieldTypes.TryGetValue(rkey2, out var rft) && rft is "string" or "char[]" or "const char*"))
                 return "strlen(" + obj + ")";
-            // params array or T[] method parameter: companion _count variable holds length
-            if (_ctx.LocalTypes.ContainsKey(rk2 + "_count"))
-                return rk2 + "_count";
-            // Static array field → ClassName_fieldName_count macro (emitted by transpiler)
-            if (!string.IsNullOrEmpty(_ctx.CurrentClass) && _ctx.SemanticModel != null)
-            {
-                try
-                {
-                    var sym = _ctx.SemanticModel.GetSymbolInfo(mem.Expression).Symbol;
-                    if (sym is IFieldSymbol fSym && fSym.IsStatic && fSym.Type is IArrayTypeSymbol)
-                        return _ctx.CurrentClass + "_" + rkey2 + "_count";
-                }
-                catch { }
-            }
-            // Instance array field → use tracked allocation size from FieldArrayLengths
-            if (_ctx.FieldTypes.TryGetValue(rkey2, out var ift) && ift?.EndsWith("[]") == true
-                && _ctx.FieldArrayLengths.TryGetValue(rkey2, out var flen))
-                return flen;
+            // Arrays: compile-time length if known in this method, params companion
+            // count, otherwise the runtime length header (works for fields, parameters,
+            // return values — anything).
+            if (ArrayModel.IsArrayExpr(mem.Expression, _ctx))
+                return ArrayModel.LengthOf(rk2, obj, _ctx);
         }
         if (prop == "Count" && IsListExpr(mem.Expression)) return obj + "->count";
         if (prop == "Count" && IsStackQueueHashSetExpr(mem.Expression)) return obj + "->count";
@@ -2245,41 +2298,26 @@ public sealed class ExpressionWriter : IExpressionWriter
 
     private string WriteArrayCreation(ArrayCreationExpressionSyntax arr)
     {
-        var elemType = arr.Type.ElementType.ToString().Trim();
-        var cType = elemType == "string" ? "const char*" : TypeRegistry.MapType(elemType);
-        bool isRefType = elemType != "string" && TypeRegistry.NeedsPointerSuffix(elemType);
+        // An array created in an expression (field initializer, return, argument,
+        // assignment) can outlive the current frame → always a heap array with header.
+        // Elements are zero/NULL-initialised like in C#.
+        var elemC = ArrayModel.ElemCType(arr.Type.ElementType.ToString().Trim());
         if (arr.Initializer != null && arr.Initializer.Expressions.Count > 0)
-        {
-            var elems = arr.Initializer.Expressions.Select(e => Write(e));
-            // C99 compound literal — valid as an expression (assignment, return, argument)
-            return "(" + cType + (isRefType ? "*" : "") + "[]){ " + string.Join(", ", elems) + " }";
-        }
-        // C# arrays are zero/null-initialised — use calloc, not malloc, so element
-        // reads before an explicit write are deterministic (0 / NULL), not garbage.
+            return ArrayModel.FromInit(elemC, arr.Initializer.Expressions.Select(e => Write(e)).ToList());
         if (arr.Type.RankSpecifiers.Count > 0
-            && arr.Type.RankSpecifiers[0].Sizes.Count > 0)
-        {
-            var size = Write(arr.Type.RankSpecifiers[0].Sizes[0]);
-            if (isRefType)
-                return "(" + cType + "**)calloc((size_t)(" + size + "), sizeof(" + cType + "*))";
-            return "(" + cType + "*)calloc((size_t)(" + size + "), sizeof(" + cType + "))";
-        }
-        if (isRefType)
-            return "(" + cType + "**)calloc(1, sizeof(" + cType + "*))";
-        return "(" + cType + "*)calloc(1, sizeof(" + cType + "))";
+            && arr.Type.RankSpecifiers[0].Sizes.Count > 0
+            && arr.Type.RankSpecifiers[0].Sizes[0] is not OmittedArraySizeExpressionSyntax)
+            return ArrayModel.NewHeap(elemC, Write(arr.Type.RankSpecifiers[0].Sizes[0]));
+        return ArrayModel.NewHeap(elemC, "0");
     }
 
     private string WriteImplicitArrayCreation(ImplicitArrayCreationExpressionSyntax implArr)
     {
-        // Infer element type from first element when possible
-        string cType = "int";
-        if (implArr.Initializer?.Expressions.Count > 0)
-        {
-            var firstType = TypeInferrer.InferCSharpType(implArr.Initializer.Expressions[0], _ctx);
-            cType = firstType == "string" ? "const char*" : TypeRegistry.MapType(firstType);
-        }
-        var elems = implArr.Initializer?.Expressions.Select(e => Write(e)) ?? Enumerable.Empty<string>();
-        return "(" + cType + "[]){ " + string.Join(", ", elems) + " }";
+        var csElem = ArrayModel.ElementCsType(implArr, _ctx);
+        if (csElem == null && implArr.Initializer?.Expressions.Count > 0)
+            csElem = TypeInferrer.InferCSharpType(implArr.Initializer.Expressions[0], _ctx);
+        var elems = implArr.Initializer?.Expressions.Select(e => Write(e)).ToList() ?? new List<string>();
+        return ArrayModel.FromInit(ArrayModel.ElemCType(csElem ?? "int"), elems);
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
@@ -2335,6 +2373,33 @@ public sealed class ExpressionWriter : IExpressionWriter
             }
             return false;
         }
+    }
+
+    /// <summary>
+    /// <c>v.X</c> where v is a user STRUCT value from any expression (<c>box.Value.W</c>,
+    /// <c>list[0].X</c>, <c>GetPos().Y</c>): struct members keep their C# names and are
+    /// reached with '.', or '->' when the receiver is a <c>ref</c>/<c>out</c> parameter
+    /// (passed as T*).
+    /// </summary>
+    private string? TryWriteUserStructMember(MemberAccessExpressionSyntax mem)
+    {
+        if (_ctx.SemanticModel == null || mem.Expression is ThisExpressionSyntax) return null;
+        try
+        {
+            var sym = _ctx.SemanticModel.GetSymbolInfo(mem).Symbol;
+            if (sym is not (IFieldSymbol { IsStatic: false } or IPropertySymbol { IsStatic: false })) return null;
+            if (sym.ContainingType is not { TypeKind: TypeKind.Struct } st
+                || !TypeRegistry.IsUserStruct(st.Name)) return null;
+            if (sym is IPropertySymbol p && !p.DeclaringSyntaxReferences.Any(r =>
+                    r.GetSyntax() is ParameterSyntax
+                    || (r.GetSyntax() is PropertyDeclarationSyntax pd && PropertyWriter.IsAutoProperty(pd))))
+                return null; // computed property — existing logic
+
+            bool viaPointer = _ctx.SemanticModel.GetSymbolInfo(mem.Expression).Symbol
+                is IParameterSymbol { RefKind: not RefKind.None };
+            return Write(mem.Expression) + (viaPointer ? "->" : ".") + sym.Name;
+        }
+        catch { return null; }
     }
 
     /// <summary>

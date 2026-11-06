@@ -184,7 +184,10 @@ public sealed class StringMethodHandler : InvocationHandlerBase
                 => HandleStringConcat(args, ctx),
 
             "string.Join" or "String.Join"
-                => "String_Join(" + ArgAt(args, 0) + ", " + ArgAt(args, 1) + ")",
+                => inv.ArgumentList.Arguments.Count > 1
+                   && ArrayModel.IsArrayExpr(inv.ArgumentList.Arguments[1].Expression, ctx)
+                    ? "String_JoinArr(" + ArgAt(args, 0) + ", " + ArgAt(args, 1) + ")"
+                    : "String_Join(" + ArgAt(args, 0) + ", " + ArgAt(args, 1) + ")",
 
             "string.Split" or "String.Split"
                 => HandleSplitStatic(inv, args),

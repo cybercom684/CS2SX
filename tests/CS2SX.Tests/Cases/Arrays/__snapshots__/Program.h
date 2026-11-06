@@ -10,8 +10,8 @@ struct ArraysApp
     float* f_weights;
 };
 
-extern int ArraysApp_s_table[];
-extern const char* ArraysApp_s_names[];
+extern int* ArraysApp_s_table;
+extern const char** ArraysApp_s_names;
 void ArraysApp_Init(ArraysApp* self);
 void ArraysApp_OnInit(ArraysApp* self);
 

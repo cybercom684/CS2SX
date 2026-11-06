@@ -33,15 +33,15 @@ void ControlFlowApp_OnInit(ControlFlowApp* self)
         k += 2;
     }
     while (k < 7);
-    int* maybe = NULL;
-    int value = (maybe != NULL ? *maybe : -1);
-    maybe = 4;
-    if ((maybe != NULL))
+    Nullable_int maybe = ((Nullable_int){0});
+    int value = ((maybe).has ? (maybe).value : (-1));
+    maybe = ((Nullable_int){ 4, 1 });
+    if ((maybe).has)
     {
-        value += (*maybe);
+        value += (maybe).value;
     }
     const char* text = NULL;
-    const char* shown = (text != NULL ? text : "default");
+    const char* shown = (text ?: "default");
     int flag = sum > 10 && !(k == 0) || value < 0;
     char* _sb0 = _cs2sx_next_buf();
     snprintf(_sb0, CS2SX_STRBUF_SIZE, "%d %d %d %d %s %d", sum, n, k, value, shown, flag);

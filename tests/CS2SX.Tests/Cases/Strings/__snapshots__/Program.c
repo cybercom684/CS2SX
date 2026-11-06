@@ -27,12 +27,12 @@ void StringsApp_OnInit(StringsApp* self)
     printf("%s\n", _ps_4 ? _ps_4 : "");
     printf("%d\n", String_StartsWith(name, "Sw") && String_EndsWith(name, "ch"));
     printf("%d\n", String_IndexOfChar(name, 't'));
-    List_str* parts = String_Split("a,b,c", ",");
+    const char** parts = CS2SX_StrArr_FromList(String_Split("a,b,c", ","));
     char* _sb1 = _cs2sx_next_buf();
-    snprintf(_sb1, CS2SX_STRBUF_SIZE, "%d parts, last=%s", parts->f_Length, List_str_Get(parts, 2));
+    snprintf(_sb1, CS2SX_STRBUF_SIZE, "%d parts, last=%s", CS2SX_ArrLen(parts), parts[2]);
     const char* _ps_5 = _sb1;
     printf("%s\n", _ps_5 ? _ps_5 : "");
-    const char* _ps_6 = String_Join("-", parts);
+    const char* _ps_6 = String_JoinArr("-", parts);
     printf("%s\n", _ps_6 ? _ps_6 : "");
     const char* _ps_7 = (String_IsNullOrEmpty("") ? "empty" : "not empty");
     printf("%s\n", _ps_7 ? _ps_7 : "");

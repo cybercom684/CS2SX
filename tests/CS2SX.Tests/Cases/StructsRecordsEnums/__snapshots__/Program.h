@@ -9,6 +9,10 @@ typedef struct Point {
     int X;
     int Y;
 } Point;
+#ifndef CS2SX_Nullable_Point_DEFINED
+#define CS2SX_Nullable_Point_DEFINED
+typedef struct Nullable_Point { Point value; int has; } Nullable_Point;
+#endif
 Point Point_New(int x, int y);
 int Point_ManhattanLength(Point* self);
 int Point_Equals(Point a, Point b);

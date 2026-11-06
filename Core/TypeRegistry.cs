@@ -266,8 +266,14 @@ public static class TypeRegistry
         // decimal → double (precision loss — warn at call sites)
         if (IsDecimalType(csType)) return "double";
 
-        if (csType.EndsWith('?'))
-            csType = csType[..^1].Trim();
+        // T? : a nullable VALUE type is a C value struct { T value; int has; };
+        // on reference types `?` is only an annotation — the C type is unchanged.
+        if (csType.EndsWith('?') || (csType.StartsWith("Nullable<") && csType.EndsWith(">")))
+        {
+            var inner = NullableInner(csType);
+            if (IsNullableValueInner(inner)) return NullableCName(inner);
+            csType = inner;
+        }
 
         if (csType.EndsWith("[]"))
         {
@@ -567,7 +573,56 @@ public static class TypeRegistry
             || csType.StartsWith("EventHandler<");
     }
 
-    public static bool NeedsPointerSuffix(string csType) =>
+    // ── Nullable<T> ───────────────────────────────────────────────────────────
+    // int? → Nullable_int (value struct, see _forward.h). Only value types: for
+    // string?/Enemy? the `?` is a nullable-reference annotation and changes nothing.
+
+    public static string NullableInner(string csType)
+    {
+        csType = csType.Trim();
+        if (csType.EndsWith('?')) return csType[..^1].Trim();
+        if (csType.StartsWith("Nullable<") && csType.EndsWith(">")) return csType[9..^1].Trim();
+        return csType;
+    }
+
+    public static bool IsNullableValueInner(string inner) =>
+        (IsPrimitive(inner) && inner is not ("string" or "object" or "void" or "Action" or "StringBuilder"))
+        || IsUserDefinedEnum(inner) || IsUserStruct(inner) || IsLibNxStruct(inner);
+
+    public static bool IsNullableValueType(string csType)
+    {
+        csType = csType.Trim();
+        if (!csType.EndsWith('?') && !(csType.StartsWith("Nullable<") && csType.EndsWith(">")))
+            return false;
+        return IsNullableValueInner(NullableInner(csType));
+    }
+
+    public static string NullableCName(string inner) =>
+        "Nullable_" + CS2SX.Transpiler.GenericInstantiation.MapToCSuffix(inner);
+
+    /// C typedef for Nullable&lt;inner&gt;, e.g. <c>typedef struct { int value; int has; } Nullable_int;</c>
+    public static string NullableTypedef(string inner)
+    {
+        var name = NullableCName(inner);
+        return $"#ifndef CS2SX_{name}_DEFINED\n#define CS2SX_{name}_DEFINED\n"
+             + $"typedef struct {name} {{ {MapType(inner)} value; int has; }} {name};\n#endif";
+    }
+
+    /// Primitive inner types that get a Nullable typedef in every project.
+    public static readonly string[] NullablePrimitives =
+    {
+        "int", "uint", "long", "ulong", "short", "ushort", "byte", "sbyte",
+        "float", "double", "bool", "char",
+    };
+
+    public static bool NeedsPointerSuffix(string csType)
+    {
+        if (csType.EndsWith('?') || csType.StartsWith("Nullable<"))
+            return !IsNullableValueType(csType) && NeedsPointerSuffixCore(NullableInner(csType));
+        return NeedsPointerSuffixCore(csType);
+    }
+
+    private static bool NeedsPointerSuffixCore(string csType) =>
         !IsPrimitive(csType)
         && !IsLibNxStruct(csType)
         && !IsNativePointerType(csType)

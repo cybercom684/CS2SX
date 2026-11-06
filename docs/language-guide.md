@@ -222,7 +222,34 @@ Array.Sort(werte);
 Array.Reverse(werte);
 Array.Fill(werte, 0);
 int idx = Array.IndexOf(werte, 42);
+Array.Resize(ref werte, 20);
+
+int Summe(params int[] xs) { int s = 0; foreach (var x in xs) s += x; return s; }
+Summe(1, 2, 3);          // ausgeschriebene Form
+Summe(werte);            // Array direkt
+
+string[] teile = "a,b,c".Split(',');
+Console.WriteLine(teile.Length + " " + string.Join("-", teile));
 ```
+
+Arrays kennen ihre Länge überall — als Parameter, Feld oder Rückgabewert (`.Length` funktioniert immer).
+Kleine lokale Arrays mit konstanter Größe, die die Methode nicht verlassen, liegen auf dem Stack;
+alle anderen (Felder, Rückgabewerte, an eigene Methoden übergebene) auf dem Heap. Heap-Arrays werden
+nicht automatisch freigegeben — wiederholt pro Frame neu erzeugte große Arrays besser als Feld halten
+und wiederverwenden.
+
+### Nullable-Werttypen (`int?`)
+
+```csharp
+int? best = null;
+best = 120;
+int anzeige = best ?? 0;
+if (best.HasValue && best > 100) Console.WriteLine(best.Value);
+int? summe = best + bonus;   // null, wenn einer der beiden null ist (wie in C#)
+```
+
+`int?`, `float?`, `MeinEnum?` und `MeinStruct?` sind Werttypen ohne Heap-Allokation.
+`string?` oder `Gegner?` sind nur Nullable-Annotationen für Referenztypen und ändern nichts.
 
 ---
 

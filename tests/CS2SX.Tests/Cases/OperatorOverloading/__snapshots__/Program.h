@@ -9,6 +9,10 @@ typedef struct Vec2 {
     float X;
     float Y;
 } Vec2;
+#ifndef CS2SX_Nullable_Vec2_DEFINED
+#define CS2SX_Nullable_Vec2_DEFINED
+typedef struct Nullable_Vec2 { Vec2 value; int has; } Nullable_Vec2;
+#endif
 Vec2 Vec2_New(float x, float y);
 float Vec2_Dot(Vec2* self, Vec2 o);
 Vec2 Vec2_op_add(Vec2 a, Vec2 b);

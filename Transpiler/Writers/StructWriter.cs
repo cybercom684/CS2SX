@@ -51,6 +51,7 @@ public sealed class StructWriter
 
         _ctx.WriteLine("// C# value-type struct: " + name);
         WriteStructDef(node, name);
+        _ctx.WriteLine(TypeRegistry.NullableTypedef(name));
 
         foreach (var ctor in Constructors(node).Take(1))
             _ctx.WriteLine(CtorSignature(ctor, name) + ";");

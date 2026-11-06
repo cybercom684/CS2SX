@@ -1,1 +1,0 @@
-﻿Arrays are bare pointers with side-channel lengths: '.Length' on locals/fields fails, 'new[] {..}' locals emit invalid C, and instance array field initializers point into a dead stack compound literal.

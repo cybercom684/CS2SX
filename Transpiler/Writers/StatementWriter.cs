@@ -79,19 +79,12 @@ public sealed class StatementWriter
         var line = expr.GetLocation().GetLineSpan().StartLinePosition.Line + 1;
         _ctx.CurrentLine = line;
 
-        // Track instance field array sizes: _field = new T[n]  →  FieldArrayLengths["field"] = "n"
+        // Reassigning a local array (`a = new int[10]`) invalidates the compile-time
+        // length recorded at its declaration — from here on the runtime header counts.
         if (expr.Expression is AssignmentExpressionSyntax assign
             && assign.OperatorToken.IsKind(SyntaxKind.EqualsToken)
-            && assign.Left is IdentifierNameSyntax leftId
-            && assign.Right is ArrayCreationExpressionSyntax arrCreate2
-            && arrCreate2.Type.RankSpecifiers.Count > 0
-            && arrCreate2.Type.RankSpecifiers[0].Sizes.Count > 0
-            && !(arrCreate2.Type.RankSpecifiers[0].Sizes[0] is OmittedArraySizeExpressionSyntax))
-        {
-            var fieldKey = leftId.Identifier.Text.TrimStart('_');
-            if (_ctx.FieldTypes.ContainsKey(fieldKey) && _ctx.FieldTypes[fieldKey].EndsWith("[]"))
-                _ctx.FieldArrayLengths[fieldKey] = _expr.Write(arrCreate2.Type.RankSpecifiers[0].Sizes[0]);
-        }
+            && assign.Left is IdentifierNameSyntax leftId)
+            _ctx.ArrayLengths.Remove(leftId.Identifier.Text);
 
         var result = _expr.Write(expr.Expression);
         if (!string.IsNullOrEmpty(result))
@@ -223,6 +216,13 @@ public sealed class StatementWriter
             {
                 var elemTypeName = varArrCreate.Type.ElementType.ToString().Trim();
                 WriteArrayAlloc(v, elemTypeName + "[]", varArrCreate);
+                continue;
+            }
+
+            // var x = new[] { a, b }  →  element type from the semantic model
+            if (declType is "var" && v.Initializer?.Value is ImplicitArrayCreationExpressionSyntax)
+            {
+                WriteArrayWithInitializer(v, "var[]");
                 continue;
             }
 
@@ -378,41 +378,44 @@ public sealed class StatementWriter
     {
         var baseType = declType[..^2].Trim();
         var varName = v.Identifier.Text;
-        var cType = baseType == "string" ? "const char*" : TypeRegistry.MapType(baseType);
-        bool isRefType = baseType != "string" && TypeRegistry.NeedsPointerSuffix(baseType);
-        var ptrSuffix = isRefType ? "**" : "*";
-        var castPrefix = isRefType ? "(" + cType + "**)" : "(" + cType + "*)";
-        var sizeofExpr = isRefType ? "sizeof(" + cType + "*)" : "sizeof(" + cType + ")";
+        var elemC = ArrayModel.ElemCType(baseType);
 
+        List<string>? elems = arrCreate.Initializer?.Expressions.Select(e => _expr.Write(e)).ToList();
+
+        string countExpr;
+        int constCount;
         if (arrCreate.Type.RankSpecifiers.Count > 0
             && arrCreate.Type.RankSpecifiers[0].Sizes.Count > 0
             && arrCreate.Type.RankSpecifiers[0].Sizes[0] is not OmittedArraySizeExpressionSyntax)
         {
-            var sizeExpr = _expr.Write(arrCreate.Type.RankSpecifiers[0].Sizes[0]);
-            if (IsConstantSizeExpr(arrCreate.Type.RankSpecifiers[0].Sizes[0]) && !isRefType)
-            {
-                _ctx.WriteLine(cType + " " + varName + "[" + sizeExpr + "];");
-                _ctx.WriteLine("memset(" + varName + ", 0, sizeof(" + varName + "));");
-            }
-            else
-            {
-                _ctx.WriteLine(cType + ptrSuffix + " " + varName
-                    + " = " + castPrefix + "calloc(" + sizeExpr + ", " + sizeofExpr + ");");
-            }
-            _ctx.ArrayLengths[varName] = sizeExpr;
-        }
-        else if (arrCreate.Initializer != null)
-        {
-            var elems = arrCreate.Initializer.Expressions
-                .Select(e => _expr.Write(e)).ToList();
-            _ctx.WriteLine(cType + (isRefType ? "*" : "") + " " + varName + "[] = { " + string.Join(", ", elems) + " };");
-            _ctx.ArrayLengths[varName] = elems.Count.ToString();
+            var sizeNode = arrCreate.Type.RankSpecifiers[0].Sizes[0];
+            countExpr = _expr.Write(sizeNode);
+            constCount = ArrayModel.ConstantSize(sizeNode, _ctx);
         }
         else
         {
-            _ctx.WriteLine(cType + ptrSuffix + " " + varName + " = NULL; /* empty array */");
+            constCount = elems?.Count ?? 0;
+            countExpr = constCount.ToString();
         }
+
+        WriteLocalArray(v, varName, elemC, countExpr, constCount, elems);
         _ctx.LocalTypes[varName] = declType;
+    }
+
+    /// Declares a local array: on the stack when it is small, constant-sized and
+    /// never leaves the method; otherwise on the heap. Both carry the length header.
+    private void WriteLocalArray(VariableDeclaratorSyntax v, string varName, string elemC,
+        string countExpr, int constCount, List<string>? elems)
+    {
+        if (constCount >= 0 && ArrayModel.CanLiveOnStack(v, constCount, elemC, _ctx))
+            _ctx.WriteLine(ArrayModel.LocalDecl(elemC, varName, constCount.ToString(), elems));
+        else if (elems is { Count: > 0 })
+            _ctx.WriteLine(elemC + "* " + varName + " = " + ArrayModel.FromInit(elemC, elems) + ";");
+        else
+            _ctx.WriteLine(elemC + "* " + varName + " = " + ArrayModel.NewHeap(elemC, countExpr) + ";");
+
+        if (constCount >= 0 && ArrayModel.IsNeverReassigned(v, _ctx))
+            _ctx.ArrayLengths[varName] = constCount.ToString();
     }
 
     private static bool IsConstantSizeExpr(SyntaxNode node) =>
@@ -542,12 +545,12 @@ public sealed class StatementWriter
 
         if (elems != null && cType != null)
         {
-            if (baseType == "string")
-                _ctx.WriteLine("const char* " + varName + "[] = { " + string.Join(", ", elems) + " };");
-            else
-                _ctx.WriteLine(cType + " " + varName + "[] = { " + string.Join(", ", elems) + " };");
-            _ctx.ArrayLengths[varName] = elems.Count.ToString();
-            _ctx.LocalTypes[varName] = declType;
+            // `var x = new[] {..}`: element type from the semantic model.
+            var elemCs = baseType == "var"
+                ? (ArrayModel.ElementCsType((ExpressionSyntax)initExpr!, _ctx) ?? "int")
+                : baseType;
+            WriteLocalArray(v, varName, ArrayModel.ElemCType(elemCs), elems.Count.ToString(), elems.Count, elems);
+            _ctx.LocalTypes[varName] = elemCs + "[]";
             return;
         }
 
@@ -579,22 +582,14 @@ public sealed class StatementWriter
 
     private void WriteNullableLocal(VariableDeclaratorSyntax v, string declType)
     {
-        var inner = NullableHandler.GetInnerType(declType);
-        var innerC = TypeRegistry.MapType(inner);
+        // Nullable value type → a value struct on the stack. The initializer goes
+        // through ExpressionWriter, which applies the T → T? / null → T? conversion.
+        var nullableC = TypeRegistry.MapType(declType);
         var varName = v.Identifier.Text;
-
-        if (v.Initializer == null
-            || v.Initializer.Value is LiteralExpressionSyntax lit
-               && lit.IsKind(SyntaxKind.NullLiteralExpression))
-        {
-            _ctx.WriteLine(innerC + "* " + varName + " = NULL;");
-        }
-        else
-        {
-            var initVal = _expr.Write(v.Initializer.Value);
-            _ctx.WriteLine(innerC + "* " + varName + " = (" + innerC + "*)malloc(sizeof(" + innerC + "));");
-            _ctx.WriteLine("if (" + varName + ") *" + varName + " = " + initVal + ";");
-        }
+        var init = v.Initializer != null
+            ? _expr.Write(v.Initializer.Value)
+            : NullableHandler.Null(nullableC);
+        _ctx.WriteLine(nullableC + " " + varName + " = " + init + ";");
         _ctx.LocalTypes[varName] = declType;
     }
 
@@ -627,6 +622,9 @@ public sealed class StatementWriter
             var semType = _ctx.GetSemanticType(initExpr);
             if (semType != null && TypeRegistry.IsUserStruct(semType))
                 return (semType, false);
+            // T[] → element pointer (header array), e.g. `var parts = s.Split(',')`
+            if (semType != null && semType.EndsWith("[]") && !semType.Contains(','))
+                return (ArrayModel.ElemCType(semType[..^2]), true);
         }
 
         if (v.Initializer?.Value is ObjectCreationExpressionSyntax oc)
@@ -747,10 +745,16 @@ public sealed class StatementWriter
         return (ct, false);
     }
 
-    private static bool IsSplitCall(InvocationExpressionSyntax inv) => IsListStrCall(inv);
+    private bool IsSplitCall(InvocationExpressionSyntax inv) => IsListStrCall(inv);
 
-    private static bool IsListStrCall(InvocationExpressionSyntax inv)
+    /// True when the call yields a List&lt;string&gt; in C#. Calls returning string[]
+    /// (Split, GetFiles, ReadAllLines) are arrays — see InvocationDispatcher.AdaptStringArrayResult.
+    private bool IsListStrCall(InvocationExpressionSyntax inv)
     {
+        var sem = _ctx.GetSemanticType(inv);
+        if (sem != null)
+            return TypeRegistry.IsList(sem) && TypeRegistry.GetListInnerType(sem) == "string";
+
         var calleeStr = inv.Expression.ToString();
         if (calleeStr is "string.Split" or "String.Split") return true;
         if (calleeStr is "Directory.GetFiles") return true;
@@ -1004,6 +1008,15 @@ public sealed class StatementWriter
         var colRaw = forEach.Expression.ToString();
         var colKey = colRaw.TrimStart('_');
         var colExpr = _expr.Write(forEach.Expression);
+        // foreach evaluates its collection exactly once. A call such as s.Split(' ')
+        // or GetItems() would otherwise run again for the bound and every element.
+        if (forEach.Expression is not (IdentifierNameSyntax or MemberAccessExpressionSyntax
+                                       or ThisExpressionSyntax))
+        {
+            var colTmp = _ctx.NextTmp("fe");
+            _ctx.WriteLine("__auto_type " + colTmp + " = " + colExpr + ";");
+            colExpr = colTmp;
+        }
         var varName = forEach.Identifier.Text;
         var idxVar = "_i_" + varName;
 
@@ -1208,20 +1221,11 @@ public sealed class StatementWriter
 
     private string ResolveArrayLength(string colRaw, string colKey, string colExpr)
     {
-        if (_ctx.ArrayLengths.TryGetValue(colRaw, out var knownLen)) return knownLen;
-        if (_ctx.ArrayLengths.TryGetValue(colKey, out var knownLenField)) return knownLenField;
-        if (_ctx.LocalTypes.ContainsKey(colRaw))
-        {
-            // Only use sizeof/sizeof for stack arrays; heap arrays need stored length
-            var varType = _ctx.LocalTypes[colRaw];
-            bool isDynamic = varType.EndsWith("[]");
-            if (!isDynamic)
-                return "(sizeof(" + colExpr + ") / sizeof(" + colExpr + "[0]))";
-            // For dynamically-sized arrays without stored length, warn and use 0 length
-            _ctx.Warn($"foreach on dynamic array '{colRaw}' without known length — use an explicit length variable or ArrayLengths registration", colRaw);
-            return colExpr + "_len /* unknown — set this before foreach */";
-        }
-        return colExpr + "_count";
+        // C char buffers (string(char, n) locals) are real C arrays — sizeof works there.
+        if (_ctx.LocalTypes.TryGetValue(colRaw, out var varType) && varType == "char[]")
+            return "(sizeof(" + colExpr + ") / sizeof(" + colExpr + "[0]))";
+        // Everything else is a C# array with a length header (or a params companion).
+        return ArrayModel.LengthOf(colRaw, colExpr, _ctx);
     }
 
     private void WriteForEachLoopVar(string varName, string idxVar,

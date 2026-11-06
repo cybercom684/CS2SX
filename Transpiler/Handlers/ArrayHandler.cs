@@ -76,9 +76,9 @@ public sealed class ArrayHandler : InvocationHandlerBase
 
         // Determine element type and array length
         var arrRaw = inv.ArgumentList.Arguments[0].Expression.ToString();
-        var elemType = InferArrayElementType(arrRaw, ctx);
+        var elemType = InferArrayElementType(inv.ArgumentList.Arguments[0].Expression, ctx);
         var cmpFunc = GetCmpFunction(elemType);
-        var lenExpr = ctx.ArrayLengths.TryGetValue(arrRaw, out var len) ? len : "0 /* length unknown */";
+        var lenExpr = ArrayModel.LengthOf(arrRaw, arrName, ctx);
 
         if (args.Count >= 2 && inv.ArgumentList.Arguments[1].Expression is LambdaExpressionSyntax)
         {
@@ -128,8 +128,8 @@ public sealed class ArrayHandler : InvocationHandlerBase
         var arrName = args[0];
         var val = args[1];
         var arrRaw = inv.ArgumentList.Arguments[0].Expression.ToString();
-        var elemType = InferArrayElementType(arrRaw, ctx);
-        var lenExpr = ctx.ArrayLengths.TryGetValue(arrRaw, out var len) ? len : "0 /* length unknown */";
+        var elemType = InferArrayElementType(inv.ArgumentList.Arguments[0].Expression, ctx);
+        var lenExpr = ArrayModel.LengthOf(arrRaw, arrName, ctx);
 
         string startExpr = args.Count >= 3 ? args[2] : "0";
         string countExpr = args.Count >= 4 ? args[3] : lenExpr;
@@ -161,17 +161,8 @@ public sealed class ArrayHandler : InvocationHandlerBase
         var arrName = args[0];
         var val = args[1];
         var arrRaw = inv.ArgumentList.Arguments[0].Expression.ToString();
-        var elemType = InferArrayElementType(arrRaw, ctx);
-        string lenExpr;
-        if (ctx.ArrayLengths.TryGetValue(arrRaw, out var len))
-            lenExpr = len;
-        else if (ctx.LocalTypes.ContainsKey(arrRaw))
-            lenExpr = "(int)(sizeof(" + arrName + ") / sizeof(" + arrName + "[0]))";
-        else
-        {
-            ctx.Warn(inv, $"Array.IndexOf: length of '{arrRaw}' unknown — register it in ArrayLengths or use explicit-size array");
-            lenExpr = arrName + "_count /* unknown length — set before Array.IndexOf */";
-        }
+        var elemType = InferArrayElementType(inv.ArgumentList.Arguments[0].Expression, ctx);
+        var lenExpr = ArrayModel.LengthOf(arrRaw, arrName, ctx);
 
         var resultVar = ctx.NextTmp("idx");
         var iVar = ctx.NextTmp("ii");
@@ -200,10 +191,11 @@ public sealed class ArrayHandler : InvocationHandlerBase
         // Strip & if BuildArg already added it
         var arrPtr = args[0].StartsWith("&") ? args[0][1..] : args[0];
         var arrRaw = inv.ArgumentList.Arguments[0].Expression.ToString().TrimStart('&');
-        var elemType = InferArrayElementType(arrRaw, ctx);
-        var cType = elemType == "string" ? "const char*" : TypeRegistry.MapType(elemType);
-        ctx.ArrayLengths[arrRaw] = args[1];
-        return $"({arrPtr} = ({cType}*)realloc({arrPtr}, ({args[1]}) * sizeof({cType})))";
+        var cType = ArrayModel.ElemCType(InferArrayElementType(inv.ArgumentList.Arguments[0].Expression, ctx));
+        // The length is no longer a compile-time constant after a resize.
+        ctx.ArrayLengths.Remove(arrRaw);
+        // Header-aware: allocates the new array, copies min(old, new) elements.
+        return $"({arrPtr} = ({cType}*)CS2SX_ArrResize({arrPtr}, {args[1]}, sizeof({cType})))";
     }
 
     private static string HandleReverse(InvocationExpressionSyntax inv, List<string> args,
@@ -212,9 +204,9 @@ public sealed class ArrayHandler : InvocationHandlerBase
         if (args.Count == 0) return "/* Array.Reverse — no array */";
         var arrName = args[0];
         var arrRaw = inv.ArgumentList.Arguments[0].Expression.ToString();
-        var elemType = InferArrayElementType(arrRaw, ctx);
+        var elemType = InferArrayElementType(inv.ArgumentList.Arguments[0].Expression, ctx);
         var cType = elemType == "string" ? "const char*" : TypeRegistry.MapType(elemType);
-        var lenExpr = ctx.ArrayLengths.TryGetValue(arrRaw, out var len) ? len : "0";
+        var lenExpr = ArrayModel.LengthOf(arrRaw, arrName, ctx);
         var lo = ctx.NextTmp("rlo");
         var hi = ctx.NextTmp("rhi");
         var tmp = ctx.NextTmp("rtmp");
@@ -237,7 +229,7 @@ public sealed class ArrayHandler : InvocationHandlerBase
         var arrName = args[0];
         var pred = args[1];
         var arrRaw = inv.ArgumentList.Arguments[0].Expression.ToString();
-        var lenExpr = ctx.ArrayLengths.TryGetValue(arrRaw, out var len) ? len : "0";
+        var lenExpr = ArrayModel.LengthOf(arrRaw, arrName, ctx);
         var resultVar = ctx.NextTmp("ex");
         var iVar = ctx.NextTmp("ei");
 
@@ -254,7 +246,7 @@ public sealed class ArrayHandler : InvocationHandlerBase
         var arrName = args[0];
         var pred = args[1];
         var arrRaw = inv.ArgumentList.Arguments[0].Expression.ToString();
-        var lenExpr = ctx.ArrayLengths.TryGetValue(arrRaw, out var len) ? len : "0";
+        var lenExpr = ArrayModel.LengthOf(arrRaw, arrName, ctx);
         var resultVar = ctx.NextTmp("fi");
         var iVar = ctx.NextTmp("fii");
 
@@ -264,12 +256,11 @@ public sealed class ArrayHandler : InvocationHandlerBase
         return resultVar;
     }
 
-    private static string InferArrayElementType(string arrRaw, TranspilerContext ctx)
+    private static string InferArrayElementType(ExpressionSyntax arrExpr, TranspilerContext ctx)
     {
-        if (ctx.LocalTypes.TryGetValue(arrRaw, out var lt) && lt.EndsWith("[]"))
-            return lt[..^2];
-        if (ctx.FieldTypes.TryGetValue(arrRaw.TrimStart('_'), out var ft) && ft.EndsWith("[]"))
-            return ft[..^2];
+        var elem = ArrayModel.ElementCsType(arrExpr, ctx);
+        if (elem != null) return elem;
+        var arrRaw = arrExpr.ToString();
 
         // Emit a warning so the user knows the fallback was used instead of silently
         // producing wrong C code (e.g. int comparisons for float/double arrays).

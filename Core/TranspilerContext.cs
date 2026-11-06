@@ -74,7 +74,6 @@ public sealed class TranspilerContext
         Copy(MethodReturnTypes, c.MethodReturnTypes);
         Copy(PropertyTypes, c.PropertyTypes);
         Copy(ArrayLengths, c.ArrayLengths);
-        Copy(FieldArrayLengths, c.FieldArrayLengths);
         Copy(TypeAliases, c.TypeAliases);
         Copy(VTableRoot, c.VTableRoot);
         Copy(RootHops, c.RootHops);
@@ -139,8 +138,6 @@ public sealed class TranspilerContext
 
     public Dictionary<string, string> LocalTypes { get; } = new(StringComparer.Ordinal);
     public Dictionary<string, string> ArrayLengths { get; } = new(StringComparer.Ordinal);
-    // Tracks instance field array sizes from assignments: field "keys" → "12"
-    public Dictionary<string, string> FieldArrayLengths { get; } = new(StringComparer.Ordinal);
 
     // ── Value-type und VTable Registries ──────────────────────────────────────
 

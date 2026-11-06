@@ -338,17 +338,8 @@ public sealed class CSharpToC : CSharpSyntaxWalker
 
             var csType = ResolveFieldType(field);
 
-            // FIX: Nullable-Felder (int? → int*) werden heap-allokiert → müssen free'd werden
-            if (NullableHandler.IsNullable(csType))
-            {
-                foreach (var v in field.Declaration.Variables)
-                {
-                    var fieldName = v.Identifier.Text.TrimStart('_');
-                    var prefix = TypeRegistry.HasNoPrefix(fieldName) ? "" : "f_";
-                    _ctx.WriteLine($"if (self->{prefix}{fieldName}) {{ free(self->{prefix}{fieldName}); self->{prefix}{fieldName} = NULL; }}");
-                }
-                continue;
-            }
+            // Nullable value types are inline value structs — nothing to free.
+            if (NullableHandler.IsNullable(csType)) continue;
 
             // FIX: Array-Felder (T[]) werden per calloc/malloc allokiert → müssen free'd werden
             if (csType.EndsWith("[]"))
@@ -653,8 +644,7 @@ public sealed class CSharpToC : CSharpSyntaxWalker
                        && !_ctx.EnumDefs.ContainsKey(csType)
                        && (TypeRegistry.NeedsPointerSuffix(csType)
                        || TypeRegistry.IsStringBuilder(csType)
-                       || TypeRegistry.IsControlType(csType)
-                       || NullableHandler.IsNullable(csType));
+                       || TypeRegistry.IsControlType(csType));
             var ptr = needPtr ? "*" : "";
 
             foreach (var v in field.Declaration.Variables)
@@ -662,17 +652,7 @@ public sealed class CSharpToC : CSharpSyntaxWalker
                 var fieldName = v.Identifier.Text.TrimStart('_');
                 var prefix = TypeRegistry.HasNoPrefix(fieldName) ? "" : "f_";
                 _ctx.FieldTypes[fieldName] = csType;
-
-                if (NullableHandler.IsNullable(csType))
-                {
-                    var inner = NullableHandler.GetInnerType(csType);
-                    var innerC = TypeRegistry.MapType(inner);
-                    _ctx.WriteLine(innerC + "* " + prefix + fieldName + ";");
-                }
-                else
-                {
-                    _ctx.WriteLine(cType + ptr + " " + prefix + fieldName + ";");
-                }
+                _ctx.WriteLine(cType + ptr + " " + prefix + fieldName + ";");
             }
         }
     }
@@ -810,29 +790,7 @@ public sealed class CSharpToC : CSharpSyntaxWalker
                 }
                 else if (csType.EndsWith("[]"))
                 {
-                    // Static readonly T[] → proper C array with count macro
-                    var baseType = csType[..^2].Trim();
-                    // Strip "const " prefix from element type since we add "const" via the modifier
-                    var cBase0 = baseType == "string" ? "const char*" : TypeRegistry.MapType(baseType);
-                    var cBaseElem = cBase0.StartsWith("const ") ? cBase0["const ".Length..].Trim() : cBase0;
-                    foreach (var v in field.Declaration.Variables)
-                    {
-                        if (v.Initializer == null) continue;
-                        var fieldName = v.Identifier.Text.TrimStart('_');
-                        var fullName2 = name + "_" + fieldName;
-                        List<string> elems;
-                        if (v.Initializer.Value is Microsoft.CodeAnalysis.CSharp.Syntax.InitializerExpressionSyntax initExpr2)
-                            elems = initExpr2.Expressions.Select(e => _exprWriter.Write(e)).ToList();
-                        else if (v.Initializer.Value is Microsoft.CodeAnalysis.CSharp.Syntax.ArrayCreationExpressionSyntax arrExpr2 && arrExpr2.Initializer != null)
-                            elems = arrExpr2.Initializer.Expressions.Select(e => _exprWriter.Write(e)).ToList();
-                        else if (v.Initializer.Value is Microsoft.CodeAnalysis.CSharp.Syntax.ImplicitArrayCreationExpressionSyntax implArr2)
-                            elems = implArr2.Initializer.Expressions.Select(e => _exprWriter.Write(e)).ToList();
-                        else
-                            elems = new List<string>();
-                        // "const char* arr[]" — no "static" so it matches "extern" declaration in header
-                        _ctx.Out.WriteLine($"const {cBaseElem} {fullName2}[] = {{ {string.Join(", ", elems)} }};");
-                        _ctx.Out.WriteLine($"#define {fullName2}_count {elems.Count}");
-                    }
+                    WriteStaticArrayFieldDef(field, name, csType);
                 }
                 else if (!TypeRegistry.IsPrimitive(csType))
                 {
@@ -967,66 +925,44 @@ public sealed class CSharpToC : CSharpSyntaxWalker
 
     private void WriteStaticArrayFieldDef(FieldDeclarationSyntax field, string className, string csType)
     {
-        var baseType = csType[..^2].Trim();
-        var cType = baseType == "string" ? "const char*" : TypeRegistry.MapType(baseType);
-
-        // The header declares these as `extern T name[];` (WriteStaticFieldExterns),
-        // so the definition must be NON-static and sized to match. (A `static`
-        // definition would conflict; a `[1]` size would overflow on every write.)
+        // The header declares `extern T* Cls_name;`. A static array is a global with a
+        // length header (CS2SX_ARR_STATIC) so `.Length` works everywhere, and it stays
+        // a plain pointer variable so it can be reassigned like in C#.
+        var elemC = ArrayModel.ElemCType(csType[..^2]);
         foreach (var v in field.Declaration.Variables)
         {
-            var fieldName = v.Identifier.Text.TrimStart('_');
-            var fullName = className + "_" + fieldName;
+            var fullName = className + "_" + v.Identifier.Text.TrimStart('_');
 
-            if (v.Initializer?.Value is ArrayCreationExpressionSyntax arr)
+            InitializerExpressionSyntax? elemsInit = v.Initializer?.Value switch
             {
-                if (arr.Initializer != null)
-                {
-                    // new T[] { a, b, c } / new T[n] { ... } — explicit element list
-                    var elems = arr.Initializer.Expressions
-                        .Select(e => _exprWriter.Write(e))
-                        .ToList();
-                    _ctx.Out.WriteLine(cType + " " + fullName + "[] = { "
-                        + string.Join(", ", elems) + " };");
-                    _ctx.Out.WriteLine($"#define {fullName}_count {elems.Count}");
-                }
-                else if (arr.Type.RankSpecifiers.Count > 0
-                         && arr.Type.RankSpecifiers[0].Sizes.Count > 0
-                         && arr.Type.RankSpecifiers[0].Sizes[0] is not OmittedArraySizeExpressionSyntax)
-                {
-                    // new T[N] — sized, zero-initialized
-                    var sizeExpr = _exprWriter.Write(arr.Type.RankSpecifiers[0].Sizes[0]);
-                    _ctx.Out.WriteLine(cType + " " + fullName + "[" + sizeExpr + "] = {0};");
-                    _ctx.Out.WriteLine($"#define {fullName}_count ({sizeExpr})");
-                }
+                ArrayCreationExpressionSyntax { Initializer: { } i } => i,
+                ImplicitArrayCreationExpressionSyntax ia => ia.Initializer,
+                InitializerExpressionSyntax bare when bare.IsKind(SyntaxKind.ArrayInitializerExpression) => bare,
+                _ => null,
+            };
+
+            if (elemsInit != null)
+            {
+                var elems = elemsInit.Expressions.Select(e => _exprWriter.Write(e)).ToList();
+                _ctx.Out.WriteLine(ArrayModel.StaticDef(elemC, fullName, elems.Count.ToString(), elems));
+            }
+            else if (v.Initializer?.Value is ArrayCreationExpressionSyntax arr
+                     && arr.Type.RankSpecifiers.Count > 0
+                     && arr.Type.RankSpecifiers[0].Sizes.Count > 0
+                     && arr.Type.RankSpecifiers[0].Sizes[0] is not OmittedArraySizeExpressionSyntax)
+            {
+                var size = ArrayModel.ConstantSize(arr.Type.RankSpecifiers[0].Sizes[0], _ctx);
+                if (size >= 0)
+                    _ctx.Out.WriteLine(ArrayModel.StaticDef(elemC, fullName, size.ToString()));
                 else
                 {
-                    _ctx.Out.WriteLine(cType + " " + fullName + "[1];");
+                    _ctx.Warn(field, $"Statisches Array '{fullName}' braucht eine konstante Größe (z.B. const int) — wird mit null initialisiert.");
+                    _ctx.Out.WriteLine($"{elemC}* {fullName} = NULL;");
                 }
-            }
-            else if (v.Initializer?.Value is ImplicitArrayCreationExpressionSyntax implArr)
-            {
-                var elems = implArr.Initializer.Expressions
-                    .Select(e => _exprWriter.Write(e))
-                    .ToList();
-                _ctx.Out.WriteLine(cType + " " + fullName + "[] = { "
-                    + string.Join(", ", elems) + " };");
-                _ctx.Out.WriteLine($"#define {fullName}_count {elems.Count}");
-            }
-            else if (v.Initializer?.Value is InitializerExpressionSyntax bareInit
-                     && bareInit.IsKind(SyntaxKind.ArrayInitializerExpression))
-            {
-                // int[] x = { 1, 2, 3 } — bare collection initializer (no `new`)
-                var elems = bareInit.Expressions
-                    .Select(e => _exprWriter.Write(e))
-                    .ToList();
-                _ctx.Out.WriteLine(cType + " " + fullName + "[] = { "
-                    + string.Join(", ", elems) + " };");
-                _ctx.Out.WriteLine($"#define {fullName}_count {elems.Count}");
             }
             else
             {
-                _ctx.Out.WriteLine(cType + " " + fullName + "[1];");
+                _ctx.Out.WriteLine($"{elemC}* {fullName} = NULL;"); // C#: null until assigned
             }
         }
     }
@@ -1058,11 +994,9 @@ public sealed class CSharpToC : CSharpSyntaxWalker
                         _ctx.Out.WriteLine($"#define {name}_{fieldName} ({initVal})");
                     else if (csType.EndsWith("[]"))
                     {
-                        // Array: extern declaration must match implementation type (const ElemType arr[])
-                        var elemBase = csType[..^2].Trim();
-                        var cElem0 = elemBase == "string" ? "const char*" : TypeRegistry.MapType(elemBase);
-                        var cElemStrip = cElem0.StartsWith("const ") ? cElem0["const ".Length..].Trim() : cElem0;
-                        _ctx.Out.WriteLine($"extern const {cElemStrip} {name}_{fieldName}[];");
+                        // Static arrays are header-carrying T* globals (ArrayModel) — a
+                        // readonly array's elements are still mutable in C#.
+                        _ctx.Out.WriteLine($"extern {ArrayModel.ElemCType(csType[..^2])}* {name}_{fieldName};");
                     }
                     else
                     {
@@ -1078,13 +1012,9 @@ public sealed class CSharpToC : CSharpSyntaxWalker
 
             if (csType.EndsWith("[]"))
             {
-                var baseType = csType[..^2].Trim();
-                var cType = baseType == "string" ? "const char*" : TypeRegistry.MapType(baseType);
+                var elemC = ArrayModel.ElemCType(csType[..^2]);
                 foreach (var v in field.Declaration.Variables)
-                {
-                    var fieldName = v.Identifier.Text.TrimStart('_');
-                    _ctx.Out.WriteLine($"extern {cType} {name}_{fieldName}[];");
-                }
+                    _ctx.Out.WriteLine($"extern {elemC}* {name}_{v.Identifier.Text.TrimStart('_')};");
                 continue;
             }
 
@@ -1550,12 +1480,6 @@ public sealed class CSharpToC : CSharpSyntaxWalker
                 m.IsKind(SyntaxKind.RefKeyword) || m.IsKind(SyntaxKind.OutKeyword));
             _ctx.LocalTypes[p.Identifier.Text] =
                 isRefParam ? "@ref:" + paramType : paramType;
-
-            if (isParams && paramType.EndsWith("[]"))
-            {
-                var countVar = p.Identifier.Text + "_count";
-                _ctx.LocalTypes[countVar] = "int";
-            }
         }
 
         // FIX: Lambda-Preludes (Struct-Defs + statische Funktionen) müssen VOR der
@@ -1768,10 +1692,6 @@ public sealed class CSharpToC : CSharpSyntaxWalker
                 {
                     _ctx.WriteLine($"if ({fieldExpr}) {{ StringBuilder_Free({fieldExpr}); {fieldExpr} = NULL; }}");
                 }
-                else if (NullableHandler.IsNullable(csType))
-                {
-                    _ctx.WriteLine($"if ({fieldExpr}) {{ free({fieldExpr}); {fieldExpr} = NULL; }}");
-                }
                 else if (TypeRegistry.NeedsPointerSuffix(csType)
                          && !TypeRegistry.IsPrimitive(csType)
                          && csType != "string"
@@ -1983,8 +1903,7 @@ public sealed class CSharpToC : CSharpSyntaxWalker
             || TypeRegistry.IsStringBuilder(csType)
             || TypeRegistry.IsList(csType)
             || TypeRegistry.IsDictionary(csType)
-            || TypeRegistry.IsControlType(csType)
-            || NullableHandler.IsNullable(csType);
+            || TypeRegistry.IsControlType(csType);
     }
 
     internal string BuildParamDecl(ParameterSyntax p) =>
@@ -2013,19 +1932,15 @@ public sealed class CSharpToC : CSharpSyntaxWalker
         if (_genericCollector != null && _genericCollector.GenericClasses.ContainsKey(csType))
             return csType + "* " + p.Identifier;
 
-        var isParams = p.Modifiers.Any(m => m.IsKind(SyntaxKind.ParamsKeyword));
-        if (isParams && csType.EndsWith("[]"))
-        {
-            var baseType = csType[..^2].Trim();
-            var cBaseType = baseType == "string" ? "const char*" : TypeRegistry.MapType(baseType);
-            return $"{cBaseType}* {p.Identifier}, int {p.Identifier}_count";
-        }
+        // `params T[] xs` is an ordinary array parameter: arrays carry their length,
+        // and call sites pack the expanded form (InvocationDispatcher.PackParamsArgs).
+        if (p.Modifiers.Any(m => m.IsKind(SyntaxKind.ParamsKeyword)) && csType.EndsWith("[]"))
+            return $"{ArrayModel.ElemCType(csType[..^2])}* {p.Identifier}";
 
         if (NullableHandler.IsNullable(csType))
         {
-            var inner = NullableHandler.GetInnerType(csType);
-            var cInner = TypeRegistry.MapType(inner);
-            return isRef ? $"{cInner}** {p.Identifier}" : $"{cInner}* {p.Identifier}";
+            var nullableC = TypeRegistry.MapType(csType); // Nullable_T value struct
+            return isRef ? $"{nullableC}* {p.Identifier}" : $"{nullableC} {p.Identifier}";
         }
 
         if (csType.EndsWith("[]"))

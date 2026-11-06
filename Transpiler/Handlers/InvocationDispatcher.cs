@@ -6,7 +6,9 @@
 // ============================================================================
 
 using CS2SX.Core;
+using CS2SX.Transpiler.Writers;
 using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 
 namespace CS2SX.Transpiler.Handlers;
@@ -133,7 +135,7 @@ public sealed class InvocationDispatcher
             .Select(a => BuildArg(a))
             .ToList();
 
-        var args = ResolveNamedAndOptionalArgs(inv, rawArgs);
+        var args = ResolveNamedAndOptionalArgs(inv, PackParamsArgs(inv, rawArgs));
 
         if (inv.Expression is GenericNameSyntax genName && _genericMethodExpander != null)
         {
@@ -158,12 +160,77 @@ public sealed class InvocationDispatcher
         foreach (var handler in _handlers)
         {
             if (handler.TryHandle(inv, calleeStr, args, _ctx, _writeExpr, out var result))
-                return result;
+                return AdaptStringArrayResult(inv, result);
         }
 
         // Return null — WriteInvocation will try TryWriteDirectUserClassCall next,
         // and only warn if it truly falls through to the raw-passthrough fallback.
         return null;
+    }
+
+    /// <summary>
+    /// A call in expanded <c>params</c> form — <c>Count(7, 8)</c> or <c>Count()</c> — gets
+    /// its trailing arguments packed into one array, exactly as C# does. The array is a
+    /// stack array with length header declared just before the statement, so the callee
+    /// sees an ordinary T[] (<c>values.Length</c> works). The normal form, an array passed
+    /// as a whole (<c>Count(nums)</c>), is left as is. User methods only — framework
+    /// params methods (string.Format, Console.WriteLine) have dedicated handlers.
+    /// </summary>
+    private List<string> PackParamsArgs(InvocationExpressionSyntax inv, List<string> rawArgs)
+    {
+        if (_ctx.SemanticModel == null) return rawArgs;
+        try
+        {
+            if (_ctx.SemanticModel.GetSymbolInfo(inv).Symbol is not IMethodSymbol m
+                || m.Parameters.Length == 0
+                || !m.Parameters[^1].IsParams
+                || m.Parameters[^1].Type is not IArrayTypeSymbol paramsType
+                || !TranspilerContext.IsUserCode(m.ContainingType))
+                return rawArgs;
+
+            var pIdx = m.Parameters.Length - 1;
+            var invArgs = inv.ArgumentList.Arguments;
+            if (invArgs.Count == m.Parameters.Length)
+            {
+                var last = invArgs[pIdx].Expression;
+                var lastType = _ctx.SemanticModel.GetTypeInfo(last).Type;
+                if (lastType is IArrayTypeSymbol || last.IsKind(SyntaxKind.NullLiteralExpression))
+                    return rawArgs; // normal form
+            }
+
+            var elems = rawArgs.Skip(pIdx).ToList();
+            var elemC = ArrayModel.ElemCType(TranspilerContext.FormatTypeSymbol(paramsType.ElementType));
+            var tmp = _ctx.NextTmp("pa");
+            _ctx.WriteLine(ArrayModel.LocalDecl(elemC, tmp, elems.Count.ToString(), elems));
+            return rawArgs.Take(pIdx).Append(tmp).ToList();
+        }
+        catch { return rawArgs; }
+    }
+
+    // Runtime helpers that build a List_str for APIs whose C# return type is string[].
+    private static readonly string[] s_listStrBuilders =
+    {
+        "String_Split(", "String_Split_RemoveEmpty(", "String_Split_Whitespace(",
+        "CS2SX_File_ReadAllLines(", "CS2SX_Dir_GetFiles(", "CS2SX_Dir_GetDirectories(",
+    };
+
+    /// <summary>
+    /// Where C# says the call returns <c>string[]</c> but the runtime helper returns a
+    /// List_str, convert at the boundary so the value follows the uniform array model
+    /// (<c>.Length</c>, indexing, passing to string[] parameters, foreach).
+    /// </summary>
+    private string AdaptStringArrayResult(InvocationExpressionSyntax inv, string result)
+    {
+        if (!s_listStrBuilders.Any(b => result.StartsWith(b, StringComparison.Ordinal)))
+            return result;
+        // The call's own return type — not the converted type, which in e.g. a foreach
+        // collection position is the enumerable interface rather than string[].
+        ITypeSymbol? returnType = null;
+        try { returnType = _ctx.SemanticModel?.GetTypeInfo(inv).Type; }
+        catch { }
+        return returnType is IArrayTypeSymbol { ElementType.SpecialType: SpecialType.System_String }
+            ? "CS2SX_StrArr_FromList(" + result + ")"
+            : result;
     }
 
     /// <summary>

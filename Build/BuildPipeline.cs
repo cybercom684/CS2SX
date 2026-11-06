@@ -920,6 +920,10 @@ public sealed class BuildPipeline
         sb.AppendLine();
         sb.AppendLine("extern char _cs2sx_strbuf[1024];");
         sb.AppendLine();
+        sb.AppendLine("// Nullable value types: T? → { T value; int has; }");
+        foreach (var prim in CS2SX.Core.TypeRegistry.NullablePrimitives)
+            sb.AppendLine(CS2SX.Core.TypeRegistry.NullableTypedef(prim));
+        sb.AppendLine();
 
         var alreadyDeclared = new HashSet<string>(StringComparer.Ordinal)
         {
@@ -976,6 +980,7 @@ public sealed class BuildPipeline
                         sb.AppendLine($"    {m.Identifier.Text},");
                 }
                 sb.AppendLine($"}} {enName};");
+                sb.AppendLine(CS2SX.Core.TypeRegistry.NullableTypedef(enName));
             }
         }
 

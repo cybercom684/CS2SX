@@ -1,1 +1,0 @@
-﻿string.Split returns string[] in C# but is lowered to List_str, so '.Length' on the result emits '->f_Length' (fixed by the array model).

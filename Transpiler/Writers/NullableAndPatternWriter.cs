@@ -9,14 +9,17 @@ namespace CS2SX.Transpiler.Writers;
 /// <summary>
 /// Behandelt Nullable-Typen (T?) und Pattern-Matching-Ausdrücke.
 ///
-/// Nullable-Typen:
+/// Nullable value types (int?, float?, MyEnum?, MyStruct?) are C value structs
+/// <c>typedef struct { T value; int has; } Nullable_T;</c> — no heap, no pointer:
 /// ───────────────────────────────────────────────────────────────────
-/// int? x = null;          → int* x = NULL;
-/// int? x = 5;             → int _x_val = 5; int* x = &_x_val;
-/// x.HasValue              → (x != NULL)
-/// x.Value                 → (*x)
-/// x ?? 0                  → (x != NULL ? *x : 0)
-/// x?.ToString()           → (x != NULL ? Int_ToString(*x) : NULL)
+/// int? x = null;          → Nullable_int x = (Nullable_int){0};
+/// int? x = 5; / x = 5;    → x = (Nullable_int){ 5, 1 }   (implicit T → T? conversion,
+///                            applied centrally in ExpressionWriter.Write)
+/// x.HasValue              → (x).has
+/// x.Value                 → (x).value
+/// x ?? 0                  → ((x).has ? (x).value : 0)
+/// x == null / x != null   → !(x).has / (x).has
+/// string? / Enemy?        → unchanged pointers (nullable reference annotation)
 ///
 /// Pattern Matching:
 /// ───────────────────────────────────────────────────────────────────
@@ -41,46 +44,30 @@ namespace CS2SX.Transpiler.Writers;
 /// </summary>
 public static class NullableHandler
 {
-    /// <summary>
-    /// True wenn der C#-Typ nullable ist (T? oder Nullable<T>).
-    /// </summary>
-    public static bool IsNullable(string csType)
-        => csType.EndsWith("?") || csType.StartsWith("Nullable<");
+    /// <summary>True for a nullable VALUE type (int?, Nullable&lt;float&gt;, MyEnum?).</summary>
+    public static bool IsNullable(string csType) => TypeRegistry.IsNullableValueType(csType);
+
+    /// <summary>"int?" → "int", "Nullable&lt;float&gt;" → "float"</summary>
+    public static string GetInnerType(string csType) => TypeRegistry.NullableInner(csType);
+
+    /// <summary>C struct type of a nullable value type: "int?" → "Nullable_int"</summary>
+    public static string MapNullableType(string csType) => TypeRegistry.MapType(csType);
+
+    /// <summary><c>(Nullable_T){ value, 1 }</c> — wraps a plain value.</summary>
+    public static string WrapValue(string nullableC, string valueExpr) =>
+        "((" + nullableC + "){ " + valueExpr + ", 1 })";
+
+    /// <summary><c>(Nullable_T){0}</c> — the null value.</summary>
+    public static string Null(string nullableC) => "((" + nullableC + "){0})";
 
     /// <summary>
-    /// Gibt den inneren Typ zurück: "int?" → "int", "Nullable<float>" → "float"
+    /// x ?? fallback. With a plain fallback the result is T; when the fallback is
+    /// itself nullable (<paramref name="resultIsNullable"/>) the result stays T?.
     /// </summary>
-    public static string GetInnerType(string csType)
-    {
-        if (csType.EndsWith("?")) return csType[..^1].Trim();
-        if (csType.StartsWith("Nullable<") && csType.EndsWith(">"))
-            return csType[9..^1].Trim();
-        return csType;
-    }
-
-    /// <summary>
-    /// Mappt einen Nullable-C#-Typ auf C: "int?" → "int*"
-    /// </summary>
-    public static string MapNullableType(string csType)
-    {
-        var inner = GetInnerType(csType);
-        return TypeRegistry.MapType(inner) + "*";
-    }
-
-    /// <summary>
-    /// Transpiliert den null-coalescing Operator: x ?? defaultVal
-    /// → (x != NULL ? *x : defaultVal)
-    /// </summary>
-    public static string WriteNullCoalescing(
-        string nullableExpr,
-        string defaultExpr,
-        bool innerIsValueType = true)
-    {
-        var deref = innerIsValueType ? "*" : "";
-        return "(" + nullableExpr + " != NULL ? "
-             + deref + nullableExpr + " : "
-             + defaultExpr + ")";
-    }
+    public static string WriteNullCoalescing(string nullableExpr, string fallbackExpr, bool resultIsNullable) =>
+        resultIsNullable
+            ? "((" + nullableExpr + ").has ? (" + nullableExpr + ") : (" + fallbackExpr + "))"
+            : "((" + nullableExpr + ").has ? (" + nullableExpr + ").value : (" + fallbackExpr + "))";
 
     /// <summary>
     /// Transpiliert den null-conditional Operator: x?.Method()
@@ -93,17 +80,11 @@ public static class NullableHandler
         return "(" + nullableExpr + " != NULL ? " + accessExpr + " : NULL)";
     }
 
-    /// <summary>
-    /// Transpiliert x.HasValue → (x != NULL)
-    /// </summary>
-    public static string WriteHasValue(string expr)
-        => "(" + expr + " != NULL)";
+    /// <summary>x.HasValue → (x).has</summary>
+    public static string WriteHasValue(string expr) => "(" + expr + ").has";
 
-    /// <summary>
-    /// Transpiliert x.Value → (*x)
-    /// </summary>
-    public static string WriteGetValue(string expr)
-        => "(*" + expr + ")";
+    /// <summary>x.Value → (x).value</summary>
+    public static string WriteGetValue(string expr) => "(" + expr + ").value";
 }
 
 /// <summary>
