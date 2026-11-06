@@ -108,7 +108,8 @@ public sealed class BuildPipeline
             var runtimeSources = RuntimeExporter.Export(_buildDir);
 
             var switchformsCPath = Path.Combine(_buildDir, "switchforms.c");
-            WriteSwitchformsC(switchformsCPath);
+            // RomFS is only mounted when the build embeds one (romfs/ exists).
+            WriteSwitchformsC(switchformsCPath, hasRomfs: Directory.Exists(Path.Combine(_projectDir, "romfs")));
 
             sPrepare.Progress = 100;
             sPrepare.Status = StageStatus.Done;
@@ -1130,7 +1131,7 @@ public sealed class BuildPipeline
         return null;
     }
 
-    private static void WriteSwitchformsC(string path)
+    private static void WriteSwitchformsC(string path, bool hasRomfs)
     {
         using var w = new StreamWriter(path, append: false, encoding: Encoding.UTF8);
         w.WriteLine("#include \"_forward.h\"");
@@ -1141,7 +1142,8 @@ public sealed class BuildPipeline
         w.WriteLine("u64          g_cs2sx_kDown = 0;");
         w.WriteLine("u64          g_cs2sx_kHeld = 0;");
         w.WriteLine("u64          g_cs2sx_kUp   = 0;");
-        w.WriteLine("int          g_cs2sx_want_exit = 0;");   // set by CS2SX_App_Quit / LaunchNro
+        w.WriteLine("int          g_cs2sx_want_exit = 0;");
+        w.WriteLine($"int          g_cs2sx_has_romfs = {(hasRomfs ? 1 : 0)};");   // romfs/ embedded in the .nro   // set by CS2SX_App_Quit / LaunchNro
         w.WriteLine("unsigned int _cs2sx_rand_state = 12345u;");
         w.WriteLine();
         w.WriteLine("char   _cs2sx_arena[CS2SX_ARENA_SIZE];");

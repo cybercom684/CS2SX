@@ -223,6 +223,7 @@ extern u64         g_cs2sx_kDown;
 extern u64         g_cs2sx_kHeld;
 extern u64         g_cs2sx_kUp;
 extern int         g_cs2sx_want_exit;   // set to break the main loop (clean exit)
+extern int         g_cs2sx_has_romfs;   // 1 when the .nro embeds a romfs (build-time)
 
 // Requests a clean exit of the app (the main loop breaks after the current frame;
 // OnExit + cleanup still run). App.Quit() in C#.
@@ -345,7 +346,9 @@ static inline void SwitchApp_Run(SwitchApp* self)
 {
     if (!self) return;
 
-    romfsInit();    // no-op if no romfs was linked; enables romfs:/ paths
+    // Mount romfs:/ only when the .nro embeds one. Calling romfsInit() without one is
+    // harmless on hardware (error code) but crashes some emulators (Ryujinx).
+    if (g_cs2sx_has_romfs) romfsInit();
     psmInitialize(); // battery service — must stay open for the app lifetime
 
     PadState pad;
@@ -419,5 +422,5 @@ static inline void SwitchApp_Run(SwitchApp* self)
         consoleExit(NULL);
 
     psmExit();
-    romfsExit();   // paired with romfsInit() at startup — avoids leaking the mount
+    if (g_cs2sx_has_romfs) romfsExit();   // paired with romfsInit() at startup — avoids leaking the mount
 }
