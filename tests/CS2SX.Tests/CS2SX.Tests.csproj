@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <TargetFramework>net8.0</TargetFramework>
@@ -17,7 +17,7 @@
   <ItemGroup>
     <!-- The transpiler CLI is run out-of-process per test case (it keeps global static
          state such as TypeRegistry), so we only need its build output next to ours. -->
-    <ProjectReference Include="..\..\CS2SX.csproj" />
+    <ProjectReference Include="..\..\src\CS2SX\CS2SX.csproj" />
   </ItemGroup>
 
   <ItemGroup>
