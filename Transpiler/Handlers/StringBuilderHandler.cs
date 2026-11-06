@@ -23,7 +23,13 @@ public sealed class StringBuilderHandler : InvocationHandlerBase
 
         var objStr = mem.Expression.ToString();
 
-        if (!TryResolveStringBuilder(objStr, ctx, out var sbExpr))
+        string sbExpr;
+        // Fluent chain: sb.Append(a).Append(b) — the receiver is itself a call that
+        // returns the builder (all Append* runtime functions return StringBuilder*).
+        if (mem.Expression is InvocationExpressionSyntax
+            && ctx.GetSemanticType(mem.Expression) is "StringBuilder" or "System.Text.StringBuilder")
+            sbExpr = writeExpr(mem.Expression);
+        else if (!TryResolveStringBuilder(objStr, ctx, out sbExpr))
             return NotHandled(out result);
 
         var method = mem.Name.Identifier.Text;

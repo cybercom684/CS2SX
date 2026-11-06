@@ -151,6 +151,11 @@ public sealed class BuildPipeline
                 .Where(f => !s_switchFormsSkipTranspile.Contains(Path.GetFileName(f)))
                 .ToList();
 
+            // Project-wide type facts (user enums/structs, operator overloads) must be
+            // known before generics expansion and before any file is transpiled.
+            CS2SX.Transpiler.Writers.OperatorOverloadWriter.Reset();
+            ProjectTypeScanner.RegisterUserTypes(transpiledFiles);
+
             var genericCollector = new GenericInstantiationCollector();
             genericCollector.Collect(transpiledFiles, switchFormsFilesForFwd);
 
@@ -206,7 +211,6 @@ public sealed class BuildPipeline
             // ── transpile (incremental) ───────────────────────────────────
             var sTranspile = renderer.GetStage("transpile");
             sTranspile.Status = StageStatus.Running;
-            CS2SX.Transpiler.Writers.OperatorOverloadWriter.Reset();
 
             // Shared diagnostic reporter collects source maps from ALL transpiled files.
             // Passed to CCompiler so GCC errors can be mapped back to C# line numbers.
@@ -271,19 +275,6 @@ public sealed class BuildPipeline
             // Pre-scan class member types so the inferrer can type obj.Member.
             var sharedClassMemberTypes = PreScanClassMemberTypes(transpiledFiles);
 
-            // Pre-register ALL user enums up front so every file (regardless of
-            // transpile order) treats enum fields/params as value types, not
-            // reference-type pointers.
-            foreach (var f in transpiledFiles)
-            {
-                try
-                {
-                    var tree = CSharpSyntaxTree.ParseText(File.ReadAllText(f));
-                    foreach (var en in tree.GetRoot().DescendantNodes().OfType<EnumDeclarationSyntax>())
-                        TypeRegistry.RegisterUserEnum(en.Identifier.Text);
-                }
-                catch { }
-            }
 
             for (int i = 0; i < transpiledFiles.Count; i++)
             {
@@ -756,10 +747,14 @@ public sealed class BuildPipeline
                 var tree = CSharpSyntaxTree.ParseText(src,
                     new CSharpParseOptions(LanguageVersion.CSharp12));
                 foreach (var cls in tree.GetRoot().DescendantNodes()
-                    .OfType<ClassDeclarationSyntax>())
+                    .OfType<TypeDeclarationSyntax>()
+                    .Where(t => t is ClassDeclarationSyntax or StructDeclarationSyntax or RecordDeclarationSyntax))
                 {
                     var map = own.TryGetValue(cls.Identifier.Text, out var ex)
                         ? ex : new Dictionary<string, string>(StringComparer.Ordinal);
+                    if (cls.ParameterList != null) // positional record / primary ctor
+                        foreach (var rp in cls.ParameterList.Parameters)
+                            if (rp.Type != null) map[rp.Identifier.Text] = rp.Type.ToString().Trim();
                     foreach (var f in cls.Members.OfType<FieldDeclarationSyntax>())
                     {
                         var ft = f.Declaration.Type.ToString().Trim();
@@ -937,15 +932,13 @@ public sealed class BuildPipeline
             var tree = Microsoft.CodeAnalysis.CSharp.CSharpSyntaxTree.ParseText(source);
             foreach (var typeDecl in tree.GetRoot()
                 .DescendantNodes()
-                .Where(n => n is ClassDeclarationSyntax or StructDeclarationSyntax))
+                .Where(n => n is ClassDeclarationSyntax or StructDeclarationSyntax or RecordDeclarationSyntax))
             {
-                if (typeDecl is ClassDeclarationSyntax cls
-                    && cls.TypeParameterList?.Parameters.Count > 0)
+                if (typeDecl is TypeDeclarationSyntax generic
+                    && generic.TypeParameterList?.Parameters.Count > 0)
                     continue;
 
-                var typeName = typeDecl is ClassDeclarationSyntax c
-                    ? c.Identifier.Text
-                    : ((StructDeclarationSyntax)typeDecl).Identifier.Text;
+                var typeName = ((TypeDeclarationSyntax)typeDecl).Identifier.Text;
 
                 if (alreadyDeclared.Add(typeName))
                     sb.AppendLine($"typedef struct {typeName} {typeName};");
@@ -954,6 +947,17 @@ public sealed class BuildPipeline
                 if (typeDecl is ClassDeclarationSyntax clsWithVirtuals
                     && Transpiler.VTableBuilder.HasVirtualMethods(clsWithVirtuals))
                     sb.AppendLine($"typedef struct {typeName}_vtable {typeName}_vtable;");
+            }
+
+            // Interfaces are value structs {vtable*, obj*} defined in _interfaces.h, but
+            // List<IFace> etc. in _generics.h (included first) only need the name.
+            foreach (var iface in tree.GetRoot().DescendantNodes().OfType<InterfaceDeclarationSyntax>())
+            {
+                if (iface.TypeParameterList?.Parameters.Count > 0) continue;
+                var iName = iface.Identifier.Text;
+                if (!alreadyDeclared.Add(iName)) continue;
+                sb.AppendLine($"typedef struct {iName} {iName};");
+                sb.AppendLine($"typedef struct {iName}_vtable {iName}_vtable;");
             }
 
             // User enums must be globally visible (other files use them as field /
@@ -991,8 +995,9 @@ public sealed class BuildPipeline
             }
         }
 
-        // Emit typedefs for Action<T> delegate types found in source files.
-        // e.g. Action<Window> → typedef void (*Action_Window_t)(Window*);
+        // Emit typedefs for the generic delegate types used in source files:
+        //   Action<Window>         → typedef void (*Action_Window_t)(Window*);
+        //   Func<int, int, bool>   → typedef int  (*Func_int_int_bool_t)(int, int);
         var emittedDelegateTypedefs = new HashSet<string>(StringComparer.Ordinal);
         foreach (var csFile in sourceFiles)
         {
@@ -1001,27 +1006,38 @@ public sealed class BuildPipeline
             foreach (var typeNode in tree.GetRoot()
                 .DescendantNodes()
                 .OfType<Microsoft.CodeAnalysis.CSharp.Syntax.GenericNameSyntax>()
-                .Where(g => g.Identifier.Text == "Action"))
+                .Where(g => g.Identifier.Text is "Action" or "Func"))
             {
                 var csType = typeNode.ToString().Trim();
-                if (!csType.StartsWith("Action<") || !csType.EndsWith(">")) continue;
+                var isFunc = typeNode.Identifier.Text == "Func";
+                var prefixLen = isFunc ? 5 : 7; // "Func<" / "Action<"
+                if (!csType.EndsWith(">")) continue;
 
                 var cName = CS2SX.Core.TypeRegistry.MapType(csType);
                 if (!cName.EndsWith("_t") || !emittedDelegateTypedefs.Add(cName)) continue;
 
-                var inner = csType[7..^1].Trim();
-                // Build the C parameter list: each type arg becomes its mapped C type + * if reference
-                var typeArgs = SplitSimpleGenericArgs(inner);
-                var cParams = string.Join(", ", typeArgs.Select(a =>
+                // Each type arg becomes its mapped C type (+ * for reference types).
+                var typeArgs = SplitSimpleGenericArgs(csType[prefixLen..^1].Trim())
+                    .Select(a => DelegateArgCType(a.Trim()))
+                    .ToList();
+                var ret = "void";
+                if (isFunc)
                 {
-                    a = a.Trim();
-                    var mapped = CS2SX.Core.TypeRegistry.MapType(a);
-                    if (!mapped.EndsWith("*") && CS2SX.Transpiler.CSharpToC.NeedsPtr(a))
-                        mapped += "*";
-                    return mapped;
-                }));
-                sb.AppendLine($"typedef void (*{cName})({cParams});");
+                    ret = typeArgs[^1];
+                    typeArgs.RemoveAt(typeArgs.Count - 1);
+                }
+                var cParams = typeArgs.Count > 0 ? string.Join(", ", typeArgs) : "void";
+                sb.AppendLine($"typedef {ret} (*{cName})({cParams});");
             }
+        }
+
+        static string DelegateArgCType(string csType)
+        {
+            if (csType == "bool") return "int";
+            var mapped = CS2SX.Core.TypeRegistry.MapType(csType);
+            if (!mapped.EndsWith("*") && CS2SX.Transpiler.CSharpToC.NeedsPtr(csType))
+                mapped += "*";
+            return mapped;
         }
 
         // FIX: Custom-Header aus dem Projektverzeichnis anhängen.

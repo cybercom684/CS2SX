@@ -166,6 +166,21 @@ public static class TypeRegistry
     public static bool IsUserDefinedEnum(string csType) => s_userEnumTypes.Contains(csType);
     public static void ClearUserEnums() => s_userEnumTypes.Clear();
 
+    // ── User-defined struct registry ──────────────────────────────────────────
+    // C# structs (incl. `record struct`) are C value structs: stored inline, passed
+    // by value, accessed with '.', never freed. Registered project-wide before any
+    // file is transpiled so every file agrees, regardless of transpile order.
+    private static readonly HashSet<string> s_userStructTypes = new(StringComparer.Ordinal);
+    private static readonly HashSet<string> s_userStructsWithCtor = new(StringComparer.Ordinal);
+    public static void RegisterUserStruct(string name, bool hasConstructor = false)
+    {
+        s_userStructTypes.Add(name);
+        if (hasConstructor) s_userStructsWithCtor.Add(name);
+    }
+    public static bool IsUserStruct(string csType) => s_userStructTypes.Contains(csType.Trim());
+    /// True when the struct declares an explicit constructor → `new T(..)` calls T_New(..).
+    public static bool UserStructHasConstructor(string csType) => s_userStructsWithCtor.Contains(csType.Trim());
+
     // ── Interface type registry ───────────────────────────────────────────────
     // Interfaces in C are value structs {vtable*, obj*} — NOT heap-allocated pointers.
     // NeedsPointerSuffix must return false for interface types so they're passed by value.
@@ -361,6 +376,16 @@ public static class TypeRegistry
         if (csType == "EventHandler" || csType.StartsWith("EventHandler<"))
             return "Action_t";
 
+        // Any other closed generic type is a user generic class/struct instantiation:
+        // Box<int> → Box_int, Pair<string, float> → Pair_str_float — the same name the
+        // GenericExpander emits (single source of truth: GenericInstantiation.CName).
+        var lt = csType.IndexOf('<');
+        if (lt > 0 && csType.EndsWith(">"))
+        {
+            var typeArgs = SplitGenericArgs(csType[(lt + 1)..^1]).Select(a => a.Trim()).ToList();
+            return new CS2SX.Transpiler.GenericInstantiation(csType[..lt].Trim(), typeArgs).CName;
+        }
+
         return s_primitives.TryGetValue(csType, out var c) ? c : csType;
     }
 
@@ -531,7 +556,8 @@ public static class TypeRegistry
         NoPrefixFields.Contains(fieldName);
 
     public static bool IsValueType(string csType) =>
-        IsPrimitive(csType) || IsLibNxStruct(csType);
+        IsPrimitive(csType) || IsLibNxStruct(csType) || IsUserStruct(csType)
+        || IsUserDefinedEnum(csType);
 
     public static bool IsDelegate(string csType)
     {
@@ -551,6 +577,7 @@ public static class TypeRegistry
         && !IsHashSet(csType)
         && !IsDelegate(csType)
         && !IsUserDefinedEnum(csType)
+        && !IsUserStruct(csType)
         && csType != "string"
         && !csType.EndsWith("[]");
 

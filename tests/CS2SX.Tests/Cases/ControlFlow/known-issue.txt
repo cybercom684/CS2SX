@@ -1,1 +1,1 @@
-﻿Nullable<int> local ('int? maybe') is lowered to 'int*' but assigned an int value.
+﻿Nullable<T> value types are lowered to T* (NULL = no value), so 'maybe = 4' assigns an int to an int*.

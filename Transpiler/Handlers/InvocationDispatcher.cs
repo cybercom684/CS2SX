@@ -296,6 +296,15 @@ public sealed class InvocationDispatcher
             && s_linqMethodNames.Contains(outerMem.Name.Identifier.Text))
             return "";
 
+        // Console.Write[Line]($"...") is turned into a single printf straight from the
+        // syntax by ConsoleHandler; pre-writing it here would emit a dead snprintf and
+        // evaluate every interpolated expression twice.
+        if (a.Expression is InterpolatedStringExpressionSyntax
+            && a.Parent?.Parent is InvocationExpressionSyntax conInv
+            && conInv.Expression.ToString() is "Console.WriteLine" or "Console.Write"
+            && conInv.ArgumentList.Arguments.FirstOrDefault() == a)
+            return "";
+
         // out var x → Deklaration + Adresse
         if (a.RefKindKeyword.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.OutKeyword)
             && a.Expression is DeclarationExpressionSyntax declExpr

@@ -75,7 +75,10 @@ public sealed class CheckCommand
 
         var switchFormsFiles = Directory.GetFiles(switchFormsDir, "*.cs").ToList();
 
-        // FIX: Collector + Expander wie BuildPipeline
+        // Gleiche projektweite Typ-Fakten wie BuildPipeline
+        CS2SX.Transpiler.Writers.OperatorOverloadWriter.Reset();
+        ProjectTypeScanner.RegisterUserTypes(files);
+
         var genericCollector = new GenericInstantiationCollector();
         genericCollector.Collect(files, switchFormsFiles);
 

@@ -5,8 +5,13 @@
 #include "_forward.h"
 
 // C# value-type struct: Point
-typedef struct Point Point;
+typedef struct Point {
+    int X;
+    int Y;
+} Point;
+Point Point_New(int x, int y);
 int Point_ManhattanLength(Point* self);
+int Point_Equals(Point a, Point b);
 
 struct Score
 {

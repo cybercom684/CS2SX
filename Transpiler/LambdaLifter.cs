@@ -239,23 +239,7 @@ public sealed class LambdaLifter
         List<ParamInfo> parms)
     {
         var tempWriter = new System.IO.StringWriter();
-        var tempCtx = new TranspilerContext(tempWriter);
-
-        // Zustand kopieren
-        foreach (var kv in _ctx.LocalTypes) tempCtx.LocalTypes[kv.Key] = kv.Value;
-        foreach (var kv in _ctx.FieldTypes) tempCtx.FieldTypes[kv.Key] = kv.Value;
-        foreach (var kv in _ctx.MethodReturnTypes) tempCtx.MethodReturnTypes[kv.Key] = kv.Value;
-        foreach (var kv in _ctx.PropertyTypes) tempCtx.PropertyTypes[kv.Key] = kv.Value;
-        foreach (var em in _ctx.EnumMembers) tempCtx.EnumMembers.Add(em);
-        foreach (var vt in _ctx.ValueTypeStructs) tempCtx.ValueTypeStructs.Add(vt);
-        foreach (var it in _ctx.InterfaceTypes) tempCtx.InterfaceTypes.Add(it);
-        foreach (var vt in _ctx.VTableTypes) tempCtx.VTableTypes.Add(vt);
-
-        tempCtx.CurrentClass = _ctx.CurrentClass;
-        tempCtx.CurrentBaseType = _ctx.CurrentBaseType;
-        tempCtx.SemanticModel = _ctx.SemanticModel;
-        tempCtx.CurrentFile = _ctx.CurrentFile;
-        tempCtx.TmpCounter = _ctx.TmpCounter;
+        var tempCtx = _ctx.CreateChild(tempWriter);
 
         // Captures und Parameter in den temp-Kontext eintragen
         foreach (var cap in caps)
@@ -282,8 +266,9 @@ public sealed class LambdaLifter
                 break;
         }
 
-        // TmpCounter zurücksynchronisieren damit Haupt-Kontext keine doppelten Nummern vergibt
+        // Zähler zurücksynchronisieren damit Haupt-Kontext keine doppelten Nummern vergibt
         _ctx.TmpCounter = tempCtx.TmpCounter;
+        _ctx.TmpStringCounter = tempCtx.TmpStringCounter;
         return tempWriter.ToString();
     }
 
@@ -336,22 +321,13 @@ public sealed class LambdaLifter
             }
             else
             {
-                var fieldKey = rawName.TrimStart('_');
-                if (_ctx.FieldTypes.TryGetValue(fieldKey, out var ft))
-                {
-                    csType = ft;
-                    var pfx = TypeRegistry.HasNoPrefix(fieldKey) ? "" : "f_";
-                    cExpr = "self->" + pfx + fieldKey;
+                // Instance fields are NOT copied into the closure: C# lambdas see the
+                // live field, so the body must read/write it through the captured
+                // `self` (a copy would make `() => _count++` silently do nothing).
+                if (_ctx.FieldTypes.ContainsKey(rawName.TrimStart('_'))
+                    || _ctx.FieldTypes.ContainsKey(rawName))
                     needsSelf = true;
-                }
-                else if (_ctx.FieldTypes.TryGetValue(rawName, out var ft2))
-                {
-                    csType = ft2;
-                    var pfx = TypeRegistry.HasNoPrefix(rawName) ? "" : "f_";
-                    cExpr = "self->" + pfx + rawName;
-                    needsSelf = true;
-                }
-                else continue;
+                continue;
             }
 
             var capName = rawName.TrimStart('_');

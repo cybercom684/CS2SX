@@ -1,4 +1,4 @@
-// Datei: Transpiler/Writers/ExpressionWriter.cs
+﻿// Datei: Transpiler/Writers/ExpressionWriter.cs
 //
 // FIX: WriteLambda() macht keinen O(n)-StringWriter-Rewrite mehr.
 //      Vorher:
@@ -260,9 +260,9 @@ public sealed class ExpressionWriter : IExpressionWriter
                     // for the actual runtime Control struct — user-defined classes use f_ prefix.
                     var lower = name.ToLowerInvariant();
                     if (TypeRegistry.IsBuiltinControlType(pCont) && TypeRegistry.ControlFields.Contains(lower))
-                        return "self->base." + lower;
+                        return SelfBaseChain(id, pCont) + lower;
                     var pfx = TypeRegistry.HasNoPrefix(name) ? "" : "f_";
-                    return "self->base." + pfx + name;
+                    return SelfBaseChain(id, pCont) + pfx + name;
                 }
 
                 // Inherited instance field → self->base.*
@@ -272,9 +272,9 @@ public sealed class ExpressionWriter : IExpressionWriter
                     var lname = baseField.Name.TrimStart('_');
                     var lower = lname.ToLowerInvariant();
                     if (TypeRegistry.IsBuiltinControlType(fCont) && TypeRegistry.ControlFields.Contains(lower))
-                        return "self->base." + lower;
+                        return SelfBaseChain(id, fCont) + lower;
                     var pfx = TypeRegistry.HasNoPrefix(lname) ? "" : "f_";
-                    return "self->base." + pfx + lname;
+                    return SelfBaseChain(id, fCont) + pfx + lname;
                 }
             }
             catch { }
@@ -287,6 +287,16 @@ public sealed class ExpressionWriter : IExpressionWriter
             var selfArg = _ctx.IsStaticMethod ? "" : "self";
             return _ctx.CurrentClass + "_get_" + name + "(" + selfArg + ")";
         }
+
+        // Inside a user struct's methods/constructor: fields keep their C# names
+        // (struct members are emitted unprefixed, like libnx structs) and `self`
+        // is a pointer to the struct value.
+        if (!string.IsNullOrEmpty(_ctx.CurrentClass)
+            && TypeRegistry.IsUserStruct(_ctx.CurrentClass)
+            && !_ctx.IsStaticMethod
+            && _ctx.FieldTypes.ContainsKey(name)
+            && !_ctx.LocalTypes.ContainsKey(name))
+            return "self->" + name;
 
         if (_ctx.IsFieldAccess(name))
         {
@@ -393,17 +403,35 @@ public sealed class ExpressionWriter : IExpressionWriter
             return "\"" + StringEscaper.EscapeRaw(lit.Token.ValueText) + "\"";
         if (lit.Token.IsKind(SyntaxKind.CharacterLiteralToken))
             return "'" + StringEscaper.EscapeChar(lit.Token.ValueText) + "'";
-        var text = lit.Token.Text;
-        // C# digit separators (1_048_576, 0xFF_FF) are not valid in C — strip them.
-        // Only strip for numeric literals (not strings/chars which are handled above).
-        if (text.Contains('_') && !text.StartsWith("\"") && !text.StartsWith("'"))
-            text = text.Replace("_", "");
-        if (text.EndsWith("f", StringComparison.OrdinalIgnoreCase) && !text.StartsWith("0x")) return text[..^1] + "f";
-        if (text.EndsWith("d", StringComparison.OrdinalIgnoreCase)) return text[..^1];
-        if (text.EndsWith("m", StringComparison.OrdinalIgnoreCase)) return text[..^1];
-        if (text.EndsWith("ul", StringComparison.OrdinalIgnoreCase)) return text[..^2] + "ULL";
-        if (text.EndsWith("u", StringComparison.OrdinalIgnoreCase)) return text[..^1] + "U";
-        if (text.EndsWith("l", StringComparison.OrdinalIgnoreCase)) return text[..^1] + "LL";
+        return lit.Token.IsKind(SyntaxKind.NumericLiteralToken)
+            ? CNumericLiteral(lit.Token.Text)
+            : lit.Token.Text;
+    }
+
+    /// <summary>
+    /// C# numeric literal → equivalent C literal.
+    ///   1f → 1.0f   2.5F → 2.5f   5d → 5.0   3m → 3.0 (decimal → double)
+    ///   10u → 10U   7L → 7LL      9UL → 9ULL  1_000 → 1000
+    ///   0xFD / 0x1F stay hex — 'D'/'F' are hex digits there, not suffixes.
+    /// </summary>
+    internal static string CNumericLiteral(string text)
+    {
+        text = text.Replace("_", "");   // digit separators are not valid C
+        bool isHexOrBin = text.StartsWith("0x", StringComparison.OrdinalIgnoreCase)
+                       || text.StartsWith("0b", StringComparison.OrdinalIgnoreCase);
+
+        // Integer suffixes (valid for hex/binary too).
+        var lower = text.ToLowerInvariant();
+        if (lower.EndsWith("ul") || lower.EndsWith("lu")) return text[..^2] + "ULL";
+        if (lower.EndsWith("u")) return text[..^1] + "U";
+        if (lower.EndsWith("l")) return text[..^1] + "LL";
+        if (isHexOrBin) return text;
+
+        // Real suffixes: make sure the C literal is floating-point, not an int.
+        static string Real(string digits) =>
+            digits.IndexOfAny(['.', 'e', 'E']) >= 0 ? digits : digits + ".0";
+        if (lower.EndsWith("f")) return Real(text[..^1]) + "f";
+        if (lower.EndsWith("d") || lower.EndsWith("m")) return Real(text[..^1]);
         return text;
     }
 
@@ -775,6 +803,19 @@ public sealed class ExpressionWriter : IExpressionWriter
             && baseMem.Expression is BaseExpressionSyntax)
         {
             var baseType = string.IsNullOrEmpty(_ctx.CurrentBaseType) ? "Control" : _ctx.CurrentBaseType;
+            // Bind to the ancestor that actually implements the method — `base.M()`
+            // in Square resolves to Shape.M when Rect (the direct base) doesn't override it.
+            if (_ctx.SemanticModel != null)
+            {
+                try
+                {
+                    if (_ctx.SemanticModel.GetSymbolInfo(inv).Symbol is IMethodSymbol bm
+                        && bm.ContainingType is { TypeKind: TypeKind.Class } owner
+                        && TranspilerContext.IsUserCode(owner))
+                        baseType = owner.Name;
+                }
+                catch { }
+            }
             var methodName = baseMem.Name.Identifier.Text;
             var callArgs = WriteArguments(inv.ArgumentList.Arguments);
             var allArgs = new List<string> { "((" + baseType + "*)self)" };
@@ -907,6 +948,9 @@ public sealed class ExpressionWriter : IExpressionWriter
             || TypeRegistry.IsStack(receiverType) || TypeRegistry.IsQueue(receiverType)
             || TypeRegistry.IsHashSet(receiverType)) return null;
 
+        if (TypeRegistry.IsUserStruct(receiverType))
+            return WriteStructMethodCall(mem, inv, receiverType);
+
         var callArgs = WriteArguments(inv.ArgumentList.Arguments);
         callArgs = ApplyUpcasts(inv, callArgs, receiverType);
 
@@ -936,7 +980,8 @@ public sealed class ExpressionWriter : IExpressionWriter
         // BaseType_Method, and the receiver must be cast to (BaseType*) (valid
         // because the base struct is the first member). Without this we'd emit a
         // nonexistent DerivedType_Method.
-        var methodOwner = receiverType;
+        // Generic instantiations are emitted under their mangled name: Box<int> → Box_int_Get.
+        var methodOwner = receiverType.Contains('<') ? TypeRegistry.MapType(receiverType) : receiverType;
         if (_ctx.SemanticModel != null)
         {
             try
@@ -946,6 +991,7 @@ public sealed class ExpressionWriter : IExpressionWriter
                 if (ms != null && !ms.IsStatic && owner != null
                     && owner.TypeKind == TypeKind.Class
                     && owner.SpecialType == SpecialType.None
+                    && !owner.IsGenericType
                     && owner.Name != receiverType)
                 {
                     methodOwner = owner.Name;
@@ -960,6 +1006,46 @@ public sealed class ExpressionWriter : IExpressionWriter
         var cName = CSharpToC.BuildCMethodName(methodOwner, methodName,
             inv.ArgumentList.Arguments.Count, _ctx.OverloadedMethods);
         return cName + "(" + string.Join(", ", allArgs) + ")";
+    }
+
+    /// <summary>
+    /// Calls a method of a user value struct. Instance methods take <c>T* self</c>,
+    /// so the receiver's address is passed; an rvalue receiver (e.g. <c>(a + b).Length()</c>)
+    /// is materialized in a GNU statement-expression temporary first. Static methods
+    /// (receiver is the type name) get no self.
+    /// </summary>
+    private string WriteStructMethodCall(MemberAccessExpressionSyntax mem,
+        InvocationExpressionSyntax inv, string structType)
+    {
+        var cName = structType + "_" + mem.Name.Identifier.Text;
+        var callArgs = WriteArguments(inv.ArgumentList.Arguments);
+
+        bool isStatic = mem.Expression.ToString() == structType;
+        if (!isStatic && _ctx.SemanticModel != null)
+        {
+            try { isStatic = _ctx.SemanticModel.GetSymbolInfo(mem.Expression).Symbol is ITypeSymbol; }
+            catch { }
+        }
+        if (isStatic)
+            return cName + "(" + string.Join(", ", callArgs) + ")";
+
+        string self;
+        if (mem.Expression is ThisExpressionSyntax)
+            self = "self";
+        else if (mem.Expression is IdentifierNameSyntax or MemberAccessExpressionSyntax
+                 or ElementAccessExpressionSyntax)
+            self = "&" + Write(mem.Expression);
+        else
+        {
+            var tmp = _ctx.NextTmp("sv");
+            var rest = callArgs.Count > 0 ? ", " + string.Join(", ", callArgs) : "";
+            return "({ " + structType + " " + tmp + " = " + Write(mem.Expression) + "; "
+                 + cName + "(&" + tmp + rest + "); })";
+        }
+
+        var all = new List<string> { self };
+        all.AddRange(callArgs);
+        return cName + "(" + string.Join(", ", all) + ")";
     }
 
     private List<string> ApplyUpcasts(InvocationExpressionSyntax inv, List<string> args, string receiverTypeName)
@@ -1337,6 +1423,24 @@ public sealed class ExpressionWriter : IExpressionWriter
         if (full == "string.IsNullOrWhiteSpace") return "String_IsNullOrWhiteSpace";
         if (full == "int.MaxValue") return "INT_MAX";
         if (full == "int.MinValue") return "INT_MIN";
+
+        // Type.StaticField on a user type → Type_StaticField (a C global).
+        if (_ctx.SemanticModel != null)
+        {
+            try
+            {
+                if (_ctx.SemanticModel.GetSymbolInfo(mem).Symbol is IFieldSymbol { IsStatic: true, IsConst: false } sf
+                    && sf.ContainingType is { } owner
+                    && owner.TypeKind is TypeKind.Class or TypeKind.Struct
+                    && TranspilerContext.IsUserCode(owner)
+                    && _ctx.SemanticModel.GetSymbolInfo(mem.Expression).Symbol is ITypeSymbol)
+                    return owner.Name + "_" + sf.Name.TrimStart('_');
+            }
+            catch { }
+        }
+
+        var storedMember = TryWriteUserClassStoredMember(mem);
+        if (storedMember != null) return storedMember;
 
         // typeof(T).Name / typeof(T).FullName → string constant
         if (mem.Expression is TypeOfExpressionSyntax typeOfExpr)
@@ -2062,9 +2166,12 @@ public sealed class ExpressionWriter : IExpressionWriter
             var cType = TypeRegistry.MapType(typeName);
             return "(" + cType + "){0}";
         }
-        if (_ctx.ValueTypeStructs.Contains(typeName))
+        if (_ctx.ValueTypeStructs.Contains(typeName) || TypeRegistry.IsUserStruct(typeName))
         {
             var cType = TypeRegistry.MapType(typeName);
+            if (argList?.Arguments.Count > 0 && TypeRegistry.UserStructHasConstructor(typeName))
+                return typeName + "_New(" + string.Join(", ",
+                    argList.Arguments.Select(a => Write(a.Expression))) + ")";
             if (initializer?.Expressions.Count > 0)
             {
                 var fields = initializer.Expressions
@@ -2177,8 +2284,86 @@ public sealed class ExpressionWriter : IExpressionWriter
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
+    /// <summary>
+    /// <c>obj.Field</c> / <c>obj.AutoProp</c> where obj is a user CLASS instance, resolved
+    /// through the semantic model so it works for any receiver expression
+    /// (<c>list[0].Name</c>, <c>GetEnemy().Hp</c>, chains):
+    /// <c>obj->f_Name</c>, or <c>obj->base.f_Name</c> for a member declared in a base class.
+    /// Returns null (→ existing logic) for anything else: structs, computed properties,
+    /// runtime/stub types, interfaces, static members.
+    /// </summary>
+    private string? TryWriteUserClassStoredMember(MemberAccessExpressionSyntax mem)
+    {
+        if (_ctx.SemanticModel == null) return null;
+        if (mem.Expression is ThisExpressionSyntax or BaseExpressionSyntax) return null;
+        try
+        {
+            var sym = _ctx.SemanticModel.GetSymbolInfo(mem).Symbol;
+            bool stored = sym switch
+            {
+                IFieldSymbol f => !f.IsStatic && !f.IsConst,
+                IPropertySymbol p => !p.IsStatic && IsStoredProperty(p),
+                _ => false,
+            };
+            if (!stored || !TranspilerContext.IsUserCode(sym!.ContainingType)) return null;
+            if (sym.ContainingType.TypeKind != TypeKind.Class) return null;
+
+            if (_ctx.SemanticModel.GetTypeInfo(mem.Expression).Type is not INamedTypeSymbol recvType
+                || recvType.TypeKind != TypeKind.Class
+                || !TranspilerContext.IsUserCode(recvType))
+                return null;
+
+            int hops = 0;
+            for (var t = recvType; t != null && !SymbolEqualityComparer.Default.Equals(
+                     t.OriginalDefinition, sym.ContainingType.OriginalDefinition); t = t.BaseType)
+                hops++;
+
+            var name = sym.Name.TrimStart('_');
+            var prefix = TypeRegistry.HasNoPrefix(name) ? "" : "f_";
+            return Write(mem.Expression) + "->" + string.Concat(Enumerable.Repeat("base.", hops))
+                 + prefix + name;
+        }
+        catch { return null; }
+
+        static bool IsStoredProperty(IPropertySymbol p)
+        {
+            foreach (var r in p.DeclaringSyntaxReferences)
+            {
+                var node = r.GetSyntax();
+                if (node is ParameterSyntax) return true; // positional record member
+                if (node is PropertyDeclarationSyntax pd) return PropertyWriter.IsAutoProperty(pd);
+            }
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// <c>self-></c> followed by one <c>base.</c> per inheritance level between the
+    /// current class and <paramref name="declaringType"/> (the class that declares the
+    /// member), e.g. <c>self->base.base.</c> for a field two levels up.
+    /// </summary>
+    private string SelfBaseChain(SyntaxNode at, string declaringType)
+    {
+        int hops = 1;
+        try
+        {
+            var encl = _ctx.SemanticModel?.GetEnclosingSymbol(at.SpanStart);
+            var type = encl as INamedTypeSymbol ?? encl?.ContainingType;
+            while (type != null && type.Name != _ctx.CurrentClass) type = type.ContainingType;
+            int n = 0;
+            for (var b = type?.BaseType; b != null; b = b.BaseType)
+            {
+                n++;
+                if (b.Name == declaringType) { hops = n; break; }
+            }
+        }
+        catch { }
+        return "self->" + string.Concat(Enumerable.Repeat("base.", hops));
+    }
+
     private static bool IsStructType(string csType) =>
-        TypeRegistry.IsLibNxStruct(csType)
+        TypeRegistry.IsUserStruct(csType)
+        || TypeRegistry.IsLibNxStruct(csType)
         || TypeRegistry.IsLibNxStruct(TypeRegistry.MapType(csType).TrimEnd('*'))
         || csType is "TouchState" or "StickPos" or "BatteryInfo" or "TimeInfo" or "MotionState";
 

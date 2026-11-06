@@ -1,1 +1,0 @@
-﻿Func<...> delegate typedefs (Func_int_int_int_t) are never emitted, so locals of Func type don't compile.

@@ -1,30 +1,25 @@
 ﻿// ============================================================================
-// CS2SX — Transpiler/Writers/StructWriter.cs  (NEU — FIX 4)
+// CS2SX — Transpiler/Writers/StructWriter.cs
 //
-// Behandelt C# value-type structs als C stack structs.
+// C# value-type structs (incl. `record struct`) → C value structs.
 //
-// Verhalten:
-//   • C# struct Vec2 { public float X, Y; }
-//     →  typedef struct Vec2 { float X; float Y; } Vec2;
+//   C#                                   C
+//   struct Vec2 { public float X, Y; }   typedef struct Vec2 { float X; float Y; } Vec2;   (header)
+//   public Vec2(float x, float y) {..}   Vec2 Vec2_New(float x, float y)                   (returns by value)
+//   new Vec2(1, 2)                       Vec2_New(1, 2)
+//   new Vec2 { X = 1 }                   (Vec2){ .X = 1 }
+//   new Vec2() / default                 (Vec2){0}
+//   v.Length()                           Vec2_Length(&v)       (self is always Vec2*)
+//   static Vec2 Lerp(..)                 Vec2 Vec2_Lerp(..)    (no self)
+//   operator +(Vec2 a, Vec2 b)           Vec2 Vec2_op_add(Vec2 a, Vec2 b)
 //
-//   • new Vec2(1f, 2f)            →  (Vec2){ 1.0f, 2.0f }
-//   • new Vec2 { X=1, Y=2 }      →  (Vec2){ .X = 1, .Y = 2 }
-//   • new Vec2()                  →  (Vec2){0}
-//   • Vec2 v = new Vec2(1, 2)     →  Vec2 v = { 1, 2 };     (Stack — kein malloc!)
-//   • Vec2[] arr = new Vec2[N]    →  Vec2 arr[N] = {0};      (Stack-Array!)
+// Field names are kept as written in C# (no f_ prefix), like libnx structs.
+// The full definition lives in the HEADER so other files and classes can embed
+// the struct by value. Structs are registered project-wide up front
+// (ProjectTypeScanner → TypeRegistry.IsUserStruct).
 //
-// Unterstützte Features:
-//   • Felder (Fields) mit optionalem Default-Wert
-//   • Auto-Properties (als Felder emittiert)
-//   • Readonly Felder (const in C)
-//   • Struct-Methoden als freie Funktionen: Vec2_Add(Vec2* self, ...)
-//   • IEquatable<T>-Implementierung → Vec2_Equals(Vec2 a, Vec2 b)
-//   • Implizite Konvertierungen → Cast-Makros
-//
-// Was nicht unterstützt wird (Switch-Homebrew braucht das nicht):
-//   • Interface-Implementierungen (außer IEquatable)
-//   • Vererbung (C# structs können nicht erben)
-//   • Boxing
+// Not supported: computed properties, multiple constructors (first one wins, with
+// a warning), interfaces other than IEquatable, boxing.
 // ============================================================================
 
 using CS2SX.Core;
@@ -47,173 +42,58 @@ public sealed class StructWriter
         _stmt = stmt;
     }
 
-    // ── Header-Modus: typedef + forward declaration ───────────────────────────
+    // ── Header: full definition + prototypes ─────────────────────────────────
 
-    public void WriteHeaderDecl(StructDeclarationSyntax node)
+    public void WriteHeaderDecl(TypeDeclarationSyntax node)
     {
         var name = node.Identifier.Text;
-
-        // Struct-Namen registrieren (wichtig für ExpressionWriter)
         _ctx.ValueTypeStructs.Add(name);
 
         _ctx.WriteLine("// C# value-type struct: " + name);
-        _ctx.WriteLine("typedef struct " + name + " " + name + ";");
+        WriteStructDef(node, name);
 
-        // Methoden-Signaturen
+        foreach (var ctor in Constructors(node).Take(1))
+            _ctx.WriteLine(CtorSignature(ctor, name) + ";");
         foreach (var method in node.Members.OfType<MethodDeclarationSyntax>())
-        {
-            WriteStructMethodSignature(method, name, forwardDecl: true);
-        }
-
+            _ctx.WriteLine(MethodSignature(method, name) + ";");
+        foreach (var op in node.Members.OfType<OperatorDeclarationSyntax>())
+            _ctx.WriteLine(OperatorSignature(op, name) + ";");
+        _ctx.WriteLine("int " + name + "_Equals(" + name + " a, " + name + " b);");
         _ctx.WriteLine("");
     }
 
-    // ── Implementierungs-Modus: volle Definition ──────────────────────────────
+    // ── Implementation: function bodies ──────────────────────────────────────
 
-    public void WriteImpl(StructDeclarationSyntax node)
+    public void WriteImpl(TypeDeclarationSyntax node)
     {
         var name = node.Identifier.Text;
-
-        // Sicherstellen dass registriert
         _ctx.ValueTypeStructs.Add(name);
 
         _ctx.WriteLine("// ── Struct: " + name + " ────────────────────────────────────────");
-        WriteStructDef(node, name);
-        WriteStructMethods(node, name);
-        _ctx.WriteLine("");
-    }
 
-    // ── Struct-Definition ─────────────────────────────────────────────────────
+        var ctors = Constructors(node).ToList();
+        if (ctors.Count > 1)
+            _ctx.Warn(ctors[1], $"Struct '{name}' hat {ctors.Count} Konstruktoren — nur der erste wird transpiliert.");
+        if (ctors.Count > 0)
+            WriteCtor(ctors[0], name);
 
-    private void WriteStructDef(StructDeclarationSyntax node, string name)
-    {
-        _ctx.WriteLine("typedef struct " + name + " {");
-        _ctx.Indent();
-
-        // Felder
-        foreach (var field in node.Members.OfType<FieldDeclarationSyntax>())
-        {
-            WriteStructField(field, name);
-        }
-
-        // Auto-Properties
-        foreach (var prop in node.Members.OfType<PropertyDeclarationSyntax>())
-        {
-            if (IsAutoProperty(prop))
-                WriteStructAutoProperty(prop, name);
-        }
-
-        _ctx.Dedent();
-        _ctx.WriteLine("} " + name + ";");
-        _ctx.WriteLine("");
-    }
-
-    private void WriteStructField(FieldDeclarationSyntax field, string structName)
-    {
-        var csType = field.Declaration.Type.ToString().Trim();
-        var cType = TypeRegistry.MapType(csType);
-        bool isConst = field.Modifiers.Any(m => m.IsKind(SyntaxKind.ReadOnlyKeyword)
-                                             || m.IsKind(SyntaxKind.ConstKeyword));
-        var constKw = isConst ? "const " : "";
-        var ptr = !cType.EndsWith("*") && TypeRegistry.NeedsPointerSuffix(csType) ? "*" : "";
-
-        foreach (var v in field.Declaration.Variables)
-        {
-            var defaultComment = v.Initializer != null
-                ? " /* = " + _expr.Write(v.Initializer.Value) + " */"
-                : "";
-
-            _ctx.WriteLine(constKw + cType + ptr + " " + v.Identifier + ";" + defaultComment);
-            _ctx.FieldTypes[v.Identifier.Text] = csType;
-        }
-    }
-
-    private void WriteStructAutoProperty(PropertyDeclarationSyntax prop, string structName)
-    {
-        var csType = prop.Type.ToString().Trim();
-        var cType = TypeRegistry.MapType(csType);
-        var ptr = !cType.EndsWith("*") && TypeRegistry.NeedsPointerSuffix(csType) ? "*" : "";
-        _ctx.WriteLine(cType + ptr + " " + prop.Identifier + ";");
-        _ctx.FieldTypes[prop.Identifier.Text] = csType;
-    }
-
-    // ── Struct-Methoden als freie C-Funktionen ────────────────────────────────
-
-    private void WriteStructMethods(StructDeclarationSyntax node, string name)
-    {
         foreach (var method in node.Members.OfType<MethodDeclarationSyntax>())
         {
             _ctx.ClearMethodContext();
-            // Feld-Typen wieder laden (ClearMethodContext löscht LocalTypes, nicht FieldTypes)
-
-            WriteStructMethodSignature(method, name, forwardDecl: false);
-            WriteStructMethodBody(method, name);
+            bool isStatic = IsStatic(method.Modifiers);
+            _ctx.WriteLine(MethodSignature(method, name));
+            _ctx.IsStaticMethod = isStatic;
+            if (!isStatic) _ctx.LocalTypes["self"] = name + "*";
+            WriteBody(method.Body, method.ExpressionBody, method.ReturnType.ToString().Trim() != "void");
         }
 
-        // IEquatable<T> → Equals-Funktion mit by-value Vergleich
-        WriteStructEquals(node, name);
-    }
-
-    private void WriteStructMethodSignature(
-        MethodDeclarationSyntax method, string structName, bool forwardDecl)
-    {
-        var retType = method.ReturnType.ToString().Trim();
-        var cRetType = MapReturnType(retType);
-        var mName = structName + "_" + method.Identifier.Text;
-
-        // Structs: self als Pointer (für Mutation) oder by-value (für read-only)
-        // Wir nutzen Pointer für Einfachheit (kompatibel mit beiden)
-        bool isMutating = method.Modifiers.Any(m => m.IsKind(SyntaxKind.RefKeyword))
-                       || MethodMutatesStruct(method);
-
-        var selfPart = isMutating
-            ? structName + "* self"
-            : structName + "* self"; // Immer Pointer für Konsistenz
-
-        var paramList = BuildParamList(method.ParameterList, prependComma: true);
-        var allParams = selfPart + paramList;
-
-        if (forwardDecl)
-            _ctx.WriteLine(cRetType + " " + mName + "(" + allParams + ");");
-        else
-            _ctx.WriteLine(cRetType + " " + mName + "(" + allParams + ")");
-    }
-
-    private void WriteStructMethodBody(MethodDeclarationSyntax method, string structName)
-    {
-        // self->field Zugriffe in Methodenrumpf korrekt mappen
-        _ctx.LocalTypes["self"] = structName + "*";
-
-        _ctx.WriteLine("{");
-        _ctx.Indent();
-
-        if (method.Body != null)
-            foreach (var s in method.Body.Statements)
-                _stmt.Write(s);
-        else if (method.ExpressionBody != null)
+        foreach (var op in node.Members.OfType<OperatorDeclarationSyntax>())
         {
-            var ret = _expr.Write(method.ExpressionBody.Expression);
-            if (method.ReturnType.ToString().Trim() != "void")
-                _ctx.WriteLine("return " + ret + ";");
-            else
-                _ctx.WriteLine(ret + ";");
+            _ctx.ClearMethodContext();
+            _ctx.WriteLine(OperatorSignature(op, name));
+            _ctx.IsStaticMethod = true;
+            WriteBody(op.Body, op.ExpressionBody, hasReturn: true);
         }
-
-        _ctx.Dedent();
-        _ctx.WriteLine("}");
-        _ctx.WriteLine("");
-    }
-
-    // ── IEquatable<T> → by-value Equals ──────────────────────────────────────
-
-    private void WriteStructEquals(StructDeclarationSyntax node, string name)
-    {
-        // Prüfe ob IEquatable<T> implementiert
-        bool hasEquatable = node.BaseList?.Types
-            .Any(t => t.Type.ToString().Contains("IEquatable")) == true;
-
-        // Auch ohne explizites IEquatable: Structs sollten vergleichbar sein
-        // Emit: int Vec2_Equals(Vec2 a, Vec2 b) { return memcmp(&a, &b, sizeof(Vec2)) == 0; }
 
         _ctx.WriteLine("int " + name + "_Equals(" + name + " a, " + name + " b)");
         _ctx.WriteLine("{");
@@ -224,52 +104,147 @@ public sealed class StructWriter
         _ctx.WriteLine("");
     }
 
-    // ── Helpers ───────────────────────────────────────────────────────────────
+    // ── Definition ───────────────────────────────────────────────────────────
 
-    private static bool IsAutoProperty(PropertyDeclarationSyntax prop) =>
-        prop.AccessorList != null
-        && prop.AccessorList.Accessors.All(a =>
-               a.Body == null && a.ExpressionBody == null)
-        && prop.ExpressionBody == null;
-
-    private static bool MethodMutatesStruct(MethodDeclarationSyntax method)
+    private void WriteStructDef(TypeDeclarationSyntax node, string name)
     {
-        // Heuristik: Methode mutiert den Struct wenn sie Assignments auf this.X hat
-        if (method.Body == null) return false;
-        return method.Body.Statements
-            .OfType<ExpressionStatementSyntax>()
-            .Any(s => s.Expression is AssignmentExpressionSyntax asgn
-                   && (asgn.Left.ToString().StartsWith("this.")
-                    || !asgn.Left.ToString().Contains('.')));
+        _ctx.WriteLine("typedef struct " + name + " {");
+        _ctx.Indent();
+
+        int members = 0;
+
+        // record struct Score(string Player, int Points) → positional members first
+        if (node is RecordDeclarationSyntax rec && rec.ParameterList != null)
+            foreach (var p in rec.ParameterList.Parameters)
+            {
+                var csType = p.Type?.ToString().Trim() ?? "int";
+                _ctx.WriteLine(MapStorageType(csType) + " " + p.Identifier.Text + ";");
+                _ctx.FieldTypes[p.Identifier.Text] = csType;
+                members++;
+            }
+
+        foreach (var field in node.Members.OfType<FieldDeclarationSyntax>())
+        {
+            if (IsStatic(field.Modifiers) || field.Modifiers.Any(m => m.IsKind(SyntaxKind.ConstKeyword)))
+                continue;
+            var csType = field.Declaration.Type.ToString().Trim();
+            foreach (var v in field.Declaration.Variables)
+            {
+                _ctx.WriteLine(MapStorageType(csType) + " " + v.Identifier.Text + ";");
+                _ctx.FieldTypes[v.Identifier.Text] = csType;
+                members++;
+            }
+        }
+
+        foreach (var prop in node.Members.OfType<PropertyDeclarationSyntax>())
+        {
+            if (!IsAutoProperty(prop) || IsStatic(prop.Modifiers)) continue;
+            var csType = prop.Type.ToString().Trim();
+            _ctx.WriteLine(MapStorageType(csType) + " " + prop.Identifier.Text + ";");
+            _ctx.FieldTypes[prop.Identifier.Text] = csType;
+            members++;
+        }
+
+        // An empty struct is not valid ISO C.
+        if (members == 0) _ctx.WriteLine("char _empty;");
+
+        _ctx.Dedent();
+        _ctx.WriteLine("} " + name + ";");
     }
 
-    private string BuildParamList(ParameterListSyntax paramList, bool prependComma)
+    // ── Constructor → T T_New(params) returning by value ─────────────────────
+
+    private void WriteCtor(ConstructorDeclarationSyntax ctor, string name)
+    {
+        _ctx.ClearMethodContext();
+        _ctx.WriteLine(CtorSignature(ctor, name));
+        _ctx.LocalTypes["self"] = name + "*";
+        _ctx.WriteLine("{");
+        _ctx.Indent();
+        _ctx.WriteLine(name + " _self_value = {0};");
+        _ctx.WriteLine(name + "* self = &_self_value;");
+        if (ctor.Body != null)
+            foreach (var s in ctor.Body.Statements) _stmt.Write(s);
+        else if (ctor.ExpressionBody != null)
+            _ctx.WriteLine(_expr.Write(ctor.ExpressionBody.Expression) + ";");
+        _ctx.WriteLine("return _self_value;");
+        _ctx.Dedent();
+        _ctx.WriteLine("}");
+        _ctx.WriteLine("");
+    }
+
+    private void WriteBody(BlockSyntax? body, ArrowExpressionClauseSyntax? exprBody, bool hasReturn)
+    {
+        _ctx.WriteLine("{");
+        _ctx.Indent();
+        if (body != null)
+            foreach (var s in body.Statements) _stmt.Write(s);
+        else if (exprBody != null)
+        {
+            var e = _expr.Write(exprBody.Expression);
+            _ctx.WriteLine(hasReturn ? "return " + e + ";" : e + ";");
+        }
+        _ctx.Dedent();
+        _ctx.WriteLine("}");
+        _ctx.WriteLine("");
+    }
+
+    // ── Signatures ───────────────────────────────────────────────────────────
+
+    private string CtorSignature(ConstructorDeclarationSyntax ctor, string name) =>
+        name + " " + name + "_New(" + ParamList(ctor.ParameterList, "void") + ")";
+
+    private string MethodSignature(MethodDeclarationSyntax method, string name)
+    {
+        var ret = MapReturnType(method.ReturnType.ToString().Trim());
+        var fn = name + "_" + method.Identifier.Text;
+        if (IsStatic(method.Modifiers))
+            return ret + " " + fn + "(" + ParamList(method.ParameterList, "void") + ")";
+        var rest = ParamList(method.ParameterList, "");
+        return ret + " " + fn + "(" + name + "* self" + (rest.Length > 0 ? ", " + rest : "") + ")";
+    }
+
+    private string OperatorSignature(OperatorDeclarationSyntax op, string name)
+    {
+        var ret = MapReturnType(op.ReturnType.ToString().Trim());
+        return ret + " " + OperatorOverloadWriter.GetFunctionName(name, op.OperatorToken.Text)
+             + "(" + ParamList(op.ParameterList, "void") + ")";
+    }
+
+    private string ParamList(ParameterListSyntax paramList, string empty)
     {
         var parts = paramList.Parameters.Select(p =>
         {
             var csType = p.Type?.ToString().Trim() ?? "int";
-            var cType = TypeRegistry.MapType(csType);
-            var ptr = !cType.EndsWith("*") && (TypeRegistry.NeedsPointerSuffix(csType)
-                      || TypeRegistry.IsList(csType)) ? "*" : "";
-
-            if (p.Modifiers.Any(m => m.IsKind(SyntaxKind.RefKeyword)
-                                  || m.IsKind(SyntaxKind.OutKeyword)))
-                ptr += "*";
-
+            var decl = MapStorageType(csType);
+            if (p.Modifiers.Any(m => m.IsKind(SyntaxKind.RefKeyword) || m.IsKind(SyntaxKind.OutKeyword)))
+                decl += "*";
             _ctx.LocalTypes[p.Identifier.Text] = csType;
-            return cType + ptr + " " + p.Identifier.Text;
+            return decl + " " + p.Identifier.Text;
         }).ToList();
-
-        if (parts.Count == 0) return "";
-        return (prependComma ? ", " : "") + string.Join(", ", parts);
+        return parts.Count == 0 ? empty : string.Join(", ", parts);
     }
 
-    private static string MapReturnType(string csRetType)
+    // ── Helpers ──────────────────────────────────────────────────────────────
+
+    private static IEnumerable<ConstructorDeclarationSyntax> Constructors(TypeDeclarationSyntax node) =>
+        node.Members.OfType<ConstructorDeclarationSyntax>().Where(c => !IsStatic(c.Modifiers));
+
+    private static bool IsStatic(SyntaxTokenList mods) => mods.Any(m => m.IsKind(SyntaxKind.StaticKeyword));
+
+    private static bool IsAutoProperty(PropertyDeclarationSyntax prop) =>
+        prop.AccessorList != null
+        && prop.AccessorList.Accessors.All(a => a.Body == null && a.ExpressionBody == null)
+        && prop.ExpressionBody == null;
+
+    private static string MapStorageType(string csType)
     {
-        if (csRetType == "void") return "void";
-        var cType = TypeRegistry.MapType(csRetType);
-        var ptr = !cType.EndsWith("*") && (TypeRegistry.NeedsPointerSuffix(csRetType)
-                 || TypeRegistry.IsList(csRetType)) ? "*" : "";
+        var cType = TypeRegistry.MapType(csType);
+        var ptr = !cType.EndsWith("*") && (TypeRegistry.NeedsPointerSuffix(csType)
+                  || TypeRegistry.IsList(csType)) ? "*" : "";
         return cType + ptr;
     }
+
+    private static string MapReturnType(string csRetType) =>
+        csRetType == "void" ? "void" : MapStorageType(csRetType);
 }

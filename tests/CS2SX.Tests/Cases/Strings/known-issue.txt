@@ -1,1 +1,1 @@
-﻿string.Split result (List_str) accessed via '.f_Length'; StringBuilder.Append chaining returns void.
+﻿string.Split returns string[] in C# but is lowered to List_str, so '.Length' on the result emits '->f_Length' (fixed by the array model).

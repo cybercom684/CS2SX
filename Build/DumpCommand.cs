@@ -95,6 +95,9 @@ public sealed class DumpCommand
 
         var switchFormsFiles = Directory.GetFiles(switchFormsDir, "*.cs").ToList();
 
+        CS2SX.Transpiler.Writers.OperatorOverloadWriter.Reset();
+        ProjectTypeScanner.RegisterUserTypes(allFiles);
+
         var genericCollector = new GenericInstantiationCollector();
         genericCollector.Collect(allFiles, switchFormsFiles);
 

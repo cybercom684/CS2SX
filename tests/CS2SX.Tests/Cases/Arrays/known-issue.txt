@@ -1,1 +1,1 @@
-﻿arr.Length on local int[] emits '.f_Length'; implicitly-typed 'new[] {...}' local emits invalid C; instance array field initializer lacks '_count' member.
+﻿Arrays are bare pointers with side-channel lengths: '.Length' on locals/fields fails, 'new[] {..}' locals emit invalid C, and instance array field initializers point into a dead stack compound literal.

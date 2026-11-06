@@ -43,6 +43,8 @@ public sealed class SemanticModelBuilder
                          or "System.Private.CoreLib"
                          or "System.Collections"
                          or "System.Console"
+                         or "System.Linq"
+                         or "System.Text.RegularExpressions"
                          or "netstandard")
                 {
                     try { refs.Add(MetadataReference.CreateFromFile(path)); }
@@ -71,6 +73,15 @@ public sealed class SemanticModelBuilder
         var trees = new List<SyntaxTree>();
 
         var stubTrees = LoadStubTrees(parseOptions);
+        // The same implicit usings an SDK-style .NET project gets — without them every
+        // `Console`, `List<T>` and LINQ call in user code is an unresolved symbol and
+        // the transpiler loses all semantic type information for it.
+        stubTrees.Add(CSharpSyntaxTree.ParseText(
+            "global using System;\n"
+            + "global using System.Collections.Generic;\n"
+            + "global using System.Linq;\n"
+            + "global using System.Text;\n",
+            parseOptions, path: "CS2SX.Stubs._GlobalUsings.cs"));
         trees.AddRange(stubTrees);
         Log.Debug($"SemanticModel: {stubTrees.Count} Stub-Tree(s) geladen");
 
@@ -89,7 +100,7 @@ public sealed class SemanticModelBuilder
         }
 
         var compilationOptions = new CSharpCompilationOptions(
-            OutputKind.ConsoleApplication,
+            OutputKind.DynamicallyLinkedLibrary, // analysis only — no Main required
             allowUnsafe: true,
             nullableContextOptions: NullableContextOptions.Enable,
             optimizationLevel: OptimizationLevel.Debug);
@@ -125,14 +136,20 @@ public sealed class SemanticModelBuilder
 
         var errors = _compilation.GetDiagnostics()
             .Where(d => d.Severity == DiagnosticSeverity.Error)
-            .Take(5)
             .ToList();
 
         if (errors.Count > 0)
         {
-            Log.Debug($"SemanticModel: {errors.Count} Kompilierungsfehler (ignoriert)");
-            foreach (var e in errors)
-                Log.Debug($"  {e.Id}: {e.GetMessage()}");
+            static bool InStub(Diagnostic d) =>
+                d.Location.SourceTree?.FilePath.Contains(".Stubs.", StringComparison.Ordinal) == true;
+            var stubErrors = errors.Count(InStub);
+            Log.Debug($"SemanticModel: {errors.Count} Kompilierungsfehler (ignoriert) — "
+                    + $"{errors.Count - stubErrors} im Projekt, {stubErrors} in Stubs");
+            foreach (var e in errors.OrderBy(InStub).Take(30))
+            {
+                var span = e.Location.GetLineSpan();
+                Log.Debug($"  {Path.GetFileName(span.Path)}({span.StartLinePosition.Line + 1}) {e.Id}: {e.GetMessage()}");
+            }
         }
         else
         {

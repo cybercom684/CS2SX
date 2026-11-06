@@ -257,6 +257,14 @@ public sealed class StatementWriter
                     cTypeFinal = mapped;
                     isPtr = !mapped.EndsWith("*");
                 }
+                // Inferred the right reference type but without the pointer (e.g. the
+                // element type of `list.First()`): class instances are always T*.
+                else if (varCs != null && !isPtr && !cTypeFinal.EndsWith("*")
+                         && TypeRegistry.NeedsPointerSuffix(varCs)
+                         && TypeRegistry.MapType(varCs) == cTypeFinal)
+                {
+                    isPtr = true;
+                }
             }
 
             var ptr = isPtr ? "*" : "";
@@ -612,6 +620,15 @@ public sealed class StatementWriter
 
     private (string cType, bool isPtr) InferVarType(VariableDeclaratorSyntax v)
     {
+        // User value structs are never pointers — resolve via the semantic model so
+        // `var d = a - b` / `var p = Point.Origin()` work, not only `new Point(..)`.
+        if (v.Initializer?.Value is { } initExpr)
+        {
+            var semType = _ctx.GetSemanticType(initExpr);
+            if (semType != null && TypeRegistry.IsUserStruct(semType))
+                return (semType, false);
+        }
+
         if (v.Initializer?.Value is ObjectCreationExpressionSyntax oc)
         {
             // Map through TypeRegistry so List<T>/Dict<K,V>/etc. get their C names.
@@ -620,7 +637,7 @@ public sealed class StatementWriter
             var cMapped = TypeRegistry.MapType(ocTypeName);
             if (cMapped.EndsWith("*"))
                 return (cMapped, false); // MapType already appended pointer
-            return (cMapped, true);
+            return (cMapped, !TypeRegistry.IsUserStruct(ocTypeName));
         }
 
         if (v.Initializer?.Value is InvocationExpressionSyntax inv)

@@ -33,9 +33,7 @@ void ExceptionsApp_OnInit(ExceptionsApp* self)
         {
             char* _sb0 = _cs2sx_next_buf();
             snprintf(_sb0, CS2SX_STRBUF_SIZE, "caught: %s", _ex_msg);
-            char* _sb1 = _cs2sx_next_buf();
-            snprintf(_sb1, CS2SX_STRBUF_SIZE, "caught: %s", _ex_msg);
-            const char* _ps_1 = _sb1;
+            const char* _ps_1 = _sb0;
             printf("%s\n", _ps_1 ? _ps_1 : "");
         }
     }

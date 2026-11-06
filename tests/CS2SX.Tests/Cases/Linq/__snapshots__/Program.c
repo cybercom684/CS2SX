@@ -59,45 +59,25 @@ static int _lambda_4(int v)
 
 static int _lambda_5(int v)
 {
-    return v > 8;
+    return v > 4;
 }
 
 static int _lambda_6(int v)
 {
-    return v > 0;
-}
-
-static int _lambda_7(int v)
-{
-    return v > 4;
-}
-
-static int _lambda_8(int v)
-{
     return v < 5;
 }
 
-static int _lambda_9(int v)
-{
-    return v > 4;
-}
-
-static int _lambda_10(int v)
-{
-    return v < 5;
-}
-
-static int _lambda_11(Enemy* e)
+static int _lambda_7(Enemy* e)
 {
     return e->f_Hp > 10;
 }
 
-static int _lambda_12(Enemy* e)
+static int _lambda_8(Enemy* e)
 {
     return e->f_Hp;
 }
 
-static int _lambda_13(Enemy* e)
+static int _lambda_9(Enemy* e)
 {
     return e->f_Hp;
 }
@@ -149,9 +129,7 @@ void LinqApp_OnInit(LinqApp* self)
     List_int* sorted = _tol_13;
     char* _sb0 = _cs2sx_next_buf();
     snprintf(_sb0, CS2SX_STRBUF_SIZE, "%d %d %d", evens->count, List_int_Get(doubled, 0), List_int_Get(sorted, 0));
-    char* _sb1 = _cs2sx_next_buf();
-    snprintf(_sb1, CS2SX_STRBUF_SIZE, "%d %d %d", evens->count, List_int_Get(doubled, 0), List_int_Get(sorted, 0));
-    const char* _ps_15 = _sb1;
+    const char* _ps_15 = _sb0;
     printf("%s\n", _ps_15 ? _ps_15 : "");
     int _sum_17 = 0;
     for (int _i_16 = 0; _i_16 < values->count; _i_16++)
@@ -162,104 +140,77 @@ void LinqApp_OnInit(LinqApp* self)
     int _minv_21 = (values->count > 0) ? List_int_Get(values, 0) : 0;
     for (int _i_20 = 1; _i_20 < values->count; _i_20++)
       if (List_int_Get(values, _i_20) < _minv_21) _minv_21 = List_int_Get(values, _i_20);
+    char* _sb1 = _cs2sx_next_buf();
+    snprintf(_sb1, CS2SX_STRBUF_SIZE, "%d %d %d", _sum_17, _maxv_19, _minv_21);
+    const char* _ps_22 = _sb1;
+    printf("%s\n", _ps_22 ? _ps_22 : "");
+    int _any_24 = 0;
+    for (int _i_23 = 0; _i_23 < values->count; _i_23++)
+      if (_lambda_3(List_int_Get(values, _i_23))) { _any_24 = 1; break; }
+    int _all_26 = 1;
+    for (int _i_25 = 0; _i_25 < values->count; _i_25++)
+      if (!_lambda_4(List_int_Get(values, _i_25))) { _all_26 = 0; break; }
     char* _sb2 = _cs2sx_next_buf();
-    snprintf(_sb2, CS2SX_STRBUF_SIZE, "%d %d %d", _sum_17, _maxv_19, _minv_21);
-    int _sum_23 = 0;
-    for (int _i_22 = 0; _i_22 < values->count; _i_22++)
-      _sum_23 += List_int_Get(values, _i_22);
-    int _maxv_25 = (values->count > 0) ? List_int_Get(values, 0) : 0;
-    for (int _i_24 = 1; _i_24 < values->count; _i_24++)
-      if (List_int_Get(values, _i_24) > _maxv_25) _maxv_25 = List_int_Get(values, _i_24);
-    int _minv_27 = (values->count > 0) ? List_int_Get(values, 0) : 0;
-    for (int _i_26 = 1; _i_26 < values->count; _i_26++)
-      if (List_int_Get(values, _i_26) < _minv_27) _minv_27 = List_int_Get(values, _i_26);
+    snprintf(_sb2, CS2SX_STRBUF_SIZE, "%d %d", _any_24, _all_26);
+    const char* _ps_27 = _sb2;
+    printf("%s\n", _ps_27 ? _ps_27 : "");
+    int _first_29 = 0;
+    for (int _i_28 = 0; _i_28 < values->count; _i_28++)
+    {
+        if (_lambda_5(List_int_Get(values, _i_28))) { _first_29 = List_int_Get(values, _i_28); break; }
+    }
+    int _cnt_31 = 0;
+    for (int _i_30 = 0; _i_30 < values->count; _i_30++)
+      if (_lambda_6(List_int_Get(values, _i_30))) _cnt_31++;
     char* _sb3 = _cs2sx_next_buf();
-    snprintf(_sb3, CS2SX_STRBUF_SIZE, "%d %d %d", _sum_23, _maxv_25, _minv_27);
-    const char* _ps_28 = _sb3;
-    printf("%s\n", _ps_28 ? _ps_28 : "");
-    int _any_30 = 0;
-    for (int _i_29 = 0; _i_29 < values->count; _i_29++)
-      if (_lambda_3(List_int_Get(values, _i_29))) { _any_30 = 1; break; }
-    int _all_32 = 1;
-    for (int _i_31 = 0; _i_31 < values->count; _i_31++)
-      if (!_lambda_4(List_int_Get(values, _i_31))) { _all_32 = 0; break; }
-    char* _sb4 = _cs2sx_next_buf();
-    snprintf(_sb4, CS2SX_STRBUF_SIZE, "%d %d", _any_30, _all_32);
-    int _any_34 = 0;
-    for (int _i_33 = 0; _i_33 < values->count; _i_33++)
-      if (_lambda_5(List_int_Get(values, _i_33))) { _any_34 = 1; break; }
-    int _all_36 = 1;
-    for (int _i_35 = 0; _i_35 < values->count; _i_35++)
-      if (!_lambda_6(List_int_Get(values, _i_35))) { _all_36 = 0; break; }
-    char* _sb5 = _cs2sx_next_buf();
-    snprintf(_sb5, CS2SX_STRBUF_SIZE, "%d %d", _any_34, _all_36);
-    const char* _ps_37 = _sb5;
-    printf("%s\n", _ps_37 ? _ps_37 : "");
-    int _first_39 = 0;
-    for (int _i_38 = 0; _i_38 < values->count; _i_38++)
+    snprintf(_sb3, CS2SX_STRBUF_SIZE, "%d %d", _first_29, _cnt_31);
+    const char* _ps_32 = _sb3;
+    printf("%s\n", _ps_32 ? _ps_32 : "");
+    List_Enemy* _list_33 = List_Enemy_New();
+    List_Enemy_Add(_list_33, Enemy_New("orc", 30));
+    List_Enemy_Add(_list_33, Enemy_New("bat", 5));
+    List_Enemy_Add(_list_33, Enemy_New("troll", 80));
+    List_Enemy* enemies = _list_33;
+    List_Enemy* _where_34 = List_Enemy_New();
+    for (int _i_35 = 0; _i_35 < enemies->count; _i_35++)
     {
-        if (_lambda_7(List_int_Get(values, _i_38))) { _first_39 = List_int_Get(values, _i_38); break; }
+        Enemy* _e__where_34 = List_Enemy_Get(enemies, _i_35);
+        if (_lambda_7(_e__where_34)) List_Enemy_Add(_where_34, _e__where_34);
     }
-    int _cnt_41 = 0;
-    for (int _i_40 = 0; _i_40 < values->count; _i_40++)
-      if (_lambda_8(List_int_Get(values, _i_40))) _cnt_41++;
-    char* _sb6 = _cs2sx_next_buf();
-    snprintf(_sb6, CS2SX_STRBUF_SIZE, "%d %d", _first_39, _cnt_41);
-    int _first_43 = 0;
-    for (int _i_42 = 0; _i_42 < values->count; _i_42++)
+    List_Enemy* _ord_36 = List_Enemy_New();
+    for (int _i_37 = 0; _i_37 < _where_34->count; _i_37++)
+      List_Enemy_Add(_ord_36, List_Enemy_Get(_where_34, _i_37));
+    for (int _i_37 = 1; _i_37 < _ord_36->count; _i_37++)
     {
-        if (_lambda_9(List_int_Get(values, _i_42))) { _first_43 = List_int_Get(values, _i_42); break; }
+        Enemy* _otmp_39 = _ord_36->data[_i_37];
+        int _j_38 = _i_37 - 1;
+        while (_j_38 >= 0 && (_lambda_8(_ord_36->data[_j_38]) != _lambda_8(_otmp_39) ? (_lambda_8(_ord_36->data[_j_38]) < _lambda_8(_otmp_39)) : 0))
+          { _ord_36->data[_j_38+1] = _ord_36->data[_j_38]; _j_38--; }
+        _ord_36->data[_j_38+1] = _otmp_39;
     }
-    int _cnt_45 = 0;
-    for (int _i_44 = 0; _i_44 < values->count; _i_44++)
-      if (_lambda_10(List_int_Get(values, _i_44))) _cnt_45++;
-    char* _sb7 = _cs2sx_next_buf();
-    snprintf(_sb7, CS2SX_STRBUF_SIZE, "%d %d", _first_43, _cnt_45);
-    const char* _ps_46 = _sb7;
-    printf("%s\n", _ps_46 ? _ps_46 : "");
-    List_Enemy* _list_47 = List_Enemy_New();
-    List_Enemy_Add(_list_47, Enemy_New("orc", 30));
-    List_Enemy_Add(_list_47, Enemy_New("bat", 5));
-    List_Enemy_Add(_list_47, Enemy_New("troll", 80));
-    List_Enemy* enemies = _list_47;
-    List_Enemy* _where_48 = List_Enemy_New();
-    for (int _i_49 = 0; _i_49 < enemies->count; _i_49++)
+    List_Enemy* _tol_40 = List_Enemy_New();
+    for (int _i_41 = 0; _i_41 < _ord_36->count; _i_41++)
+      List_Enemy_Add(_tol_40, List_Enemy_Get(_ord_36, _i_41));
+    List_Enemy* strong = _tol_40;
+    const char* _ps_42 = List_Enemy_Get(strong, 0)->f_Name;
+    printf("%s\n", _ps_42 ? _ps_42 : "");
+    List_Enemy* _ord_43 = List_Enemy_New();
+    for (int _i_44 = 0; _i_44 < enemies->count; _i_44++)
+      List_Enemy_Add(_ord_43, List_Enemy_Get(enemies, _i_44));
+    for (int _i_44 = 1; _i_44 < _ord_43->count; _i_44++)
     {
-        Enemy* _e__where_48 = List_Enemy_Get(enemies, _i_49);
-        if (_lambda_11(_e__where_48)) List_Enemy_Add(_where_48, _e__where_48);
+        Enemy* _otmp_46 = _ord_43->data[_i_44];
+        int _j_45 = _i_44 - 1;
+        while (_j_45 >= 0 && (_lambda_9(_ord_43->data[_j_45]) != _lambda_9(_otmp_46) ? (_lambda_9(_ord_43->data[_j_45]) > _lambda_9(_otmp_46)) : 0))
+          { _ord_43->data[_j_45+1] = _ord_43->data[_j_45]; _j_45--; }
+        _ord_43->data[_j_45+1] = _otmp_46;
     }
-    List_Enemy* _ord_50 = List_Enemy_New();
-    for (int _i_51 = 0; _i_51 < _where_48->count; _i_51++)
-      List_Enemy_Add(_ord_50, List_Enemy_Get(_where_48, _i_51));
-    for (int _i_51 = 1; _i_51 < _ord_50->count; _i_51++)
-    {
-        Enemy* _otmp_53 = _ord_50->data[_i_51];
-        int _j_52 = _i_51 - 1;
-        while (_j_52 >= 0 && (_lambda_12(_ord_50->data[_j_52]) != _lambda_12(_otmp_53) ? (_lambda_12(_ord_50->data[_j_52]) < _lambda_12(_otmp_53)) : 0))
-          { _ord_50->data[_j_52+1] = _ord_50->data[_j_52]; _j_52--; }
-        _ord_50->data[_j_52+1] = _otmp_53;
-    }
-    List_Enemy* _tol_54 = List_Enemy_New();
-    for (int _i_55 = 0; _i_55 < _ord_50->count; _i_55++)
-      List_Enemy_Add(_tol_54, List_Enemy_Get(_ord_50, _i_55));
-    List_Enemy* strong = _tol_54;
-    printf("%d\n", List_Enemy_Get(strong, 0)->Name);
-    List_Enemy* _ord_56 = List_Enemy_New();
-    for (int _i_57 = 0; _i_57 < enemies->count; _i_57++)
-      List_Enemy_Add(_ord_56, List_Enemy_Get(enemies, _i_57));
-    for (int _i_57 = 1; _i_57 < _ord_56->count; _i_57++)
-    {
-        Enemy* _otmp_59 = _ord_56->data[_i_57];
-        int _j_58 = _i_57 - 1;
-        while (_j_58 >= 0 && (_lambda_13(_ord_56->data[_j_58]) != _lambda_13(_otmp_59) ? (_lambda_13(_ord_56->data[_j_58]) > _lambda_13(_otmp_59)) : 0))
-          { _ord_56->data[_j_58+1] = _ord_56->data[_j_58]; _j_58--; }
-        _ord_56->data[_j_58+1] = _otmp_59;
-    }
-    Enemy* _first_60 = NULL;
-    if (_ord_56->count > 0) { _first_60 = List_Enemy_Get(_ord_56, 0); }
+    Enemy* _first_47 = NULL;
+    if (_ord_43->count > 0) { _first_47 = List_Enemy_Get(_ord_43, 0); }
     else { fprintf(stderr, "First()/Single(): sequence contains no elements\n"); abort(); }
-    int weakest = _first_60;
-    printf("%d\n", weakest->Name);
+    Enemy* weakest = _first_47;
+    const char* _ps_48 = weakest->f_Name;
+    printf("%s\n", _ps_48 ? _ps_48 : "");
 }
 
 void LinqApp_Free(LinqApp* self)

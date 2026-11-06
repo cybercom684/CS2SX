@@ -83,6 +83,20 @@ public sealed class OwnMethodHandler : InvocationHandlerBase
                 var symbol = symbolInfo.Symbol
                               ?? symbolInfo.CandidateSymbols.FirstOrDefault();
 
+                // Virtual/abstract/override method called on the implicit `this`:
+                // C# dispatches dynamically, so go through the vtable (which lives in
+                // the root class of the hierarchy) — never call Class_Method directly,
+                // that would bind to the base implementation or a missing abstract one.
+                if (symbol is IMethodSymbol virt && !virt.IsStatic && IsDynamicallyDispatched(virt)
+                    && ctx.VTableTypes.Contains(ctx.CurrentClass))
+                {
+                    var callArgs = BuildArgsWithRefOut(inv, virt, args, ctx, writeExpr);
+                    var all = new List<string> { "self" };
+                    all.AddRange(callArgs);
+                    result = SelfVTable(ctx) + "->" + calleeStr + "(" + string.Join(", ", all) + ")";
+                    return true;
+                }
+
                 if (symbol is IMethodSymbol method
                     && method.ContainingType?.Name == ctx.CurrentClass)
                 {
@@ -184,6 +198,24 @@ public sealed class OwnMethodHandler : InvocationHandlerBase
         selfArgs.AddRange(args);
         result = $"{ctx.CurrentClass}_{calleeStr}({string.Join(", ", selfArgs)})";
         return true;
+    }
+
+    private static bool IsDynamicallyDispatched(IMethodSymbol m)
+    {
+        if (!(m.IsVirtual || m.IsAbstract || m.IsOverride) || m.IsSealed) return false;
+        if (m.ContainingType?.TypeKind != TypeKind.Class) return false;
+        // The slot must originate in user code — runtime base classes such as
+        // SwitchApp use plain function-pointer members, not a CS2SX vtable.
+        var root = m;
+        while (root.OverriddenMethod != null) root = root.OverriddenMethod;
+        return TranspilerContext.IsUserCode(root.ContainingType);
+    }
+
+    /// `self->[base.]*vtable` — the vtable pointer sits in the hierarchy's root class.
+    internal static string SelfVTable(TranspilerContext ctx)
+    {
+        var hops = ctx.RootHops.TryGetValue(ctx.CurrentClass, out var h) ? h : 0;
+        return "self->" + string.Concat(Enumerable.Repeat("base.", hops)) + "vtable";
     }
 
     private static List<string> BuildArgsWithRefOut(

@@ -96,7 +96,7 @@ void InterfacesApp_OnFrame(InterfacesApp* self)
     for (int _i_t = 0; _i_t < (int)(self->f_things->count); _i_t++)
     {
         IUpdatable* t = List_IUpdatable_Get(self->f_things, _i_t);
-        t->vtable->Update(t->obj, 1f / 60f);
+        t->vtable->Update(t->obj, 1.0f / 60.0f);
         if (t->vtable->IsAlive(t->obj))
         {
             alive++;
@@ -104,9 +104,7 @@ void InterfacesApp_OnFrame(InterfacesApp* self)
     }
     char* _sb0 = _cs2sx_next_buf();
     snprintf(_sb0, CS2SX_STRBUF_SIZE, "alive: %d", alive);
-    char* _sb1 = _cs2sx_next_buf();
-    snprintf(_sb1, CS2SX_STRBUF_SIZE, "alive: %d", alive);
-    const char* _ps_0 = _sb1;
+    const char* _ps_0 = _sb0;
     printf("%s\n", _ps_0 ? _ps_0 : "");
 }
 

@@ -40,8 +40,12 @@ public class StructsRecordsEnumsApp : SwitchApp
         };
         Console.WriteLine(label + " " + (int)_state);
 
-        object o = 5;
-        if (o is int n && n > 3)
-            Console.WriteLine("pattern matched " + n);
+        // Boxing (`object o = 5; o is int n`) is intentionally unsupported — no runtime
+        // type info for value types. Enum/relational patterns are the idiomatic case.
+        if (_state is State.Playing or State.Paused)
+            Console.WriteLine("active");
+        int lives = 2;
+        if (lives is > 0 and < 5)
+            Console.WriteLine("few lives");
     }
 }

@@ -1,1 +1,0 @@
-﻿User structs are not registered as value types: fields accessed as 'f_X' (declared 'X'), struct values assigned to 'Vec2*' — also across files.

@@ -49,6 +49,53 @@ public sealed class TranspilerContext
         Diagnostics = sharedDiagnostics ?? new DiagnosticReporter();
     }
 
+    /// <summary>
+    /// Creates a context that writes to <paramref name="writer"/> but sees the same
+    /// class/method state as this one — for code generated out of line (lifted
+    /// lambda bodies). Copy everything here rather than at each call site, so a new
+    /// piece of state can't silently be missing inside lambdas.
+    /// </summary>
+    public TranspilerContext CreateChild(StringWriter writer)
+    {
+        var c = new TranspilerContext(writer, Diagnostics)
+        {
+            SemanticModel = SemanticModel,
+            CurrentClass = CurrentClass,
+            CurrentBaseType = CurrentBaseType,
+            IsStaticMethod = IsStaticMethod,
+            CurrentFile = CurrentFile,
+            CurrentCFile = CurrentCFile,
+            TmpCounter = TmpCounter,
+            TmpStringCounter = TmpStringCounter,
+        };
+        Copy(LocalTypes, c.LocalTypes);
+        Copy(FieldTypes, c.FieldTypes);
+        Copy(BaseFieldTypes, c.BaseFieldTypes);
+        Copy(MethodReturnTypes, c.MethodReturnTypes);
+        Copy(PropertyTypes, c.PropertyTypes);
+        Copy(ArrayLengths, c.ArrayLengths);
+        Copy(FieldArrayLengths, c.FieldArrayLengths);
+        Copy(TypeAliases, c.TypeAliases);
+        Copy(VTableRoot, c.VTableRoot);
+        Copy(RootHops, c.RootHops);
+        Copy(EnumDefs, c.EnumDefs);
+        Copy(VTableMethods, c.VTableMethods);
+        Copy(ClassMemberTypes, c.ClassMemberTypes);
+        Copy(OverloadedMethods, c.OverloadedMethods);
+        c.ComputedPropertyNames.UnionWith(ComputedPropertyNames);
+        c.EnumMembers.UnionWith(EnumMembers);
+        c.ValueTypeStructs.UnionWith(ValueTypeStructs);
+        c.VTableTypes.UnionWith(VTableTypes);
+        c.InterfaceTypes.UnionWith(InterfaceTypes);
+        c.IndexerClasses.UnionWith(IndexerClasses);
+        return c;
+
+        static void Copy<TV>(Dictionary<string, TV> from, Dictionary<string, TV> to)
+        {
+            foreach (var kv in from) to[kv.Key] = kv.Value;
+        }
+    }
+
     // ── Klassen-Kontext ───────────────────────────────────────────────────────
 
     // FIX: Stack statt single field — geschachtelte try/catch überschreiben sich nicht gegenseitig
@@ -332,6 +379,18 @@ public sealed class TranspilerContext
         Diagnostics.Warn(node, CurrentFile, message);
 
     // ── SemanticModel Helpers ─────────────────────────────────────────────────
+
+    /// <summary>
+    /// True when <paramref name="symbol"/> is declared in the user's project — not in
+    /// the embedded API stubs (which are also source trees in the compilation, their
+    /// path being a manifest resource name like "CS2SX.Stubs.SwitchApp.cs").
+    /// </summary>
+    public static bool IsUserCode(ISymbol? symbol) =>
+        symbol != null
+        && symbol.Locations.Any(l => l.IsInSource
+            && l.SourceTree?.FilePath is { } p
+            && !p.Contains(".Stubs.", StringComparison.Ordinal)
+            && !p.Contains(".SwitchFormsLib.", StringComparison.Ordinal));
 
     public string? GetSemanticType(SyntaxNode node)
     {

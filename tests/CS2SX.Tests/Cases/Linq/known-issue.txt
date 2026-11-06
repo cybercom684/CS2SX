@@ -1,1 +1,0 @@
-﻿LINQ lambdas over user classes access 'e->Name' instead of 'e->f_Name'; First() on List<Enemy> typed as int.

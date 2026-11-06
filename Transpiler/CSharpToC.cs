@@ -440,7 +440,9 @@ public sealed class CSharpToC : CSharpSyntaxWalker
         }
     }
 
-    public override void VisitStructDeclaration(StructDeclarationSyntax node)
+    public override void VisitStructDeclaration(StructDeclarationSyntax node) => WriteValueStruct(node);
+
+    private void WriteValueStruct(TypeDeclarationSyntax node)
     {
         var structName = node.Identifier.Text;
         _ctx.ValueTypeStructs.Add(structName);
@@ -454,6 +456,10 @@ public sealed class CSharpToC : CSharpSyntaxWalker
         {
             _ctx.ClearClassContext();
             _ctx.CurrentClass = structName;
+
+            if (node is RecordDeclarationSyntax rec && rec.ParameterList != null)
+                foreach (var p in rec.ParameterList.Parameters)
+                    _ctx.FieldTypes[p.Identifier.Text] = p.Type?.ToString().Trim() ?? "int";
 
             foreach (var field in node.Members.OfType<FieldDeclarationSyntax>())
             {
@@ -1604,6 +1610,13 @@ public sealed class CSharpToC : CSharpSyntaxWalker
         // record class → heap-allocated reference type (calloc + _rc ref-counting)
         // record struct → value type (plain C struct, no heap, no _rc)
         bool isRecordStruct = node.ClassOrStructKeyword.IsKind(SyntaxKind.StructKeyword);
+
+        // record struct is a plain value struct — same codegen as `struct`.
+        if (isRecordStruct)
+        {
+            WriteValueStruct(node);
+            return;
+        }
 
         var name = node.Identifier.Text;
         _ctx.ClearClassContext();

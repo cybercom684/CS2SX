@@ -1,1 +1,0 @@
-﻿List<IUpdatable> is expanded before the interface type is declared in _generics.h.

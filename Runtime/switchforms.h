@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 #include <switch.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -252,111 +252,127 @@ static inline void StringBuilder__grow(StringBuilder* sb, int needed)
     sb->capacity = cap;
 }
 
-static inline void StringBuilder_AppendStr(StringBuilder* sb, const char* s)
+static inline StringBuilder* StringBuilder_AppendStr(StringBuilder* sb, const char* s)
 {
-    if (!sb || !s) return;
+    if (!sb || !s) return sb;
     int len = (int)strlen(s);
     StringBuilder__grow(sb, len);
     memcpy(sb->buf + sb->length, s, len + 1);
     sb->length += len;
+    return sb;
 }
 
-static inline void StringBuilder_AppendChar(StringBuilder* sb, char c)
+static inline StringBuilder* StringBuilder_AppendChar(StringBuilder* sb, char c)
 {
-    if (!sb) return;
+    if (!sb) return sb;
     StringBuilder__grow(sb, 1);
     sb->buf[sb->length++] = c;
     sb->buf[sb->length] = '\0';
+    return sb;
 }
 
-static inline void StringBuilder_AppendInt(StringBuilder* sb, int val)
+static inline StringBuilder* StringBuilder_AppendInt(StringBuilder* sb, int val)
 {
     char tmp[32];
     snprintf(tmp, sizeof(tmp), "%d", val);
     StringBuilder_AppendStr(sb, tmp);
+    return sb;
 }
 
-static inline void StringBuilder_AppendUInt(StringBuilder* sb, unsigned int val)
+static inline StringBuilder* StringBuilder_AppendUInt(StringBuilder* sb, unsigned int val)
 {
     char tmp[32];
     snprintf(tmp, sizeof(tmp), "%u", val);
     StringBuilder_AppendStr(sb, tmp);
+    return sb;
 }
 
-static inline void StringBuilder_AppendFloat(StringBuilder* sb, float val)
+static inline StringBuilder* StringBuilder_AppendFloat(StringBuilder* sb, float val)
 {
     char tmp[32];
     snprintf(tmp, sizeof(tmp), "%f", val);
     StringBuilder_AppendStr(sb, tmp);
+    return sb;
 }
 
-static inline void StringBuilder_AppendLine(StringBuilder* sb, const char* s)
+static inline StringBuilder* StringBuilder_AppendLine(StringBuilder* sb, const char* s)
 {
     StringBuilder_AppendStr(sb, s);
     StringBuilder_AppendChar(sb, '\n');
+    return sb;
 }
 
-static inline void StringBuilder_AppendLong(StringBuilder* sb, long long val)
+static inline StringBuilder* StringBuilder_AppendLong(StringBuilder* sb, long long val)
 {
     char tmp[32];
     snprintf(tmp, sizeof(tmp), "%lld", val);
     StringBuilder_AppendStr(sb, tmp);
+    return sb;
 }
 
-static inline void StringBuilder_AppendULong(StringBuilder* sb, unsigned long long val)
+static inline StringBuilder* StringBuilder_AppendULong(StringBuilder* sb, unsigned long long val)
 {
     char tmp[32];
     snprintf(tmp, sizeof(tmp), "%llu", val);
     StringBuilder_AppendStr(sb, tmp);
+    return sb;
 }
 
-static inline void StringBuilder_AppendDouble(StringBuilder* sb, double val)
+static inline StringBuilder* StringBuilder_AppendDouble(StringBuilder* sb, double val)
 {
     char tmp[32];
     snprintf(tmp, sizeof(tmp), "%g", val);
     StringBuilder_AppendStr(sb, tmp);
+    return sb;
 }
 
-static inline void StringBuilder_AppendLineInt(StringBuilder* sb, int val)
+static inline StringBuilder* StringBuilder_AppendLineInt(StringBuilder* sb, int val)
 {
     StringBuilder_AppendInt(sb, val);
     StringBuilder_AppendChar(sb, '\n');
+    return sb;
 }
 
-static inline void StringBuilder_AppendLineUInt(StringBuilder* sb, unsigned int val)
+static inline StringBuilder* StringBuilder_AppendLineUInt(StringBuilder* sb, unsigned int val)
 {
     StringBuilder_AppendUInt(sb, val);
     StringBuilder_AppendChar(sb, '\n');
+    return sb;
 }
 
-static inline void StringBuilder_AppendLineLong(StringBuilder* sb, long long val)
+static inline StringBuilder* StringBuilder_AppendLineLong(StringBuilder* sb, long long val)
 {
     StringBuilder_AppendLong(sb, val);
     StringBuilder_AppendChar(sb, '\n');
+    return sb;
 }
 
-static inline void StringBuilder_AppendLineULong(StringBuilder* sb, unsigned long long val)
+static inline StringBuilder* StringBuilder_AppendLineULong(StringBuilder* sb, unsigned long long val)
 {
     StringBuilder_AppendULong(sb, val);
     StringBuilder_AppendChar(sb, '\n');
+    return sb;
 }
 
-static inline void StringBuilder_AppendLineFloat(StringBuilder* sb, float val)
+static inline StringBuilder* StringBuilder_AppendLineFloat(StringBuilder* sb, float val)
 {
     StringBuilder_AppendFloat(sb, val);
     StringBuilder_AppendChar(sb, '\n');
+    return sb;
 }
 
-static inline void StringBuilder_AppendLineDouble(StringBuilder* sb, double val)
+static inline StringBuilder* StringBuilder_AppendLineDouble(StringBuilder* sb, double val)
 {
     StringBuilder_AppendDouble(sb, val);
     StringBuilder_AppendChar(sb, '\n');
+    return sb;
 }
 
-static inline void StringBuilder_AppendLineChar(StringBuilder* sb, char c)
+static inline StringBuilder* StringBuilder_AppendLineChar(StringBuilder* sb, char c)
 {
     StringBuilder_AppendChar(sb, c);
     StringBuilder_AppendChar(sb, '\n');
+    return sb;
 }
 
 static inline void StringBuilder_Clear(StringBuilder* sb)

@@ -53,10 +53,9 @@ public sealed class ConsoleHandler : InvocationHandlerBase
             && fmtLit.Token.IsKind(SyntaxKind.StringLiteralToken)
             && inv.ArgumentList.Arguments.Count > 1)
         {
-            var fmtArgs = inv.ArgumentList.Arguments
-                .Skip(1)
-                .Select(a => writeExpr(a.Expression))
-                .ToList();
+            // Use the dispatcher's already-written args: writing the syntax again
+            // would emit (and evaluate) every argument's prelude a second time.
+            var fmtArgs = args.Skip(1).ToList();
             var fmtStr = StringEscaper.EscapeFormat(fmtLit.Token.ValueText);
             fmtStr = ReplaceDotNetPlaceholders(fmtStr, fmtArgs, inv, ctx);
             var argStr = string.Join(", ", fmtArgs);
@@ -67,7 +66,7 @@ public sealed class ConsoleHandler : InvocationHandlerBase
         // FIX: Variable oder Ausdruck als Argument.
         //      Typ bestimmen und korrekten Format-Specifier wählen.
         //      NIEMALS printf(text) — das ist ein Format-String-Injection-Bug.
-        var argExpr = writeExpr(firstArg);
+        var argExpr = args.Count > 0 && args[0].Length > 0 ? args[0] : writeExpr(firstArg);
         var csType = TypeInferrer.InferCSharpType(firstArg, ctx);
         var cType = TypeRegistry.MapType(csType);
         var specifier = GetFormatSpecifier(csType, cType);

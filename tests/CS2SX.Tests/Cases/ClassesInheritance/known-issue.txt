@@ -1,1 +1,0 @@
-﻿Abstract/virtual calls emit undeclared 'Shape_Area'/'Rect_Describe'; inherited field 'Name' not reachable from derived class; base-typed locals ('Shape a = new Rect()') emit invalid casts.

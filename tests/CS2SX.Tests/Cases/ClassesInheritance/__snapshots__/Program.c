@@ -16,7 +16,7 @@ Shape* Shape_New(const char* name)
 const char* Shape_Describe(Shape* self)
 {
     char* _sb0 = _cs2sx_next_buf();
-    snprintf(_sb0, CS2SX_STRBUF_SIZE, "%s with area %f", self->f_Name, Shape_Area(self));
+    snprintf(_sb0, CS2SX_STRBUF_SIZE, "%s with area %f", self->f_Name, self->vtable->Area(self));
     return _sb0;
 }
 
@@ -81,14 +81,14 @@ Square* Square_New(float side)
     if (_base_0) { self->base = *_base_0; free(_base_0); }
     self->base.base.vtable = &Square_vtable_instance;
     self->base.base._rc = 1;
-    self->base.f_Name = "Square";
+    self->base.base.f_Name = "Square";
     return self;
 }
 
 const char* Square_Describe(Square* self)
 {
     char* _sb0 = _cs2sx_next_buf();
-    snprintf(_sb0, CS2SX_STRBUF_SIZE, "[%s]", Rect_Describe(((Rect*)self)));
+    snprintf(_sb0, CS2SX_STRBUF_SIZE, "[%s]", Shape_Describe(((Shape*)self)));
     return _sb0;
 }
 
@@ -156,10 +156,8 @@ void ClassesInheritanceApp_OnInit(ClassesInheritanceApp* self)
     const char* _ps_2 = c->vtable->Describe(c);
     printf("%s\n", _ps_2 ? _ps_2 : "");
     char* _sb0 = _cs2sx_next_buf();
-    snprintf(_sb0, CS2SX_STRBUF_SIZE, "created: %d", Shape->f_Created);
-    char* _sb1 = _cs2sx_next_buf();
-    snprintf(_sb1, CS2SX_STRBUF_SIZE, "created: %d", Shape->f_Created);
-    const char* _ps_3 = _sb1;
+    snprintf(_sb0, CS2SX_STRBUF_SIZE, "created: %d", Shape_Created);
+    const char* _ps_3 = _sb0;
     printf("%s\n", _ps_3 ? _ps_3 : "");
 }
 

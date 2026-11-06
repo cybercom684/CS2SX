@@ -34,7 +34,6 @@ static int _lambda_2(int x)
 struct _cap_3
 {
     LambdasApp* self;
-    int ticks;
 };
 static struct _cap_3* _cs2sx_ctx_3 = NULL;
 
@@ -42,14 +41,11 @@ static void _lambda_3()
 {
     struct _cap_3* _c = _cs2sx_ctx_3;
     LambdasApp* self = _c->self;
-    int ticks = _c->ticks;
-    ticks++;
+    self->f_ticks++;
 }
 
 static void _lambda_4(int v)
 {
-    char* _sb0 = _cs2sx_next_buf();
-    snprintf(_sb0, CS2SX_STRBUF_SIZE, "got %d", v);
     char* _sb1 = _cs2sx_next_buf();
     snprintf(_sb1, CS2SX_STRBUF_SIZE, "got %d", v);
     const char* _ps_1 = _sb1;
@@ -62,9 +58,7 @@ void LambdasApp_OnInit(LambdasApp* self)
     Func_int_int_t isBig = _lambda_1;
     char* _sb0 = _cs2sx_next_buf();
     snprintf(_sb0, CS2SX_STRBUF_SIZE, "%d %d", add(2, 3), isBig(150));
-    char* _sb1 = _cs2sx_next_buf();
-    snprintf(_sb1, CS2SX_STRBUF_SIZE, "%d %d", add(2, 3), isBig(150));
-    const char* _ps_0 = _sb1;
+    const char* _ps_0 = _sb0;
     printf("%s\n", _ps_0 ? _ps_0 : "");
     int multiplier = 3;
     static struct _cap_2 _ctx_val_2;
@@ -74,7 +68,6 @@ void LambdasApp_OnInit(LambdasApp* self)
     printf("%d\n", scale(7));
     static struct _cap_3 _ctx_val_3;
     _ctx_val_3.self = self;
-    _ctx_val_3.ticks = self->f_ticks;
     _cs2sx_ctx_3 = &_ctx_val_3;
     self->f_onTick = _lambda_3;
     LambdasApp_Apply(5, _lambda_4);

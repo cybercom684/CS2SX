@@ -308,6 +308,7 @@ public sealed class LinqHandler : InvocationHandlerBase
                         ctx.Dedent();
                         ctx.WriteLine("}");
                         result = retVar;
+                        ctx.LocalTypes[retVar] = inner; // element type, so `var x = ...First()` is typed
                     }
                     else
                     {
@@ -321,6 +322,7 @@ public sealed class LinqHandler : InvocationHandlerBase
                         ctx.WriteLine($"if ({countExpr0} > 0) {{ {retVar} = {listGet.Replace("_idx", "0")}; }}");
                         ctx.WriteLine($"else {{ fprintf(stderr, \"First()/Single(): sequence contains no elements\\n\"); abort(); }}");
                         result = retVar;
+                        ctx.LocalTypes[retVar] = inner; // element type, so `var x = ...First()` is typed
                     }
                     return true;
                 }
@@ -342,6 +344,7 @@ public sealed class LinqHandler : InvocationHandlerBase
                         ctx.Dedent();
                         ctx.WriteLine("}");
                         result = retVar;
+                        ctx.LocalTypes[retVar] = inner; // element type, so `var x = ...First()` is typed
                     }
                     else
                     {
@@ -370,6 +373,7 @@ public sealed class LinqHandler : InvocationHandlerBase
                         if (isStrict)
                             ctx.WriteLine($"if (!{foundVar}) {{ fprintf(stderr, \"Last(): sequence contains no matching elements\\n\"); abort(); }}");
                         result = retVar2;
+                        ctx.LocalTypes[retVar2] = inner; // element type, so `var x = ...First()` is typed
                     }
                     else if (isStrict)
                     {
@@ -380,6 +384,7 @@ public sealed class LinqHandler : InvocationHandlerBase
                         ctx.WriteLine($"if ({countExpr} > 0) {{ {retVar2} = {listGet.Replace("_idx", countExpr + " - 1")}; }}");
                         ctx.WriteLine($"else {{ fprintf(stderr, \"Last(): sequence contains no elements\\n\"); abort(); }}");
                         result = retVar2;
+                        ctx.LocalTypes[retVar2] = inner; // element type, so `var x = ...First()` is typed
                     }
                     else
                     {
