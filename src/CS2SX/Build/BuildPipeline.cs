@@ -34,7 +34,7 @@ public sealed class BuildPipeline
     internal static readonly string[] GeneratedHeaders =
     {
         "_forward.h", "_generics.h", "_interfaces.h",
-        "switchforms.h", "switchapp.h", "AudioStub.h", "FtpStub.h", "NetStub.h", "cs2sx_prelude.h",
+        "switchforms.h", "switchapp.h", "AudioStub.h", "FtpStub.h", "NetStub.h", "cs2sx_prelude.h", "cs2sx_gfx.h", "cs2sx_gfx_shaders.h",
     };
 
     private readonly bool _transpileOnly;
@@ -1136,16 +1136,7 @@ public sealed class BuildPipeline
         w.WriteLine("#include \"_forward.h\"");
         w.WriteLine();
         w.WriteLine("char         _cs2sx_strbuf[1024];");
-        w.WriteLine("Framebuffer  g_fb;");
-        w.WriteLine("u32*         g_fb_addr       = NULL;");
-        w.WriteLine("u32*         g_sw_backbuf    = NULL;");
-        w.WriteLine("int          g_fb_width      = 1280;");   // physical render = output resolution
-        w.WriteLine("int          g_fb_height     = 720;");
-        w.WriteLine("int          g_out_w         = 0;");      // requested output (0 = auto = logical)
-        w.WriteLine("int          g_out_h         = 0;");
-        w.WriteLine("int          g_sn            = 1;");      // coord scale numerator   (logical→physical)
-        w.WriteLine("int          g_sd            = 1;");      // coord scale denominator
-        w.WriteLine("int          g_gfx_init      = 0;");
+        // graphics settings (g_fb_width, g_sn, g_gfx_init, ...) live in the runtime module rt_gfx.c
         w.WriteLine("PadState     g_cs2sx_pad;");
         w.WriteLine("u64          g_cs2sx_kDown = 0;");
         w.WriteLine("u64          g_cs2sx_kHeld = 0;");

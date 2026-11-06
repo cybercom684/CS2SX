@@ -16,6 +16,12 @@ public class Texture : IDisposable
         Pixels = pixels;
     }
 
-    /// <summary>Releases the pixel memory.</summary>
+    /// <summary>
+    /// Re-uploads <see cref="Pixels"/> to the GPU after you changed them. Textures are
+    /// uploaded automatically on first draw; call this only for later modifications.
+    /// </summary>
+    public void Update() { }
+
+    /// <summary>Releases the texture (CPU and GPU memory). Safe to call more than once.</summary>
     public void Dispose() { }
 }

@@ -1448,20 +1448,3 @@ void CS2SX_Regex_Replace(const char* input, const char* pattern,
 
 List_str* CS2SX_Regex_Split(const char* input, const char* pattern);
 
-// ============================================================================
-// PNG Texture Loader (CS2SX_Texture_LoadPNG)
-// Minimal 1-file stb_image-style loader für RGB/RGBA PNGs vom SD-Karte.
-// Verwendet einen eingebetteten Deflate/zlib-Decoder ohne externe Libs.
-// ============================================================================
-
-// FIX/NEU: Einfacher PNG-Loader via libnx filesystem + miniz-kompatible Schnittstelle.
-// Da miniz nicht verfügbar ist, verwenden wir einen einfachen 4x4-RGBA-Dummy-Loader
-// als Platzhalter — der echte Loader wird als separate switchapp_png.h bereitgestellt.
-// Für den Moment: CS2SX_Texture_LoadRGBA lädt rohe RGBA-Pixeldaten (kein PNG-Encoding).
-
-typedef struct Texture Texture;
-
-// Forward declaration — Texture ist in switchapp.h definiert.
-// Diese Funktion ist nur deklariert, nicht inline implementiert.
-// Die Implementierung erfolgt in switchapp.h / switchapp.c.
-Texture* CS2SX_Texture_LoadRGBA(const char* path, int width, int height);

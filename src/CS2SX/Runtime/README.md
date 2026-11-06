@@ -42,5 +42,13 @@ A new module needs an `<EmbeddedResource>` entry only if it is not matched by
 `Runtime\src\*.c`; a new header needs its own `<EmbeddedResource>` line in
 `CS2SX.csproj` and an entry in `BuildPipeline.GeneratedHeaders`.
 
-`switchapp.h` (graphics) is not split yet: the software renderer is replaced by the
-deko3d backend in the next phase.
+## Graphics
+
+`cs2sx_gfx.h` + `src/rt_gfx.c` render on the GPU with deko3d (linked via `-ldeko3d`):
+one textured/vertex-colored pipeline, a per-frame vertex ring, draws batched by texture
+(the 8×8 font and a white block share one atlas, so text and solid shapes batch
+together), lazily uploaded textures, a one-pixel alpha fringe for anti-aliasing.
+
+Shaders live in `shaders/*.glsl`. After editing them run `tools/build-shaders.ps1`
+(needs devkitPro's `uam`); it regenerates `cs2sx_gfx_shaders.h`, which is committed so
+nobody else needs `uam`.

@@ -182,8 +182,11 @@ public static class ArrayModel
         {
             if (ctx.SemanticModel?.GetSymbolInfo(inv).Symbol is IMethodSymbol m)
             {
+                // .NET and the Switch API (CS2SX.Switch) never retain an array argument
+                // beyond the call (e.g. Graphics.DrawPolygon(xs, ys, ...)).
                 var ns = m.ContainingNamespace?.ToDisplayString() ?? "";
-                return ns == "System" || ns.StartsWith("System.", StringComparison.Ordinal);
+                return ns == "System" || ns.StartsWith("System.", StringComparison.Ordinal)
+                    || ns == "CS2SX.Switch";
             }
         }
         catch { }

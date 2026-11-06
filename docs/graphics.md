@@ -1,6 +1,10 @@
 # Graphics API
 
-CS2SX stellt über die `Graphics`-Klasse und `Color`-Klasse eine vollständige 2D-Framebuffer-API zur Verfügung.
+CS2SX stellt über die `Graphics`-Klasse und `Color`-Klasse eine vollständige 2D-API zur Verfügung.
+Gezeichnet wird auf der **GPU** (deko3d): Alle Aufrufe eines Frames werden gesammelt und in
+wenigen Draw-Calls gerendert. Runde Formen und Linien sind kantengeglättet, Farben mit
+Alpha werden echt überblendet, und eine höhere Ausgabeauflösung (1080p) kostet keine
+zusätzliche Rechenzeit.
 
 ---
 
@@ -13,7 +17,9 @@ public override void OnInit()
 }
 ```
 
-Sobald `Graphics.Init()` aufgerufen wurde, rendert jeder `OnFrame()`-Aufruf in den Framebuffer. Konsolen-Ausgabe (`Console.WriteLine`) ist danach nicht mehr sichtbar.
+Sobald `Graphics.Init()` aufgerufen wurde, rendert jeder `OnFrame()`-Aufruf auf die GPU; der Bildschirm wird vor jedem Frame schwarz gelöscht. Konsolen-Ausgabe (`Console.WriteLine`) ist danach nicht mehr sichtbar. `Graphics.BeginFrame()`/`EndFrame()` sind nicht nötig (die Runtime steuert die Frames) und bewirken nichts.
+
+Alle Koordinaten sind **logisch** (die Größe aus `Graphics.Init`). Ausnahmen in **physischen** Ausgabe-Pixeln: `SetPixel`, `SetPixelAlpha`, `BlitPhysical`. Umrisse (`DrawRect`, `DrawCircle`, …) sind einen physischen Pixel breit.
 
 ---
 
@@ -158,14 +164,21 @@ Graphics.DrawTextureCenteredScaled(tex, rx, ry, rw, rh, tw, th);
 
 > `null`-Check empfohlen: `if (tex != null) Graphics.DrawTexture(tex, x, y);`
 
+Texturen werden beim ersten Zeichnen automatisch auf die GPU geladen (auch wenn sie schon in
+`OnInit` erzeugt wurden). Änderst du später `tex.Pixels`, mache die Änderung mit
+`tex.Update()` sichtbar. Gib Texturen mit `tex.Dispose()` frei — mehrfaches `Dispose` ist
+unschädlich. Halbtransparente Pixel werden überblendet (früher: nur ganz transparent/deckend).
+
 ### Auflösung & weitere Primitive
 
 ```csharp
 // VOR Graphics.Init() aufrufen: in 1080p ausgeben (gedockt), Logik bleibt 1280×720
 Graphics.SetOutputResolution(1920, 1080);
 
-// gefülltes/umrandetes Polygon aus einem Punkte-Array
-Graphics.DrawPolygon(points, count, Color.White);
+// geschlossener Umriss durch die Punkte (xs[i], ys[i])
+int[] xs = { 100, 160, 190, 150, 90 };
+int[] ys = { 200, 190, 240, 285, 260 };
+Graphics.DrawPolygon(xs, ys, xs.Length, Color.White);
 ```
 
 `SetOutputResolution(w, h)` rendert intern hochskaliert (z.B. 1080p) während alle Zeichenkoordinaten im logischen 1280×720-Raum bleiben.

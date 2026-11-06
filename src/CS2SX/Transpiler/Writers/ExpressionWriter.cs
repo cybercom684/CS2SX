@@ -662,6 +662,11 @@ public sealed class ExpressionWriter : IExpressionWriter
         else
             accessExpr = receiver + "->(" + Write(condAccess.WhenNotNull) + ")";
 
+        // x?.Dispose() also releases x (see ReleaseAfterDispose)
+        if (condAccess.WhenNotNull is InvocationExpressionSyntax { Expression: MemberBindingExpressionSyntax disposeBinding } disposeInv)
+            accessExpr = ReleaseAfterDispose(condAccess.Expression, disposeBinding.Name.Identifier.Text,
+                disposeInv.ArgumentList.Arguments.Count, accessExpr);
+
         // Void-returning null-conditional: use (void)0 as null arm to avoid C11 type violation
         bool isVoidCall = false;
         if (_ctx.SemanticModel != null && condAccess.WhenNotNull is InvocationExpressionSyntax voidInv)
@@ -859,6 +864,35 @@ public sealed class ExpressionWriter : IExpressionWriter
     // ── Invocation ────────────────────────────────────────────────────────────
 
     private string WriteInvocation(InvocationExpressionSyntax inv)
+    {
+        var code = WriteInvocationCore(inv);
+        return inv.Expression is MemberAccessExpressionSyntax mem
+            ? ReleaseAfterDispose(mem.Expression, mem.Name.Identifier.Text, inv.ArgumentList.Arguments.Count, code)
+            : code;
+    }
+
+    /// <summary>
+    /// <c>x.Dispose()</c> on a field/local/parameter of reference type also sets x to NULL.
+    /// C# allows Dispose twice; in C the second free — by the app or by the class's
+    /// generated _Free, which disposes owned fields — would be a double free.
+    /// </summary>
+    private string ReleaseAfterDispose(ExpressionSyntax receiver, string method, int argCount, string callCode)
+    {
+        if (method != "Dispose" || argCount != 0 || _ctx.SemanticModel == null) return callCode;
+        if (receiver is not (IdentifierNameSyntax or MemberAccessExpressionSyntax)) return callCode;
+        try
+        {
+            var sym = _ctx.SemanticModel.GetSymbolInfo(receiver).Symbol;
+            var type = _ctx.SemanticModel.GetTypeInfo(receiver).Type;
+            bool assignable = sym is IFieldSymbol { IsReadOnly: false, IsConst: false } or ILocalSymbol
+                           || sym is IParameterSymbol { RefKind: RefKind.None };
+            if (!assignable || type == null || !type.IsReferenceType) return callCode;
+            return "(void)(" + callCode + ", " + Write(receiver) + " = NULL)";
+        }
+        catch { return callCode; }
+    }
+
+    private string WriteInvocationCore(InvocationExpressionSyntax inv)
     {
         // Nullable: x.GetValueOrDefault() / x.GetValueOrDefault(defVal)
         if (inv.Expression is MemberAccessExpressionSyntax nvMem

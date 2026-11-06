@@ -90,6 +90,6 @@ public static class Graphics
     public static void DrawTextAlpha(int x, int y, string text, uint color, int scale, byte alpha) { }
     public static void DrawTextShadow(int x, int y, string text, uint color, uint shadow, int scale) { }
     public static void DrawGrid(int x, int y, int w, int h, int cellW, int cellH, uint color) { }
-    /// <summary>Filled polygon through the points (xs[i], ys[i]) for i &lt; count.</summary>
+    /// <summary>Closed outline through the points (xs[i], ys[i]) for i &lt; count.</summary>
     public static void DrawPolygon(int[] xs, int[] ys, int count, uint color) { }
 }

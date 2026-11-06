@@ -22,6 +22,8 @@
 		<EmbeddedResource Include="Runtime\FtpStub.h" />
 		<EmbeddedResource Include="Runtime\cs2sx_prelude.h" />
 		<EmbeddedResource Include="Runtime\NetStub.h" />
+		<EmbeddedResource Include="Runtime\cs2sx_gfx.h" />
+		<EmbeddedResource Include="Runtime\cs2sx_gfx_shaders.h" />
 		<!-- Runtime modules: state + non-trivial functions, compiled once per tool version
 		     (cached object files), exported to cs2sx_out/runtime/. -->
 		<EmbeddedResource Include="Runtime\src\*.c" />

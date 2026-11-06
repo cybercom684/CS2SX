@@ -1,4 +1,4 @@
-﻿// ============================================================================
+// ============================================================================
 // CS2SX — Build/CCompiler.cs
 //
 // Compiles the generated C and the extern-lib sources to a Switch ELF.
@@ -148,7 +148,7 @@ public sealed class CCompiler
             + " -march=armv8-a+crc+crypto -mtune=cortex-a57 -mtp=soft -fPIE"
             + $" -specs=\"{switchSpecs}\""
             + (Directory.Exists(portlibsLib) ? $" -L\"{portlibsLib}\"" : "")
-            + $" -L\"{libnxLib}\" -lnx -lm"
+            + $" -L\"{libnxLib}\" -ldeko3d -lnx -lm"   // deko3d: GPU renderer (rt_gfx.c)
             + " -Wl,--gc-sections";
 
         // Windows caps a command line at ~32 KB — use a response file for many objects.
