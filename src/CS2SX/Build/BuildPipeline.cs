@@ -460,9 +460,11 @@ public sealed class BuildPipeline
             if (externLibs.Count > 0)
                 Log.Info($"ExternLibs: {string.Join(", ", externLibs.Select(l => l.Name))}");
 
-            new CCompiler().Compile(cFiles, elfPath, _buildDir, _projectDir,
+            var compiler = new CCompiler();
+            compiler.Compile(cFiles, elfPath, _buildDir, _projectDir,
                 diagnostics: sharedDiagnostics,
                 externLibs: externLibs);
+            sCompile.Detail = $"{compiler.CompiledCount} compiled, {compiler.CachedCount} cached";
 
             sCompile.Progress = 100;
             sCompile.Status = StageStatus.Done;

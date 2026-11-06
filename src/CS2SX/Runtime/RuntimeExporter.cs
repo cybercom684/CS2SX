@@ -50,6 +50,7 @@ public static class RuntimeExporter
         using var stream = assembly.GetManifestResourceStream(resourceName)
             ?? throw new InvalidOperationException($"Embedded resource nicht gefunden: {resourceName}");
         using var reader = new StreamReader(stream);
-        File.WriteAllText(targetPath, reader.ReadToEnd());
+        // Unchanged runtime headers keep their timestamp → no needless C recompiles.
+        FileUtil.WriteIfChanged(targetPath, reader.ReadToEnd());
     }
 }
