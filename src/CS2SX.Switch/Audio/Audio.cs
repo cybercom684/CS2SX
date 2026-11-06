@@ -1,4 +1,7 @@
-// CS2SX Stub — wird nicht transpiliert
+using System;
+
+namespace CS2SX.Switch;
+
 public static class Audio
 {
     // ── Core ──────────────────────────────────────────────────────────────────

@@ -14,20 +14,13 @@ public class ProjectCreator
 
         Directory.CreateDirectory(projectDir);
 
-        // FIX: ExternLibs-Ordner anlegen (wird für zusätzliche native Bibliotheken benötigt)
-        Directory.CreateDirectory(Path.Combine(projectDir, "externLibs"));
-
         Console.WriteLine($"[CS2SX] Creating project '{appName}'...");
 
-        File.WriteAllText(Path.Combine(projectDir, $"{appName}.csproj"), $"""
-            <Project Sdk="Microsoft.NET.Sdk">
-              <PropertyGroup>
-                <TargetFramework>net8.0</TargetFramework>
-                <Nullable>enable</Nullable>
-                <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-              </PropertyGroup>
-            </Project>
-            """);
+        File.WriteAllText(Path.Combine(projectDir, $"{appName}.csproj"), AppProjectTemplate.Csproj());
+        var nugetConfig = AppProjectTemplate.NugetConfig();
+        if (nugetConfig != null)
+            File.WriteAllText(Path.Combine(projectDir, "nuget.config"), nugetConfig);
+        File.WriteAllText(Path.Combine(projectDir, ".gitignore"), AppProjectTemplate.GitIgnore);
 
         File.WriteAllText(Path.Combine(projectDir, "cs2sx.json"), $$"""
             {
@@ -54,23 +47,6 @@ public class ProjectCreator
             }
             """);
 
-        //Eine einfache Batch-Datei zum Builden und Bereinigen des Projekts (Windows_only)
-        File.WriteAllText(Path.Combine(projectDir, "cs2sx_batch.cmd"), $"""
-            @echo off
-            REM Batch-Datei für CS2SX-Befehle
-            REM Wähle einen Befehl: clean, build, watch
-            set /p cmd=Enter command (clean/build/watch):
-            if "%cmd%"=="clean" (
-                cs2sx clean {appName}.csproj
-            ) else if "%cmd%"=="build" (
-                cs2sx build {appName}.csproj
-            ) else if "%cmd%"=="watch" (
-                cs2sx watch {appName}.csproj
-            ) else (
-                echo Invalid command. Use clean, build, or watch.
-            )
-            """);
-
         // FIX: Default-Icon als 1x1 Pixel JPEG exportieren wenn kein Icon vorhanden
         // Ein echtes Icon muss vom User ersetzt werden, aber der Build schlägt nicht fehl.
         ExportDefaultIconSafe(projectDir);
@@ -78,12 +54,8 @@ public class ProjectCreator
         // FIX: README erzeugen
         WriteReadme(projectDir, appName);
 
-        var stubsExported = ExportStubsSafe(projectDir);
-        if (!stubsExported)
-            Console.Error.WriteLine("[CS2SX] Warnung: Stubs konnten nicht exportiert werden.");
-
         Console.WriteLine($"[CS2SX] Done! Project created at: {projectDir}");
-        Console.WriteLine($"[CS2SX] Build with: cs2sx build {appName}/{appName}.csproj");
+        Console.WriteLine($"[CS2SX] Build with: dotnet build {appName}   (→ {appName}.nro)");
         Console.WriteLine($"[CS2SX] Replace icon.jpg with your own 256x256 JPEG icon.");
     }
 
@@ -163,49 +135,26 @@ public class ProjectCreator
         File.WriteAllText(Path.Combine(projectDir, "README.md"), $"""
             # {appName}
 
-            Nintendo Switch Homebrew App, erstellt mit [CS2SX](https://github.com/yourusername/cs2sx).
+            Nintendo Switch Homebrew App, erstellt mit CS2SX.
 
             ## Build
 
             ```bash
-            cs2sx build {appName}.csproj
+            dotnet build
             ```
 
-            ## Entwicklung
-
-            ```bash
-            cs2sx watch {appName}.csproj
-            ```
-
-            ## Clean
-
-            ```bash
-            cs2sx clean {appName}.csproj
-            ```
-
-            ## Icon
-
-            Ersetze `icon.jpg` mit deinem eigenen 256x256 JPEG-Icon.
+            Erzeugt `{appName}.nro` (oder Build in Visual Studio / Rider). Alternativ direkt:
+            `cs2sx build`, beim Entwickeln `cs2sx watch` (baut bei jeder Änderung neu).
 
             ## Struktur
 
             - `Program.cs` — Einstiegspunkt (Klasse erbt von `SwitchApp`)
             - `cs2sx.json` — Projektmetadaten (Name, Version, Author, Icon)
             - `icon.jpg` — App-Icon (256x256 JPEG)
-            """);
-    }
+            - `romfs/` — optional: Dateien, die in die .nro eingebettet werden
 
-    private static bool ExportStubsSafe(string projectDir)
-    {
-        try
-        {
-            RuntimeExporter.ExportStubs(projectDir);
-            return true;
-        }
-        catch (Exception ex)
-        {
-            Console.Error.WriteLine($"[CS2SX] ExportStubs-Fehler: {ex.Message}");
-            return false;
-        }
+            Die Switch-API (`Graphics`, `Input`, `File`, `Audio`, …) kommt aus dem Paket
+            `CS2SX.Switch` und ist ohne `using` verfügbar.
+            """);
     }
 }

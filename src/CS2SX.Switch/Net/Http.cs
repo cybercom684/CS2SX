@@ -1,4 +1,7 @@
-// CS2SX Stub — wird nicht transpiliert
+using System;
+
+namespace CS2SX.Switch;
+
 
 /// Einfacher HTTP- und HTTPS-Client für Nintendo Switch.
 /// Das URL-Schema entscheidet: "https://" nutzt TLS (Port 443),

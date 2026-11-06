@@ -1,4 +1,7 @@
-// CS2SX Stub — wird nicht transpiliert
+using System;
+
+namespace CS2SX.Switch;
+
 
 /// Sensor-Zustand des Gyroscopes und Beschleunigungsmessers.
 public struct MotionState

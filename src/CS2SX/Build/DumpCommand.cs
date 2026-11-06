@@ -22,11 +22,6 @@ public sealed class DumpCommand
     private readonly string _projectDir;
 
     // Files that are injected by the build pipeline — not user sources.
-    private static readonly HashSet<string> s_skip =
-        new(StringComparer.OrdinalIgnoreCase)
-        {
-            "SwitchApp.cs", "Input.cs", "_GlobalTypes.cs",
-        };
 
     /// <param name="csprojPath">Path to the .csproj file (or its containing directory).</param>
     public DumpCommand(string csprojPath)
@@ -59,7 +54,6 @@ public sealed class DumpCommand
 
         // All project files (used for semantic analysis and generic collection)
         var allFiles = reader.SourceFiles
-            .Where(f => !s_skip.Contains(Path.GetFileName(f)))
             .ToList();
 
         // Subset to actually dump
@@ -78,28 +72,15 @@ public sealed class DumpCommand
 
         // ── Same analysis pipeline as CheckCommand / BuildPipeline ─────────────
 
-        var switchFormsDir = Path.Combine(Path.GetTempPath(),
-            "cs2sx_dump_" + Path.GetFileName(_projectDir));
-        if (Directory.Exists(switchFormsDir))
-            Directory.Delete(switchFormsDir, recursive: true);
-        Directory.CreateDirectory(switchFormsDir);
+        var apiSourceDir = RuntimeExporter.ExportApiSourcesToTemp();
 
-        try
-        {
-            RuntimeExporter.ExportSwitchForms(switchFormsDir);
-        }
-        catch (Exception ex)
-        {
-            Log.Warning($"SwitchForms export failed: {ex.Message}");
-        }
-
-        var switchFormsFiles = Directory.GetFiles(switchFormsDir, "*.cs").ToList();
+        var apiSourceFiles = Directory.GetFiles(apiSourceDir, "*.cs").ToList();
 
         CS2SX.Transpiler.Writers.OperatorOverloadWriter.Reset();
         ProjectTypeScanner.RegisterUserTypes(allFiles);
 
         var genericCollector = new GenericInstantiationCollector();
-        genericCollector.Collect(allFiles, switchFormsFiles);
+        genericCollector.Collect(allFiles, apiSourceFiles);
 
         var interfaceExpander = new InterfaceExpander(genericCollector);
         interfaceExpander.AnalyzeImplementations(allFiles);
@@ -167,7 +148,7 @@ public sealed class DumpCommand
         }
 
         // Cleanup temp dir
-        try { Directory.Delete(switchFormsDir, recursive: true); }
+        try { Directory.Delete(apiSourceDir, recursive: true); }
         catch { }
 
         return exitCode;

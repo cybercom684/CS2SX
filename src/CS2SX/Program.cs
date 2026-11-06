@@ -64,10 +64,11 @@ switch (cli.Command)
             return new CleanCommand(csprojPath).Run();
         }
 
-    case "update":
+    case "migrate":
+    case "update": // pre-0.5 name of the stub-refresh command
         {
             if (string.IsNullOrWhiteSpace(cli.BuildTarget)) return Usage();
-            return new UpdateCommand(cli.BuildTarget).Run();
+            return new MigrateCommand(cli.BuildTarget, cli.DryRun).Run();
         }
 
     case "genstubs":
@@ -126,7 +127,8 @@ static int Usage()
     Log.Info("  cs2sx dump   <path/to/App.csproj> [file] Print generated C to stdout");
     Log.Info("  cs2sx watch  <path/to/App.csproj|folder>  Watch & rebuild on change");
     Log.Info("  cs2sx clean  <path/to/App.csproj|folder>  Delete cs2sx_out/");
-    Log.Info("  cs2sx update <path/to/App.csproj|folder>  Refresh IDE stubs to latest version");
+    Log.Info("  cs2sx migrate <path/to/App.csproj|folder> Move an older project to the CS2SX.Switch package");
+    Log.Info("               [--dry-run]                  Only show what would change");
     Log.Info("  cs2sx genstubs <libnx-include> <output>   Generate LibNX stubs");
     return 1;
 }

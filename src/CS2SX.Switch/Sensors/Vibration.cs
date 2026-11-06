@@ -1,4 +1,7 @@
-// CS2SX Stub — wird nicht transpiliert
+using System;
+
+namespace CS2SX.Switch;
+
 
 /// HD-Rumble-Steuerung für Nintendo Switch JoyCons und Controller.
 /// Wird beim ersten Aufruf automatisch initialisiert.

@@ -14,6 +14,7 @@ public static class CliParser
             ["clean"] = ParseClean,   // FIX: war vergessen
             ["dump"] = ParseDump,
             ["update"] = ParseUpdate,
+            ["migrate"] = ParseUpdate,
         };
 
     public static CliArgs Parse(string[] args)
@@ -86,7 +87,8 @@ public static class CliParser
 
     private static CliArgs ParseUpdate(string[] args) => new()
     {
-        Command = "update",
-        BuildTarget = args.ElementAtOrDefault(0) ?? string.Empty,
+        Command = "migrate",
+        BuildTarget = args.FirstOrDefault(a => !a.StartsWith('-')) ?? string.Empty,
+        DryRun = args.Contains("--dry-run"),
     };
 }

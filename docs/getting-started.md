@@ -19,16 +19,17 @@ Die Umgebungsvariable `DEVKITPRO` muss auf das DevkitPro-Verzeichnis zeigen (z.B
 
 ```bash
 # Aus dem Repository bauen und als globales Tool installieren
-dotnet pack -c Release
-dotnet tool install --global --add-source ./bin/Release CS2SX
+dotnet pack src/CS2SX -c Release -o nupkg
+dotnet tool install --global --add-source ./nupkg CS2SX
 ```
 
-Nach der Installation ist `cs2sx` in jedem Terminal verfügbar.
+Nach der Installation ist `cs2sx` in jedem Terminal verfügbar. Das Tool bringt das
+passende API-Paket `CS2SX.Switch` mit — neue Projekte bauen ohne weitere Einrichtung.
 
 **Update:**
 ```bash
-dotnet pack -c Release
-dotnet tool update --global --add-source ./bin/Release CS2SX
+dotnet pack src/CS2SX -c Release -o nupkg
+dotnet tool update --global --add-source ./nupkg CS2SX
 ```
 
 ---
@@ -45,20 +46,25 @@ Das erzeugt folgende Struktur:
 
 ```
 MeineApp/
-├── MeineApp.csproj       ← .NET-Projektdatei (für IDE)
-├── cs2sx.json            ← CS2SX-Konfiguration (Name, Icon, Version)
-├── Program.cs            ← Einstiegspunkt (wird nicht transpiliert)
-├── MeineApp.cs           ← Deine App-Klasse
+├── MeineApp.csproj       ← .NET-Projekt, referenziert das Paket CS2SX.Switch
+├── nuget.config          ← Paketquelle: das mit cs2sx ausgelieferte CS2SX.Switch
+├── cs2sx.json            ← Name, Autor, Version, Icon
+├── Program.cs            ← Deine App-Klasse (erbt von SwitchApp)
 ├── icon.jpg              ← App-Icon (256×256)
-└── romfs/                ← optionale eingebettete Assets (BMPs etc.)
+├── README.md
+└── .gitignore
 ```
+
+Keine kopierten Stub-Dateien: Die Switch-API (`Graphics`, `Input`, `File`, `Audio`, `Http`, …)
+kommt aus dem Paket und ist ohne `using` verfügbar — IntelliSense, Doku-Kommentare und
+Typprüfung inklusive.
 
 ### 2. App-Klasse
 
-`MeineApp.cs` enthält eine Klasse die von `SwitchApp` erbt:
+`Program.cs` enthält eine Klasse, die von `SwitchApp` erbt:
 
 ```csharp
-public class MeineApp : SwitchApp
+public class MeineAppApp : SwitchApp
 {
     public override void OnInit()
     {
@@ -69,8 +75,8 @@ public class MeineApp : SwitchApp
     public override void OnFrame()
     {
         // Einmal pro Frame (~60fps)
-        if (Input.IsDown(NpadButton.Plus))
-            Environment.Exit(0);   // Beenden mit Plus
+        if (Input.IsDown(NpadButton.A))
+            App.Quit();   // Plus beendet die App ohnehin automatisch
     }
 }
 ```
@@ -78,10 +84,12 @@ public class MeineApp : SwitchApp
 ### 3. Bauen
 
 ```bash
-cs2sx build MeineApp/MeineApp.csproj
+dotnet build MeineApp
 ```
 
-Die fertige `MeineApp.nro` liegt danach im Projektverzeichnis und kann direkt auf die SD-Karte der Switch kopiert werden (`/switch/MeineApp/MeineApp.nro`).
+`dotnet build` (oder Build in Visual Studio / Rider) prüft den C#-Code und erzeugt
+anschließend `MeineApp.nro` im Projektverzeichnis. Kopiere sie auf die SD-Karte der Switch
+(`/switch/MeineApp/MeineApp.nro`). Nur typprüfen ohne `.nro`: `dotnet build -p:CS2SXBuildNro=false`.
 
 ---
 
@@ -90,11 +98,21 @@ Die fertige `MeineApp.nro` liegt danach im Projektverzeichnis und kann direkt au
 | Befehl | Beschreibung |
 |--------|-------------|
 | `cs2sx new <Name>` | Neues Projekt erstellen |
-| `cs2sx build <csproj>` | Vollständiger Build → `.nro` |
-| `cs2sx check <csproj>` | Nur transpilieren, kein GCC (schnelle Fehlerprüfung) |
+| `cs2sx build <csproj>` | Vollständiger Build → `.nro` (das macht auch `dotnet build`) |
+| `cs2sx build <csproj> --transpile-only` | Nur C erzeugen, ohne GCC |
+| `cs2sx check <csproj>` | Nur transpilieren, Warnungen anzeigen (schnelle Fehlerprüfung) |
 | `cs2sx watch <csproj>` | Datei-Watcher mit automatischem Rebuild bei Änderungen |
 | `cs2sx clean <csproj>` | Build-Artefakte löschen (behebt verwaiste Symbole nach Umbenennen) |
+| `cs2sx migrate <csproj>` | Älteres Projekt (mit kopierten Stubs) auf das Paket umstellen |
 | `cs2sx addLib <libName>` | Externe C-Library einbinden |
+
+### Ältere Projekte umstellen
+
+Projekte aus cs2sx-Versionen vor 0.5 enthalten kopierte Stub-Dateien (`SwitchApp.cs`, `Input.cs`,
+`LibNX/`, …). `cs2sx migrate MeineApp --dry-run` zeigt, was sich ändert; ohne `--dry-run` werden
+die Kopien entfernt, die Paketreferenz eingetragen und Stellen gemeldet, die eine Handänderung
+brauchen (z. B. `System.GetBattery()` → `NX.GetBattery()`, `Directory.GetDirectories()` liefert
+jetzt wie in .NET ein `string[]`).
 
 ---
 
@@ -113,11 +131,8 @@ Die fertige `MeineApp.nro` liegt danach im Projektverzeichnis und kann direkt au
 
 ### Was wird transpiliert?
 
-Alle `.cs`-Dateien im Projektverzeichnis **außer**:
-- `Program.cs` (Einstiegspunkt, bleibt unverändert)
-- Dateien in Stub-Ordnern (`Stubs/`, `*Stubs/`)
-- Dateien aus `SwitchFormsLib/` (werden als C-Runtime mitgeliefert)
-
+Alle `.cs`-Dateien des Projekts — auch `Program.cs`, und unabhängig vom Dateinamen. Ausgenommen
+sind nur Build-Ordner (`bin/`, `obj/`, `cs2sx_out/`) und Stub-Ordner von `addLib` (`*Stubs/`).
 ### Inkrementeller Build
 
 Nur geänderte Dateien werden neu transpiliert. Bei Änderungen an Generics oder Interfaces triggert CS2SX automatisch einen vollständigen Rebuild der abhängigen Dateien.

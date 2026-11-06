@@ -31,6 +31,13 @@ fails once after writing them, so nothing passes unreviewed.
 When a fix makes it build, `CompileTests` fails with a reminder to delete the marker.
 These markers are the live bug backlog of the transpiler.
 
+## Working on the API package (src/CS2SX.Switch)
+
+The transpiler embeds the API sources directly, so tests always use the current API.
+App projects built with `dotnet build` restore the **package** instead, and NuGet caches it
+by version: after changing the API without bumping the version in `Directory.Build.props`,
+delete `~/.nuget/packages/cs2sx.switch/<version>` before trying it in an app project.
+
 ## Adding a case
 
 Create `Cases/<Name>/Program.cs` with a class `<Name>App : SwitchApp` (more `.cs`/`.h`

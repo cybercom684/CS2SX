@@ -38,4 +38,10 @@ public sealed class CliArgs
     {
         get; init;
     }
+
+    /// migrate: only report what would change.
+    public bool DryRun
+    {
+        get; init;
+    }
 }

@@ -1,4 +1,6 @@
-﻿// CS2SX Stub — wird nicht transpiliert
+namespace CS2SX.Switch;
+
+/// <summary>Controller buttons for <see cref="Input.IsDown"/> / IsHeld / IsUp.</summary>
 public enum NpadButton
 {
     A, B, X, Y,
@@ -10,13 +12,19 @@ public enum NpadButton
     StickRUp, StickRDown, StickRLeft, StickRRight,
 }
 
+/// <summary>Analog stick position, -32767..32767 per axis (deadzone already applied).</summary>
 public struct StickPos
 {
     public int x;
     public int y;
+
+    /// <summary>|x| scaled to 0..100.</summary>
+    public int NormX => 0;
+    /// <summary>|y| scaled to 0..100.</summary>
+    public int NormY => 0;
 }
 
-/// Touch-Zustand: bis zu 10 simultane Berührungen, x[i]/y[i] in Pixel (0..1280 / 0..720).
+/// <summary>Touch state: up to 10 simultaneous touches, x[i]/y[i] in pixels (0..1280 / 0..720). Handheld mode only.</summary>
 public struct TouchState
 {
     public int count;

@@ -1,4 +1,4 @@
-﻿// ============================================================================
+// ============================================================================
 // CS2SX — Build/CheckCommand.cs  (FIXED)
 //
 // Fixes:
@@ -17,12 +17,6 @@ namespace CS2SX.Build;
 public sealed class CheckCommand
 {
     private readonly string _projectDir;
-
-    private static readonly HashSet<string> s_skip =
-        new(StringComparer.OrdinalIgnoreCase)
-        {
-            "SwitchApp.cs", "Input.cs", "_GlobalTypes.cs",
-        };
 
     public CheckCommand(string csprojPath)
     {
@@ -54,33 +48,19 @@ public sealed class CheckCommand
         }
 
         var files = reader.SourceFiles
-            .Where(f => !s_skip.Contains(Path.GetFileName(f)))
             .ToList();
 
         // FIX: Gleiche Analyse wie BuildPipeline
-        var switchFormsDir = Path.Combine(Path.GetTempPath(),
-            "cs2sx_check_" + Path.GetFileName(_projectDir));
-        if (Directory.Exists(switchFormsDir))
-            Directory.Delete(switchFormsDir, recursive: true);
-        Directory.CreateDirectory(switchFormsDir);
+        var apiSourceDir = RuntimeExporter.ExportApiSourcesToTemp();
 
-        try
-        {
-            RuntimeExporter.ExportSwitchForms(switchFormsDir);
-        }
-        catch (Exception ex)
-        {
-            Log.Warning($"SwitchForms-Export fehlgeschlagen: {ex.Message}");
-        }
-
-        var switchFormsFiles = Directory.GetFiles(switchFormsDir, "*.cs").ToList();
+        var apiSourceFiles = Directory.GetFiles(apiSourceDir, "*.cs").ToList();
 
         // Gleiche projektweite Typ-Fakten wie BuildPipeline
         CS2SX.Transpiler.Writers.OperatorOverloadWriter.Reset();
         ProjectTypeScanner.RegisterUserTypes(files);
 
         var genericCollector = new GenericInstantiationCollector();
-        genericCollector.Collect(files, switchFormsFiles);
+        genericCollector.Collect(files, apiSourceFiles);
 
         var interfaceExpander = new InterfaceExpander(genericCollector);
         interfaceExpander.AnalyzeImplementations(files);
@@ -179,7 +159,7 @@ public sealed class CheckCommand
         }
 
         // Temp-Verzeichnis aufräumen
-        try { Directory.Delete(switchFormsDir, recursive: true); }
+        try { Directory.Delete(apiSourceDir, recursive: true); }
         catch { }
 
         Console.WriteLine(new string('─', 60));

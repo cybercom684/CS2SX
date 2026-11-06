@@ -1,0 +1,22 @@
+<Project>
+  <!--
+    Imported into every CS2SX app project (via the CS2SX.Switch package).
+    Makes the Switch API available without `using` lines, the same way the
+    transpiler sees it.
+  -->
+  <PropertyGroup>
+    <ImplicitUsings Condition="'$(ImplicitUsings)' == ''">enable</ImplicitUsings>
+    <Nullable Condition="'$(Nullable)' == ''">enable</Nullable>
+    <!-- Switch apps transpile to C; the managed build only type-checks the code. -->
+    <OutputType Condition="'$(OutputType)' == ''">Library</OutputType>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Using Include="CS2SX.Switch" />
+    <!-- File/Directory/Path come from CS2SX.Switch (the SD card), not System.IO;
+         both imported would make them ambiguous. -->
+    <Using Remove="System.IO" />
+    <!-- Use CS2SX.Switch.Http instead (System.Net.Http does not exist on the Switch). -->
+    <Using Remove="System.Net.Http" />
+  </ItemGroup>
+</Project>

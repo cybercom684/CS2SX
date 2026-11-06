@@ -1,0 +1,9 @@
+<Project>
+  <!-- Shared by every project in the repo: one version for the cs2sx tool and the
+       CS2SX.Switch API package, so `cs2sx new` always references the matching API. -->
+  <PropertyGroup>
+    <Version>0.5.0</Version>
+    <Authors>CS2SX</Authors>
+    <LangVersion>latest</LangVersion>
+  </PropertyGroup>
+</Project>

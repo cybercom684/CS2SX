@@ -13,18 +13,15 @@ namespace CS2SX.Build;
 /// </summary>
 public sealed class ProjectReader
 {
+    // The single definition of "which .cs files are the app's sources" — build, check,
+    // dump and watch all use it. Files are never excluded by NAME (a user class in
+    // Input.cs or Button.cs is ordinary app code); only build output folders, IDE stub
+    // folders, and legacy stub copies (first line "// CS2SX Stub", from projects
+    // created before the CS2SX.Switch package) are skipped.
     private static readonly HashSet<string> s_excludedDirNames =
         new(StringComparer.OrdinalIgnoreCase)
         {
-            "obj", "bin", "Stubs", "LibNX",
-        };
-
-    private static readonly HashSet<string> s_excludedFileNames =
-        new(StringComparer.OrdinalIgnoreCase)
-        {
-            "SwitchApp.cs",
-            "Input.cs",
-            "_GlobalTypes.cs",
+            "obj", "bin", "cs2sx_out", "Stubs", "LibNX",
         };
 
     public string ProjectDirectory { get; private set; } = string.Empty;
@@ -62,9 +59,6 @@ public sealed class ProjectReader
 
     private bool IsIncluded(string fullPath)
     {
-        var fileName = Path.GetFileName(fullPath);
-        if (s_excludedFileNames.Contains(fileName)) return false;
-
         var relative = Path.GetRelativePath(ProjectDirectory, fullPath);
         var separators = new char[] { Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar };
         var segments = relative.Split(separators, StringSplitOptions.RemoveEmptyEntries);

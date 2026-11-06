@@ -1,0 +1,36 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    The Nintendo Switch API of CS2SX — the single definition of everything a CS2SX
+    app can call (SwitchApp, Graphics, Input, File, Audio, Http, ...).
+
+    App projects reference this package. Its method bodies are never executed: the
+    cs2sx transpiler maps calls to the C runtime (src/CS2SX/Runtime). The same
+    sources are embedded into the transpiler for semantic analysis, so the IDE and
+    the transpiler always see the identical API.
+  -->
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <RootNamespace>CS2SX.Switch</RootNamespace>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <!-- Not every member has docs yet; don't drown real warnings. -->
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+
+    <PackageId>CS2SX.Switch</PackageId>
+    <Description>Nintendo Switch homebrew API for CS2SX: write Switch apps in C#; `dotnet build` produces an .nro.</Description>
+    <PackageTags>nintendo-switch;homebrew;libnx;transpiler</PackageTags>
+    <PackageOutputPath>$(MSBuildThisFileDirectory)..\..\nupkg</PackageOutputPath>
+    <!-- The cs2sx tool bundles this package (see src/CS2SX/CS2SX.csproj). -->
+    <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- MSBuild integration for consuming app projects (implicit usings, .nro build). -->
+    <None Include="build\CS2SX.Switch.props" Pack="true" PackagePath="build\" />
+    <None Include="build\CS2SX.Switch.targets" Pack="true" PackagePath="build\" />
+  </ItemGroup>
+
+</Project>

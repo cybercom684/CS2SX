@@ -11,9 +11,11 @@ public static class TypeInferrer
     {
         if (expr == null) return "int";
 
-        var semantic = ctx.GetSemanticType(expr);
-        if (semantic != null && semantic != "object" && semantic != "?")
-            return semantic;
+        // The expression's own type first: as an operand of `string + x` the converted
+        // type is `object`, which says nothing about how to format x.
+        foreach (var semantic in new[] { ctx.GetSemanticNaturalType(expr), ctx.GetSemanticType(expr) })
+            if (semantic != null && semantic != "object" && semantic != "?")
+                return semantic;
 
         return InferSyntactic(expr, ctx);
     }

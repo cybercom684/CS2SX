@@ -17,14 +17,15 @@ CS2SX transpiliert C#-Quellcode zu C und kompiliert ihn via DevkitPro zu einer N
 ## Installation
 
 ```bash
-dotnet tool install --global --add-source ./bin/Release CS2SX
+dotnet pack src/CS2SX -c Release -o nupkg
+dotnet tool install --global --add-source ./nupkg CS2SX
 ```
 
 ## Update
 
 ```bash
-dotnet pack -c Release
-dotnet tool update --global --add-source ./bin/Release CS2SX
+dotnet pack src/CS2SX -c Release -o nupkg
+dotnet tool update --global --add-source ./nupkg CS2SX
 ```
 
 ---
@@ -35,8 +36,8 @@ dotnet tool update --global --add-source ./bin/Release CS2SX
 # Neues Projekt erstellen
 cs2sx new MeinProjekt
 
-# Projekt bauen
-cs2sx build MeinProjekt/MeinProjekt.csproj
+# Projekt bauen → MeinProjekt.nro (oder Build in Visual Studio / Rider)
+dotnet build MeinProjekt
 
 # Transpile-only Check (kein GCC)
 cs2sx check MeinProjekt/MeinProjekt.csproj
@@ -46,6 +47,9 @@ cs2sx watch MeinProjekt/MeinProjekt.csproj
 
 # Build-Artefakte löschen
 cs2sx clean MeinProjekt/MeinProjekt.csproj
+
+# Projekt einer älteren cs2sx-Version auf das CS2SX.Switch-Paket umstellen
+cs2sx migrate MeinProjekt --dry-run
 
 # Externe C-Library einbinden
 cs2sx addLib <libName> [project.csproj]
@@ -64,11 +68,12 @@ Die fertige `.nro`-Datei liegt danach im Projektverzeichnis und kann direkt auf 
 
 | Befehl | Beschreibung |
 |---|---|
-| `cs2sx new <AppName>` | Erstellt ein neues Projekt mit Vorlage, Platzhalter-Icon und README |
+| `cs2sx new <AppName>` | Erstellt ein neues Projekt (referenziert das Paket `CS2SX.Switch`, keine kopierten Stubs) |
 | `cs2sx build <csproj\|folder>` | Vollständiger Build → `.nro` |
 | `cs2sx check <csproj>` | Transpile-only, kein GCC — schnelle Fehlerprüfung |
 | `cs2sx watch <csproj\|folder>` | Datei-Watcher mit automatischem Rebuild (500ms Debounce) |
 | `cs2sx clean <csproj>` | Löscht `cs2sx_out/` vollständig — behebt Ghost-Symbol-Konflikte nach Klassen-Umbenennungen |
+| `cs2sx migrate <csproj\|folder>` | Stellt ein älteres Projekt auf das Paket um (`--dry-run` zeigt nur an) |
 | `cs2sx addLib <libName>` | Bindet eine externe C-Library ein (Stubs + cs2sx.json-Eintrag) |
 | `cs2sx genstubs <include> <out>` | Generiert C#-Stubs aus libnx-Headern |
 

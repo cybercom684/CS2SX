@@ -1,4 +1,7 @@
-// CS2SX Stub — wird nicht transpiliert
+using System;
+
+namespace CS2SX.Switch;
+
 
 /// Zugriff auf die systemeigene Software-Tastatur (Swkbd-Applet) des Nintendo Switch.
 /// Öffnet die Overlay-Tastatur — BLOCKIERT bis der Nutzer bestätigt oder abbricht.

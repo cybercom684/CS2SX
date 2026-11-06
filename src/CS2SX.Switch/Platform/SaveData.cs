@@ -1,8 +1,11 @@
-// CS2SX Stub — wird nicht transpiliert
+using System;
+
+namespace CS2SX.Switch;
+
 
 /// Zugriff auf den Nintendo Switch Save-Data-Speicher.
 /// Für NRO-Homebrew werden Saves auf der SD-Karte gespeichert:
-///   sdmc:/switch/cs2sx_data/<key>.txt
+///   sdmc:/switch/cs2sx_data/&lt;key&gt;.txt
 ///
 /// Typischer Ablauf:
 ///   if (SaveData.Mount()) {

@@ -379,15 +379,32 @@ public sealed class TranspilerContext
 
     /// <summary>
     /// True when <paramref name="symbol"/> is declared in the user's project — not in
-    /// the embedded API stubs (which are also source trees in the compilation, their
-    /// path being a manifest resource name like "CS2SX.Stubs.SwitchApp.cs").
+    /// the embedded Switch API or libnx bindings (which are also source trees in the
+    /// compilation, their path being a manifest resource name such as
+    /// "CS2SX.Api.Graphics.cs" or "CS2SX.Stubs.LibNX.services.Hid.cs").
     /// </summary>
     public static bool IsUserCode(ISymbol? symbol) =>
         symbol != null
         && symbol.Locations.Any(l => l.IsInSource
             && l.SourceTree?.FilePath is { } p
-            && !p.Contains(".Stubs.", StringComparison.Ordinal)
-            && !p.Contains(".SwitchFormsLib.", StringComparison.Ordinal));
+            && !p.StartsWith("CS2SX.Api.", StringComparison.Ordinal)
+            && !p.Contains(".Stubs.", StringComparison.Ordinal));
+
+    /// <summary>
+    /// The expression's OWN type (before any implicit conversion), e.g. <c>long</c> for
+    /// <c>n</c> in <c>"x" + n</c>, where the converted type would be <c>object</c>.
+    /// </summary>
+    public string? GetSemanticNaturalType(SyntaxNode node)
+    {
+        if (SemanticModel == null) return null;
+        try
+        {
+            var type = SemanticModel.GetTypeInfo(node).Type;
+            if (type == null || type is IErrorTypeSymbol) return null;
+            return FormatTypeSymbol(type);
+        }
+        catch { return null; }
+    }
 
     public string? GetSemanticType(SyntaxNode node)
     {

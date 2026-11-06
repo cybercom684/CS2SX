@@ -73,15 +73,16 @@ public sealed class SemanticModelBuilder
         var trees = new List<SyntaxTree>();
 
         var stubTrees = LoadStubTrees(parseOptions);
-        // The same implicit usings an SDK-style .NET project gets — without them every
-        // `Console`, `List<T>` and LINQ call in user code is an unresolved symbol and
-        // the transpiler loses all semantic type information for it.
+        // The usings an app project gets (SDK implicit usings + the CS2SX.Switch package's
+        // build/CS2SX.Switch.props) — without them every `Console`, `List<T>`, LINQ or
+        // Switch API call in user code is an unresolved symbol for the analysis.
         stubTrees.Add(CSharpSyntaxTree.ParseText(
             "global using System;\n"
             + "global using System.Collections.Generic;\n"
             + "global using System.Linq;\n"
-            + "global using System.Text;\n",
-            parseOptions, path: "CS2SX.Stubs._GlobalUsings.cs"));
+            + "global using System.Text;\n"
+            + "global using CS2SX.Switch;\n",
+            parseOptions, path: "CS2SX.Api._GlobalUsings.cs"));
         trees.AddRange(stubTrees);
         Log.Debug($"SemanticModel: {stubTrees.Count} Stub-Tree(s) geladen");
 
@@ -141,7 +142,8 @@ public sealed class SemanticModelBuilder
         if (errors.Count > 0)
         {
             static bool InStub(Diagnostic d) =>
-                d.Location.SourceTree?.FilePath.Contains(".Stubs.", StringComparison.Ordinal) == true;
+                d.Location.SourceTree?.FilePath is { } p
+                && (p.Contains(".Stubs.", StringComparison.Ordinal) || p.StartsWith("CS2SX.Api.", StringComparison.Ordinal));
             var stubErrors = errors.Count(InStub);
             Log.Debug($"SemanticModel: {errors.Count} Kompilierungsfehler (ignoriert) — "
                     + $"{errors.Count - stubErrors} im Projekt, {stubErrors} in Stubs");
@@ -196,7 +198,9 @@ public sealed class SemanticModelBuilder
 
         foreach (var resourceName in assembly.GetManifestResourceNames())
         {
-            if (!resourceName.Contains(".Stubs."))
+            // The Switch API (CS2SX.Api.*) plus the raw libnx bindings (*.Stubs.LibNX.*).
+            if (!resourceName.StartsWith(CS2SX.Build.RuntimeExporter.ApiResourcePrefix, StringComparison.Ordinal)
+                && !resourceName.Contains(".Stubs."))
                 continue;
 
             try
