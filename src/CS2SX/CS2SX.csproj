@@ -20,6 +20,11 @@
 		<EmbeddedResource Include="Runtime\SaveDataStub.h" />
 		<EmbeddedResource Include="Runtime\HttpStub.h" />
 		<EmbeddedResource Include="Runtime\FtpStub.h" />
+		<EmbeddedResource Include="Runtime\cs2sx_prelude.h" />
+		<EmbeddedResource Include="Runtime\NetStub.h" />
+		<!-- Runtime modules: state + non-trivial functions, compiled once per tool version
+		     (cached object files), exported to cs2sx_out/runtime/. -->
+		<EmbeddedResource Include="Runtime\src\*.c" />
 		<!-- The Switch API (src/CS2SX.Switch) — the very sources app projects compile
 		     against via the CS2SX.Switch package. The transpiler analyses user code
 		     against them, so IDE and transpiler can never disagree about the API. -->

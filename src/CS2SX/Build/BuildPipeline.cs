@@ -34,7 +34,7 @@ public sealed class BuildPipeline
     internal static readonly string[] GeneratedHeaders =
     {
         "_forward.h", "_generics.h", "_interfaces.h",
-        "switchforms.h", "switchapp.h", "AudioStub.h", "FtpStub.h",
+        "switchforms.h", "switchapp.h", "AudioStub.h", "FtpStub.h", "NetStub.h", "cs2sx_prelude.h",
     };
 
     private readonly bool _transpileOnly;
@@ -105,7 +105,7 @@ public sealed class BuildPipeline
                 throw new InvalidOperationException("Keine .cs-Quelldateien gefunden.");
 
             Log.Info($"{reader.SourceFiles.Count} source file(s) found");
-            RuntimeExporter.Export(_buildDir);
+            var runtimeSources = RuntimeExporter.Export(_buildDir);
 
             var switchformsCPath = Path.Combine(_buildDir, "switchforms.c");
             WriteSwitchformsC(switchformsCPath);
@@ -215,6 +215,7 @@ public sealed class BuildPipeline
                 allHeaders.Insert(0, Path.GetFileName(genericHeaderPath));
 
             var cFiles = new List<string> { switchformsCPath };
+            cFiles.AddRange(runtimeSources);   // runtime modules — compiled once, then cached
 
             if (!string.IsNullOrEmpty(genericImplPath) && File.Exists(genericImplPath))
                 cFiles.Add(genericImplPath);
@@ -886,28 +887,8 @@ public sealed class BuildPipeline
         var sb = new StringBuilder();
         sb.AppendLine("#pragma once");
         sb.AppendLine("#include <setjmp.h>");
-        sb.AppendLine("#include <switch.h>");
-        sb.AppendLine("#include <stdlib.h>");
-        sb.AppendLine("#include <string.h>");
-        sb.AppendLine("#include <stdio.h>");
-        sb.AppendLine("#include <stdbool.h>");
-        sb.AppendLine("#include <limits.h>");
-        sb.AppendLine("#include <float.h>");
-        sb.AppendLine("#include <math.h>");
-        sb.AppendLine();
-        sb.AppendLine("typedef void (*Action)(void*);");
-        sb.AppendLine("typedef void (*Action_t)(void);");
-        sb.AppendLine();
-        sb.AppendLine("typedef struct Control    Control;");
-        sb.AppendLine("typedef struct Form       Form;");
-        sb.AppendLine("typedef struct Label      Label;");
-        sb.AppendLine("typedef struct Button     Button;");
-        sb.AppendLine("typedef struct ProgressBar ProgressBar;");
-        sb.AppendLine("typedef struct SwitchApp  SwitchApp;");
-        sb.AppendLine();
-        sb.AppendLine("#include \"switchapp.h\"");
-        sb.AppendLine();
-        sb.AppendLine("extern char _cs2sx_strbuf[1024];");
+        // Runtime types + headers — shared with the runtime modules (rt_*.c).
+        sb.AppendLine("#include \"cs2sx_prelude.h\"");
         sb.AppendLine();
         sb.AppendLine("// Nullable value types: T? → { T value; int has; }");
         foreach (var prim in CS2SX.Core.TypeRegistry.NullablePrimitives)
