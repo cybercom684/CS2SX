@@ -396,12 +396,13 @@ if (File.Exists("/switch/MeineApp/save.txt"))
 | Feature | Alternative |
 |---------|-------------|
 | `async`/`await` | Synchrone Logik — kein echtes Multithreading auf Switch Homebrew |
-| `try`/`catch` | Fehler durch Rückgabewerte / Flags behandeln |
 | Reflection | Nicht verfügbar (kein .NET Runtime) |
 | `dynamic` | Nicht verfügbar |
 | `event` mit mehreren Subscribern | Einfacher `Action`-Delegate (ein Subscriber) |
 | `IQueryable` / LINQ-Query-Syntax | Method-Syntax LINQ verwenden |
 | `record with { }` Expressions | Manuell kopieren |
 | Ranges `arr[1..3]` in foreach | Manuell mit Index-Schleife |
+
+> **`try`/`catch`/`finally`** ist eingeschränkt unterstützt (via `setjmp/longjmp`): ein eigenes `throw` wird gefangen und `finally` läuft, aber es gibt **kein** Typ-Dispatch (alle `catch`-Blöcke werden zusammengeführt) und die Standardbibliothek wirft keine fangbaren Exceptions (`int.Parse`, Null-/Array-Zugriff geben Fehlerwerte zurück statt zu werfen). Für Eingabeprüfung also `int.TryParse(...)` statt `try/catch`. Details: [Grenzen und Workarounds](advanced/limitations.md).
 
 Ausführlichere Infos: [Grenzen und Workarounds](advanced/limitations.md)

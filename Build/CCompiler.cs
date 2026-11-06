@@ -91,7 +91,7 @@ public sealed class CCompiler
                  + defineArgs
                  + " -march=armv8-a+crc+crypto -mtune=cortex-a57 -mtp=soft -fPIE"
                  + " -ffunction-sections -fdata-sections"
-                 + " -std=c11"
+                 + " -std=gnu11"   // gnu11 ⊃ c11; libnx/external-lib headers need GNU extensions (typeof, …)
                  + " -O2 -Wall -Wextra -Wno-unused-parameter"
                  + " -Wno-format-truncation"
                  + " -Wno-unused-function"

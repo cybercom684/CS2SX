@@ -158,6 +158,8 @@ for (int i = 0; i < touch.count; i++)
 
 > Touch und Sticks stehen sowohl über `Input.GetTouch()` / `Input.GetStickLeft()` als auch automatisch als `_touch` / `_stickL` in `SwitchAppEx`-Subklassen zur Verfügung.
 
+> **Touch funktioniert nur im Handheld-Modus** — im Dock gibt es keinen Touchscreen, dann liefert `GetTouch()` immer `count == 0`. Die Koordinaten liegen im logischen 1280×720-Raum (`x[i]` 0–1279, `y[i]` 0–719). Plane Touch-Bedienung immer mit Tasten-Alternative.
+
 ---
 
 ## Input in beliebigen Klassen

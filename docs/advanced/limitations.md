@@ -83,12 +83,15 @@ public string GetText() => $"Wert: {_wert}";
 
 ---
 
-## Keine Exceptions
+## Exceptions (eingeschränkt)
 
-`try`/`catch` wird transpiliert, aber der `catch`-Block ist ein no-op — Exceptions werden nicht abgefangen.
+`try`/`catch`/`finally` wird via `setjmp`/`longjmp` transpiliert. Ein **eigenes** `throw` löst den `catch`-Block aus, und `finally` läuft danach. Aber:
+
+- **Kein Typ-Dispatch:** Es gibt keine RTTI auf der Switch — alle `catch`-Blöcke werden zu einem zusammengeführt und nacheinander ausgeführt (Filtern nach Exception-Typ ist nicht möglich; der Transpiler warnt bei mehreren `catch`).
+- **Die Standardbibliothek wirft nicht:** `int.Parse`, Null-Zugriffe, Array-Grenzen usw. lösen **keine** fangbare Exception aus, sondern geben Fehlerwerte zurück. Ein `try/catch` darum hilft nicht — nutze die `Try…`-Varianten.
 
 ```csharp
-// FALSCH — catch wird nicht ausgeführt
+// FALSCH — int.Parse wirft nicht; der catch wird nie erreicht
 try { var x = int.Parse(eingabe); }
 catch { Console.WriteLine("Kein int!"); }
 

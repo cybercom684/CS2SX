@@ -41,7 +41,7 @@ public sealed class BuildPipeline
     internal static readonly string[] GeneratedHeaders =
     {
         "_forward.h", "_generics.h", "_interfaces.h",
-        "switchforms.h", "switchapp.h", "AudioStub.h",
+        "switchforms.h", "switchapp.h", "AudioStub.h", "FtpStub.h",
     };
 
     public BuildPipeline(string csprojPath)
@@ -1149,6 +1149,7 @@ public sealed class BuildPipeline
         w.WriteLine("u64          g_cs2sx_kDown = 0;");
         w.WriteLine("u64          g_cs2sx_kHeld = 0;");
         w.WriteLine("u64          g_cs2sx_kUp   = 0;");
+        w.WriteLine("int          g_cs2sx_want_exit = 0;");   // set by CS2SX_App_Quit / LaunchNro
         w.WriteLine("unsigned int _cs2sx_rand_state = 12345u;");
         w.WriteLine();
         w.WriteLine("char   _cs2sx_arena[CS2SX_ARENA_SIZE];");

@@ -123,7 +123,7 @@ int höhe   = Graphics.MeasureTextHeight(2);
 
 ## Texturen
 
-CS2SX unterstützt 24-bit und 32-bit BMP-Dateien. Dateien im `romfs/`-Ordner werden automatisch in die `.nro` eingebettet.
+`Graphics.LoadTexture` lädt 24-/32-bit **BMP** eingebaut. Für **PNG/JPEG/GIF/TGA** gibt es `Graphics.LoadImage` (benötigt die `stb_image`-Extern-Lib, siehe [Externe Bibliotheken](advanced/external-libs.md)). Dateien im `romfs/`-Ordner werden automatisch in die `.nro` eingebettet.
 
 ```csharp
 // Aus romfs laden (empfohlen — in .nro eingebettet)
@@ -147,13 +147,28 @@ Graphics.DrawTextureCenteredScaled(tex, rx, ry, rw, rh, tw, th);
 
 | Methode | Beschreibung |
 |---|---|
-| `Graphics.LoadTexture(path)` | BMP laden → `Texture` (oder `null` bei Fehler) |
+| `Graphics.LoadTexture(path)` | **BMP** (24/32-bit) laden → `Texture` (oder `null`) — eingebaut |
+| `Graphics.LoadImage(path)` | **PNG/JPEG/BMP/GIF/TGA** laden → `Texture` — benötigt die `stb_image`-Extern-Lib |
+| `Graphics.LoadImageThumb(path, maxSize)` | Bild laden **und** auf `maxSize` herunterskalieren (Thumbnail) — `stb_image` |
+| `Graphics.ScaleTextureSmooth(src, dw, dh)` | Texture bilinear auf dw × dh resampeln → neue `Texture` |
 | `Graphics.DrawTexture(tex, x, y)` | Texture an Position (x, y) rendern |
 | `Graphics.DrawTextureCentered(tex, rx, ry, rw, rh)` | Zentriert in Bounding-Box |
 | `Graphics.DrawTextureScaled(tex, x, y, tw, th)` | Skaliert auf tw × th Pixel |
 | `Graphics.DrawTextureCenteredScaled(tex, rx, ry, rw, rh, tw, th)` | Skaliert + zentriert |
 
 > `null`-Check empfohlen: `if (tex != null) Graphics.DrawTexture(tex, x, y);`
+
+### Auflösung & weitere Primitive
+
+```csharp
+// VOR Graphics.Init() aufrufen: in 1080p ausgeben (gedockt), Logik bleibt 1280×720
+Graphics.SetOutputResolution(1920, 1080);
+
+// gefülltes/umrandetes Polygon aus einem Punkte-Array
+Graphics.DrawPolygon(points, count, Color.White);
+```
+
+`SetOutputResolution(w, h)` rendert intern hochskaliert (z.B. 1080p) während alle Zeichenkoordinaten im logischen 1280×720-Raum bleiben.
 
 ---
 

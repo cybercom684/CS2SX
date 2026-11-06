@@ -804,18 +804,32 @@ Alle Pfade müssen absolut sein und mit `/switch/` beginnen — außer beim Star
 | `File.ReadAllText(path)` | Datei lesen (max. 1 MB) |
 | `File.ReadAllLines(path)` | Zeilenweise lesen → `List<string>` |
 | `File.WriteAllText(path, content)` | Datei schreiben |
+| `File.AppendAllText(path, content)` | An Datei anhängen |
 | `File.Exists(path)` | Existenz prüfen |
+| `File.Delete(path)` | Datei löschen |
+| `File.Copy(src, dst)` | Datei kopieren |
+| `File.CopyBinary(src, dst)` | Binärsicher kopieren (gechunkt) |
+| `File.Rename(path, newName)` | Datei umbenennen |
+| `File.GetSize(path)` | Größe in Bytes (`long`) |
+| `File.GetModifiedTime(path)` / `GetModifiedString(path)` | Änderungszeit (POSIX `long` / formatiert) |
+| `File.ReadHexDump(path, off, len)` | Hexdump eines Bereichs |
+| `File.CopyBegin/CopyStep/CopyEnd` | Frame-gestückeltes Kopieren (Fortschrittsbalken) |
 | `Directory.Exists(path)` | Verzeichnis prüfen |
 | `Directory.CreateDirectory(path)` | Verzeichnis anlegen |
 | `Directory.Delete(path)` | Verzeichnis löschen |
+| `Directory.DeleteRecursive(path)` | Verzeichnis rekursiv löschen |
+| `Directory.Rename(path, newName)` | Verzeichnis umbenennen |
 | `Directory.GetFiles(path, pattern)` | Dateien → `List<string>` |
 | `Directory.GetDirectories(path)` | Unterverzeichnisse → `List<string>` |
 | `Directory.GetEntries(path)` | Dateien + Verzeichnisse → `List<string>` |
+| `Directory.GetCurrentDirectory()` | Aktuelles Verzeichnis |
 | `Path.Combine(a, b)` | Pfade kombinieren (`a/b`) |
 | `Path.GetFileName(path)` | Dateiname aus Pfad |
 | `Path.GetExtension(path)` | Extension inkl. Punkt (`.bmp`) |
 | `Path.GetDirectoryName(path)` | Verzeichnisteil des Pfades |
 | `Path.IsDirectory(path)` | `true` wenn kein `.` im letzten Segment |
+
+> Freien/gesamten Speicher und Verzeichnisgrößen liefert `Filesystem.GetFreeSpace()` / `GetTotalSpace()` / `DirSize(path)`. ZIP-Pack/Entpacken über die `Archive`-Klasse (benötigt die `miniz`-Extern-Lib).
 
 ## Assets (romfs)
 
@@ -840,8 +854,8 @@ CS2SX erkennt automatisch ob `romfs/` vorhanden ist und bettet es beim Build ein
 | `for`, `foreach`, `while`, `do...while` | ✅ |
 | `foreach` über `List<T>`, Arrays, `string`, `Dictionary<K,V>` | ✅ |
 | `switch` (Wert und Pattern) | ✅ |
-| `try` / `catch` | ✅ (via `setjmp/longjmp`) |
-| `lock` | ✅ | No-op mit Warning — Switch ist single-threaded |
+| `try` / `catch` / `finally` | ⚠️ via `setjmp/longjmp` — nur eigenes `throw` wird gefangen; **kein** Typ-Dispatch (alle `catch` werden zusammengeführt), und Standardbibliotheks-Fehler (`int.Parse`, Null-/Array-Zugriff) werfen nicht. Siehe [Grenzen](docs/advanced/limitations.md) |
+| `lock` | ✅ No-op mit Warning — Switch ist single-threaded |
 | `using` (mit `IDisposable`) | ✅ |
 | `??`, `??=`, `?.` | ✅ |
 

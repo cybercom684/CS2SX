@@ -1484,8 +1484,100 @@ static inline void Dict_str_str_Free(Dict_str_str* d) {
 
 #define CS2SX_FILE_BUF_SIZE 32768
 
+// ============================================================================
+// devoptab (stdio) path support — used for USB mass storage (libusbhsfs).
+// SD-card paths are fsFs-rooted ("/switch/…", no drive prefix) and use the fast
+// fsFs API below. devoptab mounts carry a "<name>:" prefix ("ums0:/…", "romfs:/…")
+// and are reached through the C stdio/dirent layer. cs2sx_devoptab() picks the
+// path; every fs entry point dispatches on it so USB volumes "just work".
+// ============================================================================
+#include <dirent.h>
+#include <sys/stat.h>
+#include <unistd.h>
+
+static inline int cs2sx_devoptab(const char* p) { return p && strchr(p, ':') != NULL; }
+
+static inline void cs2sx_join(char* out, size_t cap, const char* dir, const char* name)
+{
+    size_t L = strlen(dir);
+    if (L > 0 && dir[L - 1] == '/') snprintf(out, cap, "%s%s", dir, name);
+    else                            snprintf(out, cap, "%s/%s", dir, name);
+}
+static inline int cs2sx_dop_isdir(const char* path)
+{
+    struct stat st;
+    if (stat(path, &st) != 0) return 0;
+    return S_ISDIR(st.st_mode) ? 1 : 0;
+}
+static inline int cs2sx_dop_isfile(const char* path)
+{
+    struct stat st;
+    if (stat(path, &st) != 0) return 0;
+    return S_ISDIR(st.st_mode) ? 0 : 1;
+}
+// mode: 0 = all entries · 1 = files only · 2 = directories only
+static inline List_str* cs2sx_dop_entries(const char* path, int mode)
+{
+    List_str* result = List_str_New();
+    if (!result) return result;
+    DIR* dir = opendir(path);
+    if (!dir) return result;
+    struct dirent* e;
+    char pathbuf[1024];
+    while ((e = readdir(dir)) != NULL)
+    {
+        const char* nm = e->d_name;
+        if (nm[0] == '.' && (nm[1] == '\0' || (nm[1] == '.' && nm[2] == '\0'))) continue;
+        cs2sx_join(pathbuf, sizeof(pathbuf), path, nm);
+        if (mode != 0)
+        {
+            int isdir = cs2sx_dop_isdir(pathbuf);
+            if (mode == 1 && isdir) continue;
+            if (mode == 2 && !isdir) continue;
+        }
+        List_str_Add(result, pathbuf);
+    }
+    closedir(dir);
+    return result;
+}
+static inline int cs2sx_dop_rmtree(const char* path)
+{
+    if (!cs2sx_dop_isdir(path)) return remove(path) == 0;
+    DIR* dir = opendir(path);
+    if (dir)
+    {
+        struct dirent* e;
+        char child[1024];
+        while ((e = readdir(dir)) != NULL)
+        {
+            const char* nm = e->d_name;
+            if (nm[0] == '.' && (nm[1] == '\0' || (nm[1] == '.' && nm[2] == '\0'))) continue;
+            cs2sx_join(child, sizeof(child), path, nm);
+            cs2sx_dop_rmtree(child);
+        }
+        closedir(dir);
+    }
+    return rmdir(path) == 0;
+}
+// Binary copy through stdio — works for any mix of SD ("/…") and USB ("ums0:/…"),
+// since the SD card is also reachable via the default devoptab device.
+static inline int cs2sx_dop_copy(const char* src, const char* dst)
+{
+    FILE* in = fopen(src, "rb");
+    if (!in) return 0;
+    FILE* out = fopen(dst, "wb");
+    if (!out) { fclose(in); return 0; }
+    static char cbuf[65536];
+    size_t r; int ok = 1;
+    while ((r = fread(cbuf, 1, sizeof(cbuf), in)) > 0)
+        if (fwrite(cbuf, 1, r, out) != r) { ok = 0; break; }
+    fclose(out); fclose(in);
+    return ok;
+}
+
 static inline int CS2SX_File_Exists(const char* path)
 {
+    if (cs2sx_devoptab(path)) return cs2sx_dop_isfile(path);
     FsFileSystem fs;
     if (R_FAILED(fsOpenSdCardFileSystem(&fs))) return 0;
     FsFile f;
@@ -1497,6 +1589,7 @@ static inline int CS2SX_File_Exists(const char* path)
 
 static inline int CS2SX_Dir_Exists(const char* path)
 {
+    if (cs2sx_devoptab(path)) return cs2sx_dop_isdir(path);
     FsFileSystem fs;
     if (R_FAILED(fsOpenSdCardFileSystem(&fs))) return 0;
     FsDir d;
@@ -1508,6 +1601,7 @@ static inline int CS2SX_Dir_Exists(const char* path)
 
 static inline int CS2SX_Dir_Create(const char* path)
 {
+    if (cs2sx_devoptab(path)) return mkdir(path, 0777) == 0;
     FsFileSystem fs;
     if (R_FAILED(fsOpenSdCardFileSystem(&fs))) return 0;
     Result rc = fsFsCreateDirectory(&fs, path);
@@ -1528,6 +1622,28 @@ static inline const char* CS2SX_File_ReadAllText(const char* path)
 {
     static char* _buf = NULL;
     static int   _cap = 0;
+
+    // devoptab paths (romfs:/, ums0:/ …) use stdio — fsFs only sees the SD card
+    if (cs2sx_devoptab(path))
+    {
+        FILE* fp = fopen(path, "rb");
+        if (!fp) goto ret_empty;
+        fseek(fp, 0, SEEK_END);
+        long sz = ftell(fp);
+        fseek(fp, 0, SEEK_SET);
+        if (sz <= 0 || sz >= (1 << 20)) { fclose(fp); goto ret_empty; }
+        int rneeded = (int)sz + 1;
+        if (_cap < rneeded)
+        {
+            char* nb = (char*)realloc(_buf, rneeded);
+            if (!nb) { fclose(fp); goto ret_empty; }
+            _buf = nb; _cap = rneeded;
+        }
+        size_t rgot = fread(_buf, 1, (size_t)sz, fp);
+        _buf[rgot] = '\0';
+        fclose(fp);
+        return _buf;
+    }
 
     FsFileSystem fs;
     if (R_FAILED(fsOpenSdCardFileSystem(&fs)))
@@ -1584,6 +1700,208 @@ ret_empty:
     return _buf ? _buf : "";
 }
 
+// ============================================================================
+// NSP (PFS0) inspector — parses the container header WITHOUT decryption (no keys
+// needed). Exposes the file list, total content size, ticket presence and a
+// title-id-based type guess. One NSP "open" at a time (for an info viewer).
+// ============================================================================
+
+#define CS2SX_NSP_MAXFILES 64
+static int  g_nsp_ok = 0;
+static char g_nsp_tid[17];
+static int  g_nsp_type = 0;          // 0 unknown · 1 app · 2 update · 3 dlc
+static int  g_nsp_nca = 0;
+static long g_nsp_total = 0;
+static int  g_nsp_ticket = 0;
+static int  g_nsp_nfiles = 0;
+static char g_nsp_name[CS2SX_NSP_MAXFILES][64];
+static long g_nsp_size[CS2SX_NSP_MAXFILES];
+
+static inline int cs2sx_hexv(char c)
+{
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    return -1;
+}
+static inline int cs2sx_ends(const char* s, const char* suf)
+{
+    size_t a = strlen(s), b = strlen(suf);
+    return a >= b && strcmp(s + a - b, suf) == 0;
+}
+
+static inline int CS2SX_Nsp_Open(const char* path)
+{
+    g_nsp_ok = 0; g_nsp_type = 0; g_nsp_nca = 0; g_nsp_total = 0;
+    g_nsp_ticket = 0; g_nsp_nfiles = 0; g_nsp_tid[0] = '\0';
+
+    FsFileSystem fs;
+    if (R_FAILED(fsOpenSdCardFileSystem(&fs))) return 0;
+    FsFile f;
+    if (R_FAILED(fsFsOpenFile(&fs, path, FsOpenMode_Read, &f))) { fsFsClose(&fs); return 0; }
+
+    unsigned char hdr[16];
+    u64 got = 0;
+    if (R_FAILED(fsFileRead(&f, 0, hdr, 16, FsReadOption_None, &got)) || got < 16
+        || hdr[0] != 'P' || hdr[1] != 'F' || hdr[2] != 'S' || hdr[3] != '0')
+    { fsFileClose(&f); fsFsClose(&fs); return 0; }
+
+    unsigned int nfile = hdr[4] | (hdr[5] << 8) | (hdr[6] << 16) | ((unsigned)hdr[7] << 24);
+    unsigned int strsz = hdr[8] | (hdr[9] << 8) | (hdr[10] << 16) | ((unsigned)hdr[11] << 24);
+    if (nfile == 0 || nfile > 4096 || strsz > (1u << 20))
+    { fsFileClose(&f); fsFsClose(&fs); return 0; }
+
+    unsigned int entsz = nfile * 24;
+    unsigned char* ent = (unsigned char*)malloc(entsz);
+    char* strtab = (char*)malloc(strsz + 1);
+    if (!ent || !strtab) { if (ent) free(ent); if (strtab) free(strtab); fsFileClose(&f); fsFsClose(&fs); return 0; }
+
+    u64 g2 = 0, g3 = 0;
+    fsFileRead(&f, 16, ent, entsz, FsReadOption_None, &g2);
+    fsFileRead(&f, 16 + entsz, strtab, strsz, FsReadOption_None, &g3);
+    strtab[strsz] = '\0';
+    if (g2 < entsz) { free(ent); free(strtab); fsFileClose(&f); fsFsClose(&fs); return 0; }
+
+    int stored = 0;
+    for (unsigned int i = 0; i < nfile; i++)
+    {
+        unsigned char* e = ent + (size_t)i * 24;
+        u64 fsize = (u64)e[8] | ((u64)e[9] << 8) | ((u64)e[10] << 16) | ((u64)e[11] << 24)
+                  | ((u64)e[12] << 32) | ((u64)e[13] << 40) | ((u64)e[14] << 48) | ((u64)e[15] << 56);
+        unsigned int noff = e[16] | (e[17] << 8) | (e[18] << 16) | ((unsigned)e[19] << 24);
+        const char* name = (noff < strsz) ? (strtab + noff) : "";
+
+        g_nsp_total += (long)fsize;
+        if (cs2sx_ends(name, ".nca")) g_nsp_nca++;
+        if (cs2sx_ends(name, ".tik"))
+        {
+            g_nsp_ticket = 1;
+            if (g_nsp_tid[0] == '\0')   // title id = first 16 hex of the rights-id filename
+            {
+                int ok = 1;
+                for (int k = 0; k < 16; k++) if (cs2sx_hexv(name[k]) < 0) { ok = 0; break; }
+                if (ok) { for (int k = 0; k < 16; k++) g_nsp_tid[k] = name[k]; g_nsp_tid[16] = '\0'; }
+            }
+        }
+        if (stored < CS2SX_NSP_MAXFILES)
+        {
+            int j = 0;
+            while (name[j] && j < 63) { g_nsp_name[stored][j] = name[j]; j++; }
+            g_nsp_name[stored][j] = '\0';
+            g_nsp_size[stored] = (long)fsize;
+            stored++;
+        }
+    }
+    g_nsp_nfiles = stored;
+
+    // type guess from the title-id's low 12 bits: 000 = app, 800 = update, else dlc
+    if (g_nsp_tid[0])
+    {
+        int v = cs2sx_hexv(g_nsp_tid[13]) * 256 + cs2sx_hexv(g_nsp_tid[14]) * 16 + cs2sx_hexv(g_nsp_tid[15]);
+        if (v == 0) g_nsp_type = 1;
+        else if (v == 0x800) g_nsp_type = 2;
+        else g_nsp_type = 3;
+    }
+
+    free(ent); free(strtab); fsFileClose(&f); fsFsClose(&fs);
+    g_nsp_ok = 1;
+    return 1;
+}
+static inline int         CS2SX_Nsp_Ok(void)         { return g_nsp_ok; }
+static inline const char* CS2SX_Nsp_TitleId(void)    { return g_nsp_tid; }
+static inline int         CS2SX_Nsp_Type(void)       { return g_nsp_type; }
+static inline int         CS2SX_Nsp_NcaCount(void)   { return g_nsp_nca; }
+static inline long        CS2SX_Nsp_TotalSize(void)  { return g_nsp_total; }
+static inline int         CS2SX_Nsp_HasTicket(void)  { return g_nsp_ticket; }
+static inline int         CS2SX_Nsp_FileCount(void)  { return g_nsp_nfiles; }
+static inline const char* CS2SX_Nsp_FileName(int i)  { if (i < 0 || i >= g_nsp_nfiles) return ""; return g_nsp_name[i]; }
+static inline long        CS2SX_Nsp_FileSize(int i)  { if (i < 0 || i >= g_nsp_nfiles) return 0; return g_nsp_size[i]; }
+
+// ============================================================================
+// USB mass storage via libusbhsfs (FAT/exFAT). Only active when the lib header is
+// vendored into the project (else stubs). Mounted volumes appear as devoptab
+// prefixes ("ums0:") — file access on those paths goes through stdio.
+// IMPORTANT: the cache below is a per-TU static (like the copy engine), so ALL
+// CS2SX_Usb_* calls must originate from ONE C# class (UsbManager) to stay coherent.
+// ============================================================================
+#if defined(__has_include)
+#  if __has_include(<usbhsfs.h>)
+#    include <usbhsfs.h>
+#    define CS2SX_HAVE_USB 1
+#  endif
+#endif
+
+#ifdef CS2SX_HAVE_USB
+#define CS2SX_USB_MAXDEV 8
+static int           g_usb_inited = 0;
+static UsbHsFsDevice g_usb_dev[CS2SX_USB_MAXDEV];
+static unsigned int  g_usb_count = 0;
+
+static inline int CS2SX_Usb_Init(void)
+{
+    if (g_usb_inited) return 1;
+    if (R_FAILED(usbHsFsInitialize(0))) return 0;
+    g_usb_inited = 1;
+    g_usb_count = usbHsFsListMountedDevices(g_usb_dev, CS2SX_USB_MAXDEV);
+    return 1;
+}
+static inline void CS2SX_Usb_Exit(void)
+{
+    if (g_usb_inited) { usbHsFsExit(); g_usb_inited = 0; g_usb_count = 0; }
+}
+// Polls for mount/unmount each frame. Drives off the live device COUNT rather than
+// only the hotplug event — libusbhsfs mounts on a background thread, so a device
+// present at boot can appear a few frames after init; the event alone is fragile.
+// Returns 1 if the mounted-device set changed (so the UI can refresh).
+static inline int CS2SX_Usb_Poll(void)
+{
+    if (!g_usb_inited) return 0;
+    UEvent* ev = usbHsFsGetStatusChangeUserEvent();   // drain so it doesn't accumulate
+    if (ev) waitSingle(waiterForUEvent(ev), 0);
+    unsigned int now = usbHsFsGetMountedDeviceCount();
+    if (now != g_usb_count)
+    {
+        g_usb_count = usbHsFsListMountedDevices(g_usb_dev, CS2SX_USB_MAXDEV);
+        return 1;
+    }
+    return 0;
+}
+static inline int CS2SX_Usb_Count(void) { return (int)g_usb_count; }
+static inline int CS2SX_Usb_Inited(void) { return g_usb_inited; }
+static inline const char* CS2SX_Usb_Name(int i)     // e.g. "ums0:"
+{
+    if (!g_usb_inited || i < 0 || i >= (int)g_usb_count) return "";
+    return g_usb_dev[i].name;
+}
+static inline const char* CS2SX_Usb_FsType(int i)
+{
+    if (!g_usb_inited || i < 0 || i >= (int)g_usb_count) return "";
+    return LIBUSBHSFS_FS_TYPE_STR(g_usb_dev[i].fs_type);
+}
+static inline long CS2SX_Usb_Capacity(int i)
+{
+    if (!g_usb_inited || i < 0 || i >= (int)g_usb_count) return 0;
+    return (long)g_usb_dev[i].capacity;
+}
+static inline int CS2SX_Usb_Unmount(int i)
+{
+    if (!g_usb_inited || i < 0 || i >= (int)g_usb_count) return 0;
+    bool ok = usbHsFsUnmountDevice(&g_usb_dev[i], true);
+    g_usb_count = usbHsFsListMountedDevices(g_usb_dev, CS2SX_USB_MAXDEV);
+    return ok ? 1 : 0;
+}
+#else   // no libusbhsfs vendored — inert stubs so mapped calls still link if referenced
+static inline int         CS2SX_Usb_Init(void)        { return 0; }
+static inline void        CS2SX_Usb_Exit(void)        { }
+static inline int         CS2SX_Usb_Poll(void)        { return 0; }
+static inline int         CS2SX_Usb_Count(void)       { return 0; }
+static inline int         CS2SX_Usb_Inited(void)      { return 0; }
+static inline const char* CS2SX_Usb_Name(int i)       { (void)i; return ""; }
+static inline const char* CS2SX_Usb_FsType(int i)     { (void)i; return ""; }
+static inline long        CS2SX_Usb_Capacity(int i)   { (void)i; return 0; }
+static inline int         CS2SX_Usb_Unmount(int i)    { (void)i; return 0; }
+#endif
+
 // FIX 3: ReadAllLines macht eine eigene Kopie des Inhalts —
 // kein Aliasing mit dem ReadAllText-Buffer möglich.
 static inline List_str* CS2SX_File_ReadAllLines(const char* path)
@@ -1624,6 +1942,15 @@ static inline List_str* CS2SX_File_ReadAllLines(const char* path)
 static inline int CS2SX_File_WriteAllText(const char* path, const char* content)
 {
     if (!content) return 0;
+    if (cs2sx_devoptab(path))
+    {
+        FILE* fp = fopen(path, "wb");
+        if (!fp) return 0;
+        size_t L = strlen(content);
+        int ok = fwrite(content, 1, L, fp) == L;
+        fclose(fp);
+        return ok ? 1 : 0;
+    }
     FsFileSystem fs;
     if (R_FAILED(fsOpenSdCardFileSystem(&fs))) return 0;
     fsFsDeleteFile(&fs, path);
@@ -1671,6 +1998,7 @@ static inline int CS2SX_File_AppendAllText(const char* path, const char* content
 
 static inline int CS2SX_File_Delete(const char* path)
 {
+    if (cs2sx_devoptab(path)) return remove(path) == 0;
     FsFileSystem fs;
     if (R_FAILED(fsOpenSdCardFileSystem(&fs))) return 0;
     Result rc = fsFsDeleteFile(&fs, path);
@@ -1705,6 +2033,10 @@ static inline int CS2SX_Dir_Delete(const char* path)
 // non-text data) this preserves images, NRO, archives, etc. byte-for-byte.
 static inline int CS2SX_File_CopyBinary(const char* src, const char* dst)
 {
+    // If either side is a devoptab mount (USB), copy through stdio — it reaches
+    // both the SD card and "ums0:/…", so cross-device copies work transparently.
+    if (cs2sx_devoptab(src) || cs2sx_devoptab(dst)) return cs2sx_dop_copy(src, dst);
+
     FsFileSystem fs;
     if (R_FAILED(fsOpenSdCardFileSystem(&fs))) return 0;
 
@@ -1881,6 +2213,11 @@ static inline long long CS2SX_File_CopyStep(int chunkBytes)
 // File size in bytes (-1 if missing/unreadable).
 static inline long long CS2SX_File_GetSize(const char* path)
 {
+    if (cs2sx_devoptab(path))
+    {
+        struct stat st;
+        return stat(path, &st) == 0 ? (long long)st.st_size : -1;
+    }
     FsFileSystem fs;
     if (R_FAILED(fsOpenSdCardFileSystem(&fs))) return -1;
     FsFile f;
@@ -1895,6 +2232,11 @@ static inline long long CS2SX_File_GetSize(const char* path)
 // Last-modified time as a POSIX timestamp (0 if unavailable). Use for sorting.
 static inline long long CS2SX_File_GetMTime(const char* path)
 {
+    if (cs2sx_devoptab(path))
+    {
+        struct stat st;
+        return stat(path, &st) == 0 ? (long long)st.st_mtime : 0;
+    }
     FsFileSystem fs;
     if (R_FAILED(fsOpenSdCardFileSystem(&fs))) return 0;
     FsTimeStampRaw ts;
@@ -1907,6 +2249,7 @@ static inline long long CS2SX_File_GetMTime(const char* path)
 // Renames/moves a file within the SD filesystem (cheap — no data copy).
 static inline int CS2SX_File_Rename(const char* src, const char* dst)
 {
+    if (cs2sx_devoptab(src) || cs2sx_devoptab(dst)) return rename(src, dst) == 0;
     FsFileSystem fs;
     if (R_FAILED(fsOpenSdCardFileSystem(&fs))) return 0;
     Result rc = fsFsRenameFile(&fs, src, dst);
@@ -1916,6 +2259,7 @@ static inline int CS2SX_File_Rename(const char* src, const char* dst)
 
 static inline int CS2SX_Dir_Rename(const char* src, const char* dst)
 {
+    if (cs2sx_devoptab(src) || cs2sx_devoptab(dst)) return rename(src, dst) == 0;
     FsFileSystem fs;
     if (R_FAILED(fsOpenSdCardFileSystem(&fs))) return 0;
     Result rc = fsFsRenameDirectory(&fs, src, dst);
@@ -1926,6 +2270,7 @@ static inline int CS2SX_Dir_Rename(const char* src, const char* dst)
 // Recursively deletes a directory and everything in it.
 static inline int CS2SX_Dir_DeleteRecursive(const char* path)
 {
+    if (cs2sx_devoptab(path)) return cs2sx_dop_rmtree(path);
     FsFileSystem fs;
     if (R_FAILED(fsOpenSdCardFileSystem(&fs))) return 0;
     Result rc = fsFsDeleteDirectoryRecursively(&fs, path);
@@ -2022,6 +2367,8 @@ static inline const char* CS2SX_Dir_GetCurrent(void)
 // GetDirectories aufgerufen wird.
 static inline List_str* CS2SX_Dir_GetFiles(const char* path, const char* pattern)
 {
+    (void)pattern;
+    if (cs2sx_devoptab(path)) return cs2sx_dop_entries(path, 1);
     List_str* result = List_str_New();
     if (!result) return result;
     FsFileSystem fs;
@@ -2052,6 +2399,7 @@ static inline List_str* CS2SX_Dir_GetFiles(const char* path, const char* pattern
 // FIX 2: Ebenfalls stack-alloziert
 static inline List_str* CS2SX_Dir_GetDirectories(const char* path)
 {
+    if (cs2sx_devoptab(path)) return cs2sx_dop_entries(path, 2);
     List_str* result = List_str_New();
     if (!result) return result;
     FsFileSystem fs;
@@ -2080,6 +2428,7 @@ static inline List_str* CS2SX_Dir_GetDirectories(const char* path)
 // FIX 2: Ebenfalls stack-alloziert
 static inline List_str* CS2SX_Dir_GetEntries(const char* path)
 {
+    if (cs2sx_devoptab(path)) return cs2sx_dop_entries(path, 0);
     List_str* result = List_str_New();
     if (!result) return result;
     FsFileSystem fs;
@@ -2142,6 +2491,8 @@ static inline const char* CS2SX_Path_GetDirectoryName(const char* path)
 
 static inline int CS2SX_Path_IsDirectory(const char* path)
 {
+    // USB/devoptab: stat is reliable. SD keeps the cheap extension heuristic.
+    if (cs2sx_devoptab(path)) return cs2sx_dop_isdir(path);
     return CS2SX_Path_GetExtension(path)[0] == '\0';
 }
 

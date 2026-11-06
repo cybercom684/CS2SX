@@ -39,6 +39,20 @@ public sealed class SystemExtHandler : InvocationHandlerBase
             return true;
         }
 
+        // App.LaunchNro(path) — queue another .nro via hbloader, then exit cleanly.
+        if (calleeStr == "App.LaunchNro")
+        {
+            var p = args.Count > 0 ? args[0] : "NULL";
+            result = "CS2SX_App_LaunchNro(" + p + ")";
+            return true;
+        }
+        // App.Quit() — request a clean exit of the app.
+        if (calleeStr == "App.Quit")
+        {
+            result = "CS2SX_App_Quit()";
+            return true;
+        }
+
         // Sys.FreeStr(s) — explicitly free a heap-allocated string (from
         // _cs2sx_heap_strdup). For manual memory management of owned string fields
         // in a finalizer. NULL-safe; must NOT be called on string literals.

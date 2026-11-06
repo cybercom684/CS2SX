@@ -198,6 +198,9 @@ public sealed class CSharpToC : CSharpSyntaxWalker
 
         CollectFieldTypes(node);
 
+        if (_mode == TranspileMode.Implementation)
+            CheckFootguns(node);
+
         if (VTableBuilder.HasVirtualMethods(node))
             _ctx.VTableTypes.Add(node.Identifier.Text);
 
@@ -918,43 +921,106 @@ public sealed class CSharpToC : CSharpSyntaxWalker
         _ctx.Out.WriteLine();
     }
 
+    // Early diagnostics for the most common silent footguns — these otherwise only
+    // surface as confusing GCC/linker errors, or worse, wrong behaviour at runtime.
+    private void CheckFootguns(ClassDeclarationSyntax node)
+    {
+        // 1) Instance methods named Free/Retain collide with the generated
+        //    <Class>_Free / <Class>_Retain (destructor + refcount helpers) → C redefinition.
+        foreach (var m in node.Members.OfType<MethodDeclarationSyntax>())
+        {
+            if (m.Modifiers.Any(mod => mod.IsKind(SyntaxKind.StaticKeyword))) continue;
+            var mn = m.Identifier.Text;
+            if (mn == "Free" || mn == "Retain")
+                _ctx.Warn(m, $"Methode '{mn}()' kollidiert mit der generierten {node.Identifier.Text}_{mn}-Funktion (Destruktor/Refcount). Methode umbenennen (z.B. 'Release', 'Cleanup').");
+        }
+
+        // 2) A field named exactly like its own type shadows static calls on that type
+        //    (e.g. `Settings Settings;` makes `Settings.Foo()` resolve to the field).
+        foreach (var f in node.Members.OfType<FieldDeclarationSyntax>())
+        {
+            var typeName = f.Declaration.Type.ToString();
+            foreach (var v in f.Declaration.Variables)
+                if (v.Identifier.Text == typeName)
+                    _ctx.Warn(f, $"Feld '{typeName} {v.Identifier.Text}' heißt wie sein Typ → statische Aufrufe wie '{typeName}.Methode(...)' lösen auf das Feld auf. Feld umbenennen.");
+        }
+
+        // 3) Only ONE instance constructor is supported — extra ones are silently
+        //    dropped (only the first is emitted). Make that explicit.
+        var instanceCtors = node.Members.OfType<ConstructorDeclarationSyntax>()
+            .Where(c => !c.Modifiers.Any(m => m.IsKind(SyntaxKind.StaticKeyword)))
+            .ToList();
+        if (instanceCtors.Count > 1)
+            _ctx.Warn(instanceCtors[1], $"Klasse '{node.Identifier.Text}' hat {instanceCtors.Count} Konstruktoren — nur der erste wird transpiliert, die übrigen werden ignoriert. Zu EINEM Konstruktor mit optionalen Parametern zusammenführen.");
+
+        // 4) `: this(...)` constructor delegation is not supported (no alloc/init split).
+        foreach (var c in instanceCtors)
+            if (c.Initializer != null && c.Initializer.IsKind(SyntaxKind.ThisConstructorInitializer))
+                _ctx.Warn(c, $"Konstruktor-Delegation ': this(...)' wird nicht unterstützt → der Ziel-Konstruktor wird nicht aufgerufen. Gemeinsame Initialisierung in eine Methode auslagern und aus beiden aufrufen.");
+    }
+
     private void WriteStaticArrayFieldDef(FieldDeclarationSyntax field, string className, string csType)
     {
         var baseType = csType[..^2].Trim();
         var cType = baseType == "string" ? "const char*" : TypeRegistry.MapType(baseType);
-        var isConst = field.Modifiers.Any(m => m.IsKind(SyntaxKind.ReadOnlyKeyword))
-                    || field.Modifiers.Any(m => m.IsKind(SyntaxKind.ConstKeyword));
 
+        // The header declares these as `extern T name[];` (WriteStaticFieldExterns),
+        // so the definition must be NON-static and sized to match. (A `static`
+        // definition would conflict; a `[1]` size would overflow on every write.)
         foreach (var v in field.Declaration.Variables)
         {
             var fieldName = v.Identifier.Text.TrimStart('_');
             var fullName = className + "_" + fieldName;
 
-            if (v.Initializer?.Value is ArrayCreationExpressionSyntax arr
-                && arr.Initializer != null)
+            if (v.Initializer?.Value is ArrayCreationExpressionSyntax arr)
             {
-                var elems = arr.Initializer.Expressions
-                    .Select(e => _exprWriter.Write(e))
-                    .ToList();
-                var mod = isConst ? "static const " : "static ";
-                _ctx.Out.WriteLine(mod + cType + " " + fullName + "[] = { "
-                    + string.Join(", ", elems) + " };");
-                // Emit count macro so .Length works via fullName_count
-                _ctx.Out.WriteLine($"#define {fullName}_count {elems.Count}");
+                if (arr.Initializer != null)
+                {
+                    // new T[] { a, b, c } / new T[n] { ... } — explicit element list
+                    var elems = arr.Initializer.Expressions
+                        .Select(e => _exprWriter.Write(e))
+                        .ToList();
+                    _ctx.Out.WriteLine(cType + " " + fullName + "[] = { "
+                        + string.Join(", ", elems) + " };");
+                    _ctx.Out.WriteLine($"#define {fullName}_count {elems.Count}");
+                }
+                else if (arr.Type.RankSpecifiers.Count > 0
+                         && arr.Type.RankSpecifiers[0].Sizes.Count > 0
+                         && arr.Type.RankSpecifiers[0].Sizes[0] is not OmittedArraySizeExpressionSyntax)
+                {
+                    // new T[N] — sized, zero-initialized
+                    var sizeExpr = _exprWriter.Write(arr.Type.RankSpecifiers[0].Sizes[0]);
+                    _ctx.Out.WriteLine(cType + " " + fullName + "[" + sizeExpr + "] = {0};");
+                    _ctx.Out.WriteLine($"#define {fullName}_count ({sizeExpr})");
+                }
+                else
+                {
+                    _ctx.Out.WriteLine(cType + " " + fullName + "[1];");
+                }
             }
             else if (v.Initializer?.Value is ImplicitArrayCreationExpressionSyntax implArr)
             {
                 var elems = implArr.Initializer.Expressions
                     .Select(e => _exprWriter.Write(e))
                     .ToList();
-                var mod = isConst ? "static const " : "static ";
-                _ctx.Out.WriteLine(mod + cType + " " + fullName + "[] = { "
+                _ctx.Out.WriteLine(cType + " " + fullName + "[] = { "
+                    + string.Join(", ", elems) + " };");
+                _ctx.Out.WriteLine($"#define {fullName}_count {elems.Count}");
+            }
+            else if (v.Initializer?.Value is InitializerExpressionSyntax bareInit
+                     && bareInit.IsKind(SyntaxKind.ArrayInitializerExpression))
+            {
+                // int[] x = { 1, 2, 3 } — bare collection initializer (no `new`)
+                var elems = bareInit.Expressions
+                    .Select(e => _exprWriter.Write(e))
+                    .ToList();
+                _ctx.Out.WriteLine(cType + " " + fullName + "[] = { "
                     + string.Join(", ", elems) + " };");
                 _ctx.Out.WriteLine($"#define {fullName}_count {elems.Count}");
             }
             else
             {
-                _ctx.Out.WriteLine("static " + cType + " " + fullName + "[1];");
+                _ctx.Out.WriteLine(cType + " " + fullName + "[1];");
             }
         }
     }

@@ -19,6 +19,7 @@ extern PadState g_cs2sx_pad;
 #include "SwkbdStub.h"
 #include "SaveDataStub.h"
 #include "HttpStub.h"
+#include "FtpStub.h"
 
 // ============================================================================
 // Farb-Hilfsmakros (RGBA8888)
@@ -463,6 +464,22 @@ extern PadState    g_cs2sx_pad;
 extern u64         g_cs2sx_kDown;
 extern u64         g_cs2sx_kHeld;
 extern u64         g_cs2sx_kUp;
+extern int         g_cs2sx_want_exit;   // set to break the main loop (clean exit)
+
+// Requests a clean exit of the app (the main loop breaks after the current frame;
+// OnExit + cleanup still run). App.Quit() in C#.
+static inline void CS2SX_App_Quit(void) { g_cs2sx_want_exit = 1; }
+
+// Queues another homebrew .nro to be launched after this app exits (via the
+// hbloader), then requests a clean exit. App.LaunchNro(path) in C#. The path is
+// passed as argv[0]. No-op exit only if next-load isn't available (e.g. not run
+// through the hbmenu) — then it just quits.
+static inline void CS2SX_App_LaunchNro(const char* path)
+{
+    if (path && envHasNextLoad())
+        envSetNextLoad(path, path);
+    g_cs2sx_want_exit = 1;
+}
 
 // ============================================================================
 // Graphics primitives
@@ -1253,6 +1270,8 @@ static inline void SwitchApp_Run(SwitchApp* self)
         }
 
         if (self->kDown & HidNpadButton_Plus)
+            break;
+        if (g_cs2sx_want_exit)
             break;
     }
 
