@@ -8,6 +8,7 @@ Runtime/
 ├── cs2sx_prelude.h     first include of every TU (app code via _forward.h, runtime modules)
 ├── cs2sx_exc.h         exceptions: type info, try frames, CS2SX_Throw
 ├── cs2sx_delegate.h    delegates/events: CS2SX_Delegate, invocation lists, closures
+├── cs2sx_gfx.h         GPU 2D renderer (deko3d);  cs2sx_font.h  TrueType text
 ├── switchapp.h         app loop, graphics, input — includes all headers below
 ├── switchforms.h       strings, collections, StringBuilder, file system, NSP, USB, ...
 ├── AudioStub.h  HttpStub.h  FtpStub.h  NetStub.h  MotionStub.h  VibrationStub.h
@@ -64,6 +65,13 @@ new header also needs an entry in `BuildPipeline.GeneratedHeaders`.
 one textured/vertex-colored pipeline, a per-frame vertex ring, draws batched by texture
 (the 8×8 font and a white block share one atlas, so text and solid shapes batch
 together), lazily uploaded textures, a one-pixel alpha fringe for anti-aliasing.
+
+**Fonts** (`cs2sx_font.h` + `src/rt_font.c`): FreeType rasterizes glyphs at the physical
+output size into 1024² atlas pages (white + coverage alpha); changed regions upload via
+`CS2SX_Gfx_UpdateTextureRect`, quads are snapped to physical pixels. `rt_font.c` is an
+*optional* module: `Build/OptionalRuntimeModules.cs` compiles it and adds
+`-lfreetype -lharfbuzz -lpng -lbz2 -lz` only when the generated C calls `Font_*` — a
+new module with a heavy dependency belongs in that table.
 
 Shaders live in `shaders/*.glsl`. After editing them run `tools/build-shaders.ps1`
 (needs devkitPro's `uam`); it regenerates `cs2sx_gfx_shaders.h`, which is committed so

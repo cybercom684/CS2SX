@@ -1047,6 +1047,46 @@ void Graphics_DrawTextureCenteredScaled(Texture* tex, int rx, int ry, int rw, in
     if (tex) Graphics_DrawTextureScaled(tex, rx + (rw - tw) / 2, ry + (rh - th) / 2, tw, th);
 }
 
+// ── For other runtime modules (fonts) ────────────────────────────────────────
+
+// From the scale itself, so it is right in OnInit too (before the GPU exists).
+float CS2SX_Gfx_PhysicalPixel(void) { return g_sn > 0 ? (float)g_sd / (float)g_sn : 1.0f; }
+
+void CS2SX_Gfx_TexQuad(Texture* t, float x, float y, float w, float h,
+                       float u0, float v0, float u1, float v1, u32 color)
+{
+    if (!t || t->f_Width <= 0 || t->f_Height <= 0) return;
+    float iw = 1.0f / (float)t->f_Width, ih = 1.0f / (float)t->f_Height;
+    tex_quad(gfx_tex_slot(t), x, y, w, h, u0 * iw, v0 * ih, u1 * iw, v1 * ih, color);
+}
+
+int CS2SX_Gfx_UpdateTextureRect(Texture* t, int x, int y, int w, int h)
+{
+    if (!t || w <= 0 || h <= 0) return 1;
+    GfxTexGpu* g = (GfxTexGpu*)t->_gpu;
+    if (!g) return 1;              // not on the GPU yet: the first draw uploads everything
+    if (!s_inFrame) return 0;      // copies are recorded into a frame — try again later
+
+    uint32_t bytes = (uint32_t)w * (uint32_t)h * 4u;
+    DkMemBlockMaker sm;
+    dkMemBlockMakerDefaults(&sm, s_dev, ALIGN_UP(bytes, DK_MEMBLOCK_ALIGNMENT));
+    sm.flags = DkMemBlockFlags_CpuUncached | DkMemBlockFlags_GpuCached;
+    DkMemBlock staging = dkMemBlockCreate(&sm);
+    if (!staging) return 0;
+    u32* dst = (u32*)dkMemBlockGetCpuAddr(staging);
+    for (int r = 0; r < h; r++)
+        memcpy(dst + (size_t)r * w, t->f_Pixels + (size_t)(y + r) * t->f_Width + x, (size_t)w * 4u);
+
+    DkImageView view;
+    dkImageViewDefaults(&view, &g->image);
+    DkCopyBuf src = { dkMemBlockGetGpuAddr(staging), 0, 0 };
+    DkImageRect rect = { (uint32_t)x, (uint32_t)y, 0, (uint32_t)w, (uint32_t)h, 1 };
+    dkCmdBufCopyBufferToImage(s_cb, &src, &view, &rect, 0);
+    dkCmdBufBarrier(s_cb, DkBarrier_Full, DkInvalidateFlags_Image);
+    gfx_defer(staging, -1);
+    return 1;
+}
+
 void Graphics_BlitPhysical(Texture* tex, int x, int y)
 {
     if (!tex) return;

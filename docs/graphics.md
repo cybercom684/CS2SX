@@ -118,12 +118,45 @@ int breite = Graphics.MeasureTextWidth("Hallo", 2);
 int höhe   = Graphics.MeasureTextHeight(2);
 ```
 
-**Schriftgrößen (scale):**
-| Scale | Ungefähre Pixelhöhe |
-|-------|---------------------|
-| 1 | ~16 px |
-| 2 | ~32 px |
-| 3 | ~48 px |
+**Schriftgrößen (scale):** Die eingebaute Schrift ist eine 8×8-Pixelschrift, `scale` vervielfacht sie (1 → 8 px, 2 → 16 px, 3 → 24 px). Für echte Schriften siehe unten.
+
+### TrueType-Schriften (`Font`)
+
+```csharp
+private Font _font;
+
+public override void OnInit()
+{
+    Graphics.Init(1280, 720);
+    _font = Font.Load("romfs:/fonts/Inter.ttf");   // .ttf / .otf im romfs/-Ordner des Projekts
+}
+
+public override void OnFrame()
+{
+    _font.Draw(40, 30, "Grüße aus C#!", Color.White, 32);   // links oben bei (40, 30), 32 px hoch
+
+    string text = "Punkte: 120";
+    int w = _font.Measure(text, 24);                          // Breite in Pixeln
+    _font.Draw(1280 - w - 20, 20, text, Color.Yellow, 24);    // rechtsbündig
+}
+
+public override void OnExit() => _font.Dispose();
+```
+
+| Methode | Beschreibung |
+|---|---|
+| `Font.Load(path)` | `.ttf`/`.otf` laden. `FileNotFoundException`, wenn die Datei fehlt, `IOException`, wenn sie keine Schrift ist |
+| `Font.LoadSystem()` | Die Systemschrift der Switch (Latein, Griechisch, Kyrillisch, japanische Kana), `null`, wenn nicht verfügbar |
+| `font.Draw(x, y, text, color, size)` | Text zeichnen; `size` = Pixelhöhe, UTF-8, `\n` für neue Zeilen, Farben mit Alpha |
+| `font.Measure(text, size)` | Breite der längsten Zeile |
+| `font.LineHeight(size)` | Zeilenabstand |
+| `font.Dispose()` | Schrift und Glyph-Cache freigeben |
+
+Glyphen werden beim ersten Gebrauch in der **Ausgabeauflösung** gerastert, auch bei `SetOutputResolution(1920, 1080)`. Text bleibt so in jeder Größe scharf, und wiederholter Text kostet nur noch das Zeichnen. Kerning kommt aus der Schriftdatei.
+
+> Nur Apps, die `Font` verwenden, enthalten die Schriftbibliothek (FreeType, rund 1,6 MB). Alle anderen bleiben so klein wie bisher.
+>
+> **Ryujinx:** Ohne installierte Firmware hat der Emulator keine Systemschrift, und `Font.LoadSystem()` lässt ihn abstürzen. Zum Testen im Emulator eine eigene Schrift im romfs mitliefern.
 
 ---
 

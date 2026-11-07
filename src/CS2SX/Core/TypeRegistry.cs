@@ -310,6 +310,7 @@ public static class TypeRegistry
     private static readonly HashSet<string> s_disposableTypes = new(StringComparer.Ordinal)
     {
         "Texture",
+        "Font",
     };
 
     public static bool IsDisposable(string csType) => s_disposableTypes.Contains(csType);

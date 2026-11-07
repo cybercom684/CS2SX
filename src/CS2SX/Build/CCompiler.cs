@@ -39,7 +39,8 @@ public sealed class CCompiler
         string includeDir,
         string? projectDir = null,
         DiagnosticReporter? diagnostics = null,
-        IEnumerable<ExternLib>? externLibs = null)
+        IEnumerable<ExternLib>? externLibs = null,
+        IEnumerable<string>? linkLibs = null)
     {
         var gcc = ProcessRunner.ResolveTool(Path.Combine(_devkitPath, "devkitA64", "bin", "aarch64-none-elf-gcc"));
         var libnxInc = Path.Combine(_devkitPath, "libnx", "include");
@@ -79,6 +80,9 @@ public sealed class CCompiler
             // warnings are not the app's business.
             + $" -isystem \"{libnxInc}\""
             + (Directory.Exists(portlibsInc) ? $" -isystem \"{portlibsInc}\"" : "")
+            // FreeType's headers include each other relative to freetype2/ (rt_font.c)
+            + (Directory.Exists(Path.Combine(portlibsInc, "freetype2"))
+                ? $" -isystem \"{Path.Combine(portlibsInc, "freetype2")}\"" : "")
             + defineArgs
             + " -march=armv8-a+crc+crypto -mtune=cortex-a57 -mtp=soft -fPIE"
             + " -ffunction-sections -fdata-sections"
@@ -148,6 +152,7 @@ public sealed class CCompiler
             + " -march=armv8-a+crc+crypto -mtune=cortex-a57 -mtp=soft -fPIE"
             + $" -specs=\"{switchSpecs}\""
             + (Directory.Exists(portlibsLib) ? $" -L\"{portlibsLib}\"" : "")
+            + string.Concat((linkLibs ?? Enumerable.Empty<string>()).Select(l => " -l" + l))
             + $" -L\"{libnxLib}\" -ldeko3d -lnx -lm"   // deko3d: GPU renderer (rt_gfx.c)
             + " -Wl,--gc-sections";
 

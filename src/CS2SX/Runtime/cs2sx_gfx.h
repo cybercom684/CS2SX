@@ -127,3 +127,16 @@ void Graphics_DrawTextureScaled(Texture* tex, int x, int y, int dw, int dh);
 void Graphics_DrawTextureCentered(Texture* tex, int rx, int ry, int rw, int rh);
 void Graphics_DrawTextureCenteredScaled(Texture* tex, int rx, int ry, int rw, int rh, int tw, int th);
 void Graphics_BlitPhysical(Texture* tex, int x, int y);              // physical, 1:1
+
+// ── For other runtime modules (rt_font.c) ────────────────────────────────────
+
+/// Size of one physical output pixel in logical units (e.g. 2/3 at 1080p output).
+float CS2SX_Gfx_PhysicalPixel(void);
+/// Draws the texel rectangle (u0,v0)-(u1,v1) of t (in texels) at a logical rect.
+void CS2SX_Gfx_TexQuad(Texture* t, float x, float y, float w, float h,
+                       float u0, float v0, float u1, float v1, u32 color);
+/// Re-uploads a region of t's pixels. Returns 0 when it must be retried inside a
+/// frame (the copy is recorded into the frame's command buffer).
+int  CS2SX_Gfx_UpdateTextureRect(Texture* t, int x, int y, int w, int h);
+
+#include "cs2sx_font.h"

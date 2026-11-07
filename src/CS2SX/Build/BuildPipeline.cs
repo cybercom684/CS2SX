@@ -462,10 +462,16 @@ public sealed class BuildPipeline
             if (externLibs.Count > 0)
                 Log.Info($"ExternLibs: {string.Join(", ", externLibs.Select(l => l.Name))}");
 
+            // Optional runtime modules (fonts → FreeType) only when the app uses them.
+            var optionalLibs = OptionalRuntimeModules.Select(cFiles);
+            if (optionalLibs.Count > 0)
+                Log.Info($"Optional runtime libs: {string.Join(", ", optionalLibs)}");
+
             var compiler = new CCompiler();
             compiler.Compile(cFiles, elfPath, _buildDir, _projectDir,
                 diagnostics: sharedDiagnostics,
-                externLibs: externLibs);
+                externLibs: externLibs,
+                linkLibs: optionalLibs);
             sCompile.Detail = $"{compiler.CompiledCount} compiled, {compiler.CachedCount} cached";
 
             sCompile.Progress = 100;
