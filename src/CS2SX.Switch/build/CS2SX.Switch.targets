@@ -1,0 +1,35 @@
+<Project>
+  <!--
+    `dotnet build` (or Build in Visual Studio / Rider) of a CS2SX app runs the cs2sx
+    transpiler after the managed type-check and produces <Name>.nro next to the project.
+
+    Properties:
+      CS2SXBuildNro  = false   only type-check, don't produce an .nro
+      CS2SXTool      = cs2sx   command used to run the transpiler (may include arguments,
+                               e.g. `dotnet path/to/CS2SX.dll`; quote paths with spaces)
+  -->
+  <PropertyGroup>
+    <CS2SXBuildNro Condition="'$(CS2SXBuildNro)' == ''">true</CS2SXBuildNro>
+    <CS2SXTool Condition="'$(CS2SXTool)' == ''">cs2sx</CS2SXTool>
+  </PropertyGroup>
+
+  <Target Name="CS2SXBuildNro"
+          AfterTargets="Build"
+          Condition="'$(CS2SXBuildNro)' == 'true' and '$(DesignTimeBuild)' != 'true' and '$(BuildingForLiveUnitTesting)' != 'true'">
+    <Exec Command="$(CS2SXTool) build &quot;$(MSBuildProjectFullPath)&quot;"
+          ContinueOnError="true"
+          StdOutEncoding="utf-8"
+          StdErrEncoding="utf-8"
+          StandardOutputImportance="high">
+      <Output TaskParameter="ExitCode" PropertyName="_CS2SXExitCode" />
+    </Exec>
+    <Error Condition="'$(_CS2SXExitCode)' == '9009' or '$(_CS2SXExitCode)' == '127'"
+           Text="The cs2sx tool was not found. Install it with: dotnet tool install --global CS2SX  (or set CS2SXBuildNro=false to only type-check)." />
+    <Error Condition="'$(_CS2SXExitCode)' != '0' and '$(_CS2SXExitCode)' != '9009' and '$(_CS2SXExitCode)' != '127'"
+           Text="cs2sx build failed (exit code $(_CS2SXExitCode)) — see the output above." />
+  </Target>
+
+  <Target Name="CS2SXClean" AfterTargets="Clean" Condition="'$(CS2SXBuildNro)' == 'true'">
+    <RemoveDir Directories="$(MSBuildProjectDirectory)\cs2sx_out" />
+  </Target>
+</Project>

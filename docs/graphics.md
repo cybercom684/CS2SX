@@ -1,6 +1,10 @@
 # Graphics API
 
-CS2SX stellt über die `Graphics`-Klasse und `Color`-Klasse eine vollständige 2D-Framebuffer-API zur Verfügung.
+CS2SX stellt über die `Graphics`-Klasse und `Color`-Klasse eine vollständige 2D-API zur Verfügung.
+Gezeichnet wird auf der **GPU** (deko3d): Alle Aufrufe eines Frames werden gesammelt und in
+wenigen Draw-Calls gerendert. Runde Formen und Linien sind kantengeglättet, Farben mit
+Alpha werden echt überblendet, und eine höhere Ausgabeauflösung (1080p) kostet keine
+zusätzliche Rechenzeit.
 
 ---
 
@@ -13,7 +17,9 @@ public override void OnInit()
 }
 ```
 
-Sobald `Graphics.Init()` aufgerufen wurde, rendert jeder `OnFrame()`-Aufruf in den Framebuffer. Konsolen-Ausgabe (`Console.WriteLine`) ist danach nicht mehr sichtbar.
+Sobald `Graphics.Init()` aufgerufen wurde, rendert jeder `OnFrame()`-Aufruf auf die GPU; der Bildschirm wird vor jedem Frame schwarz gelöscht. Konsolen-Ausgabe (`Console.WriteLine`) ist danach nicht mehr sichtbar. `Graphics.BeginFrame()`/`EndFrame()` sind nicht nötig (die Runtime steuert die Frames) und bewirken nichts.
+
+Alle Koordinaten sind **logisch** (die Größe aus `Graphics.Init`). Ausnahmen in **physischen** Ausgabe-Pixeln: `SetPixel`, `SetPixelAlpha`, `BlitPhysical`. Umrisse (`DrawRect`, `DrawCircle`, …) sind einen physischen Pixel breit.
 
 ---
 
@@ -112,12 +118,45 @@ int breite = Graphics.MeasureTextWidth("Hallo", 2);
 int höhe   = Graphics.MeasureTextHeight(2);
 ```
 
-**Schriftgrößen (scale):**
-| Scale | Ungefähre Pixelhöhe |
-|-------|---------------------|
-| 1 | ~16 px |
-| 2 | ~32 px |
-| 3 | ~48 px |
+**Schriftgrößen (scale):** Die eingebaute Schrift ist eine 8×8-Pixelschrift, `scale` vervielfacht sie (1 → 8 px, 2 → 16 px, 3 → 24 px). Für echte Schriften siehe unten.
+
+### TrueType-Schriften (`Font`)
+
+```csharp
+private Font _font;
+
+public override void OnInit()
+{
+    Graphics.Init(1280, 720);
+    _font = Font.Load("romfs:/fonts/Inter.ttf");   // .ttf / .otf im romfs/-Ordner des Projekts
+}
+
+public override void OnFrame()
+{
+    _font.Draw(40, 30, "Grüße aus C#!", Color.White, 32);   // links oben bei (40, 30), 32 px hoch
+
+    string text = "Punkte: 120";
+    int w = _font.Measure(text, 24);                          // Breite in Pixeln
+    _font.Draw(1280 - w - 20, 20, text, Color.Yellow, 24);    // rechtsbündig
+}
+
+public override void OnExit() => _font.Dispose();
+```
+
+| Methode | Beschreibung |
+|---|---|
+| `Font.Load(path)` | `.ttf`/`.otf` laden. `FileNotFoundException`, wenn die Datei fehlt, `IOException`, wenn sie keine Schrift ist |
+| `Font.LoadSystem()` | Die Systemschrift der Switch (Latein, Griechisch, Kyrillisch, japanische Kana), `null`, wenn nicht verfügbar |
+| `font.Draw(x, y, text, color, size)` | Text zeichnen; `size` = Pixelhöhe, UTF-8, `\n` für neue Zeilen, Farben mit Alpha |
+| `font.Measure(text, size)` | Breite der längsten Zeile |
+| `font.LineHeight(size)` | Zeilenabstand |
+| `font.Dispose()` | Schrift und Glyph-Cache freigeben |
+
+Glyphen werden beim ersten Gebrauch in der **Ausgabeauflösung** gerastert, auch bei `SetOutputResolution(1920, 1080)`. Text bleibt so in jeder Größe scharf, und wiederholter Text kostet nur noch das Zeichnen. Kerning kommt aus der Schriftdatei.
+
+> Nur Apps, die `Font` verwenden, enthalten die Schriftbibliothek (FreeType, rund 1,6 MB). Alle anderen bleiben so klein wie bisher.
+>
+> **Ryujinx:** Ohne installierte Firmware hat der Emulator keine Systemschrift, und `Font.LoadSystem()` lässt ihn abstürzen. Zum Testen im Emulator eine eigene Schrift im romfs mitliefern.
 
 ---
 
@@ -158,14 +197,21 @@ Graphics.DrawTextureCenteredScaled(tex, rx, ry, rw, rh, tw, th);
 
 > `null`-Check empfohlen: `if (tex != null) Graphics.DrawTexture(tex, x, y);`
 
+Texturen werden beim ersten Zeichnen automatisch auf die GPU geladen (auch wenn sie schon in
+`OnInit` erzeugt wurden). Änderst du später `tex.Pixels`, mache die Änderung mit
+`tex.Update()` sichtbar. Gib Texturen mit `tex.Dispose()` frei — mehrfaches `Dispose` ist
+unschädlich. Halbtransparente Pixel werden überblendet (früher: nur ganz transparent/deckend).
+
 ### Auflösung & weitere Primitive
 
 ```csharp
 // VOR Graphics.Init() aufrufen: in 1080p ausgeben (gedockt), Logik bleibt 1280×720
 Graphics.SetOutputResolution(1920, 1080);
 
-// gefülltes/umrandetes Polygon aus einem Punkte-Array
-Graphics.DrawPolygon(points, count, Color.White);
+// geschlossener Umriss durch die Punkte (xs[i], ys[i])
+int[] xs = { 100, 160, 190, 150, 90 };
+int[] ys = { 200, 190, 240, 285, 260 };
+Graphics.DrawPolygon(xs, ys, xs.Length, Color.White);
 ```
 
 `SetOutputResolution(w, h)` rendert intern hochskaliert (z.B. 1080p) während alle Zeichenkoordinaten im logischen 1280×720-Raum bleiben.

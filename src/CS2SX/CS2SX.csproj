@@ -1,0 +1,53 @@
+<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<OutputType>Exe</OutputType>
+		<TargetFramework>net8.0</TargetFramework>
+		<ImplicitUsings>enable</ImplicitUsings>
+		<Nullable>enable</Nullable>
+		<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+		<PackAsTool>true</PackAsTool>
+		<ToolCommandName>cs2sx</ToolCommandName>
+		<PackageId>CS2SX</PackageId>
+	</PropertyGroup>
+	<ItemGroup>
+		<PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="5.3.0" />
+		<!-- Runtime headers: the interface every translation unit includes. -->
+		<EmbeddedResource Include="Runtime\*.h" />
+		<!-- Runtime modules: state + non-trivial functions, compiled once per tool version
+		     (cached object files), exported to cs2sx_out/runtime/. -->
+		<EmbeddedResource Include="Runtime\src\*.c" />
+		<!-- The Switch API (src/CS2SX.Switch) — the very sources app projects compile
+		     against via the CS2SX.Switch package. The transpiler analyses user code
+		     against them, so IDE and transpiler can never disagree about the API. -->
+		<EmbeddedResource Include="..\CS2SX.Switch\**\*.cs" Exclude="..\CS2SX.Switch\obj\**;..\CS2SX.Switch\bin\**">
+			<LogicalName>CS2SX.Api.%(Filename)%(Extension)</LogicalName>
+		</EmbeddedResource>
+		<!-- Raw libnx bindings (generated, analysis only — not yet part of the package). -->
+		<EmbeddedResource Include="Stubs\LibNX\**\*" />
+	</ItemGroup>
+	<ItemGroup>
+		<Compile Remove="Stubs\**\*" />
+		<Compile Remove="cs2sx_out\**\*" />
+	</ItemGroup>
+
+	<!-- Bundle the CS2SX.Switch package of the same version. `cs2sx new` points the new
+	     project's nuget.config at it, so new projects build offline and always get the
+	     API that matches this transpiler. -->
+	<ItemGroup>
+		<ProjectReference Include="..\CS2SX.Switch\CS2SX.Switch.csproj" ReferenceOutputAssembly="false" />
+	</ItemGroup>
+	<PropertyGroup>
+		<CS2SXApiPackage>$(MSBuildThisFileDirectory)..\..\nupkg\CS2SX.Switch.$(Version).nupkg</CS2SXApiPackage>
+	</PropertyGroup>
+	<Target Name="CS2SXCopyApiPackage" AfterTargets="Build">
+		<Copy SourceFiles="$(CS2SXApiPackage)" DestinationFolder="$(OutDir)packages" SkipUnchangedFiles="true" />
+	</Target>
+	<Target Name="CS2SXIncludeApiPackage" BeforeTargets="_GetPackageFiles">
+		<ItemGroup>
+			<None Include="$(CS2SXApiPackage)" Pack="true" PackagePath="tools\$(TargetFramework)\any\packages\" />
+		</ItemGroup>
+	</Target>
+	<ItemGroup>
+	  <Folder Include="Core\Models\" />
+	</ItemGroup>
+</Project>

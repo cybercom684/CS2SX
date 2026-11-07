@@ -1,0 +1,47 @@
+﻿namespace CS2SX.Cli;
+
+public sealed class CliArgs
+{
+    public string Command { get; init; } = string.Empty;
+
+    // --- new ---
+    public string AppName { get; init; } = string.Empty;
+
+    // --- build ---
+    public string BuildTarget { get; init; } = string.Empty;
+
+    // --- check ---
+    public string CheckTarget { get; init; } = string.Empty;
+
+    // --- watch ---
+    public string WatchTarget { get; init; } = string.Empty;
+
+    // --- genstubs ---
+    public string LibnxInclude { get; init; } = string.Empty;
+    public string StubOutput { get; init; } = string.Empty;
+
+    // --- addlib ---
+    public string AddLibName { get; init; } = string.Empty;
+
+    // --- dump ---
+    public string[] DumpFilter { get; init; } = Array.Empty<string>();
+
+    // --- flags ---
+    public bool Verbose
+    {
+        get; init;
+    }
+
+    /// build: stop after the transpile stage (no GCC / packaging). Used by tests and
+    /// for fast iteration on machines without devkitPro.
+    public bool TranspileOnly
+    {
+        get; init;
+    }
+
+    /// migrate: only report what would change.
+    public bool DryRun
+    {
+        get; init;
+    }
+}

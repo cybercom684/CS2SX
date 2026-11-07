@@ -4,23 +4,19 @@ Diese Seite beschreibt was CS2SX nicht unterstützt und wie man die häufigsten 
 
 ---
 
-## Lambda: Feld-Mutation schlägt nicht zurück
+## Lambda: erfasste lokale Variablen sind Kopien
 
-Felder der äußeren Klasse werden beim Lambda-Erstellen in die Capture-Struct **kopiert**. Zuweisungen innen ändern nur die Kopie.
+Felder sieht eine Lambda live (über `this`). Erfasste **lokale Variablen** werden aber beim Erzeugen der Lambda kopiert. Schreibt die Lambda in eine solche Variable, sieht die Methode die Änderung nicht. `cs2sx check` warnt in diesem Fall.
 
 ```csharp
-// FALSCH — _zaehler wird in der Kopie inkrementiert
+// FALSCH — zaehler ist eine lokale Variable; die Lambda erhöht ihre Kopie
+int zaehler = 0;
+Action cb = () => zaehler++;
+cb();                       // zaehler bleibt 0 (Warnung von cs2sx check)
+
+// RICHTIG — geteilten Zustand in ein Feld legen
 private int _zaehler;
-private Action _cb;
-void Init() { _cb = () => { _zaehler++; }; }  // inkrementiert Kopie!
-void Run()  { _cb(); /* _zaehler bleibt 0 */ }
-
-// RICHTIG — Feld nach dem Aufruf setzen
-void Run()  { _cb(); _zaehler++; }
-
-// AUCH RICHTIG — Objekte als Parameter mutieren funktioniert (Pointer)
-Action<Feind> treffen = (f) => { f.Leben -= 10; };  // f->f_Leben -= 10 — wirkt!
-treffen(_feind);
+Action cb = () => _zaehler++;   // wirkt auf das Feld
 ```
 
 ---
@@ -83,23 +79,17 @@ public string GetText() => $"Wert: {_wert}";
 
 ---
 
-## Exceptions (eingeschränkt)
+## Exceptions als Kontrollfluss
 
-`try`/`catch`/`finally` wird via `setjmp`/`longjmp` transpiliert. Ein **eigenes** `throw` löst den `catch`-Block aus, und `finally` läuft danach. Aber:
-
-- **Kein Typ-Dispatch:** Es gibt keine RTTI auf der Switch — alle `catch`-Blöcke werden zu einem zusammengeführt und nacheinander ausgeführt (Filtern nach Exception-Typ ist nicht möglich; der Transpiler warnt bei mehreren `catch`).
-- **Die Standardbibliothek wirft nicht:** `int.Parse`, Null-Zugriffe, Array-Grenzen usw. lösen **keine** fangbare Exception aus, sondern geben Fehlerwerte zurück. Ein `try/catch` darum hilft nicht — nutze die `Try…`-Varianten.
+`try`/`catch`/`finally` verhalten sich wie in C#, und die Laufzeitbibliothek wirft dieselben Exceptions wie .NET, auch `NullReferenceException`, siehe [Sprachunterstützung](../language-guide.md#exceptions). Ein `throw` kostet allerdings deutlich mehr als eine Prüfung (`setjmp`/`longjmp`). Für erwartbare Fälle in einer Schleife, die jeden Frame läuft, sind deshalb `?.`, `TryParse` und `TryGetValue` der bessere Weg.
 
 ```csharp
-// FALSCH — int.Parse wirft nicht; der catch wird nie erreicht
-try { var x = int.Parse(eingabe); }
-catch { Console.WriteLine("Kein int!"); }
+// Funktioniert, ist aber teuer, wenn _ziel oft null ist
+try { Console.WriteLine(_ziel.Name); }
+catch (NullReferenceException) { Console.WriteLine("kein Ziel"); }
 
-// RICHTIG — bool-Rückgabe nutzen
-if (int.TryParse(eingabe, out int x))
-    Console.WriteLine($"Zahl: {x}");
-else
-    Console.WriteLine("Kein int!");
+// Besser
+Console.WriteLine(_ziel?.Name ?? "kein Ziel");
 ```
 
 ---

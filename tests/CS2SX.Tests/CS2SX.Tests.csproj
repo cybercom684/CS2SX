@@ -1,0 +1,29 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
+    <PackageReference Include="xunit" Version="2.9.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The transpiler CLI is run out-of-process per test case (it keeps global static
+         state such as TypeRegistry), so we only need its build output next to ours. -->
+    <ProjectReference Include="..\..\src\CS2SX\CS2SX.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Test inputs are C# programs for the Switch, not code of this test assembly. -->
+    <Compile Remove="Cases\**" />
+    <None Include="Cases\**" />
+  </ItemGroup>
+
+</Project>

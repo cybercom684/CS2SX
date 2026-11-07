@@ -1,0 +1,1 @@
+﻿Intentional: instance method Free() collides with generated Player_Free (diagnosed by 'cs2sx check'). Keep this marker.

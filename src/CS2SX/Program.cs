@@ -1,0 +1,134 @@
+﻿using CS2SX.Build;
+using CS2SX.Cli;
+using CS2SX.Logging;
+
+// UTF-8 everywhere — otherwise redirected output (CI logs, IDE build panes, tests)
+// is written in the OEM code page and umlauts/arrows in diagnostics get mangled.
+Console.OutputEncoding = System.Text.Encoding.UTF8;
+BuildRenderer.EnableAnsi();
+
+var cli = CliParser.Parse(args);
+
+switch (cli.Command)
+{
+    case "new":
+        if (string.IsNullOrWhiteSpace(cli.AppName)) return Usage();
+        new ProjectCreator().Create(cli.AppName);
+        return 0;
+
+    case "build":
+        {
+            if (string.IsNullOrWhiteSpace(cli.BuildTarget)) return Usage();
+            var csprojPath = ResolveCsproj(cli.BuildTarget);
+            if (csprojPath == null) return 1;
+            try
+            {
+                new BuildPipeline(csprojPath, cli.TranspileOnly).Run();
+                return 0;
+            }
+            catch (Exception)
+            {
+                // BuildPipeline has already logged the error and rendered the failed stage.
+                return 1;
+            }
+        }
+
+    case "check":
+        {
+            if (string.IsNullOrEmpty(cli.CheckTarget)) return Usage();
+            return new CheckCommand(cli.CheckTarget).Run();
+        }
+
+    case "dump":
+        {
+            if (string.IsNullOrEmpty(cli.CheckTarget)) return Usage();
+            return new DumpCommand(cli.CheckTarget).Run(cli.DumpFilter);
+        }
+
+    case "watch":
+        {
+            if (string.IsNullOrWhiteSpace(cli.WatchTarget)) return Usage();
+            var csprojPath = ResolveCsproj(cli.WatchTarget);
+            if (csprojPath == null) return 1;
+            using var cts = new CancellationTokenSource();
+            Console.CancelKeyPress += (_, e) => { e.Cancel = true; cts.Cancel(); };
+            await new WatchCommand(csprojPath).Run(cts.Token);
+            return 0;
+        }
+
+    case "clean":
+        {
+            if (string.IsNullOrWhiteSpace(cli.BuildTarget)) return Usage();
+            var csprojPath = ResolveCsproj(cli.BuildTarget);
+            if (csprojPath == null) return 1;
+            return new CleanCommand(csprojPath).Run();
+        }
+
+    case "migrate":
+    case "update": // pre-0.5 name of the stub-refresh command
+        {
+            if (string.IsNullOrWhiteSpace(cli.BuildTarget)) return Usage();
+            return new MigrateCommand(cli.BuildTarget, cli.DryRun).Run();
+        }
+
+    case "genstubs":
+        new StubGenerator().Generate(cli.LibnxInclude, cli.StubOutput);
+        return 0;
+
+    case "addlib":
+        if (string.IsNullOrEmpty(cli.AddLibName))
+        {
+            Log.Error("Usage: cs2sx addLib <libName> [project.csproj]");
+            return 1;
+        }
+        return new AddLibCommand(cli.AddLibName, cli.BuildTarget).Run();
+
+    case "":
+        return Usage();
+
+    default:
+        Log.Error($"Unknown command: {cli.Command}");
+        return Usage();
+}
+
+// ── Hilfsmethoden ─────────────────────────────────────────────────────────────
+
+static string? ResolveCsproj(string input)
+{
+    var full = Path.GetFullPath(input);
+
+    if (Directory.Exists(full))
+    {
+        var csproj = Directory.GetFiles(full, "*.csproj").FirstOrDefault();
+        if (csproj == null)
+        {
+            Log.Error($"No .csproj found in: {full}");
+            return null;
+        }
+        return csproj;
+    }
+
+    if (File.Exists(full))
+        return full;
+
+    Log.Error($"Not found: {full}");
+    return null;
+}
+
+static int Usage()
+{
+    Log.Info("CS2SX — C# to Nintendo Switch Transpiler");
+    Log.Info("");
+    Log.Info("Usage:");
+    Log.Info("  cs2sx new    <AppName>                    Create a new project");
+    Log.Info("  cs2sx build  <path/to/App.csproj|folder>  Build project to .nro");
+    Log.Info("               [--transpile-only]           Stop after generating C (no GCC)");
+    Log.Info("  cs2sx check  <path/to/App.csproj>         Transpile-only check");
+    Log.Info("  cs2sx dump   <path/to/App.csproj> [file] Print generated C to stdout");
+    Log.Info("  cs2sx watch  <path/to/App.csproj|folder>  Watch & rebuild on change");
+    Log.Info("  cs2sx clean  <path/to/App.csproj|folder>  Delete cs2sx_out/");
+    Log.Info("  cs2sx migrate <path/to/App.csproj|folder> Move an older project to the CS2SX.Switch package");
+    Log.Info("               [--dry-run]                  Only show what would change");
+    Log.Info("  cs2sx genstubs <libnx-include> <output>   Generate LibNX stubs");
+    return 1;
+}
