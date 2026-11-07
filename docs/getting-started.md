@@ -157,9 +157,11 @@ public class MeineApp : SwitchApp
 }
 ```
 
-### Grafik-Modus (Framebuffer)
+Die Ausgabe bleibt stehen wie ein Log, auch was in `OnInit` geschrieben wird. Hat die App Forms-Controls (`Label`, `Button`, …), wird der Bildschirm jeden Frame neu gezeichnet.
 
-Aktiviert durch `Graphics.Init(width, height)` in `OnInit()`. Ab diesem Punkt werden alle Frames über den Framebuffer gerendert.
+### Grafik-Modus (GPU)
+
+Aktiviert durch `Graphics.Init(width, height)` in `OnInit()`. Ab dann rendert jeder Frame auf der GPU (deko3d), siehe [Grafik](graphics.md).
 
 ```csharp
 public class MeineApp : SwitchApp

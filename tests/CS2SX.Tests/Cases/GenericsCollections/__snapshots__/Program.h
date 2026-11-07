@@ -13,6 +13,7 @@ struct Item
 };
 
 Item* Item_New(const char* name, int count);
+void Item_Ctor(Item* self, const char* name, int count);
 
 void Item_Free(Item* self);
 Item* Item_Retain(Item* self);

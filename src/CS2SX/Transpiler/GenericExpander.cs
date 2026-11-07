@@ -26,7 +26,8 @@ public sealed class GenericExpander
     public (string headerPath, string implPath) WriteToFiles(string buildDir)
     {
         if (_collector.Instantiations.Count == 0
-            && _collector.ListOfUserClassInstantiations.Count == 0)
+            && _collector.ListOfUserClassInstantiations.Count == 0
+            && _collector.ListOfDelegateInstantiations.Count == 0)
             return (string.Empty, string.Empty);
 
         var headerSb = new System.Text.StringBuilder();
@@ -101,6 +102,15 @@ public sealed class GenericExpander
                 headerSb.AppendLine($"#endif");
                 Log.Info($"GenericExpander: List<{userClass}> → CS2SX_LIST_DEFINE_PTR({userClass})");
             }
+        }
+
+        foreach (var dg in _collector.ListOfDelegateInstantiations.OrderBy(s => s))
+        {
+            var guard = "CS2SX_LIST_" + dg + "_DEFINED";
+            headerSb.AppendLine($"#ifndef {guard}");
+            headerSb.AppendLine($"#define {guard}");
+            headerSb.AppendLine($"CS2SX_LIST_DEFINE({dg})");
+            headerSb.AppendLine("#endif");
         }
 
         var headerPath = Path.Combine(buildDir, "_generics.h");

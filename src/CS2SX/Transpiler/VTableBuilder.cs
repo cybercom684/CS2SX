@@ -220,6 +220,46 @@ public static class VTableBuilder
     }
 
     /// <summary>
+    /// vtable instance of a ROOT class with virtual members, wired to its own
+    /// implementations (abstract slots stay NULL). Without it, `new Animal().Speak()`
+    /// on a concrete root class would call through a NULL vtable. All method
+    /// prototypes are in the class header, so this may precede the bodies.
+    /// </summary>
+    public static void WriteRootVTableInstance(
+        ClassDeclarationSyntax node, string className, System.IO.TextWriter output)
+    {
+        output.WriteLine($"static {className}_vtable {className}_vtable_instance =");
+        output.WriteLine("{");
+        foreach (var method in GetVirtualMethods(node))
+        {
+            if (method.Modifiers.Any(m => m.IsKind(SyntaxKind.AbstractKeyword))) continue;
+            var retC = TypeRegistry.MapType(method.ReturnType.ToString().Trim());
+            var castParms = new List<string> { "void*" };
+            foreach (var p in method.ParameterList.Parameters)
+                castParms.Add(TypeRegistry.MapType(p.Type?.ToString().Trim() ?? "int"));
+            var castType = retC + "(*)(" + string.Join(", ", castParms) + ")";
+            output.WriteLine($"    .{method.Identifier.Text} = ({castType}){className}_{method.Identifier.Text},");
+        }
+        foreach (var prop in GetVirtualProperties(node))
+        {
+            if (prop.Modifiers.Any(m => m.IsKind(SyntaxKind.AbstractKeyword))) continue;
+            if (PropertyWriter.IsAutoProperty(prop)) continue;   // no accessor functions
+            var propName = prop.Identifier.Text;
+            bool hasGetter = prop.AccessorList?.Accessors
+                .Any(a => a.IsKind(SyntaxKind.GetAccessorDeclaration)) == true
+                || prop.ExpressionBody != null;
+            bool hasSetter = prop.AccessorList?.Accessors
+                .Any(a => a.IsKind(SyntaxKind.SetAccessorDeclaration)) == true;
+            if (hasGetter)
+                output.WriteLine($"    .get_{propName} = (void*){className}_get_{propName},");
+            if (hasSetter)
+                output.WriteLine($"    .set_{propName} = (void*){className}_set_{propName},");
+        }
+        output.WriteLine("};");
+        output.WriteLine();
+    }
+
+    /// <summary>
     /// Validates that all override methods in a derived class have a matching
     /// virtual/abstract method in the declared base class.
     /// Emits warnings for mismatches that would cause runtime crashes.

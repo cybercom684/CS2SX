@@ -3,19 +3,16 @@
 #include "_interfaces.h"
 #include "Program.h"
 
-void Update(float dt)
-{
-}
-
-int IsAlive()
+void Bullet_Ctor(Bullet* self)
 {
 }
 
 Bullet* Bullet_New(void)
 {
-    Bullet* self = (Bullet*)malloc(sizeof(Bullet));
+    Bullet* self = (Bullet*)calloc(1, sizeof(Bullet));
     if (!self) return NULL;
-    memset(self, 0, sizeof(Bullet));
+    self->_rc = 1;
+    Bullet_Ctor(self);
     return self;
 }
 
@@ -32,7 +29,14 @@ int Bullet_IsAlive(Bullet* self)
 void Bullet_Free(Bullet* self)
 {
     if (!self) return;
+    if (--self->_rc > 0) return;
     free(self);
+}
+
+Bullet* Bullet_Retain(Bullet* self)
+{
+    if (self) self->_rc++;
+    return self;
 }
 
 IUpdatable_vtable Bullet_IUpdatable_vtable_instance =
@@ -42,12 +46,17 @@ IUpdatable_vtable Bullet_IUpdatable_vtable_instance =
 };
 
 
+void Timer_Ctor(Timer* self)
+{
+    self->f_Left = 2;
+}
+
 Timer* Timer_New(void)
 {
-    Timer* self = (Timer*)malloc(sizeof(Timer));
+    Timer* self = (Timer*)calloc(1, sizeof(Timer));
     if (!self) return NULL;
-    memset(self, 0, sizeof(Timer));
-    self->f_Left = 2;
+    self->_rc = 1;
+    Timer_Ctor(self);
     return self;
 }
 
@@ -64,7 +73,14 @@ int Timer_IsAlive(Timer* self)
 void Timer_Free(Timer* self)
 {
     if (!self) return;
+    if (--self->_rc > 0) return;
     free(self);
+}
+
+Timer* Timer_Retain(Timer* self)
+{
+    if (self) self->_rc++;
+    return self;
 }
 
 IUpdatable_vtable Timer_IUpdatable_vtable_instance =

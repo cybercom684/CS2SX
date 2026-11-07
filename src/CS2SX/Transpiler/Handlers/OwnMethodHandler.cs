@@ -135,34 +135,8 @@ public sealed class OwnMethodHandler : InvocationHandlerBase
                     && staticMethod.ContainingType?.Name != ctx.CurrentClass)
                     return NotHandled(out result);
 
-                // Delegate field/property invocation: self->field() or self->f_field()
-                // Use the stripped name (no leading _) for the field access prefix logic.
-                var strippedCallee = calleeStr.TrimStart('_');
-                if (symbol is IPropertySymbol propSym)
-                {
-                    var propTypeName = TranspilerContext.FormatTypeSymbol(propSym.Type);
-                    if (TypeRegistry.IsDelegate(propTypeName))
-                    {
-                        var pfx = TypeRegistry.HasNoPrefix(strippedCallee) ? "" : "f_";
-                        var callArgStr = args.Count > 0 ? string.Join(", ", args) : "";
-                        result = $"self->{pfx}{strippedCallee}({callArgStr})";
-                        return true;
-                    }
-                    return NotHandled(out result);
-                }
-                if (symbol is IFieldSymbol fieldSym)
-                {
-                    var fieldTypeName = TranspilerContext.FormatTypeSymbol(fieldSym.Type);
-                    if (TypeRegistry.IsDelegate(fieldTypeName))
-                    {
-                        var pfx = TypeRegistry.HasNoPrefix(strippedCallee) ? "" : "f_";
-                        var callArgStr = args.Count > 0 ? string.Join(", ", args) : "";
-                        result = $"self->{pfx}{strippedCallee}({callArgStr})";
-                        return true;
-                    }
-                    return NotHandled(out result);
-                }
-
+                // Delegate fields/properties are invoked by InvocationDispatcher
+                // (TryWriteDelegateInvoke) before any handler runs.
                 if (symbol is not IMethodSymbol)
                     return NotHandled(out result);
             }
@@ -176,8 +150,10 @@ public sealed class OwnMethodHandler : InvocationHandlerBase
             && TypeRegistry.IsDelegate(fieldDelegateType))
         {
             var pfx = TypeRegistry.HasNoPrefix(calleeKey) ? "" : "f_";
-            var callArgStr = args.Count > 0 ? string.Join(", ", args) : "";
-            result = $"self->{pfx}{calleeKey}({callArgStr})";
+            var invoke = CS2SX.Transpiler.Writers.DelegateModel.InvokeName(TypeRegistry.MapType(fieldDelegateType));
+            var callArgs = new List<string> { $"self->{pfx}{calleeKey}" };
+            callArgs.AddRange(args);
+            result = $"{invoke}({string.Join(", ", callArgs)})";
             return true;
         }
 

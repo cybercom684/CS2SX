@@ -1,12 +1,16 @@
 #include <stdlib.h>
 #include "Program.h"
 
+void Settings_Ctor(Settings* self)
+{
+}
+
 Settings* Settings_New(void)
 {
-    Settings* self = (Settings*)malloc(sizeof(Settings));
+    Settings* self = (Settings*)calloc(1, sizeof(Settings));
     if (!self) return NULL;
-    memset(self, 0, sizeof(Settings));
     self->_rc = 1;
+    Settings_Ctor(self);
     return self;
 }
 
@@ -23,13 +27,32 @@ Settings* Settings_Retain(Settings* self)
     return self;
 }
 
-Player* Player_New(const char* name)
+void Player_Ctor_1(Player* self, const char* name)
 {
-    Player* self = (Player*)malloc(sizeof(Player));
-    if (!self) return NULL;
-    memset(self, 0, sizeof(Player));
-    self->_rc = 1;
     self->f_Name = _cs2sx_heap_strdup(name);
+}
+
+Player* Player_New_1(const char* name)
+{
+    Player* self = (Player*)calloc(1, sizeof(Player));
+    if (!self) return NULL;
+    self->_rc = 1;
+    Player_Ctor_1(self, name);
+    return self;
+}
+
+void Player_Ctor_2(Player* self, const char* name, int level)
+{
+    Player_Ctor_1(self, name);
+    self->f_Level = level;
+}
+
+Player* Player_New_2(const char* name, int level)
+{
+    Player* self = (Player*)calloc(1, sizeof(Player));
+    if (!self) return NULL;
+    self->_rc = 1;
+    Player_Ctor_2(self, name, level);
     return self;
 }
 
@@ -59,7 +82,7 @@ void Diagnostics_FootgunsApp_Init(Diagnostics_FootgunsApp* self)
 
 void Diagnostics_FootgunsApp_OnInit(Diagnostics_FootgunsApp* self)
 {
-    Player* p = Player_New("x");
+    Player* p = Player_New_1("x");
     const char* _ps_0 = p->f_Name;
     printf("%s\n", _ps_0 ? _ps_0 : "");
 }

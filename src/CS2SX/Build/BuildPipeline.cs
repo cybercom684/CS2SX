@@ -34,7 +34,7 @@ public sealed class BuildPipeline
     internal static readonly string[] GeneratedHeaders =
     {
         "_forward.h", "_generics.h", "_interfaces.h",
-        "switchforms.h", "switchapp.h", "AudioStub.h", "FtpStub.h", "NetStub.h", "cs2sx_prelude.h", "cs2sx_gfx.h", "cs2sx_gfx_shaders.h",
+        "switchforms.h", "switchapp.h", "AudioStub.h", "FtpStub.h", "NetStub.h", "cs2sx_prelude.h", "cs2sx_gfx.h", "cs2sx_gfx_shaders.h", "cs2sx_exc.h", "cs2sx_delegate.h",
     };
 
     private readonly bool _transpileOnly;
@@ -828,6 +828,10 @@ public sealed class BuildPipeline
                 if (hasVirt.TryGetValue(b, out var hvb) && hvb) topVirt = b;
                 cur = b;
             }
+            // A user root deriving from a System exception: _rc lives one level deeper,
+            // in the runtime's Exception struct (self->base[.base…]._rc).
+            if (baseOf.TryGetValue(cur, out var rootBase) && TypeRegistry.IsBuiltinException(rootBase))
+                hops++;
             rootHops[cls] = hops;
             if (topVirt != null) vtableRoot[cls] = topVirt;
         }
@@ -943,12 +947,14 @@ public sealed class BuildPipeline
                 var enName = en.Identifier.Text;
                 if (!alreadyDeclared.Add("enum:" + enName)) continue;
                 sb.AppendLine($"typedef enum {enName} {{");
+                var enMembers = en.Members.Select(m => m.Identifier.Text).ToList();
                 foreach (var m in en.Members)
                 {
+                    var cMember = CS2SX.Core.TypeRegistry.EnumMemberCName(enName, m.Identifier.Text);
                     if (m.EqualsValue != null)
-                        sb.AppendLine($"    {m.Identifier.Text} = {m.EqualsValue.Value.ToString()},");
+                        sb.AppendLine($"    {cMember} = {CS2SX.Core.TypeRegistry.PrefixEnumValueExpr(enName, m.EqualsValue.Value.ToString(), enMembers)},");
                     else
-                        sb.AppendLine($"    {m.Identifier.Text},");
+                        sb.AppendLine($"    {cMember},");
                 }
                 sb.AppendLine($"}} {enName};");
                 sb.AppendLine(CS2SX.Core.TypeRegistry.NullableTypedef(enName));
@@ -971,10 +977,11 @@ public sealed class BuildPipeline
             }
         }
 
-        // Emit typedefs for the generic delegate types used in source files:
-        //   Action<Window>         → typedef void (*Action_Window_t)(Window*);
-        //   Func<int, int, bool>   → typedef int  (*Func_int_int_bool_t)(int, int);
-        var emittedDelegateTypedefs = new HashSet<string>(StringComparer.Ordinal);
+        // Typedefs + typed invokers for the generic delegate types used in source files
+        // (cs2sx_delegate.h; Action without type arguments is in the runtime):
+        //   Func<int, bool> → typedef CS2SX_Delegate* Func_int_int_t;
+        //                     static inline int Func_int_int_Invoke(Func_int_int_t d, int a0)
+        var emittedDelegateTypedefs = new HashSet<string>(StringComparer.Ordinal) { "Action_t" };
         foreach (var csFile in sourceFiles)
         {
             var source = System.IO.File.ReadAllText(csFile);
@@ -994,7 +1001,7 @@ public sealed class BuildPipeline
 
                 // Each type arg becomes its mapped C type (+ * for reference types).
                 var typeArgs = SplitSimpleGenericArgs(csType[prefixLen..^1].Trim())
-                    .Select(a => DelegateArgCType(a.Trim()))
+                    .Select(a => CS2SX.Transpiler.Writers.DelegateModel.SignatureCType(a.Trim()))
                     .ToList();
                 var ret = "void";
                 if (isFunc)
@@ -1002,18 +1009,8 @@ public sealed class BuildPipeline
                     ret = typeArgs[^1];
                     typeArgs.RemoveAt(typeArgs.Count - 1);
                 }
-                var cParams = typeArgs.Count > 0 ? string.Join(", ", typeArgs) : "void";
-                sb.AppendLine($"typedef {ret} (*{cName})({cParams});");
+                sb.Append(CS2SX.Transpiler.Writers.DelegateModel.TypedefDecl(cName, typeArgs, ret));
             }
-        }
-
-        static string DelegateArgCType(string csType)
-        {
-            if (csType == "bool") return "int";
-            var mapped = CS2SX.Core.TypeRegistry.MapType(csType);
-            if (!mapped.EndsWith("*") && CS2SX.Transpiler.CSharpToC.NeedsPtr(csType))
-                mapped += "*";
-            return mapped;
         }
 
         // FIX: Custom-Header aus dem Projektverzeichnis anhängen.

@@ -10,7 +10,8 @@ struct InputMapper
     int f_Presses;
 };
 
-InputMapper* InputMapper_New();
+InputMapper* InputMapper_New(void);
+void InputMapper_Ctor(InputMapper* self);
 void InputMapper_Poll(InputMapper* self);
 
 void InputMapper_Free(InputMapper* self);

@@ -19,6 +19,7 @@ struct Shape
 
 extern int Shape_Created;
 Shape* Shape_New(const char* name);
+void Shape_Ctor(Shape* self, const char* name);
 /* abstract: float Shape_Area(Shape* self) */
 const char* Shape_Describe(Shape* self);
 
@@ -32,6 +33,7 @@ struct Rect
 };
 
 Rect* Rect_New(float w, float h);
+void Rect_Ctor(Rect* self, float w, float h);
 float Rect_Area(Rect* self);
 
 void Rect_Free(Rect* self);
@@ -41,6 +43,7 @@ struct Square
 };
 
 Square* Square_New(float side);
+void Square_Ctor(Square* self, float side);
 const char* Square_Describe(Square* self);
 
 void Square_Free(Square* self);
@@ -51,6 +54,7 @@ struct Circle
 };
 
 Circle* Circle_New(float r);
+void Circle_Ctor(Circle* self, float r);
 float Circle_Area(Circle* self);
 
 void Circle_Free(Circle* self);

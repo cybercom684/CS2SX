@@ -24,14 +24,17 @@ public sealed class StatementWriter
             case ExpressionStatementSyntax expr: WriteExprStmt(expr); break;
             case IfStatementSyntax ifStmt: WriteIf(ifStmt); break;
             case BlockSyntax block: WriteBlock(block); break;
-            case ForStatementSyntax forStmt: WriteFor(forStmt); break;
-            case ForEachStatementSyntax forEach: WriteForEach(forEach); break;
-            case ForEachVariableStatementSyntax deconForeach: WriteForEachDeconstruction(deconForeach); break;
-            case WhileStatementSyntax whileStmt: WriteWhile(whileStmt); break;
-            case DoStatementSyntax doStmt: WriteDo(doStmt); break;
-            case BreakStatementSyntax: _ctx.WriteLine("break;"); break;
-            case ContinueStatementSyntax: _ctx.WriteLine("continue;"); break;
-            case SwitchStatementSyntax sw: WriteSwitch(sw); break;
+            case ForStatementSyntax forStmt: InLoop(() => WriteFor(forStmt)); break;
+            case ForEachStatementSyntax forEach: InLoop(() => WriteForEach(forEach)); break;
+            case ForEachVariableStatementSyntax deconForeach: InLoop(() => WriteForEachDeconstruction(deconForeach)); break;
+            case WhileStatementSyntax whileStmt: InLoop(() => WriteWhile(whileStmt)); break;
+            case DoStatementSyntax doStmt: InLoop(() => WriteDo(doStmt)); break;
+            case BreakStatementSyntax: WriteJump("break;", r => r.BreakDepth == _ctx.BreakDepth); break;
+            case ContinueStatementSyntax: WriteJump("continue;", r => r.ContinueDepth == _ctx.ContinueDepth); break;
+            case SwitchStatementSyntax sw:
+                _ctx.BreakDepth++;
+                try { WriteSwitch(sw); } finally { _ctx.BreakDepth--; }
+                break;
             case TryStatementSyntax tryStmt: WriteTryCatch(tryStmt); break;
             case ThrowStatementSyntax throwStmt: WriteThrow(throwStmt); break;
             case UsingStatementSyntax usingStmt: WriteUsing(usingStmt); break;
@@ -61,6 +64,26 @@ public sealed class StatementWriter
         // Flush using-var cleanups before return (LIFO order)
         foreach (var cleanup in _ctx.PendingUsingVarCleanups)
             _ctx.WriteLine(cleanup);
+
+        if (_ctx.TryRegions.Count > 0)
+        {
+            // Leaving try/catch blocks: the value is computed first (it may throw and
+            // must still be caught), then frames are popped and finally blocks run.
+            _ctx.WriteLine("{");
+            _ctx.Indent();
+            string? tmp = null;
+            if (ret.Expression != null)
+            {
+                tmp = _ctx.NextTmp("ret");
+                _ctx.WriteLine("__auto_type " + tmp + " = " + _expr.Write(ret.Expression) + ";");
+            }
+            EmitUnwind(0);
+            _ctx.WriteLineWithMapping(tmp == null ? "return;" : "return " + tmp + ";", line,
+                ret.ToString().Trim().Length > 60 ? ret.ToString().Trim()[..60] + "…" : ret.ToString().Trim());
+            _ctx.Dedent();
+            _ctx.WriteLine("}");
+            return;
+        }
 
         if (ret.Expression == null)
             _ctx.WriteLineWithMapping("return;", line, "return;");
@@ -1262,7 +1285,8 @@ public sealed class StatementWriter
             return;
         }
         var cInner = TypeRegistry.MapType(inner);
-        var isPrim = TypeRegistry.IsPrimitive(inner);
+        // Delegate elements are CS2SX_Delegate* values themselves (Func_int_t).
+        var isPrim = TypeRegistry.IsPrimitive(inner) || TypeRegistry.IsDelegate(inner);
         var elemPtr = isPrim ? "" : "*";
         var listFunc = "List_" + cInner + "_Get";
         _ctx.WriteLine(cInner + elemPtr + " " + varName
@@ -1284,9 +1308,12 @@ public sealed class StatementWriter
 
     private void WriteSwitch(SwitchStatementSyntax sw)
     {
+        // Pattern and string switches are lowered to if/else chains. They sit inside
+        // `switch (0) { default: … }` so a `break` nested in a case still leaves the
+        // switch (not an enclosing loop), while `continue` keeps targeting the loop.
         if (sw.Sections.Any(s => s.Labels.OfType<CasePatternSwitchLabelSyntax>().Any()))
         {
-            WritePatternSwitch(sw);
+            InBreakableBlock(() => WritePatternSwitch(sw));
             return;
         }
 
@@ -1294,7 +1321,7 @@ public sealed class StatementWriter
         // lowered to an if/else chain over CS2SX_strcmp_safe(...) == 0.
         if (TypeInferrer.InferCSharpType(sw.Expression, _ctx) == "string")
         {
-            WriteStringSwitch(sw);
+            InBreakableBlock(() => WriteStringSwitch(sw));
             return;
         }
 
@@ -1437,112 +1464,262 @@ public sealed class StatementWriter
         WriteBlockOrStmt(lockStmt.Statement);
     }
 
+    // ── try / catch / finally / throw ─────────────────────────────────────────
+    //
+    //   try { A; }                         {
+    //   catch (ParseError e) { B; }            Exception* _exf_0_pending = NULL;   (only with finally)
+    //   finally { C; }                         CS2SX_ExFrame _exf_0; CS2SX_ExPush(&_exf_0);
+    //                                          if (setjmp(_exf_0.buf) == 0) { A; CS2SX_ExPop(&_exf_0); }
+    //                                          else {
+    //                                              Exception* _exf_0_ex = _exf_0.ex;
+    //                                              [catch bodies run under a second frame when
+    //                                               there is a finally, so it runs for throws too]
+    //                                              if (CS2SX_Exc_Is(_exf_0_ex, &CS2SX_TI_ParseError)) { … B; }
+    //                                              else <rethrow, or pend it until after finally>
+    //                                          }
+    //                                          { C; }
+    //                                          if (_exf_0_pending) CS2SX_Throw(_exf_0_pending);
+    //                                      }
+    // return/break/continue out of a region pop its frame and run its finally first
+    // (EmitUnwind). The runtime side is cs2sx_exc.h.
+
     private void WriteTryCatch(TryStatementSyntax tryStmt)
     {
-        var jmpBufName = "_ex_buf_" + _ctx.NextTmp();
-        // FIX: Stack statt single field — geschachtelte try/catch korrekt
-        _ctx.PushJumpBuf(jmpBufName);
+        var f = _ctx.NextTmp("exf");
+        var pending = f + "_pending";
+        var ex = f + "_ex";
+        bool hasFinally = tryStmt.Finally != null;
+        bool hasCatch = tryStmt.Catches.Count > 0;
 
-        _ctx.WriteLine("char _ex_msg[512] = \"unknown error\";");
-        _ctx.WriteLine("jmp_buf " + jmpBufName + ";");
-        _ctx.WriteLine("int _ex_val = setjmp(" + jmpBufName + ");");
-        _ctx.WriteLine("if (_ex_val == 0)");
         _ctx.WriteLine("{");
         _ctx.Indent();
-        foreach (var stmt in tryStmt.Block.Statements)
-            Write(stmt);
+        if (hasFinally) _ctx.WriteLine("Exception* " + pending + " = NULL;");
+        _ctx.WriteLine("CS2SX_ExFrame " + f + ";");
+        _ctx.WriteLine("CS2SX_ExPush(&" + f + ");");
+        _ctx.WriteLine("if (setjmp(" + f + ".buf) == 0)");
+        _ctx.WriteLine("{");
+        _ctx.Indent();
+        InTryRegion(f, tryStmt.Finally, () =>
+        {
+            foreach (var stmt in tryStmt.Block.Statements)
+                Write(stmt);
+        });
+        _ctx.WriteLine("CS2SX_ExPop(&" + f + ");");
+        _ctx.Dedent();
+        _ctx.WriteLine("}");
+        _ctx.WriteLine("else");
+        _ctx.WriteLine("{");
+        _ctx.Indent();
+        _ctx.WriteLine("Exception* " + ex + " = " + f + ".ex;");
+        if (!hasCatch)
+        {
+            _ctx.WriteLine(pending + " = " + ex + ";");
+        }
+        else if (hasFinally)
+        {
+            var fc = f + "_c";
+            _ctx.WriteLine("CS2SX_ExFrame " + fc + ";");
+            _ctx.WriteLine("CS2SX_ExPush(&" + fc + ");");
+            _ctx.WriteLine("if (setjmp(" + fc + ".buf) == 0)");
+            _ctx.WriteLine("{");
+            _ctx.Indent();
+            InTryRegion(fc, tryStmt.Finally, () => WriteCatchChain(tryStmt, ex, pending + " = " + ex + ";"));
+            _ctx.WriteLine("CS2SX_ExPop(&" + fc + ");");
+            _ctx.Dedent();
+            _ctx.WriteLine("}");
+            _ctx.WriteLine("else " + pending + " = " + fc + ".ex;");
+        }
+        else
+        {
+            WriteCatchChain(tryStmt, ex, "CS2SX_Throw(" + ex + ");");
+        }
         _ctx.Dedent();
         _ctx.WriteLine("}");
 
-        // No RTTI on Switch — cannot dispatch by exception type.
-        // All catch blocks are emitted in sequence inside one else-block, each in its own
-        // scope to avoid variable conflicts. The developer sees the warning and all their
-        // error-handling code is present in the output (vs. silently dropping catch blocks).
-        if (tryStmt.Catches.Count > 0)
+        if (hasFinally)
         {
-            _ctx.WriteLine("else");
-            _ctx.WriteLine("{");
-            _ctx.Indent();
+            WriteFinallyBlock(tryStmt.Finally!);
+            _ctx.WriteLine("if (" + pending + ") CS2SX_Throw(" + pending + ");");
+        }
+        _ctx.Dedent();
+        _ctx.WriteLine("}");
+    }
 
-            for (int ci = 0; ci < tryStmt.Catches.Count; ci++)
+    /// if / else-if chain over the catch clauses, matched by runtime type info.
+    private void WriteCatchChain(TryStatementSyntax tryStmt, string ex, string unhandled)
+    {
+        bool first = true;
+        bool catchesAll = false;
+        foreach (var clause in tryStmt.Catches)
+        {
+            var typeName = CatchTypeName(clause);
+            var varName = clause.Declaration?.Identifier.Text;
+            if (string.IsNullOrEmpty(varName) || varName == "_") varName = null;
+            var cType = TypeRegistry.MapType(typeName);
+            var decl = varName != null ? cType + "* " + varName + " = (" + cType + "*)" + ex + ";" : null;
+            if (varName != null) _ctx.LocalTypes[varName] = typeName;
+
+            var cond = typeName == "Exception" ? "1"
+                : "CS2SX_Exc_Is(" + ex + ", &" + TypeRegistry.ExceptionTypeInfo(typeName) + ")";
+            if (clause.Filter != null)
             {
-                var catchClause = tryStmt.Catches[ci];
-                var typeName = catchClause.Declaration?.Type.ToString() ?? "Exception";
-
-                if (ci > 0)
-                    _ctx.Warn(catchClause, $"catch({typeName}) — no RTTI on Switch; all catch blocks merged into one; bodies emitted sequentially");
-
-                _ctx.WriteLine($"/* catch ({typeName}) */");
-                _ctx.WriteLine("{");
-                _ctx.Indent();
-
-                if (catchClause.Declaration != null)
-                {
-                    var exVarName = catchClause.Declaration.Identifier.Text;
-                    if (!string.IsNullOrEmpty(exVarName) && exVarName != "_")
-                    {
-                        _ctx.LocalTypes[exVarName] = "__exception__";
-                        _ctx.LocalTypes[exVarName + ".Message"] = "string";
-                    }
-                }
-                foreach (var stmt in catchClause.Block.Statements)
-                    Write(stmt);
-
-                _ctx.Dedent();
-                _ctx.WriteLine("}");
+                var filter = _expr.Write(clause.Filter.FilterExpression);
+                cond = (cond == "1" ? "" : cond + " && ")
+                     + "({ " + (decl != null ? decl + " (void)" + varName + "; " : "") + "(" + filter + "); })";
             }
 
-            _ctx.Dedent();
-            _ctx.WriteLine("}");
-        }
-
-        // FIX: finally-Blöcke wurden zuvor still gedropt
-        if (tryStmt.Finally != null)
-        {
-            // Check if try block has return statements (finally won't execute in that case in C)
-            bool tryHasReturn = tryStmt.Block.Statements
-                .OfType<ReturnStatementSyntax>().Any();
-            if (tryHasReturn)
-                _ctx.Warn(tryStmt.Finally, "finally block: return inside try bypasses finally in C — finally still emitted after catch but may not execute on all paths");
-            _ctx.WriteLine("/* finally — always runs after try/catch */");
+            _ctx.WriteLine((first ? "if (" : "else if (") + cond + ")");
             _ctx.WriteLine("{");
             _ctx.Indent();
-            foreach (var stmt in tryStmt.Finally.Block.Statements)
-                Write(stmt);
+            if (decl != null) _ctx.WriteLine(decl);
+            _ctx.CatchExceptionVars.Push(ex);
+            try
+            {
+                foreach (var stmt in clause.Block.Statements)
+                    Write(stmt);
+            }
+            finally { _ctx.CatchExceptionVars.Pop(); }
+            // The exception dies with the handler unless the variable escapes.
+            if (!ExceptionVariableEscapes(clause, varName)
+                && clause.Block.Statements.LastOrDefault() is not (ReturnStatementSyntax or ThrowStatementSyntax))
+                _ctx.WriteLine("Exception_Free(" + ex + ");");
             _ctx.Dedent();
             _ctx.WriteLine("}");
-        }
+            first = false;
 
-        _ctx.PopJumpBuf();
+            if (cond == "1") { catchesAll = true; break; }   // later clauses are unreachable
+        }
+        if (!catchesAll)
+            _ctx.WriteLine("else " + unhandled);
+    }
+
+    /// Exception type a catch clause matches ("Exception" for a bare `catch`).
+    private string CatchTypeName(CatchClauseSyntax clause)
+    {
+        if (clause.Declaration == null) return "Exception";
+        if (_ctx.SemanticModel != null)
+        {
+            try
+            {
+                var t = _ctx.SemanticModel.GetTypeInfo(clause.Declaration.Type).Type;
+                if (t != null && t is not IErrorTypeSymbol) return t.Name;
+            }
+            catch { }
+        }
+        var raw = clause.Declaration.Type.ToString().Trim();
+        var dot = raw.LastIndexOf('.');
+        return dot >= 0 ? raw[(dot + 1)..] : raw;
+    }
+
+    /// True when the handler may still reference the exception after its body: any use
+    /// of the catch variable (even `e.Message` — the string belongs to the exception and
+    /// may have been stored). Only handlers that never look at it free the exception.
+    private static bool ExceptionVariableEscapes(CatchClauseSyntax clause, string? varName)
+    {
+        if (varName == null) return false;
+        return clause.DescendantNodes().OfType<IdentifierNameSyntax>()
+            .Any(id => id.Identifier.Text == varName);
+    }
+
+    private void WriteFinallyBlock(FinallyClauseSyntax fin)
+    {
+        _ctx.WriteLine("{");
+        _ctx.Indent();
+        foreach (var stmt in fin.Block.Statements)
+            Write(stmt);
+        _ctx.Dedent();
+        _ctx.WriteLine("}");
+    }
+
+    private void InTryRegion(string frame, FinallyClauseSyntax? fin, Action body)
+    {
+        _ctx.TryRegions.Add(new TranspilerContext.TryRegion
+        {
+            Frame = frame,
+            Finally = fin,
+            BreakDepth = _ctx.BreakDepth,
+            ContinueDepth = _ctx.ContinueDepth,
+        });
+        try { body(); }
+        finally { _ctx.TryRegions.RemoveAt(_ctx.TryRegions.Count - 1); }
+    }
+
+    /// Cleanup for leaving the try regions from index <paramref name="from"/> inward:
+    /// innermost first, pop its frame and run its finally block. A finally block is
+    /// written outside its own region (a return inside it only unwinds outer ones).
+    private void EmitUnwind(int from)
+    {
+        var saved = _ctx.TryRegions.ToList();
+        try
+        {
+            for (int i = saved.Count - 1; i >= from; i--)
+            {
+                var r = saved[i];
+                if (r.Frame != null) _ctx.WriteLine("CS2SX_ExPop(&" + r.Frame + ");");
+                if (r.Finally != null)
+                {
+                    _ctx.TryRegions.RemoveRange(i, _ctx.TryRegions.Count - i);
+                    WriteFinallyBlock(r.Finally);
+                }
+            }
+        }
+        finally
+        {
+            _ctx.TryRegions.Clear();
+            _ctx.TryRegions.AddRange(saved);
+        }
+    }
+
+    /// break/continue: leaving the try regions inside the targeted loop/switch first.
+    private void WriteJump(string jump, Func<TranspilerContext.TryRegion, bool> insideTarget)
+    {
+        int from = _ctx.TryRegions.FindIndex(r => insideTarget(r));
+        if (from < 0)
+        {
+            _ctx.WriteLine(jump);
+            return;
+        }
+        _ctx.WriteLine("{");
+        _ctx.Indent();
+        EmitUnwind(from);
+        _ctx.WriteLine(jump);
+        _ctx.Dedent();
+        _ctx.WriteLine("}");
+    }
+
+    private void InLoop(Action write)
+    {
+        _ctx.BreakDepth++;
+        _ctx.ContinueDepth++;
+        try { write(); }
+        finally { _ctx.BreakDepth--; _ctx.ContinueDepth--; }
+    }
+
+    private void InBreakableBlock(Action write)
+    {
+        _ctx.WriteLine("switch (0) { default:");
+        _ctx.Indent();
+        write();
+        _ctx.Dedent();
+        _ctx.WriteLine("}");
     }
 
     private void WriteThrow(ThrowStatementSyntax throwStmt)
     {
-        if (throwStmt.Expression is ObjectCreationExpressionSyntax objCreate
-            && objCreate.ArgumentList?.Arguments.Count > 0)
+        var line = throwStmt.GetLocation().GetLineSpan().StartLinePosition.Line + 1;
+        string ex;
+        if (throwStmt.Expression == null)
         {
-            var msg = _expr.Write(objCreate.ArgumentList.Arguments[0].Expression);
-            if (_ctx.CurrentJumpBuf != null)
-            {
-                _ctx.WriteLine("strncpy(_ex_msg, " + msg + ", sizeof(_ex_msg) - 1);");
-                _ctx.WriteLine("longjmp(" + _ctx.CurrentJumpBuf + ", 1);");
-                return;
-            }
-            // FIX: throw ohne aktiven try/catch → Nachricht ausgeben + abort() statt stillem return
-            _ctx.WriteLine("fprintf(stderr, \"Unhandled exception: %s\\n\", " + msg + ");");
-            _ctx.WriteLine("abort();");
-            return;
-        }
-
-        if (_ctx.CurrentJumpBuf != null)
-        {
-            _ctx.WriteLine("longjmp(" + _ctx.CurrentJumpBuf + ", 1);");
+            // `throw;` rethrows the exception of the enclosing catch block.
+            if (_ctx.CatchExceptionVars.Count == 0)
+                _ctx.Warn(throwStmt, "`throw;` outside a catch block");
+            ex = _ctx.CatchExceptionVars.Count > 0 ? _ctx.CatchExceptionVars.Peek() : "NULL";
         }
         else
         {
-            // FIX: rethrow ohne aktiven Handler → abort() statt stillem return
-            _ctx.WriteLine("abort(); /* unhandled rethrow */");
+            ex = "(Exception*)(" + _expr.Write(throwStmt.Expression) + ")";
         }
+        _ctx.WriteLineWithMapping("CS2SX_Throw(" + ex + ");", line, throwStmt.ToString().Trim());
     }
 
     private void WriteUsing(UsingStatementSyntax usingStmt)

@@ -11,6 +11,7 @@ struct MenuEntry
 };
 
 MenuEntry* MenuEntry_New(const char* title);
+void MenuEntry_Ctor(MenuEntry* self, const char* title);
 
 void MenuEntry_Free(MenuEntry* self);
 MenuEntry* MenuEntry_Retain(MenuEntry* self);

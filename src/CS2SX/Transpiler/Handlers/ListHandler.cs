@@ -75,11 +75,11 @@ public sealed class ListHandler : InvocationHandlerBase
         if (method == "ForEach")
         {
             // list.ForEach(action) → for loop calling action on each element
-            var cInner = inner == "string" ? "const char*" : TypeRegistry.MapType(inner);
-            var actionExpr = args.Count > 0 ? args[0] : "NULL /* ForEach: missing action */";
+            if (inv.ArgumentList.Arguments.Count == 0) { result = ""; return true; }
+            var call = DelegateModel.InlineCallable(inv.ArgumentList.Arguments[0].Expression, ctx, inner, writeExpr);
             var iVar = ctx.NextTmp("fe_i");
             ctx.WriteLine($"for (int {iVar} = 0; {iVar} < {listExpr}->count; {iVar}++)");
-            ctx.WriteLine($"    {actionExpr}({listExpr}->data[{iVar}]);");
+            ctx.WriteLine($"    {call($"{listExpr}->data[{iVar}]")};");
             result = "";
             return true;
         }
@@ -172,12 +172,8 @@ public sealed class ListHandler : InvocationHandlerBase
 
         if (method == "Sort" && inv.ArgumentList.Arguments.Count > 0)
         {
-            // args[0] is already the transpiled comparer expression.
-            // If the argument was a lambda, InvocationDispatcher already lifted it via
-            // writeExpr → ExpressionWriter.WriteLambda → LambdaLifter.LiftLambda.
-            // We must NOT re-lift here or the same lambda ends up in PendingLambdaPreludes
-            // twice, emitting duplicate struct/function definitions in the C output.
-            result = BuildCustomSort(listExpr, listType, args[0], ctx);
+            var cmp = DelegateModel.InlineCallable(inv.ArgumentList.Arguments[0].Expression, ctx, inner, writeExpr);
+            result = BuildCustomSort(listExpr, listType, cmp, ctx);
             return true;
         }
 
@@ -199,17 +195,12 @@ public sealed class ListHandler : InvocationHandlerBase
 
     private static string BuildCustomSort(
         string listExpr, string listType,
-        string comparerExpr, TranspilerContext ctx)
+        Func<string, string> compare, TranspilerContext ctx)
     {
         var inner = TypeRegistry.GetListInnerType(listType) ?? "int";
         var cInner = inner == "string" ? "const char*" : TypeRegistry.MapType(inner);
-
-        // comparerExpr is already the correct C expression:
-        //   - lambda arg  → lifted function name (e.g. "_lambda_3"), produced by
-        //                   InvocationDispatcher → writeExpr → WriteLambda → LiftLambda
-        //   - method-ref  → the transpiled identifier (e.g. "MyClass_Compare")
-        // Re-lifting here would add a second identical prelude and capture-init block.
-        string resolvedComparer = comparerExpr;
+        if (!inner.Equals("string") && TypeRegistry.NeedsPointerSuffix(inner) && !cInner.EndsWith("*"))
+            cInner += "*";
 
         var idxI = ctx.NextTmp("si");
         var idxJ = ctx.NextTmp("sj");
@@ -220,7 +211,7 @@ public sealed class ListHandler : InvocationHandlerBase
         ctx.Indent();
         ctx.WriteLine($"{cInner} {tmpVar} = {listExpr}->data[{idxI}];");
         ctx.WriteLine($"int {idxJ} = {idxI} - 1;");
-        ctx.WriteLine($"while ({idxJ} >= 0 && {resolvedComparer}({listExpr}->data[{idxJ}], {tmpVar}) > 0)");
+        ctx.WriteLine($"while ({idxJ} >= 0 && {compare($"{listExpr}->data[{idxJ}], {tmpVar}")} > 0)");
         ctx.WriteLine("{");
         ctx.Indent();
         ctx.WriteLine($"{listExpr}->data[{idxJ}+1] = {listExpr}->data[{idxJ}];");

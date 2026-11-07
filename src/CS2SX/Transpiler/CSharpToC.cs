@@ -162,8 +162,7 @@ public sealed class CSharpToC : CSharpSyntaxWalker
     {
         _ctx.ClearClassContext();
         _ctx.CurrentClass = node.Identifier.Text;
-        _ctx.CurrentBaseType = node.BaseList?.Types.FirstOrDefault()?.ToString().Trim()
-                               ?? string.Empty;
+        _ctx.CurrentBaseType = ResolveBaseClass(node);
 
         var lineSpan = node.GetLocation().GetLineSpan();
         _ctx.CurrentLine = lineSpan.StartLinePosition.Line + 1;
@@ -433,6 +432,33 @@ public sealed class CSharpToC : CSharpSyntaxWalker
 
     public override void VisitStructDeclaration(StructDeclarationSyntax node) => WriteValueStruct(node);
 
+    // Interfaces are emitted by InterfaceExpander (vtable struct + per-class adapters).
+    // Walking into them here would turn their method declarations into bodiless
+    // global C functions (`int IsAlive() { }`).
+    public override void VisitInterfaceDeclaration(InterfaceDeclarationSyntax node) { }
+
+    /// The base CLASS of a class declaration ("" when it only implements interfaces):
+    /// `class Bullet : IUpdatable` has no base class and is a refcounted root.
+    private string ResolveBaseClass(ClassDeclarationSyntax node)
+    {
+        var first = node.BaseList?.Types.FirstOrDefault()?.Type;
+        if (first == null) return string.Empty;
+        if (_ctx.SemanticModel != null)
+        {
+            try
+            {
+                var sym = _ctx.SemanticModel.GetTypeInfo(first).Type;
+                if (sym != null && sym.TypeKind == TypeKind.Interface) return string.Empty;
+                if (sym != null && sym.TypeKind == TypeKind.Class) return first.ToString().Trim();
+            }
+            catch { }
+        }
+        var text = first.ToString().Trim();
+        bool looksLikeInterface = _ctx.InterfaceTypes.Contains(text)
+            || (text.Length > 1 && text[0] == 'I' && char.IsUpper(text[1]));
+        return looksLikeInterface ? string.Empty : text;
+    }
+
     private void WriteValueStruct(TypeDeclarationSyntax node)
     {
         var structName = node.Identifier.Text;
@@ -474,7 +500,8 @@ public sealed class CSharpToC : CSharpSyntaxWalker
 
     private void CollectFieldTypes(ClassDeclarationSyntax node)
     {
-        foreach (var field in node.Members.OfType<FieldDeclarationSyntax>())
+        // Fields and field-like events (event Action<int> Changed; is a delegate field).
+        foreach (var field in node.Members.OfType<BaseFieldDeclarationSyntax>())
         {
             if (field.Modifiers.Any(m => m.IsKind(SyntaxKind.StaticKeyword))) continue;
             if (field.Modifiers.Any(m => m.IsKind(SyntaxKind.ConstKeyword))) continue;
@@ -505,7 +532,7 @@ public sealed class CSharpToC : CSharpSyntaxWalker
         }
     }
 
-    private string ResolveFieldType(FieldDeclarationSyntax field)
+    private string ResolveFieldType(BaseFieldDeclarationSyntax field)
     {
         if (_ctx.SemanticModel != null)
         {
@@ -634,7 +661,7 @@ public sealed class CSharpToC : CSharpSyntaxWalker
 
     private void WriteInstanceFieldDeclarations(ClassDeclarationSyntax node)
     {
-        foreach (var field in node.Members.OfType<FieldDeclarationSyntax>())
+        foreach (var field in node.Members.OfType<BaseFieldDeclarationSyntax>())
         {
             if (field.Modifiers.Any(m => m.IsKind(SyntaxKind.StaticKeyword))) continue;
 
@@ -909,18 +936,6 @@ public sealed class CSharpToC : CSharpSyntaxWalker
                     _ctx.Warn(f, $"Feld '{typeName} {v.Identifier.Text}' heißt wie sein Typ → statische Aufrufe wie '{typeName}.Methode(...)' lösen auf das Feld auf. Feld umbenennen.");
         }
 
-        // 3) Only ONE instance constructor is supported — extra ones are silently
-        //    dropped (only the first is emitted). Make that explicit.
-        var instanceCtors = node.Members.OfType<ConstructorDeclarationSyntax>()
-            .Where(c => !c.Modifiers.Any(m => m.IsKind(SyntaxKind.StaticKeyword)))
-            .ToList();
-        if (instanceCtors.Count > 1)
-            _ctx.Warn(instanceCtors[1], $"Klasse '{node.Identifier.Text}' hat {instanceCtors.Count} Konstruktoren — nur der erste wird transpiliert, die übrigen werden ignoriert. Zu EINEM Konstruktor mit optionalen Parametern zusammenführen.");
-
-        // 4) `: this(...)` constructor delegation is not supported (no alloc/init split).
-        foreach (var c in instanceCtors)
-            if (c.Initializer != null && c.Initializer.IsKind(SyntaxKind.ThisConstructorInitializer))
-                _ctx.Warn(c, $"Konstruktor-Delegation ': this(...)' wird nicht unterstützt → der Ziel-Konstruktor wird nicht aufgerufen. Gemeinsame Initialisierung in eine Methode auslagern und aus beiden aufrufen.");
     }
 
     private void WriteStaticArrayFieldDef(FieldDeclarationSyntax field, string className, string csType)
@@ -1194,24 +1209,13 @@ public sealed class CSharpToC : CSharpSyntaxWalker
             {
                 _ctx.Out.WriteLine("void " + name + "_Init(" + name + "* self);");
             }
+            else if (IsControlSubclass(_ctx.CurrentBaseType))
+            {
+                _ctx.Out.WriteLine(name + "* " + name + "_New();");
+            }
             else
             {
-                var explicitCtor = node.Members
-                    .OfType<ConstructorDeclarationSyntax>()
-                    .FirstOrDefault();
-
-                if (explicitCtor != null && explicitCtor.ParameterList.Parameters.Count > 0)
-                {
-                    var paramDecls = explicitCtor.ParameterList.Parameters
-                        .Select(p => BuildParamDecl(p))
-                        .ToList();
-                    _ctx.Out.WriteLine(name + "* " + name + "_New("
-                        + string.Join(", ", paramDecls) + ");");
-                }
-                else
-                {
-                    _ctx.Out.WriteLine(name + "* " + name + "_New();");
-                }
+                Strategies.DefaultConstructorStrategy.WritePrototypes(node, name, _ctx, this);
             }
         }
 

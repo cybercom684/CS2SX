@@ -3,12 +3,16 @@
 #include "Input.h"
 #include "Program.h"
 
+void InputMapper_Ctor(InputMapper* self)
+{
+}
+
 InputMapper* InputMapper_New(void)
 {
-    InputMapper* self = (InputMapper*)malloc(sizeof(InputMapper));
+    InputMapper* self = (InputMapper*)calloc(1, sizeof(InputMapper));
     if (!self) return NULL;
-    memset(self, 0, sizeof(InputMapper));
     self->_rc = 1;
+    InputMapper_Ctor(self);
     return self;
 }
 

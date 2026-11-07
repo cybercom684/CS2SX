@@ -62,7 +62,7 @@ public sealed class EnumHandler : InvocationHandlerBase
 
             if (enumTypeName != null && ctx.EnumDefs.TryGetValue(enumTypeName, out var defMembers))
             {
-                var checks = string.Join(" || ", defMembers.Select(m => $"(({valArg}) == {m})"));
+                var checks = string.Join(" || ", defMembers.Select(m => $"(({valArg}) == {TypeRegistry.EnumMemberCName(enumTypeName, m)})"));
                 result = "(" + checks + ")";
             }
             else
@@ -104,7 +104,7 @@ public sealed class EnumHandler : InvocationHandlerBase
 
         // Emit: static const EnumType _vals[] = { A, B, C };
         var arrName = ctx.NextTmp("enum_vals");
-        var memberList = string.Join(", ", members);
+        var memberList = string.Join(", ", members.Select(m => TypeRegistry.EnumMemberCName(enumTypeName, m)));
         ctx.Out.WriteLine(ctx.Tab + $"static const {enumTypeName} {arrName}[] = {{ {memberList} }};");
         ctx.ArrayLengths[arrName] = members.Count.ToString();
         return arrName;
@@ -140,7 +140,7 @@ public sealed class EnumHandler : InvocationHandlerBase
                 var okVar = ctx.NextTmp("ep_ok");
                 ctx.WriteLine($"int {okVar} = 0;");
                 foreach (var m in tryMembers)
-                    ctx.WriteLine($"if (CS2SX_strcmp_safe({strArg}, \"{m}\") == 0) {{ *{outArg} = {m}; {okVar} = 1; }}");
+                    ctx.WriteLine($"if (CS2SX_strcmp_safe({strArg}, \"{m}\") == 0) {{ *{outArg} = {TypeRegistry.EnumMemberCName(enumTypeName, m)}; {okVar} = 1; }}");
                 return okVar;
             }
             // Fallback: numeric parse always succeeds
@@ -154,7 +154,7 @@ public sealed class EnumHandler : InvocationHandlerBase
             var resultVar = ctx.NextTmp("ep");
             ctx.WriteLine($"{enumTypeName} {resultVar} = ({enumTypeName})0;");
             foreach (var m in members)
-                ctx.WriteLine($"if (CS2SX_strcmp_safe({strArg}, \"{m}\") == 0) {resultVar} = {m};");
+                ctx.WriteLine($"if (CS2SX_strcmp_safe({strArg}, \"{m}\") == 0) {resultVar} = {TypeRegistry.EnumMemberCName(enumTypeName, m)};");
             return resultVar;
         }
 
@@ -191,7 +191,7 @@ public sealed class EnumHandler : InvocationHandlerBase
             foreach (var m in members)
             {
                 var kw = first ? "if" : "else if";
-                ctx.WriteLine($"{kw} ({valArg} == {m}) snprintf({buf}, CS2SX_STRBUF_SIZE, \"%s\", \"{m}\");");
+                ctx.WriteLine($"{kw} ({valArg} == {TypeRegistry.EnumMemberCName(enumTypeName, m)}) snprintf({buf}, CS2SX_STRBUF_SIZE, \"%s\", \"{m}\");");
                 first = false;
             }
             return buf;

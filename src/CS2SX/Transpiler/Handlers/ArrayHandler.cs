@@ -80,9 +80,10 @@ public sealed class ArrayHandler : InvocationHandlerBase
         var cmpFunc = GetCmpFunction(elemType);
         var lenExpr = ArrayModel.LengthOf(arrRaw, arrName, ctx);
 
-        if (args.Count >= 2 && inv.ArgumentList.Arguments[1].Expression is LambdaExpressionSyntax)
+        if (inv.ArgumentList.Arguments.Count >= 2)
         {
-            // qsort with lambda-lifted compare — emit inline insertion sort for simplicity
+            // Comparison delegate or lambda — inline insertion sort calling it.
+            var compare = DelegateModel.InlineCallable(inv.ArgumentList.Arguments[1].Expression, ctx, elemType, writeExpr);
             var idxI = ctx.NextTmp("si");
             var idxJ = ctx.NextTmp("sj");
             var tmp = ctx.NextTmp("stmp");
@@ -92,7 +93,7 @@ public sealed class ArrayHandler : InvocationHandlerBase
             ctx.Indent();
             ctx.WriteLine($"{cType} {tmp} = {arrName}[{idxI}];");
             ctx.WriteLine($"int {idxJ} = {idxI} - 1;");
-            ctx.WriteLine($"while ({idxJ} >= 0 && {args[1]}({arrName}[{idxJ}], {tmp}) > 0)");
+            ctx.WriteLine($"while ({idxJ} >= 0 && {compare($"{arrName}[{idxJ}], {tmp}")} > 0)");
             ctx.WriteLine("{");
             ctx.Indent();
             ctx.WriteLine($"{arrName}[{idxJ}+1] = {arrName}[{idxJ}];");
@@ -227,7 +228,8 @@ public sealed class ArrayHandler : InvocationHandlerBase
     {
         if (args.Count < 2) return "0";
         var arrName = args[0];
-        var pred = args[1];
+        var pred = DelegateModel.InlineCallable(inv.ArgumentList.Arguments[1].Expression, ctx,
+            InferArrayElementType(inv.ArgumentList.Arguments[0].Expression, ctx), writeExpr);
         var arrRaw = inv.ArgumentList.Arguments[0].Expression.ToString();
         var lenExpr = ArrayModel.LengthOf(arrRaw, arrName, ctx);
         var resultVar = ctx.NextTmp("ex");
@@ -235,7 +237,7 @@ public sealed class ArrayHandler : InvocationHandlerBase
 
         ctx.WriteLine($"int {resultVar} = 0;");
         ctx.WriteLine($"for (int {iVar} = 0; {iVar} < {lenExpr}; {iVar}++)");
-        ctx.WriteLine($"    if ({pred}({arrName}[{iVar}])) {{ {resultVar} = 1; break; }}");
+        ctx.WriteLine($"    if ({pred($"{arrName}[{iVar}]")}) {{ {resultVar} = 1; break; }}");
         return resultVar;
     }
 
@@ -244,7 +246,8 @@ public sealed class ArrayHandler : InvocationHandlerBase
     {
         if (args.Count < 2) return "-1";
         var arrName = args[0];
-        var pred = args[1];
+        var pred = DelegateModel.InlineCallable(inv.ArgumentList.Arguments[1].Expression, ctx,
+            InferArrayElementType(inv.ArgumentList.Arguments[0].Expression, ctx), writeExpr);
         var arrRaw = inv.ArgumentList.Arguments[0].Expression.ToString();
         var lenExpr = ArrayModel.LengthOf(arrRaw, arrName, ctx);
         var resultVar = ctx.NextTmp("fi");
@@ -252,7 +255,7 @@ public sealed class ArrayHandler : InvocationHandlerBase
 
         ctx.WriteLine($"int {resultVar} = -1;");
         ctx.WriteLine($"for (int {iVar} = 0; {iVar} < {lenExpr}; {iVar}++)");
-        ctx.WriteLine($"    if ({pred}({arrName}[{iVar}])) {{ {resultVar} = {iVar}; break; }}");
+        ctx.WriteLine($"    if ({pred($"{arrName}[{iVar}]")}) {{ {resultVar} = {iVar}; break; }}");
         return resultVar;
     }
 

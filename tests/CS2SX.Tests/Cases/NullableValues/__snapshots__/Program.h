@@ -23,7 +23,8 @@ struct Profile
     const char* f_Nickname;
 };
 
-Profile* Profile_New();
+Profile* Profile_New(void);
+void Profile_Ctor(Profile* self);
 Nullable_int Profile_Find(Profile* self, int key);
 int Profile_Add(Profile* self, Nullable_int bonus);
 

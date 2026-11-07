@@ -49,6 +49,18 @@ public class Spieler
 
 Klassen werden als C-Structs mit Funktionszeiger-VTable transpiliert. Instanzen werden auf dem Heap allokiert und über `_Free`-Funktionen freigegeben.
 
+**Konstruktoren** dürfen überladen werden und sich gegenseitig aufrufen — `: this(...)` und `: base(...)` funktionieren wie in C#, ebenso optionale Parameter. Die Reihenfolge ist die von C#: Feld-Initialisierer, dann der Basis-Konstruktor, dann der Rumpf.
+
+```csharp
+public class Punkt
+{
+    public int X, Y;
+    public Punkt() : this(0, 0) { }
+    public Punkt(int v) : this(v, v) { }
+    public Punkt(int x, int y) { X = x; Y = y; }
+}
+```
+
 ### Structs
 
 ```csharp
@@ -112,6 +124,8 @@ public enum Status : byte { Idle = 0, Running = 1, Done = 2 }
 [Flags]
 public enum Optionen { Keine = 0, Sound = 1, Musik = 2, Alle = 3 }
 ```
+
+Mehrere Enums dürfen gleichnamige Werte haben (`Modus.Keine`, `Stufe.Keine`). Im generierten C heißen die Konstanten `Modus_Keine` — wichtig nur, wenn man eigenen C-Code dazu schreibt.
 
 ---
 
@@ -288,43 +302,61 @@ var liste = new List<int> { 3, 1, 2 };
 liste.Sort((a, b) => a - b);
 ```
 
-Lambdas werden zu statischen C-Funktionen geliftet (`_lambda_N`). Captures von lokalen Variablen werden in einer Capture-Struct übergeben.
-
-### Lambda-Einschränkung: Feld-Mutation schlägt nicht zurück
-
-Felder der äußeren Klasse werden beim Erstellen der Lambda in die Capture-Struct **kopiert**. Zuweisungen an diese Felder innerhalb der Lambda ändern nur die Kopie — das Original bleibt unverändert.
+Delegates (`Action`, `Func<…>`, Events) sind echte Objekte: Lambdas, Methoden (`OnTreffer`, `Hilfe.Parse`) und Kombinationen daraus lassen sich speichern, übergeben, in Listen ablegen und mit `+=`/`-=` verketten. Ein Aufruf ruft alle Einträge nacheinander auf und liefert das letzte Ergebnis. Ein Aufruf auf `null` wirft `NullReferenceException`, deshalb `?.Invoke(...)` für Events.
 
 ```csharp
-// FALSCH — _log wird in der Kopie gesetzt, nicht im Feld
-private string _log = "";
-private Action _cb;
-
-public void Init()
+public class Zaehler
 {
-    _cb = () => { _log = "fertig"; };  // schreibt in Capture-Kopie!
+    public event Action<int> Geaendert;
+    private int _wert;
+    public void Plus(int n) { _wert += n; Geaendert?.Invoke(_wert); }
 }
 
-public void OnFrame()
+var z = new Zaehler();
+z.Geaendert += OnGeaendert;                 // Methode dieser Klasse
+z.Geaendert += w => Console.WriteLine(w);   // zusätzlich eine Lambda
+z.Plus(1);                                  // ruft beide auf
+z.Geaendert -= OnGeaendert;
+```
+
+**Captures:** Felder (`_wert`, `this`) sieht eine Lambda immer live. Erfasste **lokale Variablen** werden beim Erzeugen der Lambda kopiert. Jede Lambda, die in einer Schleife entsteht, hat deshalb ihre eigenen Werte (`for (…) { int k = i; liste.Add(() => k); }` liefert 0, 1, 2 …). Weist eine Lambda einer erfassten lokalen Variable etwas zu, warnt `cs2sx check`, weil die Änderung außen nicht ankommt. Für geteilten Zustand ein Feld verwenden.
+
+Lambdas, die direkt an LINQ oder `List`/`Array`-Methoden gehen (`Where`, `Select`, `ForEach`, `Sort`, `Find`, …), werden zu einer Schleife um eine statische Funktion. Das kostet keine Allokation.
+
+---
+
+## Exceptions
+
+```csharp
+public class ParseFehler : Exception
 {
-    _cb();
-    // _log ist weiterhin "" — die Zuweisung in der Lambda hatte keinen Effekt
+    public int Position;
+    public ParseFehler(string msg, int pos) : base(msg) { Position = pos; }
 }
 
-// RICHTIG — Felder NACH dem Lambda-Aufruf setzen
-public void OnFrame()
+try
 {
-    _cb();                   // Lambda läuft (gut für Seiteneffekte auf Objekten)
-    _log = "fertig";         // Feld direkt nach dem Aufruf setzen
+    Lade(datei);
+}
+catch (ParseFehler e) when (e.Position > 0)
+{
+    Console.WriteLine("Zeile " + e.Position + ": " + e.Message);
+}
+catch (IOException)
+{
+    throw;                          // weiterreichen
+}
+finally
+{
+    Aufraeumen();
 }
 ```
 
-**Was funktioniert:** Pointer-Parameter innerhalb einer Lambda werden korrekt dereferenziert. Wenn die Lambda ein Objekt als Parameter empfängt (`Action<MyClass>`), können dessen Felder über den Pointer mutiert werden:
+`throw` funktioniert über Methodengrenzen hinweg, `catch` wählt nach Typ (inklusive Basisklassen und `when`-Filter), `finally` läuft auch bei `return`, `break`, `continue` und weitergeworfenen Exceptions. Eigene Exception-Klassen leiten von `Exception` oder einer System-Exception ab. Verfügbar sind unter anderem `ArgumentException`, `ArgumentNullException`, `ArgumentOutOfRangeException`, `InvalidOperationException`, `NotSupportedException`, `NotImplementedException`, `FormatException`, `IOException`, `FileNotFoundException` und `KeyNotFoundException`, jeweils mit `Message`, `InnerException` und `GetType().Name`.
 
-```csharp
-Action<Spieler> heilen = (sp) => { sp.Leben += 10; };  // sp->f_Leben += 10 — funktioniert!
-heilen(_spieler);
-// _spieler.Leben ist jetzt +10 — Mutation via Pointer-Param wirkt sich aus
-```
+Eine nicht gefangene Exception beendet die App. Vorher zeigt die Switch die Meldung im System-Fehlerdialog, und sie wird nach `stderr` geschrieben (nxlink).
+
+Die Laufzeit selbst wirft noch keine Exceptions: `int.Parse` und Zugriffe außerhalb von Arrays oder auf `null` lösen nichts Fangbares aus. Für Eingabeprüfung also `int.TryParse(...)` verwenden.
 
 ---
 
@@ -425,11 +457,10 @@ if (File.Exists("/switch/MeineApp/save.txt"))
 | `async`/`await` | Synchrone Logik — kein echtes Multithreading auf Switch Homebrew |
 | Reflection | Nicht verfügbar (kein .NET Runtime) |
 | `dynamic` | Nicht verfügbar |
-| `event` mit mehreren Subscribern | Einfacher `Action`-Delegate (ein Subscriber) |
+| Eigene `delegate`-Typen (`delegate void Handler(int x);`) | `Action<…>` / `Func<…>` verwenden |
+| `event` mit eigenen `add`/`remove`-Accessoren | Feld-artiges `event` |
 | `IQueryable` / LINQ-Query-Syntax | Method-Syntax LINQ verwenden |
 | `record with { }` Expressions | Manuell kopieren |
 | Ranges `arr[1..3]` in foreach | Manuell mit Index-Schleife |
-
-> **`try`/`catch`/`finally`** ist eingeschränkt unterstützt (via `setjmp/longjmp`): ein eigenes `throw` wird gefangen und `finally` läuft, aber es gibt **kein** Typ-Dispatch (alle `catch`-Blöcke werden zusammengeführt) und die Standardbibliothek wirft keine fangbaren Exceptions (`int.Parse`, Null-/Array-Zugriff geben Fehlerwerte zurück statt zu werfen). Für Eingabeprüfung also `int.TryParse(...)` statt `try/catch`. Details: [Grenzen und Workarounds](advanced/limitations.md).
 
 Ausführlichere Infos: [Grenzen und Workarounds](advanced/limitations.md)

@@ -11,6 +11,7 @@ struct Board
 };
 
 Board* Board_New(int n);
+void Board_Ctor(Board* self, int n);
 int Board_Sum(int* values);
 int Board_Count(int* values);
 int* Board_Doubled(Board* self);

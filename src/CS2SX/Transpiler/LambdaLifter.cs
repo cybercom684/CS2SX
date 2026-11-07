@@ -44,17 +44,28 @@ public sealed class LambdaLifter
     // ── Öffentliche API ──────────────────────────────────────────────────────
 
     /// <summary>
-    /// Hebt ein Lambda in eine statische C-Funktion und schreibt das Prelude
-    /// (Struct-Def + Funktionsdefinition) in _ctx.PendingLambdaPreludes.
-    /// CSharpToC.VisitMethodDeclaration() flusht diese VOR der Methodensignatur.
-    /// Gibt den C-Funktionsnamen zurück.
+    /// Lifts a lambda into a static C function; its definition goes to
+    /// _ctx.PendingLambdaPreludes (flushed before the enclosing method).
+    ///
+    /// Inline mode (default — LINQ/List handlers that call it right away in a loop they
+    /// write themselves): returns the function name; captures go through a static
+    /// context pointer set just before the call. No allocation.
+    ///
+    /// Delegate mode (<paramref name="asDelegate"/> — a lambda that becomes a value:
+    /// stored, passed to a user method, subscribed to an event): returns an expression
+    /// of type CS2SX_Delegate*. Each evaluation gets its own heap environment holding
+    /// the captured values, so closures created in a loop keep their own variables.
+    /// Lambdas without captures are one static delegate.
     /// </summary>
     public string LiftLambda(
         LambdaExpressionSyntax lambda,
         string? hintType = null,
         string? elementTypeHint = null,
-        bool isPredicate = false)
+        bool isPredicate = false,
+        bool asDelegate = false)
     {
+        if (asDelegate) return LiftDelegate(lambda, hintType);
+
         var id = _ctx.NextLambdaId();
         var name = "_lambda_" + id;
         var caps = FindCaptures(lambda);
@@ -91,7 +102,7 @@ public sealed class LambdaLifter
             catch { }
         }
 
-        var parms = ExtractParams(lambda, effectiveElementHint);
+        var parms = ApplySemanticParamTypes(lambda, ExtractParams(lambda, effectiveElementHint));
         var retCs = isPredicate ? "bool"
             : hintType != null ? ExtractReturnType(hintType, parms.Count)
             : "void";
@@ -116,6 +127,119 @@ public sealed class LambdaLifter
         }
 
         return name;
+    }
+
+    // ── Delegate mode ────────────────────────────────────────────────────────
+
+    private string LiftDelegate(LambdaExpressionSyntax lambda, string? hintType)
+    {
+        var id = _ctx.NextLambdaId();
+        var name = "_lambda_" + id;
+        var caps = FindCaptures(lambda);
+        var parms = ApplySemanticParamTypes(lambda, ExtractParams(lambda, null));
+        var retCs = hintType != null ? ExtractReturnType(hintType, parms.Count) : "void";
+        WarnOnMutatedCaptures(lambda, caps);
+
+        var capStruct = "_cap_" + id;
+        var sb = new System.Text.StringBuilder();
+        if (caps.Count > 0)
+        {
+            sb.AppendLine($"struct {capStruct}");
+            sb.AppendLine("{");
+            sb.AppendLine("    CS2SX_Env _hdr;");
+            foreach (var cap in caps)
+                sb.AppendLine("    " + CapFieldDecl(cap) + ";");
+            sb.AppendLine("};");
+            sb.AppendLine();
+        }
+
+        var retC = DelegateModel.SignatureCType(retCs);
+        var paramList = new List<string> { "void* _env" };
+        paramList.AddRange(parms.Select(p => DelegateModel.SignatureCType(p.CsType) + " " + p.Name));
+        sb.AppendLine($"static {retC} {name}({string.Join(", ", paramList)})");
+        sb.AppendLine("{");
+        if (caps.Count > 0)
+        {
+            sb.AppendLine($"    struct {capStruct}* _c = (struct {capStruct}*)_env;");
+            foreach (var cap in caps)
+                sb.AppendLine("    " + CapFieldDecl(cap) + " = _c->" + cap.CapName + ";");
+        }
+        else
+            sb.AppendLine("    (void)_env;");
+        sb.Append(TranspileBody(lambda, retCs, caps, parms));
+        sb.AppendLine("}");
+        sb.AppendLine();
+
+        if (caps.Count == 0)
+        {
+            sb.AppendLine($"static CS2SX_Delegate _dg_{id} = CS2SX_DELEGATE_STATIC({name});");
+            sb.AppendLine();
+            _ctx.PendingLambdaPreludes.Add(sb.ToString());
+            return $"(&_dg_{id})";
+        }
+        _ctx.PendingLambdaPreludes.Add(sb.ToString());
+
+        // A fresh environment per evaluation (inside a loop: per iteration).
+        var env = "_env_" + id;
+        _ctx.WriteLine($"struct {capStruct}* {env} = CS2SX_ENV_NEW(struct {capStruct});");
+        foreach (var cap in caps)
+            _ctx.WriteLine($"{env}->{cap.CapName} = {cap.CExpr};");
+        return $"CS2SX_Delegate_New((void*){name}, {env}, 1)";
+    }
+
+    private string CapFieldDecl(CaptureInfo cap)
+    {
+        if (cap.CapName == "self" && !string.IsNullOrEmpty(_ctx.CurrentClass))
+            return _ctx.CurrentClass + "* self";
+        return MapFieldType(cap.CsType) + (NeedsPtr(cap.CsType) ? "*" : "") + " " + cap.CapName;
+    }
+
+    /// Captured variables are copied when the delegate is created. C# shares them
+    /// instead, so assigning one inside the lambda (or after creating it) would not be
+    /// seen on the other side — say so instead of silently behaving differently.
+    private void WarnOnMutatedCaptures(LambdaExpressionSyntax lambda, List<CaptureInfo> caps)
+    {
+        if (_ctx.SemanticModel == null || caps.Count == 0) return;
+        try
+        {
+            var flow = _ctx.SemanticModel.AnalyzeDataFlow(lambda);
+            if (flow == null || !flow.Succeeded) return;
+            foreach (var sym in flow.CapturedInside)
+            {
+                if (sym is not (ILocalSymbol or IParameterSymbol)) continue;
+                if (!caps.Any(c => c.CapName == sym.Name.TrimStart('_'))) continue;
+                if (flow.WrittenInside.Contains(sym, SymbolEqualityComparer.Default))
+                    _ctx.Warn(lambda, $"Lambda ändert die erfasste Variable '{sym.Name}' — CS2SX kopiert erfasste lokale Variablen beim Erzeugen des Delegates, die Änderung ist außerhalb nicht sichtbar. Ein Feld statt der lokalen Variable verwenden.");
+            }
+        }
+        catch { }
+    }
+
+    /// Parameter types from the semantic model (`(a, b) => …` has no syntax types).
+    private List<ParamInfo> ApplySemanticParamTypes(LambdaExpressionSyntax lambda, List<ParamInfo> parms)
+    {
+        if (_ctx.SemanticModel == null) return parms;
+        var syntaxParams = lambda switch
+        {
+            SimpleLambdaExpressionSyntax s => new List<ParameterSyntax> { s.Parameter },
+            ParenthesizedLambdaExpressionSyntax p => p.ParameterList.Parameters.ToList(),
+            _ => new List<ParameterSyntax>(),
+        };
+        var result = new List<ParamInfo>(parms.Count);
+        for (int i = 0; i < parms.Count; i++)
+        {
+            var csType = parms[i].CsType;
+            try
+            {
+                if (i < syntaxParams.Count
+                    && _ctx.SemanticModel.GetDeclaredSymbol(syntaxParams[i]) is IParameterSymbol ps
+                    && ps.Type is not IErrorTypeSymbol)
+                    csType = TranspilerContext.FormatTypeSymbol(ps.Type);
+            }
+            catch { }
+            result.Add(parms[i] with { CsType = csType });
+        }
+        return result;
     }
 
     // ── Typedef-Generierung ──────────────────────────────────────────────────

@@ -13,6 +13,7 @@ struct Enemy
 };
 
 Enemy* Enemy_New(const char* name, int hp);
+void Enemy_Ctor(Enemy* self, const char* name, int hp);
 
 void Enemy_Free(Enemy* self);
 Enemy* Enemy_Retain(Enemy* self);

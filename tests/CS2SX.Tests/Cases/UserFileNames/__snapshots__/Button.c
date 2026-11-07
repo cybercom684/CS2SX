@@ -3,13 +3,17 @@
 #include "Input.h"
 #include "Program.h"
 
+void MenuEntry_Ctor(MenuEntry* self, const char* title)
+{
+    self->f_Title = _cs2sx_heap_strdup(title);
+}
+
 MenuEntry* MenuEntry_New(const char* title)
 {
-    MenuEntry* self = (MenuEntry*)malloc(sizeof(MenuEntry));
+    MenuEntry* self = (MenuEntry*)calloc(1, sizeof(MenuEntry));
     if (!self) return NULL;
-    memset(self, 0, sizeof(MenuEntry));
     self->_rc = 1;
-    self->f_Title = _cs2sx_heap_strdup(title);
+    MenuEntry_Ctor(self, title);
     return self;
 }
 

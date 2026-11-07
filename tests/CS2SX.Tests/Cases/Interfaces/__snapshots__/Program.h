@@ -6,20 +6,20 @@
 #include "_interfaces.h"
 #include "_generics.h"
 
-void Update(float dt);
-int IsAlive();
 struct Bullet
 {
-    IUpdatable base;
+    int _rc;
     /* implements IUpdatable */
     float f_Y;
 };
 
-Bullet* Bullet_New();
+Bullet* Bullet_New(void);
+void Bullet_Ctor(Bullet* self);
 void Bullet_Update(Bullet* self, float dt);
 int Bullet_IsAlive(Bullet* self);
 
 void Bullet_Free(Bullet* self);
+Bullet* Bullet_Retain(Bullet* self);
 extern IUpdatable_vtable Bullet_IUpdatable_vtable_instance;
 static inline IUpdatable* Bullet_as_IUpdatable(Bullet* self)
 {
@@ -32,16 +32,18 @@ static inline IUpdatable* Bullet_as_IUpdatable(Bullet* self)
 
 struct Timer
 {
-    IUpdatable base;
+    int _rc;
     /* implements IUpdatable */
     float f_Left;
 };
 
-Timer* Timer_New();
+Timer* Timer_New(void);
+void Timer_Ctor(Timer* self);
 void Timer_Update(Timer* self, float dt);
 int Timer_IsAlive(Timer* self);
 
 void Timer_Free(Timer* self);
+Timer* Timer_Retain(Timer* self);
 extern IUpdatable_vtable Timer_IUpdatable_vtable_instance;
 static inline IUpdatable* Timer_as_IUpdatable(Timer* self)
 {

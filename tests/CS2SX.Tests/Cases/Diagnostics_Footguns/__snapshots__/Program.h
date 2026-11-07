@@ -10,7 +10,8 @@ struct Settings
     int f_Volume;
 };
 
-Settings* Settings_New();
+Settings* Settings_New(void);
+void Settings_Ctor(Settings* self);
 
 void Settings_Free(Settings* self);
 Settings* Settings_Retain(Settings* self);
@@ -22,7 +23,10 @@ struct Player
     Settings* f_Settings;
 };
 
-Player* Player_New(const char* name);
+Player* Player_New_1(const char* name);
+void Player_Ctor_1(Player* self, const char* name);
+Player* Player_New_2(const char* name, int level);
+void Player_Ctor_2(Player* self, const char* name, int level);
 void Player_Free(Player* self);
 
 void Player_Free(Player* self);

@@ -17,7 +17,6 @@
 #include <math.h>
 
 typedef void (*Action)(void*);
-typedef void (*Action_t)(void);
 
 typedef struct Control     Control;
 typedef struct Form        Form;
@@ -26,6 +25,8 @@ typedef struct Button      Button;
 typedef struct ProgressBar ProgressBar;
 typedef struct SwitchApp   SwitchApp;
 
+#include "cs2sx_exc.h"
+#include "cs2sx_delegate.h"
 #include "switchapp.h"
 
 extern char _cs2sx_strbuf[1024];

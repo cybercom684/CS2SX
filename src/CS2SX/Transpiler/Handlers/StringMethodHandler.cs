@@ -1,4 +1,4 @@
-﻿using CS2SX.Core;
+using CS2SX.Core;
 using CS2SX.Transpiler.Writers;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
@@ -312,6 +312,7 @@ public sealed class StringMethodHandler : InvocationHandlerBase
         // Enum.ToString() → ternary name lookup using known members.
         // Check semantic model first (works across files), then EnumDefs (current TU).
         List<string>? members = null;
+        var enumName = recvType;
         if (ctx.SemanticModel != null)
         {
             try
@@ -320,7 +321,10 @@ public sealed class StringMethodHandler : InvocationHandlerBase
                 var sym = typeInfo.ConvertedType ?? typeInfo.Type;
                 if (sym?.TypeKind == Microsoft.CodeAnalysis.TypeKind.Enum
                     && ctx.EnumDefs.TryGetValue(sym.Name, out var semMembers))
+                {
                     members = semMembers;
+                    enumName = sym.Name;
+                }
             }
             catch { }
         }
@@ -329,7 +333,8 @@ public sealed class StringMethodHandler : InvocationHandlerBase
 
         if (members != null && members.Count > 0)
         {
-            var chain = string.Join(" : ", members.Select(m => $"{receiver} == {m} ? \"{m}\""));
+            var chain = string.Join(" : ", members.Select(m =>
+                $"{receiver} == {CS2SX.Core.TypeRegistry.EnumMemberCName(enumName, m)} ? \"{m}\""));
             return "(" + chain + " : \"0\")";
         }
 

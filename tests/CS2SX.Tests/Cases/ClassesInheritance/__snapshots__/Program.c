@@ -2,14 +2,24 @@
 #include "Program.h"
 
 int Shape_Created;
-Shape* Shape_New(const char* name)
+static Shape_vtable Shape_vtable_instance =
 {
-    Shape* self = (Shape*)malloc(sizeof(Shape));
-    if (!self) return NULL;
-    memset(self, 0, sizeof(Shape));
-    self->_rc = 1;
+    .Describe = (const char*(*)(void*))Shape_Describe,
+};
+
+void Shape_Ctor(Shape* self, const char* name)
+{
     self->f_Name = _cs2sx_heap_strdup(name);
     Shape_Created++;
+}
+
+Shape* Shape_New(const char* name)
+{
+    Shape* self = (Shape*)calloc(1, sizeof(Shape));
+    if (!self) return NULL;
+    self->_rc = 1;
+    self->vtable = &Shape_vtable_instance;
+    Shape_Ctor(self, name);
     return self;
 }
 
@@ -35,19 +45,20 @@ Shape* Shape_Retain(Shape* self)
 
 static Shape_vtable Rect_vtable_instance;
 
-Rect* Rect_New(float w, float h)
+void Rect_Ctor(Rect* self, float w, float h)
 {
-    Rect* self = (Rect*)malloc(sizeof(Rect));
-    if (!self) return NULL;
-    memset(self, 0, sizeof(Rect));
-    self->base._rc = 1;
-    self->base.vtable = &Rect_vtable_instance;
-    Shape* _base_0 = Shape_New("Rect");
-    if (_base_0) { self->base = *_base_0; free(_base_0); }
-    self->base.vtable = &Rect_vtable_instance;
-    self->base._rc = 1;
+    Shape_Ctor((Shape*)self, "Rect");
     self->f_W = w;
     self->f_H = h;
+}
+
+Rect* Rect_New(float w, float h)
+{
+    Rect* self = (Rect*)calloc(1, sizeof(Rect));
+    if (!self) return NULL;
+    self->base._rc = 1;
+    self->base.vtable = &Rect_vtable_instance;
+    Rect_Ctor(self, w, h);
     return self;
 }
 
@@ -70,18 +81,19 @@ static Shape_vtable Rect_vtable_instance =
 
 static Shape_vtable Square_vtable_instance;
 
+void Square_Ctor(Square* self, float side)
+{
+    Rect_Ctor((Rect*)self, side, side);
+    self->base.base.f_Name = "Square";
+}
+
 Square* Square_New(float side)
 {
-    Square* self = (Square*)malloc(sizeof(Square));
+    Square* self = (Square*)calloc(1, sizeof(Square));
     if (!self) return NULL;
-    memset(self, 0, sizeof(Square));
     self->base.base._rc = 1;
     self->base.base.vtable = &Square_vtable_instance;
-    Rect* _base_0 = Rect_New(side, side);
-    if (_base_0) { self->base = *_base_0; free(_base_0); }
-    self->base.base.vtable = &Square_vtable_instance;
-    self->base.base._rc = 1;
-    self->base.base.f_Name = "Square";
+    Square_Ctor(self, side);
     return self;
 }
 
@@ -106,18 +118,19 @@ static Shape_vtable Square_vtable_instance =
 
 static Shape_vtable Circle_vtable_instance;
 
+void Circle_Ctor(Circle* self, float r)
+{
+    Shape_Ctor((Shape*)self, "Circle");
+    self->f_r = r;
+}
+
 Circle* Circle_New(float r)
 {
-    Circle* self = (Circle*)malloc(sizeof(Circle));
+    Circle* self = (Circle*)calloc(1, sizeof(Circle));
     if (!self) return NULL;
-    memset(self, 0, sizeof(Circle));
     self->base._rc = 1;
     self->base.vtable = &Circle_vtable_instance;
-    Shape* _base_0 = Shape_New("Circle");
-    if (_base_0) { self->base = *_base_0; free(_base_0); }
-    self->base.vtable = &Circle_vtable_instance;
-    self->base._rc = 1;
-    self->f_r = r;
+    Circle_Ctor(self, r);
     return self;
 }
 

@@ -176,6 +176,11 @@ public sealed class GenericInstantiationCollector
     public IReadOnlySet<string> ListOfUserClassInstantiations => _listUserClasses;
     private readonly HashSet<string> _listUserClasses = new(StringComparer.Ordinal);
 
+    /// C typedefs of delegate element types of List&lt;Func&lt;int&gt;&gt; etc. — the elements are
+    /// CS2SX_Delegate* values, so these get CS2SX_LIST_DEFINE(Func_int_t).
+    public IReadOnlySet<string> ListOfDelegateInstantiations => _listDelegates;
+    private readonly HashSet<string> _listDelegates = new(StringComparer.Ordinal);
+
     // ── Öffentliche API ───────────────────────────────────────────────────────
 
     public void Collect(IReadOnlyList<string> sourceFiles, IReadOnlyList<string>? stubFiles = null)
@@ -394,6 +399,12 @@ public sealed class GenericInstantiationCollector
 
         // Primitiv oder string → bereits via CS2SX_LIST_DEFINE in switchforms.h abgedeckt
         if (TypeRegistry.IsPrimitive(arg) || arg == "string") return;
+
+        if (TypeRegistry.IsDelegate(arg))
+        {
+            _listDelegates.Add(TypeRegistry.MapType(arg));
+            return;
+        }
 
         // Verschachtelte Generics / Nullable vorerst überspringen
         if (arg.Contains('<') || arg.EndsWith('?')) return;

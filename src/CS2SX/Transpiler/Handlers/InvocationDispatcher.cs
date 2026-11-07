@@ -137,6 +137,11 @@ public sealed class InvocationDispatcher
 
         var args = ResolveNamedAndOptionalArgs(inv, PackParamsArgs(inv, rawArgs));
 
+        // Calling a delegate value — `d(x)` or `d.Invoke(x)` — goes through the typed
+        // invoker of its delegate type (all entries of a multicast list; null throws).
+        var delegateCall = TryWriteDelegateInvoke(inv, args);
+        if (delegateCall != null) return delegateCall;
+
         if (inv.Expression is GenericNameSyntax genName && _genericMethodExpander != null)
         {
             var typeArgs = genName.TypeArgumentList.Arguments
@@ -166,6 +171,26 @@ public sealed class InvocationDispatcher
         // Return null — WriteInvocation will try TryWriteDirectUserClassCall next,
         // and only warn if it truly falls through to the raw-passthrough fallback.
         return null;
+    }
+
+    private string? TryWriteDelegateInvoke(InvocationExpressionSyntax inv, List<string> args)
+    {
+        if (_ctx.SemanticModel == null) return null;
+        try
+        {
+            if (_ctx.SemanticModel.GetSymbolInfo(inv).Symbol is not IMethodSymbol { MethodKind: MethodKind.DelegateInvoke })
+                return null;
+            var target = inv.Expression is MemberAccessExpressionSyntax { Name.Identifier.Text: "Invoke" } ma
+                && DelegateModel.IsDelegate(_ctx.SemanticModel.GetTypeInfo(ma.Expression).Type)
+                ? ma.Expression
+                : inv.Expression;
+            var type = _ctx.SemanticModel.GetTypeInfo(target).Type;
+            if (!DelegateModel.IsDelegate(type)) return null;
+            var callArgs = new List<string> { _writeExpr(target) };
+            callArgs.AddRange(args);
+            return DelegateModel.InvokeName(type!) + "(" + string.Join(", ", callArgs) + ")";
+        }
+        catch { return null; }
     }
 
     /// <summary>
@@ -352,6 +377,23 @@ public sealed class InvocationDispatcher
         };
     }
 
+    /// List&lt;T&gt; / Array methods whose callback the List/Array handlers lift inline
+    /// (a loop calling a static function) — pre-writing the lambda would create a
+    /// delegate object that is never used.
+    private bool IsInlineCollectionCallback(InvocationExpressionSyntax inv)
+    {
+        if (_ctx.SemanticModel == null) return false;
+        try
+        {
+            if (_ctx.SemanticModel.GetSymbolInfo(inv).Symbol is not IMethodSymbol m) return false;
+            var owner = m.ContainingType?.OriginalDefinition.ToDisplayString();
+            return owner is "System.Collections.Generic.List<T>" or "System.Array"
+                && m.Name is "ForEach" or "Sort" or "Find" or "FindAll" or "Exists"
+                    or "TrueForAll" or "ConvertAll" or "FindIndex";
+        }
+        catch { return false; }
+    }
+
     private string BuildArg(ArgumentSyntax a)
     {
         // Skip lifting lambdas for LINQ methods — LinqHandler accesses raw syntax directly
@@ -360,7 +402,8 @@ public sealed class InvocationDispatcher
         if (a.Expression is LambdaExpressionSyntax
             && a.Parent?.Parent is InvocationExpressionSyntax outerInv
             && outerInv.Expression is MemberAccessExpressionSyntax outerMem
-            && s_linqMethodNames.Contains(outerMem.Name.Identifier.Text))
+            && (s_linqMethodNames.Contains(outerMem.Name.Identifier.Text)
+                || IsInlineCollectionCallback(outerInv)))
             return "";
 
         // Console.Write[Line]($"...") is turned into a single printf straight from the

@@ -79,7 +79,7 @@ void Button_Update(Control* self, u64 kDown, u64 kHeld)
     if (!self) return;
     Button* b = (Button*)self;
     if (self->focused && (kDown & HidNpadButton_A) && b->OnClick)
-        b->OnClick(self->context);
+        Action_Invoke(b->OnClick);
 }
 
 Button* Button_New(const char* text)

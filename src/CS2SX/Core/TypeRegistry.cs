@@ -166,6 +166,71 @@ public static class TypeRegistry
     public static bool IsUserDefinedEnum(string csType) => s_userEnumTypes.Contains(csType);
     public static void ClearUserEnums() => s_userEnumTypes.Clear();
 
+    // ── Exceptions ────────────────────────────────────────────────────────────
+    // System exception types are all the runtime's `Exception` struct (cs2sx_exc.h)
+    // with their own CS2SX_TypeInfo (CS2SX_TI_<Name>) for `catch (T)` matching.
+    // Keep in sync with CS2SX_EXCEPTION_TYPES in the runtime header.
+    public static readonly IReadOnlyList<(string Name, string Base)> BuiltinExceptions = new[]
+    {
+        ("Exception", ""),
+        ("SystemException", "Exception"),
+        ("ApplicationException", "Exception"),
+        ("ArgumentException", "SystemException"),
+        ("ArgumentNullException", "ArgumentException"),
+        ("ArgumentOutOfRangeException", "ArgumentException"),
+        ("ArithmeticException", "SystemException"),
+        ("DivideByZeroException", "ArithmeticException"),
+        ("OverflowException", "ArithmeticException"),
+        ("FormatException", "SystemException"),
+        ("IndexOutOfRangeException", "SystemException"),
+        ("InvalidCastException", "SystemException"),
+        ("InvalidOperationException", "SystemException"),
+        ("ObjectDisposedException", "InvalidOperationException"),
+        ("NotSupportedException", "SystemException"),
+        ("NotImplementedException", "SystemException"),
+        ("NullReferenceException", "SystemException"),
+        ("OutOfMemoryException", "SystemException"),
+        ("TimeoutException", "SystemException"),
+        ("KeyNotFoundException", "SystemException"),
+        ("IOException", "SystemException"),
+        ("FileNotFoundException", "IOException"),
+        ("DirectoryNotFoundException", "IOException"),
+        ("EndOfStreamException", "IOException"),
+    };
+
+    private static readonly HashSet<string> s_builtinExceptions =
+        new(BuiltinExceptions.Select(e => e.Name), StringComparer.Ordinal);
+
+    public static bool IsBuiltinException(string name) => s_builtinExceptions.Contains(name);
+
+    /// True for System.Exception and everything deriving from it (user classes included).
+    public static bool IsExceptionType(Microsoft.CodeAnalysis.ITypeSymbol? type)
+    {
+        for (var t = type; t != null; t = t.BaseType)
+            if (t.Name == "Exception" && t.ContainingNamespace?.ToDisplayString() == "System")
+                return true;
+        return false;
+    }
+
+    /// The runtime type-info symbol of an exception class: CS2SX_TI_ArgumentException.
+    public static string ExceptionTypeInfo(string name) => "CS2SX_TI_" + name;
+
+    /// C name of a user enum constant: <c>Mode.None</c> → <c>Mode_None</c>. C enumerators
+    /// share one global namespace, so unprefixed members of two enums would collide.
+    public static string EnumMemberCName(string enumName, string member) => enumName + "_" + member;
+
+    /// Rewrites references to sibling members inside an enum member's value expression
+    /// (<c>B = A | 2</c>, <c>C = Mode.B</c>) to their prefixed C names.
+    public static string PrefixEnumValueExpr(string enumName, string valueExpr, IEnumerable<string> members)
+    {
+        var set = new HashSet<string>(members, StringComparer.Ordinal);
+        valueExpr = System.Text.RegularExpressions.Regex.Replace(valueExpr,
+            @"\b" + System.Text.RegularExpressions.Regex.Escape(enumName) + @"\.(\w+)\b",
+            m => set.Contains(m.Groups[1].Value) ? EnumMemberCName(enumName, m.Groups[1].Value) : m.Value);
+        return System.Text.RegularExpressions.Regex.Replace(valueExpr, @"(?<![\w.])([A-Za-z_]\w*)\b",
+            m => set.Contains(m.Groups[1].Value) ? EnumMemberCName(enumName, m.Groups[1].Value) : m.Value);
+    }
+
     // ── User-defined struct registry ──────────────────────────────────────────
     // C# structs (incl. `record struct`) are C value structs: stored inline, passed
     // by value, accessed with '.', never freed. Registered project-wide before any

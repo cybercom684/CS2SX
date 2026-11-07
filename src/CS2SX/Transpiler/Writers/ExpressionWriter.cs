@@ -43,8 +43,30 @@ public sealed class ExpressionWriter : IExpressionWriter
 
     public string Write(SyntaxNode? node)
     {
+        if (node is ExpressionSyntax mg && TryWriteMethodGroupConversion(mg) is { } dg)
+            return dg;
         var code = WriteCore(node);
         return node is ExpressionSyntax expr ? ApplyNullableConversion(expr, code) : code;
+    }
+
+    /// A method group converted to a delegate (`ev += OnChanged`, `Run(Helper.Parse)`)
+    /// becomes a delegate object bound to its receiver — see DelegateModel.MethodGroup.
+    private string? TryWriteMethodGroupConversion(ExpressionSyntax expr)
+    {
+        if (_ctx.SemanticModel == null
+            || expr is not (IdentifierNameSyntax or MemberAccessExpressionSyntax))
+            return null;
+        try
+        {
+            if (!DelegateModel.IsDelegate(_ctx.SemanticModel.GetTypeInfo(expr).ConvertedType))
+                return null;
+            var info = _ctx.SemanticModel.GetSymbolInfo(expr);
+            var method = info.Symbol as IMethodSymbol
+                ?? info.CandidateSymbols.OfType<IMethodSymbol>().FirstOrDefault();
+            if (method == null || method.MethodKind != MethodKind.Ordinary) return null;
+            return DelegateModel.MethodGroup(method, expr, _ctx, Write);
+        }
+        catch { return null; }
     }
 
     /// <summary>
@@ -141,6 +163,7 @@ public sealed class ExpressionWriter : IExpressionWriter
             SizeOfExpressionSyntax sizeOf => "sizeof(" + TypeRegistry.MapType(sizeOf.Type.ToString().Trim()) + ")",
             RangeExpressionSyntax range => WriteRange(range),
             InitializerExpressionSyntax initz => WriteArrayInitializerLiteral(initz),
+            ThrowExpressionSyntax throwExpr => WriteThrowExpression(throwExpr),
             _ => WriteFallback(node),
         };
     }
@@ -195,6 +218,29 @@ public sealed class ExpressionWriter : IExpressionWriter
         return pre.OperatorToken.Text + operandExpr;
     }
 
+    /// `x ?? throw …`, `c ? v : throw …`, `=> throw …`: an lvalue of the target type
+    /// that never yields (cs2sx_exc.h: CS2SX_ThrowExpr does not return).
+    private string WriteThrowExpression(ThrowExpressionSyntax throwExpr)
+    {
+        var ex = "(Exception*)(" + Write(throwExpr.Expression) + ")";
+        string cType = "int";
+        if (_ctx.SemanticModel != null)
+        {
+            try
+            {
+                var target = _ctx.SemanticModel.GetTypeInfo(throwExpr).ConvertedType;
+                if (target != null && target is not IErrorTypeSymbol && target.SpecialType != SpecialType.System_Void)
+                {
+                    var cs = TranspilerContext.FormatTypeSymbol(target);
+                    cType = TypeRegistry.MapType(cs);
+                    if (!cType.EndsWith("*") && CS2SX.Transpiler.CSharpToC.NeedsPtr(cs)) cType += "*";
+                }
+            }
+            catch { }
+        }
+        return "(*(" + cType + "*)CS2SX_ThrowExpr(" + ex + "))";
+    }
+
     private string WriteAwait(AwaitExpressionSyntax awaitExpr)
     {
         _ctx.Warn(awaitExpr, "await — no async support on Switch; executing inner expression synchronously");
@@ -231,7 +277,9 @@ public sealed class ExpressionWriter : IExpressionWriter
         var lifter = new LambdaLifter(_ctx, this);
         var stmtWriter = new StatementWriter(_ctx, this);
         lifter.SetStatementWriter(stmtWriter);
-        return lifter.LiftLambda(lambda, hintType: hintType);
+        // A lambda written as an expression is a value — a delegate object. Handlers
+        // that call a lambda inline (LINQ, List.ForEach…) lift it themselves.
+        return lifter.LiftLambda(lambda, hintType: hintType, asDelegate: true);
     }
 
     // ── Identifier ────────────────────────────────────────────────────────────
@@ -243,7 +291,22 @@ public sealed class ExpressionWriter : IExpressionWriter
         var mapped = TypeRegistry.MapEnum(name);
         if (mapped != name) return mapped;
 
-        if (_ctx.EnumMembers.Contains(name)) return name;
+        if (_ctx.EnumMembers.Contains(name) && !_ctx.LocalTypes.ContainsKey(name))
+        {
+            // Bare enum member (`using static`, or inside the enum itself).
+            if (_ctx.SemanticModel != null)
+            {
+                try
+                {
+                    if (_ctx.SemanticModel.GetSymbolInfo(id).Symbol is IFieldSymbol ef
+                        && ef.ContainingType?.TypeKind == TypeKind.Enum
+                        && TypeRegistry.IsUserDefinedEnum(ef.ContainingType.Name))
+                        return TypeRegistry.EnumMemberCName(ef.ContainingType.Name, ef.Name);
+                }
+                catch { }
+            }
+            return name;
+        }
         if (name == "_cs2sx_strbuf") return "_cs2sx_strbuf";
 
         if (_ctx.LocalTypes.TryGetValue(name, out var localType))
@@ -252,8 +315,6 @@ public sealed class ExpressionWriter : IExpressionWriter
                 return "(*" + name + ")";
             if (localType.StartsWith("__kvp__", StringComparison.Ordinal))
                 return name + "_Key";
-            if (localType == "__exception__")
-                return "_ex_msg";
             if (name.StartsWith('_') && !name.StartsWith("__"))
             {
                 var clean = name.TrimStart('_');
@@ -612,8 +673,15 @@ public sealed class ExpressionWriter : IExpressionWriter
             var methodName = invMember.Name.Identifier.Text;
             var invArgs = WriteArguments(inv.ArgumentList.Arguments);
             var argStr = string.Join(", ", invArgs);
-            // ?.Invoke() on a delegate/Action → direct function pointer call
-            if (methodName == "Invoke")
+            // ?.Invoke() on a delegate → its typed invoker (every entry of a multicast list)
+            ITypeSymbol? recvSym = null;
+            try { recvSym = _ctx.SemanticModel?.GetTypeInfo(condAccess.Expression).Type; } catch { }
+            if (methodName == "Invoke" && DelegateModel.IsDelegate(recvSym))
+            {
+                accessExpr = DelegateModel.InvokeName(recvSym!) + "(" + receiver
+                    + (argStr.Length > 0 ? ", " + argStr : "") + ")";
+            }
+            else if (methodName == "Invoke")
             {
                 accessExpr = receiver + "(" + argStr + ")";
             }
@@ -697,41 +765,37 @@ public sealed class ExpressionWriter : IExpressionWriter
         return "_cs2sx_heap_strdup(" + right + ")";
     }
 
+    private bool IsDelegateTyped(ExpressionSyntax expr)
+    {
+        if (_ctx.SemanticModel != null)
+        {
+            try
+            {
+                var sym = _ctx.SemanticModel.GetSymbolInfo(expr).Symbol;
+                if (sym is IEventSymbol) return true;
+                var t = _ctx.SemanticModel.GetTypeInfo(expr).Type;
+                if (t != null) return DelegateModel.IsDelegate(t);
+            }
+            catch { }
+        }
+        var raw = expr.ToString().Trim();
+        string? type = null;
+        _ctx.LocalTypes.TryGetValue(raw, out type);
+        if (type == null) _ctx.FieldTypes.TryGetValue(raw.TrimStart('_'), out type);
+        return type != null && TypeRegistry.IsDelegate(type);
+    }
+
     private string WriteAssignment(AssignmentExpressionSyntax assign)
     {
         var op = assign.OperatorToken.Text;
         var right = Write(assign.Right);
 
-        // Add at the start of WriteAssignment, before existing op checks:
-        if (op == "+=" || op == "-=")
+        // Delegates/events: `d += h` / `d -= h` build a new invocation list (multicast).
+        if ((op == "+=" || op == "-=") && IsDelegateTyped(assign.Left))
         {
-            var leftRaw = assign.Left.ToString().Trim();
-            var leftKey = leftRaw.TrimStart('_');
-
-            string? fieldType = null;
-            _ctx.LocalTypes.TryGetValue(leftRaw, out fieldType);
-            if (fieldType == null) _ctx.FieldTypes.TryGetValue(leftKey, out fieldType);
-
-            if (fieldType != null
-                && (fieldType == "Action" || fieldType.StartsWith("Action<")
-                    || fieldType.StartsWith("Func<") || fieldType == "EventHandler"))
-            {
-                // Delegate combine/remove — emit a simple assignment for single subscriber,
-                // or use a handler list for multiple subscribers.
-                // Simple approach: last subscriber wins for single delegates (+=),
-                // clear for -=. Emit a warning that multicast is simplified.
-                _ctx.Warn($"Delegate {op} on '{leftRaw}': multicast simplified to last-subscriber-wins",
-                          leftRaw);
-
-                var leftExpr = Write(assign.Left);
-                if (op == "+=")
-                {
-                    var cDelegateType = LambdaLifter.MapDelegateType(fieldType);
-                    return leftExpr + " = (" + cDelegateType + ")" + right;
-                }
-                else // -=
-                    return leftExpr + " = NULL /* unsubscribed */";
-            }
+            var leftExpr = Write(assign.Left);
+            var fn = op == "+=" ? "CS2SX_Delegate_Combine" : "CS2SX_Delegate_Remove";
+            return leftExpr + " = " + fn + "(" + leftExpr + ", " + right + ")";
         }
 
         if (op == "??=")
@@ -1281,9 +1345,6 @@ public sealed class ExpressionWriter : IExpressionWriter
         var objRaw = mem.Expression.ToString();
         var objKey = objRaw.TrimStart('_');
 
-        if (_ctx.LocalTypes.TryGetValue(objRaw, out var exType) && exType == "__exception__")
-            return "_ex_msg " + op + " " + right;
-
         if (_ctx.LocalTypes.TryGetValue(objRaw, out var kvpType)
             && kvpType.StartsWith("__kvp__", StringComparison.Ordinal))
         {
@@ -1327,52 +1388,9 @@ public sealed class ExpressionWriter : IExpressionWriter
             return "Label_SetText(" + obj + ", " + right + ")";
         }
 
-        // OnClick assignment: SwitchForms Button uses void(*)(void*), user classes use Action_t
-        if (prop == "OnClick")
-        {
-            var receiverType = lt ?? ft;
-            bool isSwitchFormsButton = receiverType == "Button";
-
-            var methodRaw = assign.Right.ToString().Trim();
-            string methodExpr;
-            if (assign.Right is LambdaExpressionSyntax)
-            {
-                methodExpr = right; // already lifted by Write(assign.Right) above
-            }
-            else if (methodRaw.Contains('.'))
-            {
-                methodExpr = methodRaw.Replace('.', '_');
-            }
-            else if (_ctx.SemanticModel != null && assign.Right is IdentifierNameSyntax idRight)
-            {
-                try
-                {
-                    var sym = _ctx.SemanticModel.GetSymbolInfo(idRight).Symbol;
-                    if (sym is IMethodSymbol ms)
-                        methodExpr = ms.ContainingType.Name + "_" + ms.Name;
-                    else
-                        methodExpr = string.IsNullOrEmpty(_ctx.CurrentClass)
-                            ? methodRaw
-                            : _ctx.CurrentClass + "_" + methodRaw;
-                }
-                catch
-                {
-                    methodExpr = string.IsNullOrEmpty(_ctx.CurrentClass)
-                        ? methodRaw
-                        : _ctx.CurrentClass + "_" + methodRaw;
-                }
-            }
-            else
-            {
-                methodExpr = string.IsNullOrEmpty(_ctx.CurrentClass)
-                    ? methodRaw
-                    : _ctx.CurrentClass + "_" + methodRaw;
-            }
-
-            if (isSwitchFormsButton)
-                return obj + "->OnClick = (void(*)(void*))" + methodExpr;
-            return obj + "->OnClick = (Action_t)" + methodExpr;
-        }
+        // Button.OnClick is an Action delegate field of the runtime Button (no f_ prefix).
+        if (prop == "OnClick" && (lt ?? ft) == "Button")
+            return obj + "->OnClick " + op + " " + right;
 
         var assignReceiverType = lt ?? ft;
         string cProp;
@@ -1513,6 +1531,40 @@ public sealed class ExpressionWriter : IExpressionWriter
 
     // ── MemberAccess ──────────────────────────────────────────────────────────
 
+    /// Members System.Exception declares, on any exception (user subclasses included):
+    /// e.Message → ((Exception*)(e))->f_Message, e.GetType().Name → CS2SX_Exc_TypeName(e).
+    private string? TryWriteExceptionMember(MemberAccessExpressionSyntax mem)
+    {
+        if (_ctx.SemanticModel == null) return null;
+        var member = mem.Name.Identifier.Text;
+        try
+        {
+            if (member is "Name" or "FullName"
+                && mem.Expression is InvocationExpressionSyntax { Expression: MemberAccessExpressionSyntax getType }
+                && getType.Name.Identifier.Text == "GetType"
+                && TypeRegistry.IsExceptionType(_ctx.SemanticModel.GetTypeInfo(getType.Expression).Type))
+            {
+                return "CS2SX_Exc_TypeName((Exception*)(" + Write(getType.Expression) + "))";
+            }
+
+            if (_ctx.SemanticModel.GetSymbolInfo(mem).Symbol is not IPropertySymbol prop
+                || prop.ContainingType?.ContainingNamespace?.ToDisplayString() is not ("System" or "System.IO" or "System.Collections.Generic")
+                || !TypeRegistry.IsExceptionType(_ctx.SemanticModel.GetTypeInfo(mem.Expression).Type))
+                return null;
+            var recv = "((Exception*)(" + Write(mem.Expression) + "))";
+            return member switch
+            {
+                "Message" => recv + "->f_Message",
+                "InnerException" => recv + "->f_InnerException",
+                "ParamName" => recv + "->f_ParamName",
+                "StackTrace" or "Source" => "\"\"",
+                "HResult" => "0",
+                _ => null,
+            };
+        }
+        catch { return null; }
+    }
+
     private string WriteMemberAccess(MemberAccessExpressionSyntax mem)
     {
         var full = mem.ToString();
@@ -1538,6 +1590,9 @@ public sealed class ExpressionWriter : IExpressionWriter
             }
             catch { }
         }
+
+        var exceptionMember = TryWriteExceptionMember(mem);
+        if (exceptionMember != null) return exceptionMember;
 
         var storedMember = TryWriteUserClassStoredMember(mem) ?? TryWriteUserStructMember(mem);
         if (storedMember != null) return storedMember;
@@ -1596,9 +1651,11 @@ public sealed class ExpressionWriter : IExpressionWriter
                 var sym = _ctx.SemanticModel.GetSymbolInfo(mem).Symbol;
                 if (sym is Microsoft.CodeAnalysis.IFieldSymbol fld)
                 {
-                    // Enum member → global C constant (just the name)
+                    // Enum member → global C constant (user enums are prefixed: Mode_None)
                     if (fld.ContainingType?.TypeKind == Microsoft.CodeAnalysis.TypeKind.Enum)
-                        return fld.Name;
+                        return TypeRegistry.IsUserDefinedEnum(fld.ContainingType.Name)
+                            ? TypeRegistry.EnumMemberCName(fld.ContainingType.Name, fld.Name)
+                            : fld.Name;
                     // Static-class const field (like AppCategory.Tools = "Tools")
                     if (fld.IsConst && fld.ContainingType?.IsStatic == true)
                     {
@@ -1619,15 +1676,11 @@ public sealed class ExpressionWriter : IExpressionWriter
         }
         // Fallback for check-mode without semantic model: if the property name is a known
         // enum member in the current translation unit, return it directly.
-        if (_ctx.EnumMembers.Contains(mem.Name.Identifier.Text))
-            return mem.Name.Identifier.Text;
-
-        // Cross-file fallback: TypeRegistry.RegisterUserEnum was called for all enums in the project.
-        // If the receiver is a registered user enum type, emit just the member name.
+        // Fallback without semantic model: `Mode.None` on a registered user enum.
         {
             var receiverName = mem.Expression.ToString().Trim();
             if (TypeRegistry.IsUserDefinedEnum(receiverName))
-                return mem.Name.Identifier.Text;
+                return TypeRegistry.EnumMemberCName(receiverName, mem.Name.Identifier.Text);
         }
 
         if (full.StartsWith("LibNX.", StringComparison.Ordinal))
@@ -1711,9 +1764,6 @@ public sealed class ExpressionWriter : IExpressionWriter
         }
 
         var rawExpr = mem.Expression.ToString();
-
-        if (_ctx.LocalTypes.TryGetValue(rawExpr, out var exType) && exType == "__exception__")
-            return "_ex_msg";
 
         if (_ctx.LocalTypes.TryGetValue(rawExpr, out var kvpType)
             && kvpType.StartsWith("__kvp__", StringComparison.Ordinal))
@@ -2028,9 +2078,10 @@ public sealed class ExpressionWriter : IExpressionWriter
             var cName = baseName + "_" + string.Join("_", typeArgs);
             var ctorArgs = obj.ArgumentList?.Arguments.Select(a => Write(a.Expression))
                 ?? Enumerable.Empty<string>();
-            return cName + "_New(" + string.Join(", ", ctorArgs) + ")";
+            return cName + "_New" + CtorNaming.SuffixFor(ResolveCtor(obj))
+                + "(" + string.Join(", ", ctorArgs) + ")";
         }
-        return WriteObjectCreationFromTypeName(obj.Type.ToString(), obj.ArgumentList, obj.Initializer);
+        return WriteObjectCreationFromTypeName(obj.Type.ToString(), obj.ArgumentList, obj.Initializer, obj);
     }
 
     private string WriteImplicitObjectCreation(ImplicitObjectCreationExpressionSyntax obj)
@@ -2041,42 +2092,26 @@ public sealed class ExpressionWriter : IExpressionWriter
             _ctx.Warn(obj, "new() — Zieltyp nicht bestimmbar (kein SemanticModel oder Typ-Fehler)");
             return "NULL /* new() — type not resolvable */";
         }
-        return WriteObjectCreationFromTypeName(typeName, obj.ArgumentList, obj.Initializer);
+        return WriteObjectCreationFromTypeName(typeName, obj.ArgumentList, obj.Initializer, obj);
     }
 
-    private List<string> BuildCtorArgs(string typeName, ArgumentListSyntax? argList)
+    /// Arguments of a constructor call (`new T(...)`, `: base(...)`, `: this(...)`),
+    /// with omitted optional parameters filled from their defaults.
+    internal List<string> BuildCtorArgs(string typeName, ArgumentListSyntax? argList)
     {
         var supplied = argList?.Arguments.Select(a => Write(a.Expression)).ToList()
                        ?? new List<string>();
 
-        // Use SemanticModel to find the constructor and fill in optional parameter defaults.
-        if (_ctx.SemanticModel != null && argList != null)
+        if (_ctx.SemanticModel != null && argList?.Parent != null)
         {
             try
             {
-                var symInfo = _ctx.SemanticModel.GetSymbolInfo(argList.Parent!);
-                if (symInfo.Symbol is IMethodSymbol ctor)
+                if (_ctx.SemanticModel.GetSymbolInfo(argList.Parent).Symbol is IMethodSymbol ctor)
                 {
-                    var parameters = ctor.Parameters;
-                    if (supplied.Count < parameters.Length)
+                    for (int i = supplied.Count; i < ctor.Parameters.Length; i++)
                     {
-                        for (int i = supplied.Count; i < parameters.Length; i++)
-                        {
-                            var param = parameters[i];
-                            if (param.HasExplicitDefaultValue)
-                            {
-                                var defVal = param.ExplicitDefaultValue;
-                                supplied.Add(defVal == null ? "NULL"
-                                    : defVal is string s ? "\"" + s + "\""
-                                    : defVal is bool b ? (b ? "1" : "0")
-                                    : defVal.ToString() ?? "0");
-                            }
-                            else
-                            {
-                                // Non-optional param missing — can't fill, leave as-is
-                                break;
-                            }
-                        }
+                        if (!ctor.Parameters[i].HasExplicitDefaultValue) break;
+                        supplied.Add(DefaultValueLiteral(ctor.Parameters[i]));
                     }
                 }
             }
@@ -2086,10 +2121,43 @@ public sealed class ExpressionWriter : IExpressionWriter
         return supplied;
     }
 
+    /// C literal of an optional parameter's default value.
+    internal static string DefaultValueLiteral(IParameterSymbol param)
+    {
+        if (!param.HasExplicitDefaultValue) return "0";
+        var v = param.ExplicitDefaultValue;
+        if (v != null && param.Type.TypeKind == TypeKind.Enum
+            && TypeRegistry.IsUserDefinedEnum(param.Type.Name))
+        {
+            var member = param.Type.GetMembers().OfType<IFieldSymbol>()
+                .FirstOrDefault(f => f.HasConstantValue && Equals(f.ConstantValue, v));
+            if (member != null) return TypeRegistry.EnumMemberCName(param.Type.Name, member.Name);
+        }
+        return v switch
+        {
+            null => "NULL",
+            string s => "\"" + StringEscaper.EscapeRaw(s) + "\"",
+            bool b => b ? "1" : "0",
+            float f => f.ToString("R", System.Globalization.CultureInfo.InvariantCulture) + "f",
+            double d => d.ToString("R", System.Globalization.CultureInfo.InvariantCulture),
+            char c => ((int)c).ToString(),
+            _ => Convert.ToString(v, System.Globalization.CultureInfo.InvariantCulture) ?? "0",
+        };
+    }
+
+    /// The constructor a `new T(...)` resolves to (null without semantic model).
+    private IMethodSymbol? ResolveCtor(SyntaxNode? creation)
+    {
+        if (creation == null || _ctx.SemanticModel == null) return null;
+        try { return _ctx.SemanticModel.GetSymbolInfo(creation).Symbol as IMethodSymbol; }
+        catch { return null; }
+    }
+
     private string WriteObjectCreationFromTypeName(
         string typeName,
         ArgumentListSyntax? argList,
-        InitializerExpressionSyntax? initializer)
+        InitializerExpressionSyntax? initializer,
+        SyntaxNode? creation = null)
     {
         // new string(char c, int count) → CS2SX_RepeatChar(c, count)
         // new string(char[] arr) or new string(char[] arr, int start, int count)
@@ -2233,7 +2301,8 @@ public sealed class ExpressionWriter : IExpressionWriter
             var cName = baseName + "_" + string.Join("_", typeArgs);
             var ctorArgs = argList?.Arguments.Select(a => Write(a.Expression))
                 ?? Enumerable.Empty<string>();
-            return cName + "_New(" + string.Join(", ", ctorArgs) + ")";
+            return cName + "_New" + CtorNaming.SuffixFor(ResolveCtor(creation))
+                + "(" + string.Join(", ", ctorArgs) + ")";
         }
         if (typeName == "Random")
             return "NULL /* Random — use CS2SX_Rand_Next() directly */";
@@ -2275,13 +2344,16 @@ public sealed class ExpressionWriter : IExpressionWriter
         }
 
         var args = BuildCtorArgs(typeName, argList);
-        var creation = typeName + "_New(" + string.Join(", ", args) + ")";
+        var ctorSym = ResolveCtor(creation);
+        var newExpr = TypeRegistry.IsBuiltinException(typeName)
+            ? ExceptionModel.NewExpr(typeName, ctorSym, args)
+            : typeName + "_New" + CtorNaming.SuffixFor(ctorSym) + "(" + string.Join(", ", args) + ")";
 
         if (initializer?.Expressions.Count > 0)
         {
             var tmp = _ctx.NextTmp(typeName.ToLower());
             var cTypeName = TypeRegistry.MapType(typeName);
-            _ctx.Out.WriteLine(_ctx.Tab + cTypeName + "* " + tmp + " = " + creation + ";");
+            _ctx.Out.WriteLine(_ctx.Tab + cTypeName + "* " + tmp + " = " + newExpr + ";");
             foreach (var expr in initializer.Expressions)
             {
                 if (expr is not AssignmentExpressionSyntax asgn) continue;
@@ -2292,10 +2364,9 @@ public sealed class ExpressionWriter : IExpressionWriter
                     _ctx.Out.WriteLine(_ctx.Tab + "Label_SetText(" + tmp + ", " + propVal + ");");
                     continue;
                 }
-                if (propName == "OnClick")
+                if (propName == "OnClick" && typeName == "Button")
                 {
-                    _ctx.Out.WriteLine(_ctx.Tab + tmp + "->OnClick = (void(*)(void*))"
-                        + _ctx.CurrentClass + "_" + propVal.Trim() + ";");
+                    _ctx.Out.WriteLine(_ctx.Tab + tmp + "->OnClick = " + propVal + ";");
                     continue;
                 }
                 // For user-defined types use f_ prefix; MapProperty is for runtime/control types only
@@ -2309,7 +2380,7 @@ public sealed class ExpressionWriter : IExpressionWriter
             }
             return tmp;
         }
-        return creation;
+        return newExpr;
     }
 
     private static List<string> SplitTopLevelTypeArgs(string s)
@@ -2375,6 +2446,7 @@ public sealed class ExpressionWriter : IExpressionWriter
             {
                 IFieldSymbol f => !f.IsStatic && !f.IsConst,
                 IPropertySymbol p => !p.IsStatic && IsStoredProperty(p),
+                IEventSymbol e => !e.IsStatic,   // field-like event: a delegate field
                 _ => false,
             };
             if (!stored || !TranspilerContext.IsUserCode(sym!.ContainingType)) return null;

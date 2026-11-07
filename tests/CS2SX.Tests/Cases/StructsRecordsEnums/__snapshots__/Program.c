@@ -48,7 +48,7 @@ void StructsRecordsEnumsApp_Init(StructsRecordsEnumsApp* self)
 {
     if (!self) return;
     ((SwitchApp*)self)->OnInit = (void(*)(SwitchApp*))StructsRecordsEnumsApp_OnInit;
-    self->f_state = Menu;
+    self->f_state = State_Menu;
 }
 
 void StructsRecordsEnumsApp_OnInit(StructsRecordsEnumsApp* self)
@@ -65,25 +65,25 @@ void StructsRecordsEnumsApp_OnInit(StructsRecordsEnumsApp* self)
     snprintf(_sb1, CS2SX_STRBUF_SIZE, "%s %d", s->f_Player, s->f_Points);
     const char* _ps_1 = _sb1;
     printf("%s\n", _ps_1 ? _ps_1 : "");
-    self->f_state = Playing;
+    self->f_state = State_Playing;
     switch (self->f_state)
     {
-        case Menu:
+        case State_Menu:
             printf("menu\n");
             break;
-        case Playing:
+        case State_Playing:
             printf("playing\n");
             break;
         default:
             printf("other\n");
             break;
     }
-    const char* label = (self->f_state == Paused ? "paused" : (self->f_state == GameOver ? "over" : "running"));
+    const char* label = (self->f_state == State_Paused ? "paused" : (self->f_state == State_GameOver ? "over" : "running"));
     char* _sb2 = _cs2sx_next_buf();
     snprintf(_sb2, CS2SX_STRBUF_SIZE, "%s %d", label, ((int)self->f_state));
     const char* _ps_2 = _sb2;
     printf("%s\n", _ps_2 ? _ps_2 : "");
-    if (self->f_state == Playing || self->f_state == Paused)
+    if (self->f_state == State_Playing || self->f_state == State_Paused)
     {
         printf("active\n");
     }

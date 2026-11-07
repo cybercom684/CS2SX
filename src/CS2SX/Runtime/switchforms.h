@@ -182,7 +182,7 @@ struct Button
     Control     base;
     const char* text;
     // focused moved to Control.base.focused — access via base.focused or self->focused via Control*
-    void        (*OnClick)(void* context);
+    Action_t    OnClick;   // C# Action (cs2sx_delegate.h)
 };
 
 void Button_Draw(Control* self);

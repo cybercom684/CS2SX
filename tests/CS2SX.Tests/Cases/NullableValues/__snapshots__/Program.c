@@ -7,12 +7,16 @@ int Size_Equals(Size a, Size b)
     return memcmp(&a, &b, sizeof(Size)) == 0;
 }
 
+void Profile_Ctor(Profile* self)
+{
+}
+
 Profile* Profile_New(void)
 {
-    Profile* self = (Profile*)malloc(sizeof(Profile));
+    Profile* self = (Profile*)calloc(1, sizeof(Profile));
     if (!self) return NULL;
-    memset(self, 0, sizeof(Profile));
     self->_rc = 1;
+    Profile_Ctor(self);
     return self;
 }
 
@@ -49,7 +53,7 @@ void NullableValuesApp_OnInit(NullableValuesApp* self)
 {
     Profile* p = Profile_New();
     p->f_BestScore = ((Nullable_int){ 120, 1 });
-    p->f_LastMode = ((Nullable_Mode){ Run, 1 });
+    p->f_LastMode = ((Nullable_Mode){ Mode_Run, 1 });
     p->f_Nickname = NULL;
     Nullable_int found = Profile_Find(p, 3);
     Nullable_int missing = Profile_Find(p, -1);
@@ -75,7 +79,7 @@ void NullableValuesApp_OnInit(NullableValuesApp* self)
     const char* _ps_8 = _sb2;
     printf("%s\n", _ps_8 ? _ps_8 : "");
     char* _sb3 = _cs2sx_next_buf();
-    snprintf(_sb3, CS2SX_STRBUF_SIZE, "%d %d", (({ __auto_type _na_9 = p->f_LastMode; __auto_type _nb_10 = ((Nullable_Mode){ Run, 1 }); _na_9.has == _nb_10.has && (!_na_9.has || _na_9.value == _nb_10.value); })), (box).value.W);
+    snprintf(_sb3, CS2SX_STRBUF_SIZE, "%d %d", (({ __auto_type _na_9 = p->f_LastMode; __auto_type _nb_10 = ((Nullable_Mode){ Mode_Run, 1 }); _na_9.has == _nb_10.has && (!_na_9.has || _na_9.value == _nb_10.value); })), (box).value.W);
     const char* _ps_11 = _sb3;
     printf("%s\n", _ps_11 ? _ps_11 : "");
     const char* _ps_12 = (p->f_Nickname ?: "anon");

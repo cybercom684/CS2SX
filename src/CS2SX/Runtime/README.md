@@ -6,6 +6,8 @@ exported into each build (`cs2sx_out/`).
 ```
 Runtime/
 ├── cs2sx_prelude.h     first include of every TU (app code via _forward.h, runtime modules)
+├── cs2sx_exc.h         exceptions: type info, try frames, CS2SX_Throw
+├── cs2sx_delegate.h    delegates/events: CS2SX_Delegate, invocation lists, closures
 ├── switchapp.h         app loop, graphics, input — includes all headers below
 ├── switchforms.h       strings, collections, StringBuilder, file system, NSP, USB, ...
 ├── AudioStub.h  HttpStub.h  FtpStub.h  NetStub.h  MotionStub.h  VibrationStub.h
@@ -38,9 +40,19 @@ Rules for runtime code:
    (`CS2SX_Net_Acquire`/`CS2SX_Net_Release`) — never call `socketInitializeDefault`/
    `socketExit` directly.
 
-A new module needs an `<EmbeddedResource>` entry only if it is not matched by
-`Runtime\src\*.c`; a new header needs its own `<EmbeddedResource>` line in
-`CS2SX.csproj` and an entry in `BuildPipeline.GeneratedHeaders`.
+Headers (`Runtime\*.h`) and modules (`Runtime\src\*.c`) are embedded by wildcard; a
+new header also needs an entry in `BuildPipeline.GeneratedHeaders`.
+
+## Language runtime
+
+- **Exceptions** (`cs2sx_exc.h`): every exception is an `Exception` struct with a
+  `CS2SX_TypeInfo` (`CS2SX_TI_<Name>`, parent pointer → `catch (T)` matches subclasses).
+  `try` pushes a `CS2SX_ExFrame` (jmp_buf) on a thread-local stack; `CS2SX_Throw` pops
+  the innermost frame and jumps there. Uncaught: stderr + system error dialog + exit.
+  Runtime code may throw too: `CS2SX_ThrowNew(&CS2SX_TI_FormatException, "…")`.
+- **Delegates** (`cs2sx_delegate.h`): one `CS2SX_Delegate` (function, bound target,
+  next entry) for every delegate type; the per-type invokers are generated into
+  `_forward.h`. Lifted functions take the bound object as first parameter.
 
 ## Graphics
 

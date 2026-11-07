@@ -1,13 +1,17 @@
 #include <stdlib.h>
 #include "Program.h"
 
+void Board_Ctor(Board* self, int n)
+{
+    self->f_Cells = (int*)CS2SX_ArrNew(n, sizeof(int));
+}
+
 Board* Board_New(int n)
 {
-    Board* self = (Board*)malloc(sizeof(Board));
+    Board* self = (Board*)calloc(1, sizeof(Board));
     if (!self) return NULL;
-    memset(self, 0, sizeof(Board));
     self->_rc = 1;
-    self->f_Cells = (int*)CS2SX_ArrNew(n, sizeof(int));
+    Board_Ctor(self, n);
     return self;
 }
 

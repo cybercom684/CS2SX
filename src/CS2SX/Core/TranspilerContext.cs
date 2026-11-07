@@ -67,6 +67,7 @@ public sealed class TranspilerContext
             CurrentCFile = CurrentCFile,
             TmpCounter = TmpCounter,
             TmpStringCounter = TmpStringCounter,
+            _lambdas = _lambdas,
         };
         Copy(LocalTypes, c.LocalTypes);
         Copy(FieldTypes, c.FieldTypes);
@@ -97,11 +98,30 @@ public sealed class TranspilerContext
 
     // ── Klassen-Kontext ───────────────────────────────────────────────────────
 
-    // FIX: Stack statt single field — geschachtelte try/catch überschreiben sich nicht gegenseitig
-    private readonly Stack<string> _jumpBufStack = new();
-    public string? CurrentJumpBuf => _jumpBufStack.Count > 0 ? _jumpBufStack.Peek() : null;
-    public void PushJumpBuf(string name) => _jumpBufStack.Push(name);
-    public void PopJumpBuf() { if (_jumpBufStack.Count > 0) _jumpBufStack.Pop(); }
+    // ── try/catch/finally (per function — a child context for a lambda starts empty) ──
+
+    /// A try region the code currently being written is inside of. Leaving it by
+    /// return/break/continue must pop its exception frame (if still pushed) and run
+    /// its finally block, innermost region first.
+    public sealed class TryRegion
+    {
+        /// Frame variable still on the runtime frame stack here; null in a catch
+        /// block (CS2SX_Throw already popped it).
+        public string? Frame { get; init; }
+        public Microsoft.CodeAnalysis.CSharp.Syntax.FinallyClauseSyntax? Finally { get; init; }
+        /// Loop/switch depth when the region was entered (see BreakDepth).
+        public int BreakDepth { get; init; }
+        public int ContinueDepth { get; init; }
+    }
+
+    public List<TryRegion> TryRegions { get; } = new();
+
+    /// C variable holding the exception of each enclosing catch block (for `throw;`).
+    public Stack<string> CatchExceptionVars { get; } = new();
+
+    /// Nesting of constructs `break` / `continue` refer to (loops + switch / loops).
+    public int BreakDepth { get; set; }
+    public int ContinueDepth { get; set; }
 
     public string? CurrentReturnBuffer
     {
@@ -220,18 +240,29 @@ public sealed class TranspilerContext
     // FIX: Lambda-Zähler gehört in den Context, NICHT in LambdaLifter.
     // Zwei Lambdas in verschiedenen Methoden derselben Klasse müssen
     // unterschiedliche IDs bekommen. Wird nur in ClearClassContext() resettet.
-    private int _lambdaCounter;
+    // Shared by a context and its children (lambda bodies), so a lambda nested in a
+    // lambda gets a unique id and its definition reaches the file.
+    private sealed class LambdaState
+    {
+        public int Counter;
+        public readonly List<string> Preludes = new();
+        public readonly HashSet<string> Thunks = new(StringComparer.Ordinal);
+    }
+    private LambdaState _lambdas = new();
 
     /// <summary>
     /// Gibt eine eindeutige, aufsteigende Lambda-ID für die aktuelle Klasse zurück.
     /// </summary>
-    public int NextLambdaId() => _lambdaCounter++;
+    public int NextLambdaId() => _lambdas.Counter++;
 
     // FIX-2: Lambda-Preludes (Struct-Defs + Funktionsdefs) werden hier gesammelt
     // statt per O(n)-StringWriter-Rewrite eingefügt zu werden.
-    // ExpressionWriter.WriteLambda() fügt via LambdaLifter.ConsumePrelude() hinzu.
     // CSharpToC.VisitMethodDeclaration() schreibt sie einmalig VOR der Signatur.
-    public List<string> PendingLambdaPreludes { get; } = new();
+    public List<string> PendingLambdaPreludes => _lambdas.Preludes;
+
+    /// Method-group thunks (DelegateModel.MethodGroup) already emitted into this
+    /// file — one static definition per method, never cleared per class.
+    public HashSet<string> EmittedThunks => _lambdas.Thunks;
 
     /// <summary>
     /// Schreibt alle gesammelten Lambda-Preludes in den Output und leert die Liste.
@@ -307,7 +338,10 @@ public sealed class TranspilerContext
         CurrentTupleReturnType = null;
         CurrentReturnBuffer = null;
         // _lambdaCounter wird ebenfalls NICHT zurückgesetzt (gilt pro Klasse).
-        _jumpBufStack.Clear();
+        TryRegions.Clear();
+        CatchExceptionVars.Clear();
+        BreakDepth = 0;
+        ContinueDepth = 0;
     }
 
     public void ClearClassContext()

@@ -355,21 +355,27 @@ static inline void SwitchApp_Run(SwitchApp* self)
     padConfigureInput(1, HidNpadStyleSet_NpadStandard);
     padInitializeDefault(&pad);
 
-    // OnInit first: lets the user call Graphics.Init() to set g_fb_width/g_fb_height
-    // before framebufferCreate, so the buffer is allocated at the correct size.
+    // The text console is up before OnInit, so Console.WriteLine there is visible.
+    // An app that calls Graphics.Init() in OnInit switches to the GPU afterwards.
+    consoleInit(NULL);
     if (self->OnInit)
         self->OnInit(self);
 
-    // Graphics mode (Graphics.Init called in OnInit): GPU swapchain at the output
-    // resolution. If the GPU can't be brought up, fall back to the text console.
-    int use_gfx = g_gfx_init && CS2SX_Gfx_Start();
-
-    if (!use_gfx)
+    // Graphics mode: GPU swapchain at the output resolution (the console releases the
+    // window first). If the GPU can't be brought up, fall back to the text console.
+    int use_gfx = 0;
+    if (g_gfx_init)
     {
-        consoleInit(NULL);
-        if (g_gfx_init) printf("[cs2sx] GPU initialisation failed - running in text mode\n");
-        Form_InitFocus(&self->form);
+        consoleExit(NULL);
+        use_gfx = CS2SX_Gfx_Start();
+        if (!use_gfx)
+        {
+            consoleInit(NULL);
+            printf("[cs2sx] GPU initialisation failed - running in text mode\n");
+        }
     }
+    if (!use_gfx)
+        Form_InitFocus(&self->form);
 
     while (appletMainLoop())
     {
@@ -393,8 +399,13 @@ static inline void SwitchApp_Run(SwitchApp* self)
         }
         else
         {
-            consoleClear();
-            printf("\033[H\033[2J");
+            // Forms controls are redrawn every frame; without controls the console
+            // is a log and keeps what the app printed (also in OnInit).
+            if (self->form.count > 0)
+            {
+                consoleClear();
+                printf("\033[H\033[2J");
+            }
 
             Form_UpdateAll(&self->form, self->kDown, self->kHeld);
 

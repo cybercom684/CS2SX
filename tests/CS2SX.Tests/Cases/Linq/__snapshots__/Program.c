@@ -2,14 +2,18 @@
 #include "_generics.h"
 #include "Program.h"
 
-Enemy* Enemy_New(const char* name, int hp)
+void Enemy_Ctor(Enemy* self, const char* name, int hp)
 {
-    Enemy* self = (Enemy*)malloc(sizeof(Enemy));
-    if (!self) return NULL;
-    memset(self, 0, sizeof(Enemy));
-    self->_rc = 1;
     self->f_Name = _cs2sx_heap_strdup(name);
     self->f_Hp = hp;
+}
+
+Enemy* Enemy_New(const char* name, int hp)
+{
+    Enemy* self = (Enemy*)calloc(1, sizeof(Enemy));
+    if (!self) return NULL;
+    self->_rc = 1;
+    Enemy_Ctor(self, name, hp);
     return self;
 }
 
