@@ -13,7 +13,7 @@ int ExceptionsApp_Divide(int a, int b)
     {
         CS2SX_Throw((Exception*)(CS2SX_Exc_New(&CS2SX_TI_Exception, "division by zero", NULL, NULL)));
     }
-    return a / b;
+    return CS2SX_IDIV(a, b);
 }
 
 void ExceptionsApp_OnInit(ExceptionsApp* self)

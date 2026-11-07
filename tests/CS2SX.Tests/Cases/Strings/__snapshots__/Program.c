@@ -12,7 +12,7 @@ void StringsApp_OnInit(StringsApp* self)
     const char* name = "Switch";
     int score = 1234;
     float ratio = 0.75f;
-    printf("Hello %s, score=%d, ratio=%f\n", name, score, ratio);
+    printf("Hello %s, score=%d, ratio=%s\n", name, score, Float_ToString(ratio));
     char* _sb0 = _cs2sx_next_buf();
     snprintf(_sb0, CS2SX_STRBUF_SIZE, "%s %s %d", String_ToUpper(name), String_ToLower(name), strlen(name));
     const char* _ps_0 = _sb0;
@@ -25,11 +25,11 @@ void StringsApp_OnInit(StringsApp* self)
     printf("%s\n", _ps_3 ? _ps_3 : "");
     const char* _ps_4 = String_Trim("  padded  ");
     printf("%s\n", _ps_4 ? _ps_4 : "");
-    printf("%d\n", String_StartsWith(name, "Sw") && String_EndsWith(name, "ch"));
+    printf("%s\n", CS2SX_BoolStr(String_StartsWith(name, "Sw") && String_EndsWith(name, "ch")));
     printf("%d\n", String_IndexOfChar(name, 't'));
     const char** parts = CS2SX_StrArr_FromList(String_Split("a,b,c", ","));
     char* _sb1 = _cs2sx_next_buf();
-    snprintf(_sb1, CS2SX_STRBUF_SIZE, "%d parts, last=%s", CS2SX_ArrLen(parts), parts[2]);
+    snprintf(_sb1, CS2SX_STRBUF_SIZE, "%d parts, last=%s", CS2SX_ArrLen(parts), CS2SX_AT(parts, 2));
     const char* _ps_5 = _sb1;
     printf("%s\n", _ps_5 ? _ps_5 : "");
     const char* _ps_6 = String_JoinArr("-", parts);

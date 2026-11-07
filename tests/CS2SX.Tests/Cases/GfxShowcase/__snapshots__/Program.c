@@ -17,7 +17,7 @@ void GfxShowcaseApp_OnInit(GfxShowcaseApp* self)
     {
         for (int x = 0; x < 32; x++)
         {
-            px[y * 32 + x] = (((x / 8 + y / 8) % 2 == 0) ? COLOR_WHITE : COLOR_RED);
+            CS2SX_AT(px, y * 32 + x) = (((x / 8 + y / 8) % 2 == 0) ? COLOR_WHITE : COLOR_RED);
         }
     }
     self->f_checker = Texture_New(32, 32, px);
@@ -26,7 +26,7 @@ void GfxShowcaseApp_OnInit(GfxShowcaseApp* self)
     {
         for (int x = 0; x < 64; x++)
         {
-            gp[y * 64 + x] = Color_WithAlpha(COLOR_CYAN, ((unsigned char)(x * 4)));
+            CS2SX_AT(gp, y * 64 + x) = Color_WithAlpha(COLOR_CYAN, ((unsigned char)(x * 4)));
         }
     }
     self->f_gradient = Texture_New(64, 16, gp);

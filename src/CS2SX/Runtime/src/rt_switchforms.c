@@ -312,12 +312,12 @@ const char* String_ToLower(const char* s)
 
 const char* String_Substring(const char* s, int start, int length)
 {
-    if (!s) return "";
-    char* buf = _cs2sx_next_buf();
+    if (!s) CS2SX_ThrowNullRef();
     int slen = (int)strlen(s);
-    if (start < 0) start = 0;
-    if (start >= slen) { buf[0] = '\0'; return buf; }
-    if (length < 0 || start + length > slen) length = slen - start;
+    // C#: startIndex in [0, Length], length >= 0, startIndex + length <= Length
+    if (start < 0 || start > slen) CS2SX_ThrowArgOutOfRange("startIndex");
+    if (length < 0 || length > slen - start) CS2SX_ThrowArgOutOfRange("length");
+    char* buf = _cs2sx_next_buf();
     if (length >= CS2SX_STRBUF_SIZE) length = CS2SX_STRBUF_SIZE - 1;
     memcpy(buf, s + start, length);
     buf[length] = '\0';
@@ -326,10 +326,10 @@ const char* String_Substring(const char* s, int start, int length)
 
 const char* String_SubstringFrom(const char* s, int start)
 {
-    if (!s) return "";
+    if (!s) CS2SX_ThrowNullRef();
     int slen = (int)strlen(s);
-    if (start < 0) start = 0;
-    if (start >= slen) return "";
+    if (start < 0 || start > slen) CS2SX_ThrowArgOutOfRange("startIndex");
+    if (start == slen) return "";
     // Copy into a pooled buffer rather than returning an interior pointer.
     char* buf = _cs2sx_next_buf();
     int i = 0;
@@ -413,214 +413,7 @@ int String_EqualsIgnoreCase(const char* a, const char* b)
     return *a == '\0' && *b == '\0';
 }
 
-int CS2SX_Int_Parse(const char* s)
-{
-    if (!s || s[0] == '\0') return 0;
-    int result = 0;
-    int sign = 1;
-    int i = 0;
-    if (s[0] == '-') { sign = -1; i = 1; }
-    else if (s[0] == '+') { i = 1; }
-    for (; s[i] != '\0'; i++)
-    {
-        if (s[i] < '0' || s[i] > '9') return 0;
-        result = result * 10 + (s[i] - '0');
-    }
-    return result * sign;
-}
-
-int CS2SX_Int_TryParse(const char* s, int* out_val)
-{
-    if (!s || s[0] == '\0') return 0;
-    int i = 0;
-    if (s[0] == '-' || s[0] == '+') i = 1;
-    if (s[i] == '\0') return 0;
-    for (int j = i; s[j] != '\0'; j++)
-        if (s[j] < '0' || s[j] > '9') return 0;
-    *out_val = CS2SX_Int_Parse(s);
-    return 1;
-}
-
-float CS2SX_Float_Parse(const char* s)
-{
-    if (!s || s[0] == '\0') return 0.0f;
-    float result = 0.0f;
-    float sign = 1.0f;
-    int   i = 0;
-    if (s[0] == '-') { sign = -1.0f; i = 1; }
-    else if (s[0] == '+') { i = 1; }
-    for (; s[i] != '\0' && s[i] != '.'; i++)
-    {
-        if (s[i] < '0' || s[i] > '9') return 0.0f;
-        result = result * 10.0f + (float)(s[i] - '0');
-    }
-    if (s[i] == '.')
-    {
-        i++;
-        float factor = 0.1f;
-        for (; s[i] != '\0'; i++)
-        {
-            if (s[i] < '0' || s[i] > '9') break;
-            result += (float)(s[i] - '0') * factor;
-            factor *= 0.1f;
-        }
-    }
-    return result * sign;
-}
-
-double CS2SX_Double_Parse(const char* s)
-{
-    if (!s || s[0] == '\0') return 0.0;
-    char* end;
-    double v = strtod(s, &end);
-    return (end != s) ? v : 0.0;
-}
-
-int CS2SX_Double_TryParse(const char* s, double* out_val)
-{
-    if (!s || s[0] == '\0') return 0;
-    char* end;
-    double v = strtod(s, &end);
-    if (end == s) return 0;
-    *out_val = v;
-    return 1;
-}
-
-long long CS2SX_Long_Parse(const char* s)
-{
-    if (!s || s[0] == '\0') return 0;
-    char* end;
-    long long v = strtoll(s, &end, 10);
-    return (end != s) ? v : 0;
-}
-
-int CS2SX_Long_TryParse(const char* s, long long* out_val)
-{
-    if (!s || s[0] == '\0') return 0;
-    char* end;
-    long long v = strtoll(s, &end, 10);
-    if (end == s) return 0;
-    *out_val = v;
-    return 1;
-}
-
-unsigned long long CS2SX_ULong_Parse(const char* s)
-{
-    if (!s || s[0] == '\0') return 0;
-    char* end;
-    unsigned long long v = strtoull(s, &end, 10);
-    return (end != s) ? v : 0;
-}
-
-int CS2SX_ULong_TryParse(const char* s, unsigned long long* out_val)
-{
-    if (!s || s[0] == '\0') return 0;
-    char* end;
-    unsigned long long v = strtoull(s, &end, 10);
-    if (end == s) return 0;
-    *out_val = v;
-    return 1;
-}
-
-unsigned int CS2SX_UInt_Parse(const char* s)
-{
-    if (!s || s[0] == '\0') return 0;
-    char* end;
-    unsigned long v = strtoul(s, &end, 10);
-    return (end != s) ? (unsigned int)v : 0u;
-}
-
-int CS2SX_UInt_TryParse(const char* s, unsigned int* out_val)
-{
-    if (!s || s[0] == '\0') return 0;
-    char* end;
-    unsigned long v = strtoul(s, &end, 10);
-    if (end == s) return 0;
-    *out_val = (unsigned int)v;
-    return 1;
-}
-
-int CS2SX_Bool_TryParse(const char* s, int* out_val)
-{
-    if (!s) return 0;
-    if (strcmp(s, "true") == 0 || strcmp(s, "True") == 0 || strcmp(s, "1") == 0)
-        { *out_val = 1; return 1; }
-    if (strcmp(s, "false") == 0 || strcmp(s, "False") == 0 || strcmp(s, "0") == 0)
-        { *out_val = 0; return 1; }
-    return 0;
-}
-
-short CS2SX_Short_Parse(const char* s)
-{
-    if (!s || s[0] == '\0') return 0;
-    char* end;
-    long v = strtol(s, &end, 10);
-    return (end != s) ? (short)v : (short)0;
-}
-
-int CS2SX_Short_TryParse(const char* s, short* out_val)
-{
-    if (!s || s[0] == '\0') return 0;
-    char* end;
-    long v = strtol(s, &end, 10);
-    if (end == s) return 0;
-    *out_val = (short)v;
-    return 1;
-}
-
-unsigned short CS2SX_UShort_Parse(const char* s)
-{
-    if (!s || s[0] == '\0') return 0;
-    char* end;
-    unsigned long v = strtoul(s, &end, 10);
-    return (end != s) ? (unsigned short)v : (unsigned short)0;
-}
-
-int CS2SX_UShort_TryParse(const char* s, unsigned short* out_val)
-{
-    if (!s || s[0] == '\0') return 0;
-    char* end;
-    unsigned long v = strtoul(s, &end, 10);
-    if (end == s) return 0;
-    *out_val = (unsigned short)v;
-    return 1;
-}
-
-unsigned char CS2SX_Byte_Parse(const char* s)
-{
-    if (!s || s[0] == '\0') return 0;
-    char* end;
-    unsigned long v = strtoul(s, &end, 10);
-    return (end != s) ? (unsigned char)v : (unsigned char)0;
-}
-
-int CS2SX_Byte_TryParse(const char* s, unsigned char* out_val)
-{
-    if (!s || s[0] == '\0') return 0;
-    char* end;
-    unsigned long v = strtoul(s, &end, 10);
-    if (end == s) return 0;
-    *out_val = (unsigned char)v;
-    return 1;
-}
-
-signed char CS2SX_SByte_Parse(const char* s)
-{
-    if (!s || s[0] == '\0') return 0;
-    char* end;
-    long v = strtol(s, &end, 10);
-    return (end != s) ? (signed char)v : (signed char)0;
-}
-
-int CS2SX_SByte_TryParse(const char* s, signed char* out_val)
-{
-    if (!s || s[0] == '\0') return 0;
-    char* end;
-    long v = strtol(s, &end, 10);
-    if (end == s) return 0;
-    *out_val = (signed char)v;
-    return 1;
-}
+// int.Parse & co. live in rt_parse.c.
 
 List_str* List_str_New(void)
 {
@@ -662,10 +455,19 @@ const char** CS2SX_StrArr_FromList(List_str* l)
 
 void List_str_Remove(List_str* l, int idx)
 {
-    if (!l || idx < 0 || idx >= l->count) return;
+    CS2SX_ListCheck(l ? l->count : -1, idx);
     free(l->data[idx]);
     for (int _i = idx; _i < l->count - 1; _i++) l->data[_i] = l->data[_i + 1];
     l->count--;
+}
+
+void List_str_Insert(List_str* l, int idx, const char* val)
+{
+    CS2SX_ListCheck(l ? l->count + 1 : -1, idx);
+    List_str_Add(l, val);   // grows and copies val; then move it into place
+    char* added = l->data[l->count - 1];
+    for (int _i = l->count - 1; _i > idx; _i--) l->data[_i] = l->data[_i - 1];
+    l->data[idx] = added;
 }
 
 void List_str_Sort(List_str* l)
@@ -781,7 +583,9 @@ Dict_str_str* Dict_str_str_New(void)
 
 void Dict_str_str_Add(Dict_str_str* d, const char* key, const char* val)
 {
-    if (!d) return;
+    if (!d) CS2SX_ThrowNullRef();
+    if (!key) CS2SX_ThrowArgNull("key");
+    if (Dict_str_str_ContainsKey(d, key)) CS2SX_ThrowDuplicateKey();
     if (d->count >= d->capacity) {
         d->capacity *= 2;
         d->keys = (const char**)realloc(d->keys, d->capacity * sizeof(const char*));
@@ -903,86 +707,61 @@ int CS2SX_Dir_Create(const char* path)
     return R_SUCCEEDED(rc);
 }
 
+// File.ReadAllText: the whole file as a NEW string per call (C# strings are values;
+// a shared buffer would change earlier results). A UTF-8 BOM is dropped like in .NET.
+// Missing file → FileNotFoundException, other failures → IOException.
+static const char* file_text_finish(char* buf, size_t len)
+{
+    buf[len] = '\0';
+    if (len >= 3 && (unsigned char)buf[0] == 0xEF && (unsigned char)buf[1] == 0xBB
+        && (unsigned char)buf[2] == 0xBF)
+        memmove(buf, buf + 3, len - 2);
+    return buf;
+}
+
 const char* CS2SX_File_ReadAllText(const char* path)
 {
-    static char* _buf = NULL;
-    static int   _cap = 0;
+    if (!path) CS2SX_ThrowArgNull("path");
 
     // devoptab paths (romfs:/, ums0:/ …) use stdio — fsFs only sees the SD card
     if (cs2sx_devoptab(path))
     {
         FILE* fp = fopen(path, "rb");
-        if (!fp) goto ret_empty;
+        if (!fp) CS2SX_ThrowFileNotFound(path);
         fseek(fp, 0, SEEK_END);
         long sz = ftell(fp);
         fseek(fp, 0, SEEK_SET);
-        if (sz <= 0 || sz >= (1 << 20)) { fclose(fp); goto ret_empty; }
-        int rneeded = (int)sz + 1;
-        if (_cap < rneeded)
-        {
-            char* nb = (char*)realloc(_buf, rneeded);
-            if (!nb) { fclose(fp); goto ret_empty; }
-            _buf = nb; _cap = rneeded;
-        }
-        size_t rgot = fread(_buf, 1, (size_t)sz, fp);
-        _buf[rgot] = '\0';
+        if (sz < 0) { fclose(fp); CS2SX_ThrowIO("Could not read the file."); }
+        char* buf = (char*)malloc((size_t)sz + 1);
+        if (!buf) { fclose(fp); CS2SX_ThrowNew(&CS2SX_TI_OutOfMemoryException, NULL); }
+        size_t got = fread(buf, 1, (size_t)sz, fp);
         fclose(fp);
-        return _buf;
+        return file_text_finish(buf, got);
     }
 
     FsFileSystem fs;
-    if (R_FAILED(fsOpenSdCardFileSystem(&fs)))
-        goto ret_empty;
-
+    if (R_FAILED(fsOpenSdCardFileSystem(&fs))) CS2SX_ThrowIO("The SD card is not available.");
+    FsFile f;
+    if (R_FAILED(fsFsOpenFile(&fs, path, FsOpenMode_Read, &f)))
     {
-        FsFile f;
-        if (R_FAILED(fsFsOpenFile(&fs, path, FsOpenMode_Read, &f)))
-        {
-            fsFsClose(&fs);
-            goto ret_empty;
-        }
-
-        s64 size = 0;
-        fsFileGetSize(&f, &size);
-
-        if (size <= 0 || size >= (1 << 20))   /* max 1 MB */
-        {
-            fsFileClose(&f);
-            fsFsClose(&fs);
-            goto ret_empty;
-        }
-
-        int needed = (int)size + 1;
-        if (_cap < needed)
-        {
-            char* nb = (char*)realloc(_buf, needed);
-            if (!nb)
-            {
-                fsFileClose(&f);
-                fsFsClose(&fs);
-                goto ret_empty;
-            }
-            _buf = nb;
-            _cap = needed;
-        }
-
-        u64 bytesRead = 0;
-        fsFileRead(&f, 0, _buf, (u64)size, FsReadOption_None, &bytesRead);
-        _buf[bytesRead] = '\0';
-
+        fsFsClose(&fs);
+        CS2SX_ThrowFileNotFound(path);
+    }
+    s64 size = 0;
+    fsFileGetSize(&f, &size);
+    char* buf = size >= 0 ? (char*)malloc((size_t)size + 1) : NULL;
+    if (!buf)
+    {
         fsFileClose(&f);
         fsFsClose(&fs);
-        return _buf;
+        CS2SX_ThrowNew(&CS2SX_TI_OutOfMemoryException, NULL);
     }
-
-ret_empty:
-    if (!_buf || _cap < 1)
-    {
-        char* nb = (char*)malloc(1);
-        if (nb) { _buf = nb; _cap = 1; }
-    }
-    if (_buf) _buf[0] = '\0';
-    return _buf ? _buf : "";
+    u64 bytesRead = 0;
+    Result rc = fsFileRead(&f, 0, buf, (u64)size, FsReadOption_None, &bytesRead);
+    fsFileClose(&f);
+    fsFsClose(&fs);
+    if (R_FAILED(rc)) { free(buf); CS2SX_ThrowIO("Could not read the file."); }
+    return file_text_finish(buf, (size_t)bytesRead);
 }
 
 int  g_nsp_ok = 0;
@@ -1085,16 +864,7 @@ List_str* CS2SX_File_ReadAllLines(const char* path)
     List_str* result = List_str_New();
     if (!result) return result;
 
-    const char* content = CS2SX_File_ReadAllText(path);
-    if (!content || content[0] == '\0') return result;
-
-    // FIX: sofort eine eigene Kopie machen, bevor irgendein anderer
-    // ReadAllText-Aufruf den internen Buffer überschreiben könnte.
-    int len = (int)strlen(content);
-    char* src = (char*)malloc(len + 1);
-    if (!src) return result;
-    memcpy(src, content, len + 1);
-
+    char* src = (char*)CS2SX_File_ReadAllText(path);   // own heap copy; throws if missing
     char* cur = src;
     while (*cur)
     {
@@ -1182,15 +952,33 @@ int CS2SX_File_Delete(const char* path)
     return R_SUCCEEDED(rc);
 }
 
+// stdio path for any file: bare paths ("/switch/x") are on the SD card.
+static void cs2sx_stdio_path(const char* path, char* out, size_t cap)
+{
+    snprintf(out, cap, cs2sx_devoptab(path) ? "%s" : "sdmc:%s", path);
+}
+
+// File.Copy: byte-exact (binary files too). Missing source → FileNotFoundException.
 int CS2SX_File_Copy(const char* src, const char* dst)
 {
-    const char* content = CS2SX_File_ReadAllText(src);
-    if (!content || content[0] == '\0') return 0;
-    char* copy = _cs2sx_heap_strdup(content);   /* eigene Heap-Kopie */
-    if (!copy) return 0;
-    int ok = CS2SX_File_WriteAllText(dst, copy);
-    free(copy);
-    return ok;
+    if (!src) CS2SX_ThrowArgNull("sourceFileName");
+    if (!dst) CS2SX_ThrowArgNull("destFileName");
+    char ps[1024], pd[1024];
+    cs2sx_stdio_path(src, ps, sizeof ps);
+    cs2sx_stdio_path(dst, pd, sizeof pd);
+    FILE* in = fopen(ps, "rb");
+    if (!in) CS2SX_ThrowFileNotFound(src);
+    FILE* out = fopen(pd, "wb");
+    if (!out) { fclose(in); CS2SX_ThrowIO("Could not create the destination file."); }
+    char buf[16 * 1024];
+    size_t n;
+    int ok = 1;
+    while ((n = fread(buf, 1, sizeof buf, in)) > 0)
+        if (fwrite(buf, 1, n, out) != n) { ok = 0; break; }
+    fclose(in);
+    if (fclose(out) != 0) ok = 0;
+    if (!ok) CS2SX_ThrowIO("Could not write the destination file.");
+    return 1;
 }
 
 int CS2SX_Dir_Delete(const char* path)

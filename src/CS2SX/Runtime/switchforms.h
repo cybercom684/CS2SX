@@ -54,6 +54,23 @@ static inline int CS2SX_ArrLen(const void* a)
     return (h->magic == CS2SX_ARR_MAGIC || h->magic == CS2SX_ARR_MAGIC_STACK) ? h->length : 0;
 }
 
+/// Bounds check of a[i] like C#: null → NullReferenceException, i outside
+/// [0, Length) → IndexOutOfRangeException. Pointers that are not C# arrays (no
+/// magic header, e.g. native memory) are not checked.
+static inline void CS2SX_ArrCheck(const void* a, int i)
+{
+    if (__builtin_expect(!a, 0)) CS2SX_ThrowNullRef();
+    const CS2SX_ArrHdr* h = (const CS2SX_ArrHdr*)a - 1;
+    if ((h->magic == CS2SX_ARR_MAGIC || h->magic == CS2SX_ARR_MAGIC_STACK)
+        && __builtin_expect((unsigned)i >= (unsigned)h->length, 0))
+        CS2SX_ThrowIndexOutOfRange();
+}
+
+/// a[i] with the check, still an lvalue (a[i] = v, a[i]++, &a[i]); a and i are
+/// evaluated once.
+#define CS2SX_AT(a, i) (*({ __typeof__(a) _cs2sx_a = (a); int _cs2sx_i = (int)(i); \
+    CS2SX_ArrCheck(_cs2sx_a, _cs2sx_i); _cs2sx_a + _cs2sx_i; }))
+
 /// Frees a heap array created by CS2SX_ArrNew/CS2SX_ArrFromInit (NULL-safe).
 void CS2SX_ArrFree(void* a);
 
@@ -342,19 +359,12 @@ static inline const char* UInt_ToString(unsigned int val)
     return buf;
 }
 
-static inline const char* Float_ToString(float val)
-{
-    char* buf = _cs2sx_next_buf();
-    snprintf(buf, CS2SX_STRBUF_SIZE, "%f", val);
-    return buf;
-}
-
-static inline const char* Double_ToString(double val)
-{
-    char* buf = _cs2sx_next_buf();
-    snprintf(buf, CS2SX_STRBUF_SIZE, "%g", val);
-    return buf;
-}
+/// double/float ToString() without a format, as .NET prints them (src/rt_number.c):
+/// the shortest text that reads back as the same value — 2.5, 0.1, 1E+21, 1E-05,
+/// NaN, Infinity. Also used for doubles in string concatenation and interpolation.
+const char* Float_ToString(float val);
+const char* Double_ToString(double val);
+#define CS2SX_BoolStr(b) ((b) ? "True" : "False")
 
 static inline const char* Long_ToString(long long val)
 {
@@ -442,68 +452,41 @@ int String_EqualsIgnoreCase(const char* a, const char* b);
 #define String_Length(s) ((int)strlen(s))
 
 // ============================================================================
-// Int / Float Parsing
+// int.Parse / TryParse & co. (src/rt_number.c) — C# syntax and range rules:
+// leading/trailing whitespace, optional sign, nothing else. Parse throws
+// FormatException / OverflowException / ArgumentNullException; TryParse returns 0
+// and stores 0 instead. Floating point also accepts a fraction, an exponent,
+// thousands separators, "NaN" and "Infinity"; out of range gives ±Infinity.
 // ============================================================================
 
-int CS2SX_Int_Parse(const char* s);
-
-int CS2SX_Int_TryParse(const char* s, int* out_val);
-
-float CS2SX_Float_Parse(const char* s);
-
-static inline int CS2SX_Float_TryParse(const char* s, float* out_val)
-{
-    if (!s || s[0] == '\0') return 0;
-    *out_val = CS2SX_Float_Parse(s);
-    return 1;
-}
-
-double CS2SX_Double_Parse(const char* s);
-
-int CS2SX_Double_TryParse(const char* s, double* out_val);
-
-long long CS2SX_Long_Parse(const char* s);
-
-int CS2SX_Long_TryParse(const char* s, long long* out_val);
-
-unsigned long long CS2SX_ULong_Parse(const char* s);
-
-int CS2SX_ULong_TryParse(const char* s, unsigned long long* out_val);
-
-unsigned int CS2SX_UInt_Parse(const char* s);
-
-int CS2SX_UInt_TryParse(const char* s, unsigned int* out_val);
-
-static inline int CS2SX_Bool_Parse(const char* s)
-{
-    if (!s) return 0;
-    if (strcmp(s, "true") == 0 || strcmp(s, "True") == 0 || strcmp(s, "1") == 0) return 1;
-    return 0;
-}
-
-int CS2SX_Bool_TryParse(const char* s, int* out_val);
-
-short CS2SX_Short_Parse(const char* s);
-
-int CS2SX_Short_TryParse(const char* s, short* out_val);
-
-unsigned short CS2SX_UShort_Parse(const char* s);
-
-int CS2SX_UShort_TryParse(const char* s, unsigned short* out_val);
-
-unsigned char CS2SX_Byte_Parse(const char* s);
-
-int CS2SX_Byte_TryParse(const char* s, unsigned char* out_val);
-
-signed char CS2SX_SByte_Parse(const char* s);
-
-int CS2SX_SByte_TryParse(const char* s, signed char* out_val);
+#define CS2SX_PARSE_DECLARE(Name, T) \
+    T Name##_Parse(const char* s); int Name##_TryParse(const char* s, T* out_val);
+CS2SX_PARSE_DECLARE(CS2SX_Int, int)
+CS2SX_PARSE_DECLARE(CS2SX_UInt, unsigned int)
+CS2SX_PARSE_DECLARE(CS2SX_Long, long long)
+CS2SX_PARSE_DECLARE(CS2SX_ULong, unsigned long long)
+CS2SX_PARSE_DECLARE(CS2SX_Short, short)
+CS2SX_PARSE_DECLARE(CS2SX_UShort, unsigned short)
+CS2SX_PARSE_DECLARE(CS2SX_Byte, unsigned char)
+CS2SX_PARSE_DECLARE(CS2SX_SByte, signed char)
+CS2SX_PARSE_DECLARE(CS2SX_Float, float)
+CS2SX_PARSE_DECLARE(CS2SX_Double, double)
+CS2SX_PARSE_DECLARE(CS2SX_Bool, int)
+#undef CS2SX_PARSE_DECLARE
 
 // ============================================================================
 // List<T>
 // ============================================================================
 
 #define CS2SX_LIST_INITIAL_CAP 8
+
+/// Index check of List<T> accessors: a null list (count < 0) throws
+/// NullReferenceException, an index outside [0, count) ArgumentOutOfRangeException.
+static inline void CS2SX_ListCheck(int count, int index)
+{
+    if (__builtin_expect(count < 0, 0)) CS2SX_ThrowNullRef();
+    if (__builtin_expect((unsigned)index >= (unsigned)count, 0)) CS2SX_ThrowArgOutOfRange("index");
+}
 
 #define CS2SX_LIST_DEFINE(T)                                                                        \
 typedef struct { T* data; int count; int capacity; } List_##T;                                      \
@@ -518,9 +501,15 @@ static inline void List_##T##_Add(List_##T* l, T val) {                         
         l->capacity *= 2;                                                                           \
         l->data = (T*)realloc(l->data, l->capacity * sizeof(T)); }                                 \
     l->data[l->count++] = val; }                                                                    \
-static inline T    List_##T##_Get(List_##T* l, int i) { return l->data[i]; }                       \
+static inline T    List_##T##_Get(List_##T* l, int i) {                                            \
+    CS2SX_ListCheck(l ? l->count : -1, i); return l->data[i]; }                                     \
 static inline void List_##T##_Set(List_##T* l, int i, T val) {                                     \
-    if (l && i >= 0 && i < l->count) l->data[i] = val; }                                           \
+    CS2SX_ListCheck(l ? l->count : -1, i); l->data[i] = val; }                                      \
+static inline void List_##T##_Insert(List_##T* l, int idx, T val) {                                \
+    CS2SX_ListCheck(l ? l->count + 1 : -1, idx);                                                    \
+    List_##T##_Add(l, val);                                                                         \
+    for (int _i = l->count - 1; _i > idx; _i--) l->data[_i] = l->data[_i - 1];                    \
+    l->data[idx] = val; }                                                                           \
 static inline int  List_##T##_Count(List_##T* l)       { return l ? l->count : 0; }                \
 static inline void List_##T##_Clear(List_##T* l)       { if (l) l->count = 0; }                    \
 static inline void List_##T##_Free(List_##T* l)        { if (l) { free(l->data); free(l); } }      \
@@ -529,7 +518,7 @@ static inline int  List_##T##_Contains(List_##T* l, T val) {                    
 static inline int  List_##T##_IndexOf(List_##T* l, T val) {                                        \
     for (int _i = 0; _i < l->count; _i++) { if (l->data[_i] == val) return _i; } return -1; }     \
 static inline void List_##T##_Remove(List_##T* l, int idx) {                                       \
-    if (!l || idx < 0 || idx >= l->count) return;                                                  \
+    CS2SX_ListCheck(l ? l->count : -1, idx);                                                        \
     for (int _i = idx; _i < l->count - 1; _i++) l->data[_i] = l->data[_i + 1];                   \
     l->count--; }                                                                                   \
 static inline void List_##T##_RemoveValue(List_##T* l, T val) {                                    \
@@ -564,9 +553,15 @@ static inline void List_##T##_Add(List_##T* l, T* val) {                        
         l->capacity *= 2;                                                                           \
         l->data = (T**)realloc(l->data, l->capacity * sizeof(T*)); }                               \
     l->data[l->count++] = val; }                                                                    \
-static inline T*   List_##T##_Get(List_##T* l, int i) { return (l && i >= 0 && i < l->count) ? l->data[i] : NULL; } \
+static inline T*   List_##T##_Get(List_##T* l, int i) {                                            \
+    CS2SX_ListCheck(l ? l->count : -1, i); return l->data[i]; }                                     \
 static inline void List_##T##_Set(List_##T* l, int i, T* val) {                                    \
-    if (l && i >= 0 && i < l->count) l->data[i] = val; }                                           \
+    CS2SX_ListCheck(l ? l->count : -1, i); l->data[i] = val; }                                      \
+static inline void List_##T##_Insert(List_##T* l, int idx, T* val) {                               \
+    CS2SX_ListCheck(l ? l->count + 1 : -1, idx);                                                    \
+    List_##T##_Add(l, val);                                                                         \
+    for (int _i = l->count - 1; _i > idx; _i--) l->data[_i] = l->data[_i - 1];                    \
+    l->data[idx] = val; }                                                                           \
 static inline int  List_##T##_Count(List_##T* l)       { return l ? l->count : 0; }                \
 static inline void List_##T##_Clear(List_##T* l)       { if (l) l->count = 0; }                    \
 static inline void List_##T##_Free(List_##T* l)        { if (l) { free(l->data); free(l); } }      \
@@ -577,7 +572,7 @@ static inline int  List_##T##_IndexOf(List_##T* l, T* val) {                    
     if (!l) return -1;                                                                              \
     for (int _i = 0; _i < l->count; _i++) { if (l->data[_i] == val) return _i; } return -1; }     \
 static inline void List_##T##_Remove(List_##T* l, int idx) {                                       \
-    if (!l || idx < 0 || idx >= l->count) return;                                                  \
+    CS2SX_ListCheck(l ? l->count : -1, idx);                                                        \
     for (int _i = idx; _i < l->count - 1; _i++) l->data[_i] = l->data[_i + 1];                   \
     l->count--; }                                                                                   \
 static inline void List_##T##_RemoveValue(List_##T* l, T* val) {                                   \
@@ -621,10 +616,12 @@ static inline void Stack_##T##_Push(Stack_##T* s, T val) {                      
         s->data = (T*)realloc(s->data, s->capacity * sizeof(T)); }                                  \
     s->data[s->count++] = val; }                                                                    \
 static inline T Stack_##T##_Pop(Stack_##T* s) {                                                     \
-    if (!s || s->count == 0) { T _z; memset(&_z,0,sizeof(T)); return _z; }                         \
+    if (!s) CS2SX_ThrowNullRef();                                                                    \
+    if (s->count == 0) CS2SX_ThrowInvalidOp("Stack empty.");                                         \
     return s->data[--s->count]; }                                                                    \
 static inline T Stack_##T##_Peek(Stack_##T* s) {                                                    \
-    if (!s || s->count == 0) { T _z; memset(&_z,0,sizeof(T)); return _z; }                         \
+    if (!s) CS2SX_ThrowNullRef();                                                                    \
+    if (s->count == 0) CS2SX_ThrowInvalidOp("Stack empty.");                                         \
     return s->data[s->count - 1]; }                                                                  \
 static inline void Stack_##T##_Clear(Stack_##T* s) { if (s) s->count = 0; }                        \
 static inline void Stack_##T##_Free(Stack_##T* s) { if (s) { free(s->data); free(s); } }
@@ -654,10 +651,12 @@ static inline void Queue_##T##_Enqueue(Queue_##T* q, T val) {                   
         free(q->data); q->data = nd; q->head = 0; q->tail = q->count; q->capacity = nc; }            \
     q->data[q->tail] = val; q->tail = (q->tail + 1) % q->capacity; q->count++; }                   \
 static inline T Queue_##T##_Dequeue(Queue_##T* q) {                                                  \
-    if (!q || q->count == 0) { T _z; memset(&_z,0,sizeof(T)); return _z; }                          \
+    if (!q) CS2SX_ThrowNullRef();                                                                     \
+    if (q->count == 0) CS2SX_ThrowInvalidOp("Queue empty.");                                          \
     T val = q->data[q->head]; q->head = (q->head + 1) % q->capacity; q->count--; return val; }      \
 static inline T Queue_##T##_Peek(Queue_##T* q) {                                                     \
-    if (!q || q->count == 0) { T _z; memset(&_z,0,sizeof(T)); return _z; }                          \
+    if (!q) CS2SX_ThrowNullRef();                                                                     \
+    if (q->count == 0) CS2SX_ThrowInvalidOp("Queue empty.");                                          \
     return q->data[q->head]; }                                                                        \
 static inline void Queue_##T##_Clear(Queue_##T* q) {                                                 \
     if (q) { q->head = 0; q->tail = 0; q->count = 0; } }                                             \
@@ -734,10 +733,12 @@ List_str* List_str_New(void);
 // FIX: Add nimmt const char* und legt eine Heap-Kopie an
 void List_str_Add(List_str* l, const char* val);
 
-static inline const char* List_str_Get(List_str* l, int i) { return l->data[i]; }
+static inline const char* List_str_Get(List_str* l, int i) {
+    CS2SX_ListCheck(l ? l->count : -1, i); return l->data[i]; }
 static inline int          List_str_Count(List_str* l) { return l ? l->count : 0; }
+void List_str_Insert(List_str* l, int idx, const char* val);
 static inline void         List_str_Set(List_str* l, int i, const char* val) {
-    if (!l || i < 0 || i >= l->count) return;
+    CS2SX_ListCheck(l ? l->count : -1, i);
     free(l->data[i]);
     l->data[i] = val ? _cs2sx_heap_strdup(val) : NULL; }
 
@@ -824,8 +825,10 @@ static inline Dict_##K##_##V* Dict_##K##_##V##_New(void) {                      
     d->keys = (K*)malloc(CS2SX_DICT_INITIAL_CAP * sizeof(K));                                          \
     d->vals = (V*)malloc(CS2SX_DICT_INITIAL_CAP * sizeof(V));                                          \
     d->count = 0; d->capacity = CS2SX_DICT_INITIAL_CAP; return d; }                                    \
+static inline int Dict_##K##_##V##_ContainsKey(Dict_##K##_##V* d, K key);                            \
 static inline void Dict_##K##_##V##_Add(Dict_##K##_##V* d, K key, V val) {                             \
-    if (!d) return;                                                                                     \
+    if (!d) CS2SX_ThrowNullRef();                                                                       \
+    if (Dict_##K##_##V##_ContainsKey(d, key)) CS2SX_ThrowDuplicateKey();                               \
     if (d->count >= d->capacity) {                                                                      \
         d->capacity *= 2;                                                                               \
         d->keys = (K*)realloc(d->keys, d->capacity * sizeof(K));                                        \
@@ -838,7 +841,8 @@ static inline int Dict_##K##_##V##_TryGetValue(Dict_##K##_##V* d, K key, V* out_
         if (d->keys[_i] == key) { *out_val = d->vals[_i]; return 1; } } return 0; }                    \
 static inline V Dict_##K##_##V##_Get(Dict_##K##_##V* d, K key) {                                       \
     V _v; memset(&_v, 0, sizeof(V));                                                                    \
-    Dict_##K##_##V##_TryGetValue(d, key, &_v); return _v; }                                            \
+    if (!d) CS2SX_ThrowNullRef();                                                                       \
+    if (!Dict_##K##_##V##_TryGetValue(d, key, &_v)) CS2SX_ThrowKeyNotFound(); return _v; }             \
 static inline void Dict_##K##_##V##_Set(Dict_##K##_##V* d, K key, V val) {                             \
     for (int _i = 0; _i < d->count; _i++) {                                                            \
         if (d->keys[_i] == key) { d->vals[_i] = val; return; } }                                       \
@@ -861,8 +865,11 @@ static inline Dict_str_##V* Dict_str_##V##_New(void) {                          
     d->keys = (const char**)malloc(CS2SX_DICT_INITIAL_CAP * sizeof(const char*));                      \
     d->vals = (V*)malloc(CS2SX_DICT_INITIAL_CAP * sizeof(V));                                          \
     d->count = 0; d->capacity = CS2SX_DICT_INITIAL_CAP; return d; }                                    \
+static inline int Dict_str_##V##_ContainsKey(Dict_str_##V* d, const char* key);                         \
 static inline void Dict_str_##V##_Add(Dict_str_##V* d, const char* key, V val) {                        \
-    if (!d) return;                                                                                     \
+    if (!d) CS2SX_ThrowNullRef();                                                                       \
+    if (!key) CS2SX_ThrowArgNull("key");                                                                \
+    if (Dict_str_##V##_ContainsKey(d, key)) CS2SX_ThrowDuplicateKey();                                 \
     if (d->count >= d->capacity) {                                                                      \
         d->capacity *= 2;                                                                               \
         d->keys = (const char**)realloc(d->keys, d->capacity * sizeof(const char*));                    \
@@ -876,7 +883,9 @@ static inline int Dict_str_##V##_TryGetValue(Dict_str_##V* d, const char* key, V
         if (strcmp(d->keys[_i], key) == 0) { *out_val = d->vals[_i]; return 1; } } return 0; }         \
 static inline V Dict_str_##V##_Get(Dict_str_##V* d, const char* key) {                                  \
     V _v; memset(&_v, 0, sizeof(V));                                                                    \
-    Dict_str_##V##_TryGetValue(d, key, &_v); return _v; }                                               \
+    if (!d) CS2SX_ThrowNullRef();                                                                       \
+    if (!key) CS2SX_ThrowArgNull("key");                                                                \
+    if (!Dict_str_##V##_TryGetValue(d, key, &_v)) CS2SX_ThrowKeyNotFound(); return _v; }              \
 static inline void Dict_str_##V##_Set(Dict_str_##V* d, const char* key, V val) {                        \
     for (int _i = 0; _i < d->count; _i++) {                                                            \
         if (strcmp(d->keys[_i], key) == 0) { d->vals[_i] = val; return; } }                            \
@@ -911,7 +920,11 @@ static inline int Dict_str_str_TryGetValue(Dict_str_str* d, const char* key, con
     } return 0;
 }
 static inline const char* Dict_str_str_Get(Dict_str_str* d, const char* key) {
-    const char* v = NULL; Dict_str_str_TryGetValue(d, key, &v); return v;
+    const char* v = NULL;
+    if (!d) CS2SX_ThrowNullRef();
+    if (!key) CS2SX_ThrowArgNull("key");
+    if (!Dict_str_str_TryGetValue(d, key, &v)) CS2SX_ThrowKeyNotFound();
+    return v;
 }
 void Dict_str_str_Set(Dict_str_str* d, const char* key, const char* val);
 void Dict_str_str_Remove(Dict_str_str* d, const char* key);
@@ -990,8 +1003,8 @@ int CS2SX_Dir_Exists(const char* path);
 int CS2SX_Dir_Create(const char* path);
 
 // ============================================================================
-// File.ReadAllText — thread-sicherer statischer Lese-Buffer
-// SEMANTIK: Rückgabewert ist gültig bis zum nächsten Aufruf von ReadAllText
+// File.ReadAllText — a new heap string per call; FileNotFoundException if missing
+// (the C# string is immutable — earlier results stay valid)
 //           ODER bis zum Ende der aufrufenden Anweisung.
 //           Für längere Lebensdauer: _cs2sx_heap_strdup() verwenden.
 // FIX: CS2SX_File_Copy macht jetzt eine eigene Heap-Kopie vor dem Write-Aufruf,

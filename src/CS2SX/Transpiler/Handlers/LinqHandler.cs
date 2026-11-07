@@ -297,17 +297,23 @@ public sealed class LinqHandler : InvocationHandlerBase
                         var predFn = MakeLifter().LiftLambda(lambdaArg, elementTypeHint: inner, isPredicate: true);
                         var idxVar = ctx.NextTmp("i");
                         var retVar = ctx.NextTmp("first");
+                        var foundVar = ctx.NextTmp("found");
                         var fillLine = isPrim || inner == "string"
                             ? $"{cInnerType} {retVar} = 0;"
                             : $"{cInnerType}* {retVar} = NULL;";
                         ctx.WriteLine(fillLine);
+                        ctx.WriteLine($"int {foundVar} = 0;");
                         ctx.WriteLine($"for (int {idxVar} = 0; {idxVar} < {listCount.Replace("_idx", idxVar)}; {idxVar}++)");
                         ctx.WriteLine("{");
                         ctx.Indent();
-                        ctx.WriteLine($"if ({predFn}({listGet.Replace("_idx", idxVar)})) {{ {retVar} = {listGet.Replace("_idx", idxVar)}; break; }}");
+                        ctx.WriteLine($"if ({predFn}({listGet.Replace("_idx", idxVar)})) {{ {retVar} = {listGet.Replace("_idx", idxVar)}; {foundVar}++; " + (methodName == "First" ? "break; " : "") + "}");
                         ctx.Dedent();
                         ctx.WriteLine("}");
-                        result = retVar;
+                        // The throw is part of the value, not of the hoisted loop: a guarded
+                        // `c ? xs.First(p) : d` must not throw when the guard is false.
+                        result = methodName == "First"
+                            ? $"({foundVar} ? {retVar} : (CS2SX_ThrowInvalidOp(\"Sequence contains no matching element\"), {retVar}))"
+                            : $"({foundVar} == 1 ? {retVar} : (CS2SX_ThrowInvalidOp({foundVar} ? \"Sequence contains more than one matching element\" : \"Sequence contains no matching element\"), {retVar}))";
                         ctx.LocalTypes[retVar] = inner; // element type, so `var x = ...First()` is typed
                     }
                     else
@@ -320,8 +326,9 @@ public sealed class LinqHandler : InvocationHandlerBase
                             : $"{cInnerType}* {retVar} = NULL;";
                         ctx.WriteLine(fillLine);
                         ctx.WriteLine($"if ({countExpr0} > 0) {{ {retVar} = {listGet.Replace("_idx", "0")}; }}");
-                        ctx.WriteLine($"else {{ fprintf(stderr, \"First()/Single(): sequence contains no elements\\n\"); abort(); }}");
-                        result = retVar;
+                        result = methodName == "First"
+                            ? $"({countExpr0} > 0 ? {retVar} : (CS2SX_ThrowNoElements(), {retVar}))"
+                            : $"({countExpr0} == 1 ? {retVar} : ({countExpr0} == 0 ? CS2SX_ThrowNoElements() : CS2SX_ThrowInvalidOp(\"Sequence contains more than one element\"), {retVar}))";
                         ctx.LocalTypes[retVar] = inner; // element type, so `var x = ...First()` is typed
                     }
                     return true;
@@ -370,9 +377,9 @@ public sealed class LinqHandler : InvocationHandlerBase
                         ctx.WriteLine($"int {foundVar} = 0;");
                         ctx.WriteLine($"for (int {idxVar2} = 0; {idxVar2} < {listCount.Replace("_idx", idxVar2)}; {idxVar2}++)");
                         ctx.WriteLine($"  if ({predFn}({listGet.Replace("_idx", idxVar2)})) {{ {retVar2} = {listGet.Replace("_idx", idxVar2)}; {foundVar} = 1; }}");
-                        if (isStrict)
-                            ctx.WriteLine($"if (!{foundVar}) {{ fprintf(stderr, \"Last(): sequence contains no matching elements\\n\"); abort(); }}");
-                        result = retVar2;
+                        result = isStrict
+                            ? $"({foundVar} ? {retVar2} : (CS2SX_ThrowInvalidOp(\"Sequence contains no matching element\"), {retVar2}))"
+                            : retVar2;
                         ctx.LocalTypes[retVar2] = inner; // element type, so `var x = ...First()` is typed
                     }
                     else if (isStrict)
@@ -382,8 +389,7 @@ public sealed class LinqHandler : InvocationHandlerBase
                         var retVar2 = ctx.NextTmp("last");
                         ctx.WriteLine($"{cInnerType}{elemPtr} {retVar2} = {defaultVal};");
                         ctx.WriteLine($"if ({countExpr} > 0) {{ {retVar2} = {listGet.Replace("_idx", countExpr + " - 1")}; }}");
-                        ctx.WriteLine($"else {{ fprintf(stderr, \"Last(): sequence contains no elements\\n\"); abort(); }}");
-                        result = retVar2;
+                        result = $"({countExpr} > 0 ? {retVar2} : (CS2SX_ThrowNoElements(), {retVar2}))";
                         ctx.LocalTypes[retVar2] = inner; // element type, so `var x = ...First()` is typed
                     }
                     else
@@ -497,7 +503,7 @@ public sealed class LinqHandler : InvocationHandlerBase
                         ctx.WriteLine($"double {minVar} = ({countExpr} > 0) ? (double){projFn}({listGet.Replace("_idx", "0")}) : 0.0;");
                         ctx.WriteLine($"for (int {idxVar} = 1; {idxVar} < {listCount.Replace("_idx", idxVar)}; {idxVar}++)");
                         ctx.WriteLine($"{{ double _mv = (double){projFn}({listGet.Replace("_idx", idxVar)}); if (_mv < {minVar}) {minVar} = _mv; }}");
-                        result = minVar;
+                        result = $"({countExpr} > 0 ? {minVar} : (CS2SX_ThrowNoElements(), {minVar}))";
                     }
                     else
                     {
@@ -507,7 +513,7 @@ public sealed class LinqHandler : InvocationHandlerBase
                         ctx.WriteLine($"{cInnerType} {minVar} = ({countExpr} > 0) ? {listGet.Replace("_idx", "0")} : 0;");
                         ctx.WriteLine($"for (int {idxVar} = 1; {idxVar} < {listCount.Replace("_idx", idxVar)}; {idxVar}++)");
                         ctx.WriteLine($"  if ({listGet.Replace("_idx", idxVar)} < {minVar}) {minVar} = {listGet.Replace("_idx", idxVar)};");
-                        result = minVar;
+                        result = $"({countExpr} > 0 ? {minVar} : (CS2SX_ThrowNoElements(), {minVar}))";
                     }
                     return true;
                 }
@@ -523,7 +529,7 @@ public sealed class LinqHandler : InvocationHandlerBase
                         ctx.WriteLine($"double {maxVar} = ({countExpr} > 0) ? (double){projFn}({listGet.Replace("_idx", "0")}) : 0.0;");
                         ctx.WriteLine($"for (int {idxVar} = 1; {idxVar} < {listCount.Replace("_idx", idxVar)}; {idxVar}++)");
                         ctx.WriteLine($"{{ double _mv = (double){projFn}({listGet.Replace("_idx", idxVar)}); if (_mv > {maxVar}) {maxVar} = _mv; }}");
-                        result = maxVar;
+                        result = $"({countExpr} > 0 ? {maxVar} : (CS2SX_ThrowNoElements(), {maxVar}))";
                     }
                     else
                     {
@@ -533,7 +539,7 @@ public sealed class LinqHandler : InvocationHandlerBase
                         ctx.WriteLine($"{cInnerType} {maxVar} = ({countExpr} > 0) ? {listGet.Replace("_idx", "0")} : 0;");
                         ctx.WriteLine($"for (int {idxVar} = 1; {idxVar} < {listCount.Replace("_idx", idxVar)}; {idxVar}++)");
                         ctx.WriteLine($"  if ({listGet.Replace("_idx", idxVar)} > {maxVar}) {maxVar} = {listGet.Replace("_idx", idxVar)};");
-                        result = maxVar;
+                        result = $"({countExpr} > 0 ? {maxVar} : (CS2SX_ThrowNoElements(), {maxVar}))";
                     }
                     return true;
                 }
@@ -550,7 +556,7 @@ public sealed class LinqHandler : InvocationHandlerBase
                         ctx.WriteLine($"for (int {idxVar} = 0; {idxVar} < {cntExpr}; {idxVar}++)");
                         ctx.WriteLine($"  {sumVar} += (double){projFn}({listGet.Replace("_idx", idxVar)});");
                         var cntVar = listCount.Replace("_idx", "0");
-                        result = "(" + cntVar + " > 0 ? " + sumVar + " / " + cntVar + " : 0.0)";
+                        result = "(" + cntVar + " > 0 ? " + sumVar + " / " + cntVar + " : (CS2SX_ThrowNoElements(), 0.0))";
                     }
                     else
                     {
@@ -561,7 +567,7 @@ public sealed class LinqHandler : InvocationHandlerBase
                         ctx.WriteLine($"for (int {idxVar} = 0; {idxVar} < {cntExpr}; {idxVar}++)");
                         ctx.WriteLine($"  {sumVar} += (double){listGet.Replace("_idx", idxVar)};");
                         var cntVar = listCount.Replace("_idx", "0");
-                        result = "(" + cntVar + " > 0 ? " + sumVar + " / " + cntVar + " : 0.0)";
+                        result = "(" + cntVar + " > 0 ? " + sumVar + " / " + cntVar + " : (CS2SX_ThrowNoElements(), 0.0))";
                     }
                     return true;
                 }

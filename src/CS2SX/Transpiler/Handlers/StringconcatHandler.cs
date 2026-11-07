@@ -59,8 +59,9 @@ public static class StringConcatFixer
             {
                 var csType = TypeInferrer.InferCSharpType(part, ctx);
                 var cType = TypeRegistry.MapType(csType);
-                fmt.Append(TypeRegistry.FormatSpecifier(cType));
-                args.Add(writeExpr(part));
+                var (spec, code) = FormatArg.Adapt(csType, TypeRegistry.FormatSpecifier(cType), writeExpr(part));
+                fmt.Append(spec);
+                args.Add(code);
             }
         }
 

@@ -33,7 +33,8 @@ public sealed class ConsoleHandler : InvocationHandlerBase
 
         // Konstantes String-Literal → direkt einbetten (kein Argument nötig)
         if (firstArg is LiteralExpressionSyntax lit
-            && lit.Token.IsKind(SyntaxKind.StringLiteralToken))
+            && lit.Token.IsKind(SyntaxKind.StringLiteralToken)
+            && inv.ArgumentList.Arguments.Count == 1)
         {
             var escaped = StringEscaper.EscapeFormat(lit.Token.ValueText);
             result = $"printf(\"{escaped}{nl}\")";
@@ -57,9 +58,10 @@ public sealed class ConsoleHandler : InvocationHandlerBase
             // would emit (and evaluate) every argument's prelude a second time.
             var fmtArgs = args.Skip(1).ToList();
             var fmtStr = StringEscaper.EscapeFormat(fmtLit.Token.ValueText);
-            fmtStr = ReplaceDotNetPlaceholders(fmtStr, fmtArgs, inv, ctx);
-            var argStr = string.Join(", ", fmtArgs);
-            result = $"printf(\"{fmtStr}{nl}\", {argStr})";
+            var (printfFmt, printfArgs) = ReplaceDotNetPlaceholders(fmtStr, fmtArgs, inv, ctx);
+            result = printfArgs.Count > 0
+                ? $"printf(\"{printfFmt}{nl}\", {string.Join(", ", printfArgs)})"
+                : $"printf(\"{printfFmt}{nl}\")";
             return true;
         }
 
@@ -70,6 +72,12 @@ public sealed class ConsoleHandler : InvocationHandlerBase
         var csType = TypeInferrer.InferCSharpType(firstArg, ctx);
         var cType = TypeRegistry.MapType(csType);
         var specifier = GetFormatSpecifier(csType, cType);
+        (specifier, argExpr) = FormatArg.Adapt(csType, specifier, argExpr);
+        if (csType is "bool" or "double" or "float")
+        {
+            result = $"printf(\"%s{nl}\", {argExpr})";
+            return true;
+        }
 
         if (specifier == "%s")
         {
@@ -90,15 +98,17 @@ public sealed class ConsoleHandler : InvocationHandlerBase
     // ── Hilfsmethoden ──────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Ersetzt .NET-Platzhalter {0}, {1} etc. durch C-Format-Specifier.
+    /// .NET placeholders {0}, {1:F2} … → printf specifiers, plus the printf argument
+    /// list in placeholder order ({1} {0} and repeated {0} work).
     /// </summary>
-    private static string ReplaceDotNetPlaceholders(
+    private static (string Fmt, List<string> Args) ReplaceDotNetPlaceholders(
         string fmt,
         List<string> argExprs,
         InvocationExpressionSyntax inv,
         TranspilerContext ctx)
     {
         var sb = new System.Text.StringBuilder();
+        var outArgs = new List<string>();
         int i = 0;
         while (i < fmt.Length)
         {
@@ -110,16 +120,24 @@ public sealed class ConsoleHandler : InvocationHandlerBase
                     var inner = fmt[(i + 1)..close];
                     var colon = inner.IndexOf(':');
                     var idxStr = colon >= 0 ? inner[..colon] : inner;
+                    var fmtSpec = colon >= 0 ? inner[(colon + 1)..] : null;
 
                     if (int.TryParse(idxStr.Trim(), out var idx)
-                        && idx + 1 < inv.ArgumentList.Arguments.Count)
+                        && idx + 1 < inv.ArgumentList.Arguments.Count && idx < argExprs.Count)
                     {
                         var argNode = inv.ArgumentList.Arguments[idx + 1].Expression;
                         var csT = TypeInferrer.InferCSharpType(argNode, ctx);
                         var cT = TypeRegistry.MapType(csT);
-                        sb.Append(GetFormatSpecifier(csT, cT));
+                        var spec = GetFormatSpecifier(csT, cT);
+                        var code = argExprs[idx];
+                        if (fmtSpec != null)
+                            spec = StringMethodHandler.MapFormatSpecifier(fmtSpec, spec);
+                        else
+                            (spec, code) = FormatArg.Adapt(csT, spec, code);
+                        sb.Append(spec);
+                        outArgs.Add(code);
                     }
-                    else sb.Append("%s");
+                    else sb.Append(inner);
                     i = close + 1;
                     continue;
                 }
@@ -134,7 +152,7 @@ public sealed class ConsoleHandler : InvocationHandlerBase
             }
             sb.Append(fmt[i++]);
         }
-        return sb.ToString();
+        return (sb.ToString(), outArgs);
     }
 
     private static string GetFormatSpecifier(string csType, string cType)

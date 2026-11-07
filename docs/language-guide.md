@@ -356,7 +356,21 @@ finally
 
 Eine nicht gefangene Exception beendet die App. Vorher zeigt die Switch die Meldung im System-Fehlerdialog, und sie wird nach `stderr` geschrieben (nxlink).
 
-Die Laufzeit selbst wirft noch keine Exceptions: `int.Parse` und Zugriffe außerhalb von Arrays oder auf `null` lösen nichts Fangbares aus. Für Eingabeprüfung also `int.TryParse(...)` verwenden.
+Die Laufzeitbibliothek wirft dieselben Exceptions wie .NET:
+
+| Situation | Exception |
+|---|---|
+| `int.Parse("abc")`, `bool.Parse("1")` · Wert zu groß (`byte.Parse("300")`) · `null` | `FormatException` · `OverflowException` · `ArgumentNullException` |
+| `list[i]`, `RemoveAt`, `Insert`, `Substring` außerhalb des Bereichs | `ArgumentOutOfRangeException` |
+| `array[i]` außerhalb des Bereichs · auf ein `null`-Array | `IndexOutOfRangeException` · `NullReferenceException` |
+| `dict[key]` ohne den Schlüssel · `Add` mit vorhandenem Schlüssel | `KeyNotFoundException` · `ArgumentException` |
+| `Pop`/`Peek`/`Dequeue` auf leerem Stack/Queue · `First`/`Single`/`Last`/`Min`/`Max`/`Average` auf leerer Folge | `InvalidOperationException` |
+| Ganzzahl-Division oder `%` durch 0 | `DivideByZeroException` |
+| `File.ReadAllText`/`ReadAllLines`/`Copy` auf nicht vorhandene Datei | `FileNotFoundException` |
+
+`TryParse`, `TryGetValue`, `FirstOrDefault` usw. werfen nicht und sind für erwartbare Fehlschläge der günstigere Weg. Nicht geprüft werden Zugriffe über `null`-Objektreferenzen (`spieler.Name` mit `spieler == null`). Sie stürzen weiterhin ab, statt eine `NullReferenceException` zu werfen.
+
+Zahlen und Wahrheitswerte erscheinen in Strings wie in .NET: `2.5` statt `2.500000`, `0.1`, `1E+21`, `True`/`False`.
 
 ---
 

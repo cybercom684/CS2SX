@@ -554,6 +554,9 @@ public sealed class ExpressionWriter : IExpressionWriter
         overloaded = OperatorOverloadWriter.TryRewriteBinary(bin, rightCsType, left, right);
         if (overloaded != null) return overloaded;
 
+        if ((op == "/" || op == "%") && NeedsZeroDivisorCheck(bin))
+            return (op == "/" ? "CS2SX_IDIV(" : "CS2SX_IMOD(") + left + ", " + right + ")";
+
         if (op == "==" || op == "!=")
         {
             bool lIsStr = IsStringExpr(bin.Left) || IsStringType(bin.Left);
@@ -800,6 +803,14 @@ public sealed class ExpressionWriter : IExpressionWriter
 
         if (op == "??=")
             return WriteNullCoalescingAssignment(assign, right);
+
+        // x /= y, x %= y on integers: divide-by-zero check like the binary operator.
+        if ((op == "/=" || op == "%=") && assign.Left is IdentifierNameSyntax or MemberAccessExpressionSyntax
+            && IsIntegralWithRuntimeDivisor(assign.Left, assign.Right))
+        {
+            var target = Write(assign.Left);
+            return target + " = " + (op == "/=" ? "CS2SX_IDIV(" : "CS2SX_IMOD(") + target + ", " + right + ")";
+        }
 
         // string s += "x"  →  s = <concat into pooled buffer>(s, "x")
         // C has no `+=` for const char*, so lower it to a concat + reassign.
@@ -1491,6 +1502,10 @@ public sealed class ExpressionWriter : IExpressionWriter
 
     private string WriteIndexerAssignment(ElementAccessExpressionSyntax elemLeft, string op, string right)
     {
+        // Arrays (bounds-checked, multi-dimensional): the element access is an lvalue.
+        if (IsSingleDimArray(elemLeft.Expression) || elemLeft.ArgumentList.Arguments.Count > 1)
+            return WriteElementAccess(elemLeft) + " " + op + " " + right;
+
         var obj = Write(elemLeft.Expression);
         var key = Write(elemLeft.ArgumentList.Arguments[0].Expression);
         var objRaw = elemLeft.Expression.ToString();
@@ -1508,7 +1523,8 @@ public sealed class ExpressionWriter : IExpressionWriter
             var types = TypeRegistry.GetDictionaryTypes(dictType)!.Value;
             var cKey = types.key == "string" ? "str" : TypeRegistry.MapType(types.key);
             var cVal = types.val == "string" ? "str" : TypeRegistry.MapType(types.val);
-            return "Dict_" + cKey + "_" + cVal + "_Set(" + obj + ", " + key + ", " + right + ")";
+            var prefix = "Dict_" + cKey + "_" + cVal;
+            return AccessorAssignment(prefix + "_Get", prefix + "_Set", obj, key, op, right);
         }
 
         bool isList = (lt != null && TypeRegistry.IsList(lt))
@@ -1518,15 +1534,28 @@ public sealed class ExpressionWriter : IExpressionWriter
             var listType = lt ?? ft!;
             var inner = TypeRegistry.GetListInnerType(listType) ?? "int";
             var cInner = inner == "string" ? "str" : TypeRegistry.MapType(inner);
-            return "List_" + cInner + "_Set(" + obj + ", " + key + ", " + right + ")";
+            return AccessorAssignment("List_" + cInner + "_Get", "List_" + cInner + "_Set", obj, key, op, right);
         }
 
         // User-defined indexer setter → ClassName_set(obj, key, value)
         var objTypeName = (lt ?? ft ?? "").TrimEnd('*').Trim();
         if (!string.IsNullOrEmpty(objTypeName) && _ctx.IndexerClasses.Contains(objTypeName))
-            return objTypeName + "_set(" + obj + ", " + key + ", " + right + ")";
+            return AccessorAssignment(objTypeName + "_get", objTypeName + "_set", obj, key, op, right);
 
-        return obj + "[" + key + "] = " + right;
+        // Arrays (bounds-checked, multi-dimensional) and raw pointers: an lvalue.
+        return WriteElementAccess(elemLeft) + " " + op + " " + right;
+    }
+
+    /// `c[k] = v` → set(c, k, v); compound `c[k] += v` → set(c, k, get(c, k) + v), with
+    /// c and k evaluated once (the old code dropped the operator: `d[k] += 1` set 1).
+    private static string AccessorAssignment(string get, string set, string obj, string key,
+        string op, string right)
+    {
+        if (op == "=")
+            return set + "(" + obj + ", " + key + ", " + right + ")";
+        var binOp = op[..^1];
+        return "({ __auto_type _cs2sx_c = " + obj + "; __auto_type _cs2sx_k = " + key + "; "
+             + set + "(_cs2sx_c, _cs2sx_k, " + get + "(_cs2sx_c, _cs2sx_k) " + binOp + " (" + right + ")); })";
     }
 
     // ── MemberAccess ──────────────────────────────────────────────────────────
@@ -2613,7 +2642,7 @@ public sealed class ExpressionWriter : IExpressionWriter
             var types = TypeRegistry.GetDictionaryTypes(dictType)!.Value;
             var cKey = types.key == "string" ? "str" : TypeRegistry.MapType(types.key);
             var cVal = types.val == "string" ? "str" : TypeRegistry.MapType(types.val);
-            return "*Dict_" + cKey + "_" + cVal + "_Get(" + objExpr + ", " + index + ")";
+            return "Dict_" + cKey + "_" + cVal + "_Get(" + objExpr + ", " + index + ")";
         }
 
         bool isList = (lt != null && TypeRegistry.IsList(lt))
@@ -2650,7 +2679,40 @@ public sealed class ExpressionWriter : IExpressionWriter
         if (!string.IsNullOrEmpty(objTypeName) && _ctx.IndexerClasses.Contains(objTypeName))
             return objTypeName + "_get(" + objExpr + ", " + index + ")";
 
+        // C# arrays are bounds-checked (IndexOutOfRange / NullReference), see CS2SX_AT.
+        if (IsSingleDimArray(elem.Expression))
+            return "CS2SX_AT(" + objExpr + ", " + index + ")";
+
         return objExpr + "[" + index + "]";
+    }
+
+    /// Integer division/modulo whose divisor is not a non-zero constant: C# throws
+    /// DivideByZeroException, AArch64 silently yields 0 — so it gets checked.
+    private bool NeedsZeroDivisorCheck(BinaryExpressionSyntax bin) =>
+        IsIntegralWithRuntimeDivisor(bin, bin.Right);
+
+    private bool IsIntegralWithRuntimeDivisor(ExpressionSyntax typed, ExpressionSyntax divisor)
+    {
+        if (_ctx.SemanticModel == null) return false;
+        try
+        {
+            var t = _ctx.SemanticModel.GetTypeInfo(typed).Type;
+            if (t == null || t.SpecialType is not (SpecialType.System_Int32 or SpecialType.System_UInt32
+                    or SpecialType.System_Int64 or SpecialType.System_UInt64 or SpecialType.System_Int16
+                    or SpecialType.System_UInt16 or SpecialType.System_Byte or SpecialType.System_SByte
+                    or SpecialType.System_Char))
+                return false;
+            var c = _ctx.SemanticModel.GetConstantValue(divisor);
+            return !(c.HasValue && c.Value != null && Convert.ToDecimal(c.Value) != 0);
+        }
+        catch { return false; }
+    }
+
+    private bool IsSingleDimArray(ExpressionSyntax expr)
+    {
+        if (_ctx.SemanticModel == null) return false;
+        try { return _ctx.SemanticModel.GetTypeInfo(expr).Type is IArrayTypeSymbol { Rank: 1 }; }
+        catch { return false; }
     }
 
     // Range expression: 1..3, ^3.., ..^1 etc.

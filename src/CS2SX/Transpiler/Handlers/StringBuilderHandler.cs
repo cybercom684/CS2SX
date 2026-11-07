@@ -81,13 +81,12 @@ public sealed class StringBuilderHandler : InvocationHandlerBase
         {
             var template = lit.Token.ValueText;
             var formatArgs = inv.ArgumentList.Arguments.Skip(1).ToList();
-            var fmt = StringMethodHandler.BuildFormatStringPublic(template, formatArgs, ctx);
+            var (fmt, fmtArgs) = StringMethodHandler.BuildFormatString(template, formatArgs, args.Skip(1).ToList(), ctx);
             var buf = ctx.NextStringBuf();
             if (formatArgs.Count > 0)
             {
-                var argStr = string.Join(", ", args.Skip(1));
                 ctx.Out.WriteLine(ctx.Tab
-                    + $"snprintf({buf}, CS2SX_STRBUF_SIZE, \"{fmt}\", {argStr});");
+                    + $"snprintf({buf}, CS2SX_STRBUF_SIZE, \"{fmt}\"" + (fmtArgs.Count > 0 ? ", " + string.Join(", ", fmtArgs) : "") + ");");
             }
             return "StringBuilder_AppendStr(" + sbExpr + ", " + buf + ")";
         }

@@ -151,3 +151,79 @@ void* CS2SX_ThrowExpr(Exception* ex)
 {
     CS2SX_Throw(ex);
 }
+
+// ── Exceptions of the runtime library ───────────────────────────────────────
+
+void CS2SX_ThrowNullRef(void)
+{
+    CS2SX_ThrowNew(&CS2SX_TI_NullReferenceException, NULL);
+}
+
+void CS2SX_ThrowArgNull(const char* paramName)
+{
+    CS2SX_Throw(CS2SX_Exc_New(&CS2SX_TI_ArgumentNullException, NULL, paramName, NULL));
+}
+
+void CS2SX_ThrowArgOutOfRange(const char* paramName)
+{
+    CS2SX_Throw(CS2SX_Exc_New(&CS2SX_TI_ArgumentOutOfRangeException,
+        "Index was out of range. Must be non-negative and less than the size of the collection.",
+        paramName, NULL));
+}
+
+void CS2SX_ThrowIndexOutOfRange(void)
+{
+    CS2SX_ThrowNew(&CS2SX_TI_IndexOutOfRangeException, NULL);
+}
+
+void CS2SX_ThrowKeyNotFound(void)
+{
+    CS2SX_ThrowNew(&CS2SX_TI_KeyNotFoundException, NULL);
+}
+
+void CS2SX_ThrowDuplicateKey(void)
+{
+    CS2SX_ThrowNew(&CS2SX_TI_ArgumentException, "An item with the same key has already been added.");
+}
+
+void CS2SX_ThrowInvalidOp(const char* message)
+{
+    CS2SX_ThrowNew(&CS2SX_TI_InvalidOperationException, message);
+}
+
+void CS2SX_ThrowNoElements(void)
+{
+    CS2SX_ThrowNew(&CS2SX_TI_InvalidOperationException, "Sequence contains no elements");
+}
+
+void CS2SX_ThrowDivideByZero(void)
+{
+    CS2SX_ThrowNew(&CS2SX_TI_DivideByZeroException, NULL);
+}
+
+void CS2SX_ThrowFormat(const char* input)
+{
+    char msg[256];
+    snprintf(msg, sizeof msg, "The input string '%.180s' was not in a correct format.", input ? input : "");
+    CS2SX_ThrowNew(&CS2SX_TI_FormatException, msg);
+}
+
+void CS2SX_ThrowOverflow(const char* typeName)
+{
+    char msg[128];
+    snprintf(msg, sizeof msg, "Value was either too large or too small for %s %s.",
+             (typeName[0] == 'I' || typeName[0] == 'U') ? "an" : "a", typeName);
+    CS2SX_ThrowNew(&CS2SX_TI_OverflowException, msg);
+}
+
+void CS2SX_ThrowFileNotFound(const char* path)
+{
+    char msg[600];
+    snprintf(msg, sizeof msg, "Could not find file '%.500s'.", path ? path : "");
+    CS2SX_ThrowNew(&CS2SX_TI_FileNotFoundException, msg);
+}
+
+void CS2SX_ThrowIO(const char* message)
+{
+    CS2SX_ThrowNew(&CS2SX_TI_IOException, message);
+}

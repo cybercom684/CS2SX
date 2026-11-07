@@ -102,6 +102,10 @@ public static class FormatStringBuilder
                 var specifier = fmtClause != null
                     ? StringMethodHandler.MapFormatSpecifier(fmtClause, baseSpec)
                     : baseSpec;
+                var argCode = writeExpr(hole.Expression);
+                if (fmtClause == null && baseSpec != "%s")
+                    (specifier, argCode) = FormatArg.Adapt(
+                        TypeInferrer.InferCSharpType(hole.Expression, ctx), specifier, argCode);
 
                 // Alignment: {x,10} → "%-10s" / "%10d" etc.
                 if (hole.AlignmentClause != null
@@ -116,7 +120,7 @@ public static class FormatStringBuilder
                 }
 
                 fmt.Append(specifier);
-                args.Add(writeExpr(hole.Expression));
+                args.Add(argCode);
             }
         }
         return (fmt.ToString(), args);

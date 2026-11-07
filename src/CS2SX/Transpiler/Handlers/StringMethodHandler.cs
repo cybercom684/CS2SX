@@ -343,6 +343,7 @@ public sealed class StringMethodHandler : InvocationHandlerBase
             "uint" or "u32" or "uint32_t" => "UInt_ToString((unsigned int)" + receiver + ")",
             "float" => "Float_ToString(" + receiver + ")",
             "double" => "Double_ToString(" + receiver + ")",
+            "bool" => "CS2SX_BoolStr(" + receiver + ")",
             "long" or "i64" or "int64_t" => "Long_ToString((long long)" + receiver + ")",
             "ulong" or "u64" or "uint64_t" => "ULong_ToString((unsigned long long)" + receiver + ")",
             _ => "Int_ToString((int)" + receiver + ")",
@@ -456,12 +457,12 @@ public sealed class StringMethodHandler : InvocationHandlerBase
         if (formatArgs.Count == 0)
             return "\"" + StringEscaper.EscapeRaw(template) + "\"";
 
-        var fmt = BuildFormatString(template, formatArgs, ctx);
-        var argStr = string.Join(", ", formatArgs.Select(a => writeExpr(a.Expression)));
+        var codes = formatArgs.Select(a => writeExpr(a.Expression)).ToList();
+        var (fmt, fmtArgs) = BuildFormatString(template, formatArgs, codes, ctx);
         var buf = ctx.NextStringBuf();
         ctx.Out.WriteLine(ctx.Tab
-            + "snprintf(" + buf + ", sizeof(" + buf + "), \""
-            + fmt + "\", " + argStr + ");");
+            + "snprintf(" + buf + ", CS2SX_STRBUF_SIZE, \"" + fmt + "\""
+            + (fmtArgs.Count > 0 ? ", " + string.Join(", ", fmtArgs) : "") + ");");
         return buf;
     }
 
@@ -477,14 +478,16 @@ public sealed class StringMethodHandler : InvocationHandlerBase
         return buf;
     }
 
-    // Public overload for use by StringBuilderHandler
-    public static string BuildFormatStringPublic(string template,
-        List<ArgumentSyntax> formatArgs, TranspilerContext ctx)
-        => BuildFormatString(template, formatArgs, ctx);
-
-    private static string BuildFormatString(string template,
-        List<ArgumentSyntax> formatArgs, TranspilerContext ctx)
+    /// <summary>
+    /// A .NET composite format ("{1} of {0:F2}") → printf format plus the printf
+    /// arguments in placeholder order (reordered and repeated placeholders work).
+    /// <paramref name="argCodes"/> are the already-written C expressions of
+    /// <paramref name="formatArgs"/>.
+    /// </summary>
+    internal static (string Fmt, List<string> Args) BuildFormatString(string template,
+        List<ArgumentSyntax> formatArgs, IReadOnlyList<string> argCodes, TranspilerContext ctx)
     {
+        var outArgs = new List<string>();
         var sb = new System.Text.StringBuilder();
         int i = 0;
         while (i < template.Length)
@@ -504,13 +507,22 @@ public sealed class StringMethodHandler : InvocationHandlerBase
                     if (commaIdx >= 0 && (cutIdx < 0 || commaIdx < cutIdx)) cutIdx = commaIdx;
                     var idxStr = cutIdx >= 0 ? inner[..cutIdx] : inner;
                     var fmtSpec = colonIdx >= 0 ? inner[(colonIdx + 1)..] : null;
-                    if (int.TryParse(idxStr.Trim(), out var argIdx) && argIdx < formatArgs.Count)
+                    if (int.TryParse(idxStr.Trim(), out var argIdx) && argIdx < formatArgs.Count
+                        && argIdx < argCodes.Count)
                     {
-                        var baseSpec = TypeInferrer.FormatSpecifier(formatArgs[argIdx].Expression, ctx);
-                        sb.Append(fmtSpec != null ? MapFormatSpecifier(fmtSpec, baseSpec) : baseSpec);
+                        var argExpr = formatArgs[argIdx].Expression;
+                        var baseSpec = TypeInferrer.FormatSpecifier(argExpr, ctx);
+                        var spec = baseSpec;
+                        var code = argCodes[argIdx];
+                        if (fmtSpec != null)
+                            spec = MapFormatSpecifier(fmtSpec, baseSpec);
+                        else
+                            (spec, code) = FormatArg.Adapt(TypeInferrer.InferCSharpType(argExpr, ctx), spec, code);
+                        sb.Append(spec);
+                        outArgs.Add(code);
                     }
                     else
-                        sb.Append("%s");
+                        sb.Append(StringEscaper.EscapeFormat("{" + inner + "}"));
                     i = close + 1;
                     continue;
                 }
@@ -525,7 +537,7 @@ public sealed class StringMethodHandler : InvocationHandlerBase
             sb.Append(c);
             i++;
         }
-        return sb.ToString();
+        return (sb.ToString(), outArgs);
     }
 
     // Maps .NET format specifiers to printf format strings.

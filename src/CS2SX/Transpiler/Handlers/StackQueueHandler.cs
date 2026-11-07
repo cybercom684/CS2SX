@@ -68,21 +68,11 @@ public sealed class StackQueueHandler : InvocationHandlerBase
             var inner = TypeRegistry.GetStackInnerType(collType) ?? "int";
             var cInner = inner == "string" ? "str" : TypeRegistry.MapType(inner);
             var prefix = "Stack_" + cInner;
-            // Emit bounds-check for Pop only — Peek is used in null-check patterns and must not abort
-            if (method == "Pop")
-            {
-                ctx.Out.WriteLine(ctx.Tab + "if (!" + objStr + " || " + objStr + "->count == 0) { fprintf(stderr, \"Stack underflow\\n\"); abort(); }");
-                // Store Pop result in a temp variable to prevent double-evaluation in chained calls
-                var popTmp = ctx.NextTmp("popped");
-                var elemTypeName = inner == "string" ? "const char*" : TypeRegistry.MapType(inner);
-                var ptrSuffix = TypeRegistry.NeedsPointerSuffix(inner) ? "*" : "";
-                ctx.Out.WriteLine(ctx.Tab + elemTypeName + ptrSuffix + " " + popTmp + " = " + prefix + "_Pop(" + objStr + ");");
-                result = popTmp;
-                return true;
-            }
+            // Pop/Peek on an empty stack throw InvalidOperationException in the runtime.
             result = method switch
             {
                 "Push"  => prefix + "_Push(" + objStr + ", " + JoinArgs(args) + ")",
+                "Pop"   => prefix + "_Pop(" + objStr + ")",
                 "Peek"  => prefix + "_Peek(" + objStr + ")",
                 "Clear" => prefix + "_Clear(" + objStr + ")",
                 _       => objStr + "->" + method + "()"
@@ -97,11 +87,7 @@ public sealed class StackQueueHandler : InvocationHandlerBase
             var inner = TypeRegistry.GetQueueInnerType(collType) ?? "int";
             var cInner = inner == "string" ? "str" : TypeRegistry.MapType(inner);
             var prefix = "Queue_" + cInner;
-            // Emit bounds-check for Dequeue only — Peek must not abort (used in null-check patterns)
-            if (method == "Dequeue")
-            {
-                ctx.Out.WriteLine(ctx.Tab + "if (!" + objStr + " || " + objStr + "->count == 0) { fprintf(stderr, \"Queue underflow\\n\"); abort(); }");
-            }
+            // Dequeue/Peek on an empty queue throw InvalidOperationException in the runtime.
             result = method switch
             {
                 "Enqueue" => prefix + "_Enqueue(" + objStr + ", " + JoinArgs(args) + ")",

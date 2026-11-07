@@ -44,7 +44,7 @@ void ControlFlowApp_OnInit(ControlFlowApp* self)
     const char* shown = (text ?: "default");
     int flag = sum > 10 && !(k == 0) || value < 0;
     char* _sb0 = _cs2sx_next_buf();
-    snprintf(_sb0, CS2SX_STRBUF_SIZE, "%d %d %d %d %s %d", sum, n, k, value, shown, flag);
+    snprintf(_sb0, CS2SX_STRBUF_SIZE, "%d %d %d %d %s %s", sum, n, k, value, shown, CS2SX_BoolStr(flag));
     const char* _ps_0 = _sb0;
     printf("%s\n", _ps_0 ? _ps_0 : "");
     int x = 0;

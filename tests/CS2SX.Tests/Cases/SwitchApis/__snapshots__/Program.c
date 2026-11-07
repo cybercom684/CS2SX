@@ -14,7 +14,7 @@ void SwitchApisApp_OnInit(SwitchApisApp* self)
     Graphics_Init(1280, 720);
     int r = CS2SX_Ftp_Start(5000);
     char* _sb0 = _cs2sx_next_buf();
-    snprintf(_sb0, CS2SX_STRBUF_SIZE, "FTP %s:%d r=%d running=%d", CS2SX_Ftp_GetIP(), CS2SX_Ftp_GetPort(), r, CS2SX_Ftp_IsRunning());
+    snprintf(_sb0, CS2SX_STRBUF_SIZE, "FTP %s:%d r=%d running=%s", CS2SX_Ftp_GetIP(), CS2SX_Ftp_GetPort(), r, CS2SX_BoolStr(CS2SX_Ftp_IsRunning()));
     const char* _ps_0 = _sb0;
     printf("%s\n", _ps_0 ? _ps_0 : "");
     if (CS2SX_Nsp_Open("/x.nsp") == 1)

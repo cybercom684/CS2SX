@@ -20,7 +20,7 @@ int Board_Sum(int* values)
     int s = 0;
     for (int i = 0; i < CS2SX_ArrLen(values); i++)
     {
-        s += values[i];
+        s += CS2SX_AT(values, i);
     }
     return s;
 }
@@ -35,7 +35,7 @@ int* Board_Doubled(Board* self)
     int* result = (int*)CS2SX_ArrNew(CS2SX_ArrLen(self->f_Cells), sizeof(int));
     for (int i = 0; i < CS2SX_ArrLen(self->f_Cells); i++)
     {
-        result[i] = self->f_Cells[i] * 2;
+        CS2SX_AT(result, i) = CS2SX_AT(self->f_Cells, i) * 2;
     }
     return result;
 }
@@ -65,7 +65,7 @@ void ArraysAdvancedApp_OnInit(ArraysAdvancedApp* self)
     Board* b = Board_New(5);
     for (int i = 0; i < CS2SX_ArrLen(b->f_Cells); i++)
     {
-        b->f_Cells[i] = i;
+        CS2SX_AT(b->f_Cells, i) = i;
     }
     int* twice = Board_Doubled(b);
     char* _sb0 = _cs2sx_next_buf();
@@ -80,9 +80,9 @@ void ArraysAdvancedApp_OnInit(ArraysAdvancedApp* self)
     printf("%s\n", _ps_2 ? _ps_2 : "");
     int* grow = (int*)CS2SX_ArrFromInit((int[]){ 1, 2 }, 2, sizeof(int));
     (grow = (int*)CS2SX_ArrResize(grow, 4, sizeof(int)));
-    grow[3] = 9;
+    CS2SX_AT(grow, 3) = 9;
     char* _sb2 = _cs2sx_next_buf();
-    snprintf(_sb2, CS2SX_STRBUF_SIZE, "%d %d", CS2SX_ArrLen(grow), grow[3]);
+    snprintf(_sb2, CS2SX_STRBUF_SIZE, "%d %d", CS2SX_ArrLen(grow), CS2SX_AT(grow, 3));
     const char* _ps_3 = _sb2;
     printf("%s\n", _ps_3 ? _ps_3 : "");
     int* scratch = (int*)CS2SX_ArrNew(2, sizeof(int));

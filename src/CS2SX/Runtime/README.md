@@ -49,7 +49,11 @@ new header also needs an entry in `BuildPipeline.GeneratedHeaders`.
   `CS2SX_TypeInfo` (`CS2SX_TI_<Name>`, parent pointer → `catch (T)` matches subclasses).
   `try` pushes a `CS2SX_ExFrame` (jmp_buf) on a thread-local stack; `CS2SX_Throw` pops
   the innermost frame and jumps there. Uncaught: stderr + system error dialog + exit.
-  Runtime code may throw too: `CS2SX_ThrowNew(&CS2SX_TI_FormatException, "…")`.
+  Runtime code throws where .NET throws, through the helpers in `cs2sx_exc.h`
+  (`CS2SX_ThrowArgOutOfRange("index")`, `CS2SX_ThrowFormat(s)`, …) — never return a
+  silent default for an invalid call. `List`/`Dictionary`/`Stack`/`Queue` accessors,
+  `CS2SX_AT` (array bounds), `CS2SX_IDIV`/`CS2SX_IMOD` (division by zero) and
+  `src/rt_number.c` (Parse, number → text) follow this.
 - **Delegates** (`cs2sx_delegate.h`): one `CS2SX_Delegate` (function, bound target,
   next entry) for every delegate type; the per-type invokers are generated into
   `_forward.h`. Lifted functions take the bound object as first parameter.

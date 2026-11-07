@@ -96,6 +96,28 @@ static inline void CS2SX_ExPop(CS2SX_ExFrame* f)
 
 __attribute__((noreturn)) void CS2SX_Throw(Exception* ex);
 __attribute__((noreturn)) void CS2SX_ThrowNew(const CS2SX_TypeInfo* type, const char* message);
+/// The exceptions the runtime library throws itself (messages as in .NET).
+__attribute__((noreturn)) void CS2SX_ThrowNullRef(void);
+__attribute__((noreturn)) void CS2SX_ThrowArgNull(const char* paramName);
+__attribute__((noreturn)) void CS2SX_ThrowArgOutOfRange(const char* paramName);
+__attribute__((noreturn)) void CS2SX_ThrowIndexOutOfRange(void);
+__attribute__((noreturn)) void CS2SX_ThrowKeyNotFound(void);
+__attribute__((noreturn)) void CS2SX_ThrowDuplicateKey(void);
+__attribute__((noreturn)) void CS2SX_ThrowInvalidOp(const char* message);
+__attribute__((noreturn)) void CS2SX_ThrowNoElements(void);
+__attribute__((noreturn)) void CS2SX_ThrowDivideByZero(void);
+__attribute__((noreturn)) void CS2SX_ThrowFormat(const char* input);
+__attribute__((noreturn)) void CS2SX_ThrowOverflow(const char* typeName);
+__attribute__((noreturn)) void CS2SX_ThrowFileNotFound(const char* path);
+__attribute__((noreturn)) void CS2SX_ThrowIO(const char* message);
+
+/// Integer `a / b` and `a % b` as C# evaluates them: operands left to right, a zero
+/// divisor throws DivideByZeroException (AArch64 would silently yield 0).
+#define CS2SX_IDIV(a, b) ({ __typeof__(a) _cs2sx_x = (a); __typeof__(b) _cs2sx_y = (b); \
+    if (__builtin_expect(_cs2sx_y == 0, 0)) CS2SX_ThrowDivideByZero(); _cs2sx_x / _cs2sx_y; })
+#define CS2SX_IMOD(a, b) ({ __typeof__(a) _cs2sx_x = (a); __typeof__(b) _cs2sx_y = (b); \
+    if (__builtin_expect(_cs2sx_y == 0, 0)) CS2SX_ThrowDivideByZero(); _cs2sx_x % _cs2sx_y; })
+
 /// `x ?? throw …` / `c ? v : throw …`: usable as an lvalue of any type,
 /// `*(T*)CS2SX_ThrowExpr(ex)`; never returns.
 __attribute__((noreturn)) void* CS2SX_ThrowExpr(Exception* ex);

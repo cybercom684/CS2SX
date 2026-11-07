@@ -67,10 +67,10 @@ public sealed class ConvertHandler : InvocationHandlerBase
                 return true;
             }
 
-            if (csType == "bool")
+            if (csType is "bool" or "double" or "float")
             {
-                // bool → "true"/"false"
-                result = "(" + args[0] + " ? \"true\" : \"false\")";
+                // C# text: "True"/"False", shortest round-trip number
+                result = FormatArg.Adapt(csType, "%s", args[0]).Code;
                 return true;
             }
 
@@ -118,8 +118,18 @@ public sealed class ConvertHandler : InvocationHandlerBase
             }
         }
 
-        result = (argType == "string")
-            ? mapping.parseFunc + "(" + args[0] + ")"
+        if (argType == "string")
+        {
+            // Convert.ToInt32(null) is 0; anything else parses like int.Parse (throws).
+            result = "({ const char* _cs2sx_cs = (" + args[0] + "); _cs2sx_cs ? "
+                   + mapping.parseFunc + "(_cs2sx_cs) : 0; })";
+            return true;
+        }
+
+        // Convert rounds floating point to the nearest integer (ties to even); a cast truncates.
+        bool integralTarget = mapping.cast is not ("(float)" or "(double)" or "(bool)" or "(char)");
+        result = integralTarget && argType is "float" or "double"
+            ? mapping.cast + "rint(" + args[0] + ")"
             : mapping.cast + "(" + args[0] + ")";
         return true;
     }

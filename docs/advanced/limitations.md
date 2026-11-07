@@ -79,20 +79,17 @@ public string GetText() => $"Wert: {_wert}";
 
 ---
 
-## Exceptions: die Laufzeit wirft (noch) nicht
+## Exceptions: Null-Objektreferenzen
 
-`try`/`catch`/`finally` und `throw` verhalten sich wie in C#, siehe [Sprachunterstützung](../language-guide.md#exceptions). Die **Laufzeitbibliothek selbst** wirft aber noch nichts: `int.Parse`, Null-Zugriffe, Array-Grenzen usw. geben Fehlerwerte zurück oder stürzen ab, statt eine fangbare Exception auszulösen. Ein `try/catch` darum hilft nicht, nutze die `Try…`-Varianten.
+`try`/`catch`/`finally` verhalten sich wie in C#. Die Laufzeitbibliothek wirft dieselben Exceptions wie .NET (Parse, Listen, Arrays, Dictionary, LINQ, Division durch 0, Dateien), siehe [Sprachunterstützung](../language-guide.md#exceptions). Nur der Zugriff über eine `null`-Objektreferenz wird nicht geprüft: Er stürzt ab, statt eine `NullReferenceException` zu werfen. Prüfe Referenzen deshalb vorher auf `null` oder nutze `?.`.
 
 ```csharp
-// FALSCH — int.Parse wirft nicht; der catch wird nie erreicht
-try { var x = int.Parse(eingabe); }
-catch { Console.WriteLine("Kein int!"); }
+// FALSCH — stürzt ab, wenn _ziel null ist (keine NullReferenceException)
+try { Console.WriteLine(_ziel.Name); }
+catch (NullReferenceException) { Console.WriteLine("kein Ziel"); }
 
-// RICHTIG — bool-Rückgabe nutzen
-if (int.TryParse(eingabe, out int x))
-    Console.WriteLine($"Zahl: {x}");
-else
-    Console.WriteLine("Kein int!");
+// RICHTIG
+Console.WriteLine(_ziel?.Name ?? "kein Ziel");
 ```
 
 ---

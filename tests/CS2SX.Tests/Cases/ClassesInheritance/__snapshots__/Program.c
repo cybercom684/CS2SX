@@ -26,7 +26,7 @@ Shape* Shape_New(const char* name)
 const char* Shape_Describe(Shape* self)
 {
     char* _sb0 = _cs2sx_next_buf();
-    snprintf(_sb0, CS2SX_STRBUF_SIZE, "%s with area %f", self->f_Name, self->vtable->Area(self));
+    snprintf(_sb0, CS2SX_STRBUF_SIZE, "%s with area %s", self->f_Name, Float_ToString(self->vtable->Area(self)));
     return _sb0;
 }
 

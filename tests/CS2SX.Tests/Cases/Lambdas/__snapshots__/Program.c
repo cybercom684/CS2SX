@@ -66,7 +66,7 @@ void LambdasApp_OnInit(LambdasApp* self)
     Func_int_int_int_t add = (&_dg_0);
     Func_int_int_t isBig = (&_dg_1);
     char* _sb0 = _cs2sx_next_buf();
-    snprintf(_sb0, CS2SX_STRBUF_SIZE, "%d %d", Func_int_int_int_Invoke(add, 2, 3), Func_int_int_Invoke(isBig, 150));
+    snprintf(_sb0, CS2SX_STRBUF_SIZE, "%d %s", Func_int_int_int_Invoke(add, 2, 3), CS2SX_BoolStr(Func_int_int_Invoke(isBig, 150)));
     const char* _ps_0 = _sb0;
     printf("%s\n", _ps_0 ? _ps_0 : "");
     int multiplier = 3;

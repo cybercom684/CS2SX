@@ -310,10 +310,10 @@ Texture* Texture_New(int width, int height, u32* pixels)
     Texture* t = (Texture*)calloc(1, sizeof(Texture));
     if (!t) return NULL;
     size_t bytes = (size_t)width * (size_t)height * sizeof(u32);
-    t->f_Pixels = (u32*)malloc(bytes);
+    // A C# uint[] with length header (tex.Pixels.Length, bounds-checked indexing).
+    t->f_Pixels = (u32*)CS2SX_ArrNew(width * height, sizeof(u32));
     if (!t->f_Pixels) { free(t); return NULL; }
-    if (pixels) memcpy(t->f_Pixels, pixels, bytes);
-    else        memset(t->f_Pixels, 0, bytes);
+    if (pixels) memcpy(t->f_Pixels, pixels, bytes);   // CS2SX_ArrNew zero-fills
     t->f_Width = width;
     t->f_Height = height;
     return t;
@@ -329,7 +329,7 @@ void Texture_Dispose(Texture* t)
         else { if (g->mem) dkMemBlockDestroy(g->mem); s_slotUsed[g->slot] = 0; }
         free(g);
     }
-    free(t->f_Pixels);
+    CS2SX_ArrFree(t->f_Pixels);
     free(t);
 }
 

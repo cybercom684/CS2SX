@@ -61,7 +61,7 @@ void GenericsCollectionsApp_OnInit(GenericsCollectionsApp* self)
     Dict_str_int_Set(stock, "pear", 5);
     if (Dict_str_int_ContainsKey(stock, "apple"))
     {
-        Dict_str_int_Set(stock, "apple", 1);
+        ({ __auto_type _cs2sx_c = stock; __auto_type _cs2sx_k = "apple"; Dict_str_int_Set(_cs2sx_c, _cs2sx_k, Dict_str_int_Get(_cs2sx_c, _cs2sx_k) + (1)); });
     }
     for (int _i_kv = 0; _i_kv < (int)(stock->count); _i_kv++)
     {

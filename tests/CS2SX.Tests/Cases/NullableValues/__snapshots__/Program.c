@@ -75,11 +75,11 @@ void NullableValuesApp_OnInit(NullableValuesApp* self)
     const char* _ps_7 = _sb1;
     printf("%s\n", _ps_7 ? _ps_7 : "");
     char* _sb2 = _cs2sx_next_buf();
-    snprintf(_sb2, CS2SX_STRBUF_SIZE, "%d %d %d", better, same, (((sum).has ? (sum).value : 0)));
+    snprintf(_sb2, CS2SX_STRBUF_SIZE, "%s %s %d", CS2SX_BoolStr(better), CS2SX_BoolStr(same), (((sum).has ? (sum).value : 0)));
     const char* _ps_8 = _sb2;
     printf("%s\n", _ps_8 ? _ps_8 : "");
     char* _sb3 = _cs2sx_next_buf();
-    snprintf(_sb3, CS2SX_STRBUF_SIZE, "%d %d", (({ __auto_type _na_9 = p->f_LastMode; __auto_type _nb_10 = ((Nullable_Mode){ Mode_Run, 1 }); _na_9.has == _nb_10.has && (!_na_9.has || _na_9.value == _nb_10.value); })), (box).value.W);
+    snprintf(_sb3, CS2SX_STRBUF_SIZE, "%s %d", CS2SX_BoolStr((({ __auto_type _na_9 = p->f_LastMode; __auto_type _nb_10 = ((Nullable_Mode){ Mode_Run, 1 }); _na_9.has == _nb_10.has && (!_na_9.has || _na_9.value == _nb_10.value); }))), (box).value.W);
     const char* _ps_11 = _sb3;
     printf("%s\n", _ps_11 ? _ps_11 : "");
     const char* _ps_12 = (p->f_Nickname ?: "anon");
