@@ -27,7 +27,7 @@ dotnet tool install --global --add-source <ordner> CS2SX
 
 Nach der Installation ist `cs2sx` in jedem Terminal verfügbar. Ein Update funktioniert genauso, nur mit `dotnet tool update`. Das Tool bringt das passende API-Paket `CS2SX.Switch` mit, neue Projekte bauen also ohne weitere Einrichtung.
 
-**Ohne Installation:** `cs2sx-<version>-<system>.zip` bzw. `.tar.gz` entpacken. Unter Windows `CS2SX.exe` starten, unter Linux und macOS `dotnet CS2SX.dll` (beides braucht nur die .NET-8-Laufzeit, die mit dem .NET SDK ohnehin da ist).
+**Ohne Installation:** `cs2sx-<version>-<system>.zip` bzw. `.tar.gz` entpacken. Unter Windows `CS2SX.exe` starten, unter Linux und macOS `dotnet CS2SX.dll` (beides braucht nur eine .NET-Laufzeit ab Version 8, die mit dem .NET SDK ohnehin da ist).
 
 **Aus dem Quellcode:**
 

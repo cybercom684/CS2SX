@@ -8,6 +8,8 @@
 		<PackAsTool>true</PackAsTool>
 		<ToolCommandName>cs2sx</ToolCommandName>
 		<PackageId>CS2SX</PackageId>
+		<!-- Runs on the newest installed .NET (8 or later) — users with only a newer SDK need no extra runtime. -->
+		<RollForward>Major</RollForward>
 		<!-- NuGet drops *.nupkg files by default — the tool must carry the bundled API package. -->
 		<NoDefaultExcludes>true</NoDefaultExcludes>
 	</PropertyGroup>
