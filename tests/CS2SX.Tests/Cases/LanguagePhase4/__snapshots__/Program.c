@@ -172,7 +172,7 @@ void LanguagePhase4App_Init(LanguagePhase4App* self)
 
 int LanguagePhase4App_Parse(const char* s)
 {
-    if (strlen(s) == 0)
+    if (strlen(CS2SX_NN(s)) == 0)
     {
         CS2SX_Throw((Exception*)(ParseError_New("empty", 0)));
     }
@@ -184,7 +184,7 @@ int LanguagePhase4App_Parse(const char* s)
     {
         CS2SX_Throw((Exception*)(CS2SX_Exc_New(&CS2SX_TI_InvalidOperationException, "bad state", NULL, NULL)));
     }
-    return strlen(s);
+    return strlen(CS2SX_NN(s));
 }
 
 const char* LanguagePhase4App_Classify(const char* s)
@@ -210,7 +210,7 @@ const char* LanguagePhase4App_Classify(const char* s)
             {
                 ParseError* pe = (ParseError*)_exf_0_ex;
                 char* _sb1 = _cs2sx_next_buf();
-                snprintf(_sb1, CS2SX_STRBUF_SIZE, "parse@%d %s", pe->f_Position, ((Exception*)(pe))->f_Message);
+                snprintf(_sb1, CS2SX_STRBUF_SIZE, "parse@%d %s", CS2SX_NN(pe)->f_Position, ((Exception*)(pe))->f_Message);
                 return _sb1;
             }
             else if (CS2SX_Exc_Is(_exf_0_ex, &CS2SX_TI_ArgumentException))

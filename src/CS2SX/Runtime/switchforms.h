@@ -496,7 +496,7 @@ static inline List_##T* List_##T##_New(void) {                                  
     l->data = (T*)malloc(CS2SX_LIST_INITIAL_CAP * sizeof(T));                                      \
     l->count = 0; l->capacity = CS2SX_LIST_INITIAL_CAP; return l; }                                \
 static inline void List_##T##_Add(List_##T* l, T val) {                                            \
-    if (!l) return;                                                                                 \
+    if (!l) CS2SX_ThrowNullRef();                                                                                 \
     if (l->count >= l->capacity) {                                                                  \
         l->capacity *= 2;                                                                           \
         l->data = (T*)realloc(l->data, l->capacity * sizeof(T)); }                                 \
@@ -548,7 +548,7 @@ static inline List_##T* List_##T##_New(void) {                                  
     l->data = (T**)malloc(CS2SX_LIST_INITIAL_CAP * sizeof(T*));                                    \
     l->count = 0; l->capacity = CS2SX_LIST_INITIAL_CAP; return l; }                                \
 static inline void List_##T##_Add(List_##T* l, T* val) {                                           \
-    if (!l) return;                                                                                 \
+    if (!l) CS2SX_ThrowNullRef();                                                                                 \
     if (l->count >= l->capacity) {                                                                  \
         l->capacity *= 2;                                                                           \
         l->data = (T**)realloc(l->data, l->capacity * sizeof(T*)); }                               \
@@ -566,17 +566,17 @@ static inline int  List_##T##_Count(List_##T* l)       { return l ? l->count : 0
 static inline void List_##T##_Clear(List_##T* l)       { if (l) l->count = 0; }                    \
 static inline void List_##T##_Free(List_##T* l)        { if (l) { free(l->data); free(l); } }      \
 static inline int  List_##T##_Contains(List_##T* l, T* val) {                                      \
-    if (!l) return 0;                                                                               \
+    if (!l) CS2SX_ThrowNullRef();                                                                               \
     for (int _i = 0; _i < l->count; _i++) { if (l->data[_i] == val) return 1; } return 0; }       \
 static inline int  List_##T##_IndexOf(List_##T* l, T* val) {                                       \
-    if (!l) return -1;                                                                              \
+    if (!l) CS2SX_ThrowNullRef();                                                                              \
     for (int _i = 0; _i < l->count; _i++) { if (l->data[_i] == val) return _i; } return -1; }     \
 static inline void List_##T##_Remove(List_##T* l, int idx) {                                       \
     CS2SX_ListCheck(l ? l->count : -1, idx);                                                        \
     for (int _i = idx; _i < l->count - 1; _i++) l->data[_i] = l->data[_i + 1];                   \
     l->count--; }                                                                                   \
 static inline void List_##T##_RemoveValue(List_##T* l, T* val) {                                   \
-    if (!l) return;                                                                                 \
+    if (!l) CS2SX_ThrowNullRef();                                                                                 \
     for (int _i = 0; _i < l->count; _i++) {                                                        \
         if (l->data[_i] == val) { List_##T##_Remove(l, _i); return; } } }                         \
 static inline void List_##T##_Reverse(List_##T* l) {                                               \
@@ -610,7 +610,7 @@ static inline Stack_##T* Stack_##T##_New(void) {                                
     if (!s) return NULL;                                                                             \
     s->data = (T*)malloc(8 * sizeof(T)); s->count = 0; s->capacity = 8; return s; }                \
 static inline void Stack_##T##_Push(Stack_##T* s, T val) {                                         \
-    if (!s) return;                                                                                  \
+    if (!s) CS2SX_ThrowNullRef();                                                                                  \
     if (s->count >= s->capacity) {                                                                   \
         s->capacity *= 2;                                                                            \
         s->data = (T*)realloc(s->data, s->capacity * sizeof(T)); }                                  \
@@ -642,7 +642,7 @@ static inline Queue_##T* Queue_##T##_New(void) {                                
     q->data = (T*)malloc(8 * sizeof(T));                                                             \
     q->head = 0; q->tail = 0; q->count = 0; q->capacity = 8; return q; }                           \
 static inline void Queue_##T##_Enqueue(Queue_##T* q, T val) {                                       \
-    if (!q) return;                                                                                   \
+    if (!q) CS2SX_ThrowNullRef();                                                                                   \
     if (q->count >= q->capacity) {                                                                    \
         int nc = q->capacity * 2;                                                                     \
         T* nd = (T*)malloc(nc * sizeof(T));                                                           \
@@ -677,7 +677,7 @@ static inline HashSet_##T* HashSet_##T##_New(void) {                            
     if (!s) return NULL;                                                                              \
     s->data = (T*)malloc(8 * sizeof(T)); s->count = 0; s->capacity = 8; return s; }                \
 static inline int HashSet_##T##_Contains(HashSet_##T* s, T val) {                                   \
-    if (!s) return 0;                                                                                 \
+    if (!s) CS2SX_ThrowNullRef();                                                                                 \
     for (int _i = 0; _i < s->count; _i++) if (s->data[_i] == val) return 1; return 0; }            \
 static inline int HashSet_##T##_Add(HashSet_##T* s, T val) {                                        \
     if (!s || HashSet_##T##_Contains(s, val)) return 0;                                              \
@@ -686,7 +686,7 @@ static inline int HashSet_##T##_Add(HashSet_##T* s, T val) {                    
         s->data = (T*)realloc(s->data, s->capacity * sizeof(T)); }                                   \
     s->data[s->count++] = val; return 1; }                                                           \
 static inline int HashSet_##T##_Remove(HashSet_##T* s, T val) {                                     \
-    if (!s) return 0;                                                                                 \
+    if (!s) CS2SX_ThrowNullRef();                                                                                 \
     for (int _i = 0; _i < s->count; _i++) if (s->data[_i] == val) {                                 \
         for (int _j = _i; _j < s->count-1; _j++) s->data[_j] = s->data[_j+1];                      \
         s->count--; return 1; } return 0; }                                                           \

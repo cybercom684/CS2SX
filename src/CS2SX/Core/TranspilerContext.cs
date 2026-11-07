@@ -116,6 +116,9 @@ public sealed class TranspilerContext
 
     public List<TryRegion> TryRegions { get; } = new();
 
+    /// Locals proven never null (NullCheck) — cached, the proof scans the method body.
+    public Dictionary<ISymbol, bool> NeverNullLocals { get; } = new(SymbolEqualityComparer.Default);
+
     /// C variable holding the exception of each enclosing catch block (for `throw;`).
     public Stack<string> CatchExceptionVars { get; } = new();
 

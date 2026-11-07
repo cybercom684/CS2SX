@@ -111,6 +111,11 @@ __attribute__((noreturn)) void CS2SX_ThrowOverflow(const char* typeName);
 __attribute__((noreturn)) void CS2SX_ThrowFileNotFound(const char* path);
 __attribute__((noreturn)) void CS2SX_ThrowIO(const char* message);
 
+/// Receiver of a member access: `p->f_X` → `CS2SX_NN(p)->f_X`. p is evaluated once;
+/// NULL throws NullReferenceException (in C it would crash the console).
+#define CS2SX_NN(p) ({ __typeof__(p) _cs2sx_nn = (p); \
+    if (__builtin_expect(!_cs2sx_nn, 0)) CS2SX_ThrowNullRef(); _cs2sx_nn; })
+
 /// Integer `a / b` and `a % b` as C# evaluates them: operands left to right, a zero
 /// divisor throws DivideByZeroException (AArch64 would silently yield 0).
 #define CS2SX_IDIV(a, b) ({ __typeof__(a) _cs2sx_x = (a); __typeof__(b) _cs2sx_y = (b); \

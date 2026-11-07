@@ -1,4 +1,4 @@
-﻿// Datei: Transpiler/Writers/ExpressionWriter.cs
+// Datei: Transpiler/Writers/ExpressionWriter.cs
 //
 // FIX: WriteLambda() macht keinen O(n)-StringWriter-Rewrite mehr.
 //      Vorher:
@@ -138,6 +138,9 @@ public sealed class ExpressionWriter : IExpressionWriter
                 when hatIdx.IsKind(SyntaxKind.IndexExpression)
                 => WarnAndReturn(hatIdx, "^n (System.Index) used outside indexer — use arr[^n] form; emitting 0", "0"),
             PrefixUnaryExpressionSyntax pre => WritePrefixUnary(pre),
+            // x! (null-forgiving) only silences a compiler warning — no runtime effect.
+            PostfixUnaryExpressionSyntax forgive
+                when forgive.IsKind(SyntaxKind.SuppressNullableWarningExpression) => Write(forgive.Operand),
             PostfixUnaryExpressionSyntax post => Write(post.Operand) + post.OperatorToken.Text,
             AssignmentExpressionSyntax assign => WriteAssignment(assign),
             MemberAccessExpressionSyntax mem => WriteMemberAccess(mem),
@@ -669,7 +672,8 @@ public sealed class ExpressionWriter : IExpressionWriter
         var receiver = Write(condAccess.Expression);
         string accessExpr;
         if (condAccess.WhenNotNull is MemberBindingExpressionSyntax memberBinding)
-            accessExpr = receiver + "->" + memberBinding.Name.Identifier.Text;
+            accessExpr = receiver + "->" + (StoredMemberPath(condAccess.Expression, memberBinding)
+                                            ?? memberBinding.Name.Identifier.Text);
         else if (condAccess.WhenNotNull is InvocationExpressionSyntax inv
             && inv.Expression is MemberBindingExpressionSyntax invMember)
         {
@@ -1060,11 +1064,12 @@ public sealed class ExpressionWriter : IExpressionWriter
 
         if (_ctx.InterfaceTypes.Contains(receiverType))
         {
-            var receiver = Write(mem.Expression);
-            var ifaceArgs = new List<string> { receiver + "->obj" };
+            // The receiver is used twice (vtable, obj) — evaluate it once.
+            var receiver = NullCheck.Wrap(mem.Expression, Write(mem.Expression), _ctx);
+            var ifaceArgs = new List<string> { "_cs2sx_r->obj" };
             ifaceArgs.AddRange(callArgs);
-            return receiver + "->vtable->" + methodName
-                 + "(" + string.Join(", ", ifaceArgs) + ")";
+            return "({ __auto_type _cs2sx_r = " + receiver + "; _cs2sx_r->vtable->" + methodName
+                 + "(" + string.Join(", ", ifaceArgs) + "); })";
         }
 
         if (!_ctx.VTableTypes.Contains(receiverType)) return null;
@@ -1077,7 +1082,11 @@ public sealed class ExpressionWriter : IExpressionWriter
             && !slots.Contains(methodName))
             return null;
 
-        var recv = Write(mem.Expression);
+        var recvCode = NullCheck.Wrap(mem.Expression, Write(mem.Expression), _ctx);
+        // Used twice (vtable lookup + self) — a non-trivial receiver is evaluated once.
+        bool simpleRecv = mem.Expression is ThisExpressionSyntax or IdentifierNameSyntax
+            && recvCode == Write(mem.Expression);
+        var recv = simpleRecv ? recvCode : "_cs2sx_r";
         var vtableArgs = new List<string> { recv };
         vtableArgs.AddRange(callArgs);
 
@@ -1104,8 +1113,9 @@ public sealed class ExpressionWriter : IExpressionWriter
             catch { }
         }
         var vtChain = string.Concat(Enumerable.Repeat("base.", vtHops));
-        return recv + "->" + vtChain + "vtable->" + methodName
+        var call = recv + "->" + vtChain + "vtable->" + methodName
              + "(" + string.Join(", ", vtableArgs) + ")";
+        return simpleRecv ? call : "({ __auto_type _cs2sx_r = " + recvCode + "; " + call + "; })";
     }
 
     private string? TryWriteDirectUserClassCall(MemberAccessExpressionSyntax mem,
@@ -1162,7 +1172,7 @@ public sealed class ExpressionWriter : IExpressionWriter
             catch { }
         }
 
-        var recv = Write(mem.Expression);
+        var recv = NullCheck.Wrap(mem.Expression, Write(mem.Expression), _ctx);
 
         // A non-virtual method inherited from a base class is emitted as
         // BaseType_Method, and the receiver must be cast to (BaseType*) (valid
@@ -1351,7 +1361,7 @@ public sealed class ExpressionWriter : IExpressionWriter
     private string WriteMemberAssignment(AssignmentExpressionSyntax assign,
         MemberAccessExpressionSyntax mem, string op, string right)
     {
-        var obj = Write(mem.Expression);
+        var obj = NullCheck.Wrap(mem.Expression, Write(mem.Expression), _ctx);
         var prop = mem.Name.Identifier.Text;
         var objRaw = mem.Expression.ToString();
         var objKey = objRaw.TrimStart('_');
@@ -1715,7 +1725,7 @@ public sealed class ExpressionWriter : IExpressionWriter
         if (full.StartsWith("LibNX.", StringComparison.Ordinal))
             return mem.Name.Identifier.Text;
 
-        var obj = Write(mem.Expression);
+        var obj = NullCheck.Wrap(mem.Expression, Write(mem.Expression), _ctx);
         var prop = mem.Name.Identifier.Text;
 
         // Stopwatch.Elapsed.TotalMilliseconds / TotalSeconds / TotalMinutes
@@ -2468,9 +2478,20 @@ public sealed class ExpressionWriter : IExpressionWriter
     {
         if (_ctx.SemanticModel == null) return null;
         if (mem.Expression is ThisExpressionSyntax or BaseExpressionSyntax) return null;
+        var path = StoredMemberPath(mem.Expression, mem);
+        return path == null ? null
+            : NullCheck.Wrap(mem.Expression, Write(mem.Expression), _ctx) + "->" + path;
+    }
+
+    /// The C path from a user-class pointer to a stored member (field, auto-property,
+    /// field-like event), through the embedded base structs: "base.f_Name".
+    /// <paramref name="member"/> is the member access or `?.` member binding.
+    private string? StoredMemberPath(ExpressionSyntax receiver, ExpressionSyntax member)
+    {
+        if (_ctx.SemanticModel == null) return null;
         try
         {
-            var sym = _ctx.SemanticModel.GetSymbolInfo(mem).Symbol;
+            var sym = _ctx.SemanticModel.GetSymbolInfo(member).Symbol;
             bool stored = sym switch
             {
                 IFieldSymbol f => !f.IsStatic && !f.IsConst,
@@ -2481,7 +2502,7 @@ public sealed class ExpressionWriter : IExpressionWriter
             if (!stored || !TranspilerContext.IsUserCode(sym!.ContainingType)) return null;
             if (sym.ContainingType.TypeKind != TypeKind.Class) return null;
 
-            if (_ctx.SemanticModel.GetTypeInfo(mem.Expression).Type is not INamedTypeSymbol recvType
+            if (_ctx.SemanticModel.GetTypeInfo(receiver).Type is not INamedTypeSymbol recvType
                 || recvType.TypeKind != TypeKind.Class
                 || !TranspilerContext.IsUserCode(recvType))
                 return null;
@@ -2493,8 +2514,7 @@ public sealed class ExpressionWriter : IExpressionWriter
 
             var name = sym.Name.TrimStart('_');
             var prefix = TypeRegistry.HasNoPrefix(name) ? "" : "f_";
-            return Write(mem.Expression) + "->" + string.Concat(Enumerable.Repeat("base.", hops))
-                 + prefix + name;
+            return string.Concat(Enumerable.Repeat("base.", hops)) + prefix + name;
         }
         catch { return null; }
 

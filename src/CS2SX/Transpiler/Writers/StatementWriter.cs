@@ -207,21 +207,19 @@ public sealed class StatementWriter
 
             if (_ctx.InterfaceTypes.Contains(declType) && v.Initializer != null)
             {
+                // Interface values are IFace* (Class_as_IFace allocates the {vtable, obj} pair).
                 var initExprRaw = v.Initializer.Value.ToString().Trim();
                 var initCode = _expr.Write(v.Initializer.Value);
-                var wrapped = TryWrapAsInterface(initExprRaw, initCode, declType);
+                var wrapped = TryWrapAsInterface(initExprRaw, initCode, declType, v.Initializer.Value);
 
-                if (wrapped != null)
-                    _ctx.WriteLine(declType + " " + v.Identifier + " = " + wrapped + ";");
-                else
-                    _ctx.WriteLine(declType + " " + v.Identifier + " = " + initCode + ";");
+                _ctx.WriteLine(declType + "* " + v.Identifier + " = " + (wrapped ?? initCode) + ";");
                 _ctx.LocalTypes[v.Identifier.Text] = declType;
                 continue;
             }
 
             if (_ctx.InterfaceTypes.Contains(declType))
             {
-                _ctx.WriteLine(declType + " " + v.Identifier + ";");
+                _ctx.WriteLine(declType + "* " + v.Identifier + " = NULL;");
                 _ctx.LocalTypes[v.Identifier.Text] = declType;
                 continue;
             }

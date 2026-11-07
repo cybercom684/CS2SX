@@ -79,16 +79,16 @@ public string GetText() => $"Wert: {_wert}";
 
 ---
 
-## Exceptions: Null-Objektreferenzen
+## Exceptions als Kontrollfluss
 
-`try`/`catch`/`finally` verhalten sich wie in C#. Die Laufzeitbibliothek wirft dieselben Exceptions wie .NET (Parse, Listen, Arrays, Dictionary, LINQ, Division durch 0, Dateien), siehe [Sprachunterstützung](../language-guide.md#exceptions). Nur der Zugriff über eine `null`-Objektreferenz wird nicht geprüft: Er stürzt ab, statt eine `NullReferenceException` zu werfen. Prüfe Referenzen deshalb vorher auf `null` oder nutze `?.`.
+`try`/`catch`/`finally` verhalten sich wie in C#, und die Laufzeitbibliothek wirft dieselben Exceptions wie .NET, auch `NullReferenceException`, siehe [Sprachunterstützung](../language-guide.md#exceptions). Ein `throw` kostet allerdings deutlich mehr als eine Prüfung (`setjmp`/`longjmp`). Für erwartbare Fälle in einer Schleife, die jeden Frame läuft, sind deshalb `?.`, `TryParse` und `TryGetValue` der bessere Weg.
 
 ```csharp
-// FALSCH — stürzt ab, wenn _ziel null ist (keine NullReferenceException)
+// Funktioniert, ist aber teuer, wenn _ziel oft null ist
 try { Console.WriteLine(_ziel.Name); }
 catch (NullReferenceException) { Console.WriteLine("kein Ziel"); }
 
-// RICHTIG
+// Besser
 Console.WriteLine(_ziel?.Name ?? "kein Ziel");
 ```
 

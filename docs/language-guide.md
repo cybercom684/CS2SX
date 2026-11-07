@@ -368,7 +368,9 @@ Die Laufzeitbibliothek wirft dieselben Exceptions wie .NET:
 | Ganzzahl-Division oder `%` durch 0 | `DivideByZeroException` |
 | `File.ReadAllText`/`ReadAllLines`/`Copy` auf nicht vorhandene Datei | `FileNotFoundException` |
 
-`TryParse`, `TryGetValue`, `FirstOrDefault` usw. werfen nicht und sind für erwartbare Fehlschläge der günstigere Weg. Nicht geprüft werden Zugriffe über `null`-Objektreferenzen (`spieler.Name` mit `spieler == null`). Sie stürzen weiterhin ab, statt eine `NullReferenceException` zu werfen.
+`TryParse`, `TryGetValue`, `FirstOrDefault` usw. werfen nicht und sind für erwartbare Fehlschläge der günstigere Weg.
+
+Ein Zugriff über eine `null`-Referenz wirft `NullReferenceException`, statt die App abstürzen zu lassen. Das gilt für Felder, Methoden, virtuelle Methoden, Interfaces, Strings und Collections. Wo `null` ausgeschlossen ist, kostet die Prüfung nichts: bei `this`, bei `new …` und bei lokalen Variablen, die nur mit `new …` belegt werden.
 
 Zahlen und Wahrheitswerte erscheinen in Strings wie in .NET: `2.5` statt `2.500000`, `0.1`, `1E+21`, `True`/`False`.
 

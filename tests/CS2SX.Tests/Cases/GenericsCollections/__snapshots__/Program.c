@@ -75,7 +75,7 @@ void GenericsCollectionsApp_OnInit(GenericsCollectionsApp* self)
     List_Item* items = List_Item_New();
     List_Item_Add(items, Item_New("sword", 1));
     List_Item_Add(items, Item_New("potion", 4));
-    const char* _ps_4 = List_Item_Get(items, 1)->f_Name;
+    const char* _ps_4 = CS2SX_NN(List_Item_Get(items, 1))->f_Name;
     printf("%s\n", _ps_4 ? _ps_4 : "");
     Box_int* box = Box_int_New(42);
     char* _sb2 = _cs2sx_next_buf();

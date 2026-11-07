@@ -426,7 +426,7 @@ List_str* List_str_New(void)
 
 void List_str_Add(List_str* l, const char* val)
 {
-    if (!l) return;
+    if (!l) CS2SX_ThrowNullRef();
     if (l->count >= l->capacity)
     {
         l->capacity *= 2;

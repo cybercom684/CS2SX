@@ -73,17 +73,17 @@ static int _lambda_6(int v)
 
 static int _lambda_7(Enemy* e)
 {
-    return e->f_Hp > 10;
+    return CS2SX_NN(e)->f_Hp > 10;
 }
 
 static int _lambda_8(Enemy* e)
 {
-    return e->f_Hp;
+    return CS2SX_NN(e)->f_Hp;
 }
 
 static int _lambda_9(Enemy* e)
 {
-    return e->f_Hp;
+    return CS2SX_NN(e)->f_Hp;
 }
 
 void LinqApp_OnInit(LinqApp* self)
@@ -132,7 +132,7 @@ void LinqApp_OnInit(LinqApp* self)
       List_int_Add(_tol_13, List_int_Get(_ord_9, _i_14));
     List_int* sorted = _tol_13;
     char* _sb0 = _cs2sx_next_buf();
-    snprintf(_sb0, CS2SX_STRBUF_SIZE, "%d %d %d", evens->count, List_int_Get(doubled, 0), List_int_Get(sorted, 0));
+    snprintf(_sb0, CS2SX_STRBUF_SIZE, "%d %d %d", CS2SX_NN(evens)->count, List_int_Get(doubled, 0), List_int_Get(sorted, 0));
     const char* _ps_15 = _sb0;
     printf("%s\n", _ps_15 ? _ps_15 : "");
     int _sum_17 = 0;
@@ -197,7 +197,7 @@ void LinqApp_OnInit(LinqApp* self)
     for (int _i_42 = 0; _i_42 < _ord_37->count; _i_42++)
       List_Enemy_Add(_tol_41, List_Enemy_Get(_ord_37, _i_42));
     List_Enemy* strong = _tol_41;
-    const char* _ps_43 = List_Enemy_Get(strong, 0)->f_Name;
+    const char* _ps_43 = CS2SX_NN(List_Enemy_Get(strong, 0))->f_Name;
     printf("%s\n", _ps_43 ? _ps_43 : "");
     List_Enemy* _ord_44 = List_Enemy_New();
     for (int _i_45 = 0; _i_45 < enemies->count; _i_45++)
@@ -213,7 +213,7 @@ void LinqApp_OnInit(LinqApp* self)
     Enemy* _first_48 = NULL;
     if (_ord_44->count > 0) { _first_48 = List_Enemy_Get(_ord_44, 0); }
     Enemy* weakest = (_ord_44->count > 0 ? _first_48 : (CS2SX_ThrowNoElements(), _first_48));
-    const char* _ps_49 = weakest->f_Name;
+    const char* _ps_49 = CS2SX_NN(weakest)->f_Name;
     printf("%s\n", _ps_49 ? _ps_49 : "");
 }
 

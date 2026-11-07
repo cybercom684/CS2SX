@@ -13,9 +13,9 @@ void UserFileNamesApp_Init(UserFileNamesApp* self)
 
 void UserFileNamesApp_OnFrame(UserFileNamesApp* self)
 {
-    InputMapper_Poll(self->f_input);
+    InputMapper_Poll(CS2SX_NN(self->f_input));
     char* _sb0 = _cs2sx_next_buf();
-    snprintf(_sb0, CS2SX_STRBUF_SIZE, "%s %d", self->f_entry->f_Title, self->f_input->f_Presses);
+    snprintf(_sb0, CS2SX_STRBUF_SIZE, "%s %d", CS2SX_NN(self->f_entry)->f_Title, CS2SX_NN(self->f_input)->f_Presses);
     const char* _ps_0 = _sb0;
     printf("%s\n", _ps_0 ? _ps_0 : "");
 }

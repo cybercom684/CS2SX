@@ -112,8 +112,8 @@ void InterfacesApp_OnFrame(InterfacesApp* self)
     for (int _i_t = 0; _i_t < (int)(self->f_things->count); _i_t++)
     {
         IUpdatable* t = List_IUpdatable_Get(self->f_things, _i_t);
-        t->vtable->Update(t->obj, 1.0f / 60.0f);
-        if (t->vtable->IsAlive(t->obj))
+        ({ __auto_type _cs2sx_r = CS2SX_NN(t); _cs2sx_r->vtable->Update(_cs2sx_r->obj, 1.0f / 60.0f); });
+        if (({ __auto_type _cs2sx_r = CS2SX_NN(t); _cs2sx_r->vtable->IsAlive(_cs2sx_r->obj); }))
         {
             alive++;
         }

@@ -29,7 +29,7 @@ void StringsApp_OnInit(StringsApp* self)
     printf("%d\n", String_IndexOfChar(name, 't'));
     const char** parts = CS2SX_StrArr_FromList(String_Split("a,b,c", ","));
     char* _sb1 = _cs2sx_next_buf();
-    snprintf(_sb1, CS2SX_STRBUF_SIZE, "%d parts, last=%s", CS2SX_ArrLen(parts), CS2SX_AT(parts, 2));
+    snprintf(_sb1, CS2SX_STRBUF_SIZE, "%d parts, last=%s", CS2SX_ArrLen(CS2SX_NN(parts)), CS2SX_AT(parts, 2));
     const char* _ps_5 = _sb1;
     printf("%s\n", _ps_5 ? _ps_5 : "");
     const char* _ps_6 = String_JoinArr("-", parts);

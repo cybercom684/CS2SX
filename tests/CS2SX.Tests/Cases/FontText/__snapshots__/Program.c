@@ -35,31 +35,31 @@ void FontTextApp_OnFrame(FontTextApp* self)
         snprintf(_sb1, CS2SX_STRBUF_SIZE, "%d px - The quick brown fox jumps", size);
         char* _sb2 = _cs2sx_next_buf();
         snprintf(_sb2, CS2SX_STRBUF_SIZE, "%d px - The quick brown fox jumps", size);
-        Font_Draw(self->f_font, 20, y, _sb2, COLOR_WHITE, size);
-        y += Font_LineHeight(self->f_font, size);
+        Font_Draw(CS2SX_NN(self->f_font), 20, y, _sb2, COLOR_WHITE, size);
+        y += Font_LineHeight(CS2SX_NN(self->f_font), size);
     }
     const char* greet = "Grüße, Ünïcödé: äöü ÄÖÜ ß € ©";
-    int w = Font_Measure(self->f_font, greet, 32);
-    Graphics_FillRect(20, y + 4, w, Font_LineHeight(self->f_font, 32), CS2SX_RGB(60, 70, 120));
-    Font_Draw(self->f_font, 20, y + 4, greet, COLOR_YELLOW, 32);
-    y += Font_LineHeight(self->f_font, 32) + 12;
-    Font_Draw(self->f_font, 20, y, "Multi-line text:\nsecond line\nthird line", COLOR_CYAN, 24);
-    Font_Draw(self->f_font, 700, y, "50% alpha text", Color_WithAlpha(COLOR_WHITE, 128), 40);
-    y += Font_LineHeight(self->f_font, 24) * 3 + 8;
+    int w = Font_Measure(CS2SX_NN(self->f_font), greet, 32);
+    Graphics_FillRect(20, y + 4, w, Font_LineHeight(CS2SX_NN(self->f_font), 32), CS2SX_RGB(60, 70, 120));
+    Font_Draw(CS2SX_NN(self->f_font), 20, y + 4, greet, COLOR_YELLOW, 32);
+    y += Font_LineHeight(CS2SX_NN(self->f_font), 32) + 12;
+    Font_Draw(CS2SX_NN(self->f_font), 20, y, "Multi-line text:\nsecond line\nthird line", COLOR_CYAN, 24);
+    Font_Draw(CS2SX_NN(self->f_font), 700, y, "50% alpha text", Color_WithAlpha(COLOR_WHITE, 128), 40);
+    y += Font_LineHeight(CS2SX_NN(self->f_font), 24) * 3 + 8;
     char* _sb3 = _cs2sx_next_buf();
     snprintf(_sb3, CS2SX_STRBUF_SIZE, "Frame %d  AV To Wa", self->f_frame);
     char* _sb4 = _cs2sx_next_buf();
     snprintf(_sb4, CS2SX_STRBUF_SIZE, "Frame %d  AV To Wa", self->f_frame);
     char* _sb5 = _cs2sx_next_buf();
     snprintf(_sb5, CS2SX_STRBUF_SIZE, "Frame %d  AV To Wa", self->f_frame);
-    Font_Draw(self->f_font, 20, y, _sb5, COLOR_LIME, 36);
+    Font_Draw(CS2SX_NN(self->f_font), 20, y, _sb5, COLOR_LIME, 36);
     char* _sb6 = _cs2sx_next_buf();
     snprintf(_sb6, CS2SX_STRBUF_SIZE, "w=%d", w);
     char* _sb7 = _cs2sx_next_buf();
     snprintf(_sb7, CS2SX_STRBUF_SIZE, "w=%d", w);
     char* _sb8 = _cs2sx_next_buf();
     snprintf(_sb8, CS2SX_STRBUF_SIZE, "w=%d", w);
-    Font_Draw(self->f_font, 1000, 680, _sb8, COLOR_GRAY, 16);
+    Font_Draw(CS2SX_NN(self->f_font), 1000, 680, _sb8, COLOR_GRAY, 16);
 }
 
 void FontTextApp_OnExit(FontTextApp* self)

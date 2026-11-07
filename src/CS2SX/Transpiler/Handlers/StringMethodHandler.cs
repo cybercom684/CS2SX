@@ -255,7 +255,7 @@ public sealed class StringMethodHandler : InvocationHandlerBase
         MemberAccessExpressionSyntax mem, List<string> args,
         TranspilerContext ctx, Func<SyntaxNode?, string> writeExpr)
     {
-        var receiver = writeExpr(mem.Expression);
+        var receiver = NullCheck.Wrap(mem.Expression, writeExpr(mem.Expression), ctx);
         var methodName = mem.Name.Identifier.Text;
         var recvType = TypeInferrer.InferCSharpType(mem.Expression, ctx);
 

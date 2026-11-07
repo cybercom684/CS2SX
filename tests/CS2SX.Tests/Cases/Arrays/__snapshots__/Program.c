@@ -19,7 +19,7 @@ void ArraysApp_OnInit(ArraysApp* self)
     }
     CS2SX_AT(ArraysApp_s_table, 2) = 7;
     char* _sb0 = _cs2sx_next_buf();
-    snprintf(_sb0, CS2SX_STRBUF_SIZE, "%d %d %s %d", CS2SX_AT(grid, 3), CS2SX_AT(ArraysApp_s_table, 2), CS2SX_AT(ArraysApp_s_names, 1), CS2SX_ArrLen(ArraysApp_s_names));
+    snprintf(_sb0, CS2SX_STRBUF_SIZE, "%d %d %s %d", CS2SX_AT(grid, 3), CS2SX_AT(ArraysApp_s_table, 2), CS2SX_AT(ArraysApp_s_names, 1), CS2SX_ArrLen(CS2SX_NN(ArraysApp_s_names)));
     const char* _ps_0 = _sb0;
     printf("%s\n", _ps_0 ? _ps_0 : "");
     CS2SX_ARR_LOCAL(int, data, 4, 9, 4, 7, 1);
