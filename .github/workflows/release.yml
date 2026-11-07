@@ -1,0 +1,92 @@
+# Builds the downloadable cs2sx release.
+#
+#   git tag -a v0.6.0 -m "…" && git push origin v0.6.0
+#     → tests, builds, and publishes a GitHub Release for the tag (notes = tag message)
+#   Actions tab → "Release" → Run workflow
+#     → same build; the files are attached to the run as an artifact (no release)
+#
+# Release files:
+#   cs2sx-<ver>-<os>.zip / .tar.gz   the cs2sx command line tool (needs the .NET 8 runtime —
+#                                    which every CS2SX user has, `dotnet build` needs the SDK)
+#   CS2SX.<ver>.nupkg                the same tool as a .NET tool:
+#                                    dotnet tool install -g CS2SX --add-source <folder>
+#   CS2SX.Switch.<ver>.nupkg         the Switch API package (also bundled inside the tool)
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write   # creating the release
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            8.0.x
+            10.0.x
+
+      - name: Version
+        id: ver
+        shell: pwsh
+        run: |
+          if ("${{ github.ref_type }}" -eq "tag") {
+            $v = "${{ github.ref_name }}".TrimStart('v')
+          } else {
+            $v = ([xml](Get-Content Directory.Build.props)).Project.PropertyGroup.Version
+          }
+          "version=$v" >> $env:GITHUB_OUTPUT
+          "Version: $v"
+
+      # Transpile snapshots and diagnostics. The GCC builds need devkitPro and are
+      # skipped on the runner (run them locally: dotnet test).
+      - name: Test
+        run: dotnet test tests/CS2SX.Tests -c Release
+
+      - name: Build packages
+        shell: pwsh
+        run: |
+          $v = "${{ steps.ver.outputs.version }}"
+          New-Item -ItemType Directory dist | Out-Null
+          # dotnet tool package; builds the API package (nupkg/) on the way
+          dotnet pack src/CS2SX -c Release -p:Version=$v -o dist
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          Copy-Item "nupkg/CS2SX.Switch.$v.nupkg" dist
+
+      - name: Build command line tool
+        shell: pwsh
+        run: |
+          $v = "${{ steps.ver.outputs.version }}"
+          foreach ($rid in 'win-x64', 'linux-x64', 'osx-arm64', 'osx-x64') {
+            dotnet publish src/CS2SX -c Release -r $rid --self-contained false -p:Version=$v -o "publish/$rid"
+            if ($LASTEXITCODE) { exit $LASTEXITCODE }
+            if (-not (Test-Path "publish/$rid/packages/CS2SX.Switch.$v.nupkg")) {
+              throw "bundled API package missing in publish/$rid"
+            }
+            Remove-Item "publish/$rid/*.pdb"
+            if ($rid -like 'win-*') { Compress-Archive "publish/$rid/*" "dist/cs2sx-$v-$rid.zip" }
+            # Windows' own bsdtar — a GNU tar earlier in PATH (Git, MSYS) reads "C:" as a host
+            else { & "$env:SystemRoot\System32\tar.exe" -czf "dist/cs2sx-$v-$rid.tar.gz" -C "publish/$rid" . }
+          }
+          Get-ChildItem dist | Format-Table Name, Length
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cs2sx-${{ steps.ver.outputs.version }}
+          path: dist/*
+
+      - name: GitHub Release
+        if: github.ref_type == 'tag'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ github.ref_name }}" (Get-ChildItem dist).FullName `
+            --title "CS2SX ${{ steps.ver.outputs.version }}" --notes-from-tag --verify-tag

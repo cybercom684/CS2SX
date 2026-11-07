@@ -17,20 +17,26 @@ Die Umgebungsvariable `DEVKITPRO` muss auf das DevkitPro-Verzeichnis zeigen (z.B
 
 ## Installation
 
+Die fertigen Downloads liegen unter [Releases](https://github.com/cybercom684/CS2SX/releases).
+
+**Als .NET-Tool (empfohlen):** `CS2SX.<version>.nupkg` in einen Ordner laden, dann:
+
 ```bash
-# Aus dem Repository bauen und als globales Tool installieren
+dotnet tool install --global --add-source <ordner> CS2SX
+```
+
+Nach der Installation ist `cs2sx` in jedem Terminal verfügbar. Ein Update funktioniert genauso, nur mit `dotnet tool update`. Das Tool bringt das passende API-Paket `CS2SX.Switch` mit, neue Projekte bauen also ohne weitere Einrichtung.
+
+**Ohne Installation:** `cs2sx-<version>-<system>.zip` bzw. `.tar.gz` entpacken. Unter Windows `CS2SX.exe` starten, unter Linux und macOS `dotnet CS2SX.dll` (beides braucht nur die .NET-8-Laufzeit, die mit dem .NET SDK ohnehin da ist).
+
+**Aus dem Quellcode:**
+
+```bash
 dotnet pack src/CS2SX -c Release -o nupkg
 dotnet tool install --global --add-source ./nupkg CS2SX
 ```
 
-Nach der Installation ist `cs2sx` in jedem Terminal verfügbar. Das Tool bringt das
-passende API-Paket `CS2SX.Switch` mit — neue Projekte bauen ohne weitere Einrichtung.
-
-**Update:**
-```bash
-dotnet pack src/CS2SX -c Release -o nupkg
-dotnet tool update --global --add-source ./nupkg CS2SX
-```
+Ein neues Release entsteht, wenn ein Versions-Tag gepusht wird (`git tag -a v0.6.0 -m "…"` und dann `git push origin v0.6.0`). Die GitHub Action `.github/workflows/release.yml` testet, baut alle Pakete und veröffentlicht sie mit der Tag-Nachricht als Release-Text.
 
 ---
 

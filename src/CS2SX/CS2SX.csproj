@@ -8,6 +8,8 @@
 		<PackAsTool>true</PackAsTool>
 		<ToolCommandName>cs2sx</ToolCommandName>
 		<PackageId>CS2SX</PackageId>
+		<!-- NuGet drops *.nupkg files by default — the tool must carry the bundled API package. -->
+		<NoDefaultExcludes>true</NoDefaultExcludes>
 	</PropertyGroup>
 	<ItemGroup>
 		<PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="5.3.0" />
@@ -39,14 +41,13 @@
 	<PropertyGroup>
 		<CS2SXApiPackage>$(MSBuildThisFileDirectory)..\..\nupkg\CS2SX.Switch.$(Version).nupkg</CS2SXApiPackage>
 	</PropertyGroup>
-	<Target Name="CS2SXCopyApiPackage" AfterTargets="Build">
-		<Copy SourceFiles="$(CS2SXApiPackage)" DestinationFolder="$(OutDir)packages" SkipUnchangedFiles="true" />
-	</Target>
-	<Target Name="CS2SXIncludeApiPackage" BeforeTargets="_GetPackageFiles">
-		<ItemGroup>
-			<None Include="$(CS2SXApiPackage)" Pack="true" PackagePath="tools\$(TargetFramework)\any\packages\" />
-		</ItemGroup>
-	</Target>
+	<!-- An ordinary output file at packages/…: copied on build and publish, and therefore
+	     also inside the dotnet-tool package (which is the tool's publish output). The
+	     project reference above builds it first. -->
+	<ItemGroup>
+		<None Include="$(CS2SXApiPackage)" Link="packages\CS2SX.Switch.$(Version).nupkg"
+		      CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" Visible="false" />
+	</ItemGroup>
 	<ItemGroup>
 	  <Folder Include="Core\Models\" />
 	</ItemGroup>
