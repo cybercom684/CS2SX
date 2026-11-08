@@ -10,18 +10,20 @@ Für diese Konstrukte gibt es keine Übersetzung nach C. `cs2sx build` und `cs2s
 
 | Konstrukt | Stattdessen |
 |---|---|
-| `foreach (var i in 0..10)`, Ranges `s[1..3]` | `for`-Schleife, `Substring`, `GetRange` |
-| `p with { X = 1 }` | `new Punkt(1, p.Y)` |
+| Ranges auf Arrays (`arr[1..3]`), `^` in `foreach`-Ranges, Ranges auf komplexen Ausdrücken | Schleife, `Substring`/`GetRange` auf einer Variable |
+| `with` auf Nicht-Records, auf komplexen Ausdrücken oder für Nicht-Positionsparameter | `new Punkt(1, p.Y)` |
 | generische Methoden, die `virtual`/`abstract`/`override` sind oder in Interfaces bzw. generischen Klassen stehen; generische Structs | nicht-virtuelle generische Methode, generische Klasse |
-| lokale Funktionen | private Methode |
+| lokale Funktionen, die lokale Variablen/Parameter der umgebenden Methode benutzen, generische lokale Funktionen | Werte als Parameter übergeben, private Methode |
 | LINQ-Abfragesyntax `from x in … select x` | `list.Where(…).Select(…)` |
-| Collection-Ausdrücke `[1, 2, 3]` | `new List<int> { 1, 2, 3 }` |
-| eigene `delegate`-Typen | `Action<…>`, `Func<…>` |
+| Collection-Ausdrücke mit `..spread` oder für andere Typen als Array/List/HashSet | `new List<int>(…)` |
+| `delegate`-Typen mit `ref`/`out`/`params` oder generisch | `Action<…>`, `Func<…>` |
 | `goto`, Sprungmarken | Schleifen, `break`/`continue` |
 | `yield return` | Werte in einer `List<T>` sammeln |
 | `new object()`, `dynamic` | eigene Klasse, konkreter Typ |
 | `stackalloc`, `Span<T>`, `unsafe`, Zeiger | normale Arrays |
 | `GetType()` (außer bei Exceptions) | `is`/`switch` auf den Typ |
+
+Unterstützt (CS2SX schreibt es vor dem Übersetzen um): lokale Funktionen ohne Zugriff auf lokale Variablen der Methode, `[1, 2, 3]` für Arrays/List/HashSet, `with` bei Records, `foreach (var i in 0..10)`, `s[1..3]`/`s[^1]`/`list[2..]`, eigene `delegate`-Typen.
 
 ---
 
@@ -70,20 +72,17 @@ Problematisch ist nur, einen lokalen String in einer Sammlung oder einem Objekt 
 
 ---
 
-## Lambda: erfasste lokale Variablen sind Kopien
+## Lambdas und erfasste Variablen
 
-Felder sieht eine Lambda live (über `this`). Erfasste **lokale Variablen** werden aber beim Erzeugen der Lambda kopiert. Schreibt die Lambda in eine solche Variable, sieht die Methode die Änderung nicht. Der Transpiler warnt in diesem Fall.
+Lambdas teilen erfasste lokale Variablen und Parameter mit der Methode, wie in C#:
 
 ```csharp
-// FALSCH — zaehler ist eine lokale Variable; die Lambda erhöht ihre Kopie
 int zaehler = 0;
 Action cb = () => zaehler++;
-cb();                       // zaehler bleibt 0 (Warnung beim Build)
-
-// RICHTIG — geteilten Zustand in ein Feld legen
-private int _zaehler;
-Action cb = () => _zaehler++;   // wirkt auf das Feld
+cb(); cb();                 // zaehler ist 2
 ```
+
+Intern wird eine Variable, die erfasst **und** irgendwo verändert wird, zu einem kleinen geteilten Objekt. Nur gelesene Variablen werden einfach kopiert, das ist genauso korrekt. Nicht unterstützt ist das bei mehreren Variablen in einer Deklaration (`int a = 0, b = 0;`) und bei `foreach`-/`out`-/Pattern-Variablen. Dort wird weiterhin kopiert, und der Build warnt.
 
 ---
 

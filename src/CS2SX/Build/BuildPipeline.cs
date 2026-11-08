@@ -124,7 +124,8 @@ public sealed class BuildPipeline
             var apiSourceFiles = Directory.GetFiles(apiSourceDir, "*.cs").ToList();
             // Generic methods are specialised per type at the C# level first; every later
             // stage (forward declarations, generics, transpiling) sees the result.
-            var appSourceFiles = GenericMethodMonomorphizer.Rewrite(reader.SourceFiles.ToList(), _buildDir);
+            var appSourceFiles = GenericMethodMonomorphizer.Rewrite(
+                SyntaxLowering.Rewrite(reader.SourceFiles.ToList(), _buildDir), _buildDir);
             var allForFwd = apiSourceFiles.Concat(appSourceFiles).ToList();
             var forwardPath = Path.Combine(_buildDir, "_forward.h");
             WriteForwardDeclarations(allForFwd, forwardPath, expandedTypeNames: null);

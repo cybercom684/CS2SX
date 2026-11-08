@@ -21,7 +21,7 @@ public sealed class ListHandler : InvocationHandlerBase
     {
         "Add", "Clear", "RemoveAt", "Remove", "Contains", "Insert",
         "Sort", "IndexOf", "Reverse", "ForEach",
-        "FindAll", "TrueForAll", "ConvertAll", "Find", "Exists",
+        "FindAll", "TrueForAll", "ConvertAll", "Find", "Exists", "GetRange",
     };
 
     public override bool TryHandle(InvocationExpressionSyntax inv, string calleeStr,
@@ -59,6 +59,23 @@ public sealed class ListHandler : InvocationHandlerBase
 
         // Reference-counted elements: the list functions retain/release themselves
         // (CS2SX_LIST_DEFINE_RC); a freshly created object is adopted without retain.
+        // list.GetRange(index, count) → a new list with those elements (Get checks the
+        // bounds like .NET; Add takes the references of a reference-counted list).
+        if (method == "GetRange" && args.Count == 2)
+        {
+            var outVar = ctx.NextTmp("rng");
+            var startVar = ctx.NextTmp("rs");
+            var iVar = ctx.NextTmp("ri");
+            ctx.WriteLine($"{cList}* {outVar} = {cList}_New();");
+            ctx.WriteLine($"int {startVar} = {args[0]};");
+            ctx.WriteLine($"if ({args[1]} < 0 || {startVar} < 0) CS2SX_ThrowArgOutOfRange(\"count\");");
+            ctx.WriteLine($"for (int {iVar} = 0; {iVar} < {args[1]}; {iVar}++)");
+            ctx.WriteLine($"    {cList}_Add({outVar}, {cList}_Get({listExpr}, {startVar} + {iVar}));");
+            ctx.LocalTypes[outVar] = listType;
+            result = outVar;
+            return true;
+        }
+
         bool rcList = TypeRegistry.ArcRoot(inner) != null;
         if (rcList && method is "Add" or "Insert" && args.Count > 0
             && Arc.IsFresh(inv.ArgumentList.Arguments[^1].Expression))

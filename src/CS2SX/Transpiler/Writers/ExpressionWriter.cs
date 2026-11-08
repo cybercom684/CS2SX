@@ -2322,7 +2322,8 @@ public sealed class ExpressionWriter : IExpressionWriter
         // User-definierter Generic-Typ (AST-Node vorhanden) — nicht List/Dict
         if (obj.Type is GenericNameSyntax gn
             && !TypeRegistry.IsList(obj.Type.ToString())
-            && !TypeRegistry.IsDictionary(obj.Type.ToString()))
+            && !TypeRegistry.IsDictionary(obj.Type.ToString())
+            && !TypeRegistry.IsHashSet(obj.Type.ToString()))
         {
             var baseName = gn.Identifier.Text;
             var typeArgs = gn.TypeArgumentList.Arguments
@@ -2556,6 +2557,15 @@ public sealed class ExpressionWriter : IExpressionWriter
         {
             var inner = TypeRegistry.GetHashSetInnerType(typeName)!;
             var cInner = inner == "string" ? "str" : TypeRegistry.MapType(inner);
+            if (initializer?.Expressions.Count > 0)
+            {
+                // new HashSet<int> { 1, 2 } — the elements were dropped before
+                var tmp = _ctx.NextTmp("set");
+                _ctx.Out.WriteLine(_ctx.Tab + "HashSet_" + cInner + "* " + tmp + " = HashSet_" + cInner + "_New();");
+                foreach (var item in initializer.Expressions)
+                    _ctx.Out.WriteLine(_ctx.Tab + "HashSet_" + cInner + "_Add(" + tmp + ", " + Write(item) + ");");
+                return tmp;
+            }
             return "HashSet_" + cInner + "_New()";
         }
         // Generischer Typ aus String-Repräsentation (z.B. bei target-typed new)

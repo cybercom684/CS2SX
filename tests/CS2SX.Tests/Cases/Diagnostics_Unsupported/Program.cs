@@ -6,7 +6,7 @@ using System.Linq;
 // clear error before the C compiler runs (expect-errors.txt).
 public record Punkt(int X, int Y);
 
-public delegate int Op(int a);
+public delegate int Op(ref int a);
 
 public struct Box<T> { public T V; }
 
@@ -15,24 +15,25 @@ public class Diagnostics_UnsupportedApp : SwitchApp
     public virtual T Pick<T>(T a, T b) => a;
 
     private static IEnumerable<int> Gen() { yield return 1; }
+    private static Punkt Make() => new Punkt(0, 0);
 
     public override void OnInit()
     {
         int s = 0;
-        foreach (var i in 0..4) s += i;
+        foreach (var i in 0..^1) s += i;
 
-        string text = "abcdef";
-        Console.WriteLine(text[1..3]);
+        int[] numbers = { 1, 2, 3, 4 };
+        Console.WriteLine(numbers[1..3].Length);
 
         var a = new Punkt(1, 2);
-        var b = a with { X = 5 };
+        var b = Make() with { X = 5 };
 
-        int Sq(int x) => x * x;
+        int Sq(int x) => x * s;
 
         var list = new List<int> { 1, 2, 3 };
         var q = from x in list where x > 1 select x;
 
-        List<int> lit = [1, 2, 3];
+        List<int> lit = [.. list];
 
         object gate = new object();
 

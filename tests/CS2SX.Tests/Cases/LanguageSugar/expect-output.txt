@@ -1,0 +1,7 @@
+local 16 120 2 10
+collections 3 9 2 0
+with 10,2 10,7 1
+range-loop 14
+slices bc ef ab f 2 50 9
+notify hi
+delegate 42 25

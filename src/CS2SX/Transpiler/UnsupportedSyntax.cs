@@ -22,13 +22,17 @@ internal static class UnsupportedSyntax
     private static string? Check(SyntaxNode node, SemanticModel? model) => node switch
     {
         ForEachStatementSyntax { Expression: RangeExpressionSyntax } =>
-            "foreach über einen Range (0..10) wird nicht unterstützt — eine for-Schleife verwenden: for (int i = 0; i < 10; i++).",
+            "foreach über einen Range wird nur mit Start und Ende ohne ^ unterstützt (foreach (var i in 0..10)) — sonst eine for-Schleife verwenden.",
 
         RangeExpressionSyntax r when r.Parent is not ForEachStatementSyntax =>
-            "Ranges (a..b) werden nicht unterstützt — bei Strings Substring(start, länge), bei Listen GetRange(start, anzahl) verwenden.",
+            "Dieser Range (a..b) wird nicht unterstützt — Ranges gehen bei Strings und Listen auf einer einfachen Variable/einem Feld (s[1..3], list[2..]); bei Arrays eine Schleife verwenden.",
+
+        PrefixUnaryExpressionSyntax hat when hat.IsKind(SyntaxKind.IndexExpression)
+                                             && hat.Parent is not RangeExpressionSyntax =>
+            "Dieser Index vom Ende (^n) wird nicht unterstützt — ^ geht bei Strings, Listen und Arrays auf einer einfachen Variable/einem Feld (s[^1]); sonst s[s.Length - 1] schreiben.",
 
         WithExpressionSyntax =>
-            "with-Ausdrücke werden nicht unterstützt — eine Kopie mit new anlegen: new Punkt(10, p.Y).",
+            "Dieser with-Ausdruck wird nicht unterstützt — with geht bei Records mit Positionsparametern auf einer einfachen Variable/einem Feld und nur mit diesen Parametern; sonst eine Kopie mit new anlegen: new Punkt(10, p.Y).",
 
         // Plain generic methods are specialised beforehand (GenericMethodMonomorphizer);
         // what reaches this point is virtual/abstract, in an interface or a generic type.
@@ -39,13 +43,13 @@ internal static class UnsupportedSyntax
             $"Generische Structs ({s.Identifier.Text}<…>) werden nicht unterstützt — eine generische Klasse verwenden.",
 
         LocalFunctionStatementSyntax f =>
-            $"Lokale Funktionen ({f.Identifier.Text}) werden nicht unterstützt — als private Methode der Klasse schreiben.",
+            $"Die lokale Funktion {f.Identifier.Text} verwendet lokale Variablen oder Parameter der umgebenden Methode (oder ist generisch) — das wird nicht unterstützt; die Werte als Parameter übergeben oder eine private Methode schreiben.",
 
         QueryExpressionSyntax =>
             "LINQ-Abfragesyntax (from … select) wird nicht unterstützt — die Methodenschreibweise verwenden: list.Where(x => …).Select(x => …).",
 
         DelegateDeclarationSyntax d =>
-            $"Eigene delegate-Typen ({d.Identifier.Text}) werden nicht unterstützt — Action<…> oder Func<…> verwenden.",
+            $"Der delegate-Typ {d.Identifier.Text} wird nicht unterstützt (ref/out/params-Parameter oder generisch) — Action<…> oder Func<…> verwenden.",
 
         GotoStatementSyntax =>
             "goto wird nicht unterstützt — mit Schleifen, break/continue oder einer Methode umbauen.",
@@ -63,7 +67,7 @@ internal static class UnsupportedSyntax
             "unsafe-Code und Zeiger werden nicht unterstützt.",
 
         CollectionExpressionSyntax =>
-            "Collection-Ausdrücke ([1, 2, 3]) werden nicht unterstützt — new List<int> { 1, 2, 3 } bzw. new[] { 1, 2, 3 } verwenden.",
+            "Dieser Collection-Ausdruck wird nicht unterstützt — [a, b] geht für Arrays, List/HashSet (und leer für Stack/Queue), ohne ..spread; sonst new List<int> { 1, 2, 3 } verwenden.",
 
         BaseObjectCreationExpressionSyntax o when IsPlainObject(o, model) =>
             "new object() wird nicht unterstützt — eine eigene (leere) Klasse verwenden. Als Sperrobjekt ist es unnötig, lock wird ignoriert.",
