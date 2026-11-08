@@ -797,9 +797,11 @@ public sealed class ExpressionWriter : IExpressionWriter
         var op = assign.OperatorToken.Text;
         var right = Write(assign.Right);
 
-        // A field of a reference-counted class owns one reference (see Arc).
-        if (op == "=" && IsOwningStore(assign.Left))
-            right = Arc.RetainIfShared(assign.Right, right, _ctx);
+        // A field of a reference-counted class owns one reference (see Arc): take one
+        // for the new value, give up the old one (deferred to the next frame).
+        if (op == "=" && OwningStoreRoot(assign.Left) is { } storeRoot)
+            return "CS2SX_ARC_STORE(" + storeRoot + ", " + Write(assign.Left) + ", "
+                 + Arc.RetainIfShared(assign.Right, right, _ctx) + ")";
 
         // Delegates/events: `d += h` / `d -= h` build a new invocation list (multicast).
         if ((op == "+=" || op == "-=") && IsDelegateTyped(assign.Left))
@@ -887,21 +889,25 @@ public sealed class ExpressionWriter : IExpressionWriter
         return Write(assign.Left) + " " + op + " " + right;
     }
 
-    /// The assignment target is a field or auto-property (storage the object owns),
-    /// not a local, parameter or property with its own setter.
-    private bool IsOwningStore(ExpressionSyntax left)
+    /// Root class when the assignment target is a field or auto-property of a class
+    /// (storage that owns a reference) typed as a reference-counted class; null for
+    /// locals, parameters, properties with their own setter and struct members
+    /// (struct copies would share the reference).
+    private string? OwningStoreRoot(ExpressionSyntax left)
     {
-        if (_ctx.SemanticModel == null) return false;
+        if (_ctx.SemanticModel == null) return null;
         try
         {
             var sym = _ctx.SemanticModel.GetSymbolInfo(left).Symbol;
-            if (sym is IFieldSymbol f) return !f.IsConst && Arc.Root(f.Type) != null;
-            if (sym is IPropertySymbol p && Arc.Root(p.Type) != null)
-                return p.DeclaringSyntaxReferences.FirstOrDefault()?.GetSyntax() is PropertyDeclarationSyntax pd
-                       && PropertyWriter.IsAutoProperty(pd);
+            if (sym?.ContainingType is not { TypeKind: TypeKind.Class }) return null;
+            if (sym is IFieldSymbol f && !f.IsConst) return Arc.Root(f.Type);
+            if (sym is IPropertySymbol p
+                && p.DeclaringSyntaxReferences.FirstOrDefault()?.GetSyntax() is PropertyDeclarationSyntax pd
+                && PropertyWriter.IsAutoProperty(pd))
+                return Arc.Root(p.Type);
         }
         catch { }
-        return false;
+        return null;
     }
 
     private string? TryWrapAsInterface(string exprRaw, string exprCode, string targetIfaceName)
@@ -2464,7 +2470,11 @@ public sealed class ExpressionWriter : IExpressionWriter
                 var cp = isRuntimeInit
                     ? TypeRegistry.MapProperty(propName)
                     : (TypeRegistry.HasNoPrefix(propName) ? propName : "f_" + propName);
-                _ctx.Out.WriteLine(_ctx.Tab + tmp + "->" + cp + " = " + propVal + ";");
+                if (OwningStoreRoot(asgn.Left) is { } initRoot)
+                    _ctx.Out.WriteLine(_ctx.Tab + "CS2SX_ARC_STORE(" + initRoot + ", " + tmp + "->" + cp + ", "
+                        + Arc.RetainIfShared(asgn.Right, propVal, _ctx) + ");");
+                else
+                    _ctx.Out.WriteLine(_ctx.Tab + tmp + "->" + cp + " = " + propVal + ";");
             }
             return tmp;
         }

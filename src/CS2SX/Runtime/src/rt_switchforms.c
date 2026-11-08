@@ -32,6 +32,38 @@ void* CS2SX_ArrResize(void* a, int newCount, size_t elemSize)
     return r;
 }
 
+// ── Deferred releases (see CS2SX_ReleaseLater in switchforms.h) ─────────────
+typedef struct { void* obj; CS2SX_FreeFn fn; } CS2SX_PendingRelease;
+static CS2SX_PendingRelease* s_cs2sx_pending;
+static int s_cs2sx_pending_count, s_cs2sx_pending_cap;
+
+void CS2SX_ReleaseLater(void* obj, CS2SX_FreeFn free_fn)
+{
+    if (!obj || !free_fn) return;
+    if (s_cs2sx_pending_count == s_cs2sx_pending_cap)
+    {
+        int cap = s_cs2sx_pending_cap ? s_cs2sx_pending_cap * 2 : 64;
+        CS2SX_PendingRelease* p = (CS2SX_PendingRelease*)realloc(s_cs2sx_pending, cap * sizeof(*p));
+        if (!p) { free_fn(obj); return; }   // out of memory: release now rather than leak
+        s_cs2sx_pending = p;
+        s_cs2sx_pending_cap = cap;
+    }
+    s_cs2sx_pending[s_cs2sx_pending_count].obj = obj;
+    s_cs2sx_pending[s_cs2sx_pending_count].fn = free_fn;
+    s_cs2sx_pending_count++;
+}
+
+void CS2SX_DrainReleases(void)
+{
+    // A release can destroy an object whose cleanup queues further releases
+    // (a finalizer clearing a list): keep going until the queue is empty.
+    while (s_cs2sx_pending_count > 0)
+    {
+        CS2SX_PendingRelease r = s_cs2sx_pending[--s_cs2sx_pending_count];
+        r.fn(r.obj);
+    }
+}
+
 char* _cs2sx_next_buf(void)
 {
     size_t pos = (_cs2sx_arena_pos + 7u) & ~(size_t)7u;

@@ -1727,7 +1727,13 @@ public sealed class CSharpToC : CSharpSyntaxWalker
             _ctx.WriteLine("if (!self) return NULL;");
             _ctx.WriteLine("self->_rc = 1;");
             foreach (var (csType, fieldName) in paramFields)
-                _ctx.WriteLine($"self->f_{fieldName} = {fieldName};");
+            {
+                // The record's Free releases class-typed members, so it takes a reference.
+                var arcRoot = TypeRegistry.ArcRoot(csType.TrimEnd('?'));
+                _ctx.WriteLine(arcRoot != null
+                    ? $"self->f_{fieldName} = CS2SX_RETAIN({arcRoot}, {fieldName});"
+                    : $"self->f_{fieldName} = {fieldName};");
+            }
             _ctx.Dedent();
             _ctx.Out.WriteLine("    return self;");
             _ctx.Out.WriteLine("}");

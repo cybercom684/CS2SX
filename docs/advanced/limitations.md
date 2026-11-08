@@ -8,26 +8,23 @@ Diese Seite beschreibt, was CS2SX nicht unterstützt und wie man die häufigsten
 
 Das transpilierte Programm hat keine .NET-Laufzeit und damit keinen Garbage Collector. Objekte eigener Klassen werden stattdessen referenzgezählt:
 
-- **Felder und `List<T>` halten je eine Referenz.** Entfernt `RemoveAt`/`Remove`/`Clear` ein Objekt, wird es nur zerstört, wenn kein anderes Feld und keine andere Liste es noch hält.
-- **Zerstörung ist virtuell:** Ein `Circle` in einer `List<Shape>` räumt beim Entfernen auch seine eigenen Felder auf. Ein C#-Finalizer (`~Circle()`) läuft dabei mit.
-- **Noch nicht freigegeben werden:**
-  - lokale Objekte, die nie in einem Feld oder einer Liste landen,
-  - der alte Wert eines überschriebenen Felds,
+- **Felder und `List<T>` halten je eine Referenz.** Ein Objekt wird zerstört, wenn kein Feld und keine Liste es mehr hält: nach `RemoveAt`/`Remove`/`Clear`, nach dem Überschreiben eines Felds (`_ziel = anderes;`, `_ziel = null;`) oder wenn das besitzende Objekt selbst zerstört wird.
+- **Erst zum nächsten Frame:** Die Zerstörung passiert am Anfang des nächsten Frames. Lokale Variablen und Parameter bleiben bis dahin gültig, auch wenn ihr Objekt gerade aus der letzten Liste entfernt wurde:
+
+  ```csharp
+  var n = _queue[0];
+  _queue.RemoveAt(0);
+  n.Run();                // OK — n lebt bis zum Ende des Frames
+  ```
+
+- **Zerstörung ist virtuell:** Ein `Circle` in einer `List<Shape>` räumt auch seine eigenen Felder auf. Ein C#-Finalizer (`~Circle()`) läuft dabei mit.
+- **Nicht freigegeben werden:**
+  - Objekte, die nur in lokalen Variablen leben und nie in einem Feld oder einer Liste landen,
   - Objekte, die sich gegenseitig referenzieren (Zyklen).
 
 Für typische Homebrew-Apps ist das unkritisch. Wer aber in jedem Frame neue Objekte nur in lokalen Variablen erzeugt (`new` in `OnFrame`), verbraucht stetig Speicher.
 
-Eine Lücke gibt es noch: Ein Objekt, das nur noch eine **lokale Variable** hält, kann zerstört werden, wenn es aus seiner letzten Liste entfernt wird:
-
-```csharp
-var n = _queue[0];
-_queue.RemoveAt(0);     // _queue hielt die letzte Referenz → n ist zerstört
-n.Run();                // FALSCH
-
-var n = _queue[0];
-n.Run();                // RICHTIG — erst benutzen
-_queue.RemoveAt(0);     // dann entfernen (oder vorher einem Feld zuweisen)
-```
+**Wichtig:** `Dictionary`, `Stack`, `Queue`, `HashSet`, Arrays, Interface-Variablen und Lambdas halten **keine** eigene Referenz. Wird ein Objekt aus seinem letzten Feld bzw. seiner letzten Liste entfernt, ist es ab dem nächsten Frame auch dort ungültig. Solche Objekte zusätzlich in einem Feld oder einer `List<T>` halten.
 
 ```csharp
 // UNGÜNSTIG — 60 neue Objekte pro Sekunde, die nie freigegeben werden

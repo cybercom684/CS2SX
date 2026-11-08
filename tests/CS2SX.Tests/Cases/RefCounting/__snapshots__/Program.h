@@ -68,16 +68,31 @@ void Holder_Ctor(Holder* self);
 void Holder_Dispose(Holder* self);
 void Holder_Free(Holder* self);
 Holder* Holder_Retain(Holder* self);
+struct Pair
+{
+    int _rc;
+    Node* f_First;
+    int f_Weight;
+};
+
+Pair* Pair_New(Node* First, int Weight);
+void Pair_Free(Pair* self);
+Pair* Pair_Retain(Pair* self);
+
 struct RefCountingApp
 {
     SwitchApp base;
     List_Node* f_nodes;
     List_Shape* f_shapes;
     Node* f_kept;
+    Holder* f_holder;
+    Pair* f_pair;
+    int f_frame;
 };
 
 void RefCountingApp_Init(RefCountingApp* self);
 void RefCountingApp_OnInit(RefCountingApp* self);
+void RefCountingApp_OnFrame(RefCountingApp* self);
 
 void RefCountingApp_Free(RefCountingApp* self);
 

@@ -78,6 +78,13 @@ static inline void CS2SX_ArrCheck(const void* a, int i)
 #define CS2SX_RETAIN(Root, x) ({ __typeof__(x) _cs2sx_r = (x); \
     Root##_Retain((Root*)_cs2sx_r); _cs2sx_r; })
 
+/// Stores v (already holding its reference) into the field lv and gives up the
+/// field's previous reference at the next frame (CS2SX_ReleaseLater). lv is
+/// evaluated once; the expression's value is v.
+#define CS2SX_ARC_STORE(Root, lv, v) ({ __typeof__(&(lv)) _cs2sx_p = &(lv); \
+    __typeof__(*_cs2sx_p) _cs2sx_n = (v); __typeof__(*_cs2sx_p) _cs2sx_o = *_cs2sx_p; \
+    *_cs2sx_p = _cs2sx_n; CS2SX_ReleaseLater(_cs2sx_o, (CS2SX_FreeFn)Root##_Free); _cs2sx_n; })
+
 /// Frees a heap array created by CS2SX_ArrNew/CS2SX_ArrFromInit (NULL-safe).
 void CS2SX_ArrFree(void* a);
 
@@ -118,9 +125,18 @@ void* CS2SX_ArrResize(void* a, int newCount, size_t elemSize);
 extern char   _cs2sx_arena[CS2SX_ARENA_SIZE];
 extern size_t _cs2sx_arena_pos;
 
+// Deferred release of user-class objects (reference counting): a reference that a
+// field or list gives up is dropped at the start of the next frame, not at once.
+// Anything that still points at the object during the current frame — a local
+// variable, a parameter, a value just read from a list — stays valid.
+typedef void (*CS2SX_FreeFn)(void* obj);
+void CS2SX_ReleaseLater(void* obj, CS2SX_FreeFn free_fn);
+void CS2SX_DrainReleases(void);
+
 static inline void cs2sx_frame_begin(void)
 {
     _cs2sx_arena_pos = 0;
+    CS2SX_DrainReleases();
 }
 
 char* _cs2sx_next_buf(void);
@@ -595,7 +611,8 @@ static inline void List_##T##_Reverse(List_##T* l) {                            
 // ── List<T> für referenzgezählte User-Klassen ────────────────────────────────
 // Wie CS2SX_LIST_DEFINE_PTR, aber die Liste hält eine Referenz pro Element:
 // Add/Insert/Set nehmen eine Referenz (Root_Retain); Remove/RemoveValue/Clear/Free
-// und das Überschreiben per Set geben sie ab (Root_Free). AddNew/InsertNew
+// und das Überschreiben per Set geben sie ab — verzögert bis zum nächsten Frame
+// (CS2SX_ReleaseLater), damit lokale Variablen gültig bleiben. AddNew/InsertNew
 // übernehmen ein frisch erzeugtes Objekt (new T(..)), dessen Referenz schon der
 // Liste gehören soll.
 #define CS2SX_LIST_DEFINE_RC(T, Root)                                                               \
@@ -621,7 +638,7 @@ static inline T*   List_##T##_Get(List_##T* l, int i) {                         
 static inline void List_##T##_Set(List_##T* l, int i, T* val) {                                    \
     CS2SX_ListCheck(l ? l->count : -1, i);                                                          \
     Root##_Retain((Root*)val); T* _old = l->data[i]; l->data[i] = val;                            \
-    Root##_Free((Root*)_old); }                                                                     \
+    CS2SX_ReleaseLater(_old, (CS2SX_FreeFn)Root##_Free); }                                                                     \
 static inline void List_##T##_InsertNew(List_##T* l, int idx, T* val) {                            \
     CS2SX_ListCheck(l ? l->count + 1 : -1, idx);                                                    \
     List_##T##_AddNew(l, val);                                                                      \
@@ -634,7 +651,7 @@ static inline int  List_##T##_Count(List_##T* l)       { return l ? l->count : 0
 static inline void List_##T##_Clear(List_##T* l) {                                                 \
     if (!l) return;                                                                                 \
     int _n = l->count; l->count = 0;                                                                \
-    for (int _i = 0; _i < _n; _i++) Root##_Free((Root*)l->data[_i]); }                             \
+    for (int _i = 0; _i < _n; _i++) CS2SX_ReleaseLater(l->data[_i], (CS2SX_FreeFn)Root##_Free); }                             \
 static inline void List_##T##_Free(List_##T* l) {                                                  \
     if (!l) return; List_##T##_Clear(l); free(l->data); free(l); }                                  \
 static inline int  List_##T##_Contains(List_##T* l, T* val) {                                      \
@@ -647,7 +664,7 @@ static inline void List_##T##_Remove(List_##T* l, int idx) {                    
     CS2SX_ListCheck(l ? l->count : -1, idx);                                                        \
     T* _old = l->data[idx];                                                                         \
     for (int _i = idx; _i < l->count - 1; _i++) l->data[_i] = l->data[_i + 1];                   \
-    l->count--; Root##_Free((Root*)_old); }                                                         \
+    l->count--; CS2SX_ReleaseLater(_old, (CS2SX_FreeFn)Root##_Free); }                                                         \
 static inline void List_##T##_RemoveValue(List_##T* l, T* val) {                                   \
     if (!l) CS2SX_ThrowNullRef();                                                                   \
     for (int _i = 0; _i < l->count; _i++) {                                                        \
