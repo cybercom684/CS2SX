@@ -11,6 +11,7 @@ Board* Board_New(int n)
     Board* self = (Board*)calloc(1, sizeof(Board));
     if (!self) return NULL;
     self->_rc = 1;
+    self->_dtor = (void (*)(void*))Board_Dispose;
     Board_Ctor(self, n);
     return self;
 }
@@ -40,17 +41,23 @@ int* Board_Doubled(Board* self)
     return result;
 }
 
+void Board_Dispose(Board* self)
+{
+    CS2SX_ArrFree(self->f_Cells); self->f_Cells = NULL;
+}
+
 void Board_Free(Board* self)
 {
     if (!self) return;
-    if (--self->_rc > 0) return;
-    CS2SX_ArrFree(self->f_Cells); self->f_Cells = NULL;
-    free(self);
+    Board* _o = (Board*)self;
+    if (--_o->_rc > 0) return;
+    _o->_dtor(_o);
+    free(_o);
 }
 
 Board* Board_Retain(Board* self)
 {
-    if (self) self->_rc++;
+    if (self) ((Board*)self)->_rc++;
     return self;
 }
 

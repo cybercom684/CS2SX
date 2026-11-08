@@ -12,6 +12,7 @@ Point* Point_New_0(void)
     Point* self = (Point*)calloc(1, sizeof(Point));
     if (!self) return NULL;
     self->_rc = 1;
+    self->_dtor = (void (*)(void*))Point_Dispose;
     Point_Ctor_0(self);
     return self;
 }
@@ -26,6 +27,7 @@ Point* Point_New_1(int v)
     Point* self = (Point*)calloc(1, sizeof(Point));
     if (!self) return NULL;
     self->_rc = 1;
+    self->_dtor = (void (*)(void*))Point_Dispose;
     Point_Ctor_1(self, v);
     return self;
 }
@@ -40,6 +42,7 @@ Point* Point_New_2(int x, int y)
     Point* self = (Point*)calloc(1, sizeof(Point));
     if (!self) return NULL;
     self->_rc = 1;
+    self->_dtor = (void (*)(void*))Point_Dispose;
     Point_Ctor_2(self, x, y);
     return self;
 }
@@ -56,20 +59,27 @@ Point* Point_New_3(int x, int y, const char* tag)
     Point* self = (Point*)calloc(1, sizeof(Point));
     if (!self) return NULL;
     self->_rc = 1;
+    self->_dtor = (void (*)(void*))Point_Dispose;
     Point_Ctor_3(self, x, y, tag);
     return self;
+}
+
+void Point_Dispose(Point* self)
+{
 }
 
 void Point_Free(Point* self)
 {
     if (!self) return;
-    if (--self->_rc > 0) return;
-    free(self);
+    Point* _o = (Point*)self;
+    if (--_o->_rc > 0) return;
+    _o->_dtor(_o);
+    free(_o);
 }
 
 Point* Point_Retain(Point* self)
 {
-    if (self) self->_rc++;
+    if (self) ((Point*)self)->_rc++;
     return self;
 }
 
@@ -84,6 +94,7 @@ Point3* Point3_New_3(int x, int y, int z)
     Point3* self = (Point3*)calloc(1, sizeof(Point3));
     if (!self) return NULL;
     self->base._rc = 1;
+    self->base._dtor = (void (*)(void*))Point3_Dispose;
     Point3_Ctor_3(self, x, y, z);
     return self;
 }
@@ -98,14 +109,29 @@ Point3* Point3_New_1(int v)
     Point3* self = (Point3*)calloc(1, sizeof(Point3));
     if (!self) return NULL;
     self->base._rc = 1;
+    self->base._dtor = (void (*)(void*))Point3_Dispose;
     Point3_Ctor_1(self, v);
     return self;
+}
+
+void Point3_Dispose(Point3* self)
+{
+    Point_Dispose((Point*)self);
 }
 
 void Point3_Free(Point3* self)
 {
     if (!self) return;
-    Point_Free((Point*)self);
+    Point* _o = (Point*)self;
+    if (--_o->_rc > 0) return;
+    _o->_dtor(_o);
+    free(_o);
+}
+
+Point3* Point3_Retain(Point3* self)
+{
+    if (self) ((Point*)self)->_rc++;
+    return self;
 }
 
 const CS2SX_TypeInfo CS2SX_TI_ParseError = { "ParseError", &CS2SX_TI_Exception, "Exception of type 'ParseError' was thrown." };
@@ -141,6 +167,7 @@ Counter* Counter_New(void)
     Counter* self = (Counter*)calloc(1, sizeof(Counter));
     if (!self) return NULL;
     self->_rc = 1;
+    self->_dtor = (void (*)(void*))Counter_Dispose;
     Counter_Ctor(self);
     return self;
 }
@@ -151,16 +178,22 @@ void Counter_Add(Counter* self, int n)
     (self->f_Changed != NULL ? Action_int_Invoke(self->f_Changed, self->value) : (void)0);
 }
 
+void Counter_Dispose(Counter* self)
+{
+}
+
 void Counter_Free(Counter* self)
 {
     if (!self) return;
-    if (--self->_rc > 0) return;
-    free(self);
+    Counter* _o = (Counter*)self;
+    if (--_o->_rc > 0) return;
+    _o->_dtor(_o);
+    free(_o);
 }
 
 Counter* Counter_Retain(Counter* self)
 {
-    if (self) self->_rc++;
+    if (self) ((Counter*)self)->_rc++;
     return self;
 }
 

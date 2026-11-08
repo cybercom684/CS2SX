@@ -57,8 +57,18 @@ public sealed class ListHandler : InvocationHandlerBase
         if (method is "Add" or "Insert" && args.Count > 0)
             UpcastElement(inv.ArgumentList.Arguments[^1].Expression, args, args.Count - 1, ctx);
 
-        // For user-class lists: free elements before Clear / on RemoveAt
-        if (method == "Clear" && isUserClass)
+        // Reference-counted elements: the list functions retain/release themselves
+        // (CS2SX_LIST_DEFINE_RC); a freshly created object is adopted without retain.
+        bool rcList = TypeRegistry.ArcRoot(inner) != null;
+        if (rcList && method is "Add" or "Insert" && args.Count > 0
+            && Arc.IsFresh(inv.ArgumentList.Arguments[^1].Expression))
+        {
+            result = cList + "_" + method + "New(" + listExpr + ", " + JoinArgs(args) + ")";
+            return true;
+        }
+
+        // For other user-class lists: free elements before Clear / on RemoveAt
+        if (method == "Clear" && isUserClass && !rcList)
         {
             var idxVar = ctx.NextTmp("fi");
             var cInner = TypeRegistry.MapType(inner);
@@ -68,7 +78,7 @@ public sealed class ListHandler : InvocationHandlerBase
             return true;
         }
 
-        if (method == "RemoveAt" && isUserClass && args.Count > 0)
+        if (method == "RemoveAt" && isUserClass && !rcList && args.Count > 0)
         {
             var cInner = TypeRegistry.MapType(inner);
             ctx.WriteLine($"if ({args[0]} >= 0 && {args[0]} < {listExpr}->count && {listExpr}->data[{args[0]}])");

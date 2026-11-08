@@ -7,6 +7,7 @@
 struct Board
 {
     int _rc;
+    void (*_dtor)(void* self);   // _Dispose of the dynamic type
     int* f_Cells;
 };
 
@@ -16,6 +17,7 @@ int Board_Sum(int* values);
 int Board_Count(int* values);
 int* Board_Doubled(Board* self);
 
+void Board_Dispose(Board* self);
 void Board_Free(Board* self);
 Board* Board_Retain(Board* self);
 struct ArraysAdvancedApp

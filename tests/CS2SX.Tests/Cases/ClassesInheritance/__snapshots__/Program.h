@@ -14,6 +14,7 @@ struct Shape
 {
     Shape_vtable* vtable;
     int _rc;
+    void (*_dtor)(void* self);   // _Dispose of the dynamic type
     const char* f_Name;
 };
 
@@ -23,6 +24,7 @@ void Shape_Ctor(Shape* self, const char* name);
 /* abstract: float Shape_Area(Shape* self) */
 const char* Shape_Describe(Shape* self);
 
+void Shape_Dispose(Shape* self);
 void Shape_Free(Shape* self);
 Shape* Shape_Retain(Shape* self);
 struct Rect
@@ -36,7 +38,9 @@ Rect* Rect_New(float w, float h);
 void Rect_Ctor(Rect* self, float w, float h);
 float Rect_Area(Rect* self);
 
+void Rect_Dispose(Rect* self);
 void Rect_Free(Rect* self);
+Rect* Rect_Retain(Rect* self);
 struct Square
 {
     Rect base;
@@ -46,7 +50,9 @@ Square* Square_New(float side);
 void Square_Ctor(Square* self, float side);
 const char* Square_Describe(Square* self);
 
+void Square_Dispose(Square* self);
 void Square_Free(Square* self);
+Square* Square_Retain(Square* self);
 struct Circle
 {
     Shape base;
@@ -57,7 +63,9 @@ Circle* Circle_New(float r);
 void Circle_Ctor(Circle* self, float r);
 float Circle_Area(Circle* self);
 
+void Circle_Dispose(Circle* self);
 void Circle_Free(Circle* self);
+Circle* Circle_Retain(Circle* self);
 struct ClassesInheritanceApp
 {
     SwitchApp base;

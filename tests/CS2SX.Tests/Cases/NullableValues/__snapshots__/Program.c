@@ -16,6 +16,7 @@ Profile* Profile_New(void)
     Profile* self = (Profile*)calloc(1, sizeof(Profile));
     if (!self) return NULL;
     self->_rc = 1;
+    self->_dtor = (void (*)(void*))Profile_Dispose;
     Profile_Ctor(self);
     return self;
 }
@@ -30,16 +31,22 @@ int Profile_Add(Profile* self, Nullable_int bonus)
     return 1 + (((bonus).has ? (bonus).value : (0)));
 }
 
+void Profile_Dispose(Profile* self)
+{
+}
+
 void Profile_Free(Profile* self)
 {
     if (!self) return;
-    if (--self->_rc > 0) return;
-    free(self);
+    Profile* _o = (Profile*)self;
+    if (--_o->_rc > 0) return;
+    _o->_dtor(_o);
+    free(_o);
 }
 
 Profile* Profile_Retain(Profile* self)
 {
-    if (self) self->_rc++;
+    if (self) ((Profile*)self)->_rc++;
     return self;
 }
 

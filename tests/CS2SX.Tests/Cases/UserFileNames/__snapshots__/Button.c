@@ -13,19 +13,26 @@ MenuEntry* MenuEntry_New(const char* title)
     MenuEntry* self = (MenuEntry*)calloc(1, sizeof(MenuEntry));
     if (!self) return NULL;
     self->_rc = 1;
+    self->_dtor = (void (*)(void*))MenuEntry_Dispose;
     MenuEntry_Ctor(self, title);
     return self;
+}
+
+void MenuEntry_Dispose(MenuEntry* self)
+{
 }
 
 void MenuEntry_Free(MenuEntry* self)
 {
     if (!self) return;
-    if (--self->_rc > 0) return;
-    free(self);
+    MenuEntry* _o = (MenuEntry*)self;
+    if (--_o->_rc > 0) return;
+    _o->_dtor(_o);
+    free(_o);
 }
 
 MenuEntry* MenuEntry_Retain(MenuEntry* self)
 {
-    if (self) self->_rc++;
+    if (self) ((MenuEntry*)self)->_rc++;
     return self;
 }

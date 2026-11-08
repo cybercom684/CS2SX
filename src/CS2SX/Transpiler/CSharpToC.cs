@@ -297,8 +297,21 @@ public sealed class CSharpToC : CSharpSyntaxWalker
         _ctx.ClearClassContext();
     }
 
+    private INamedTypeSymbol? DeclaredSymbol(ClassDeclarationSyntax node)
+    {
+        try { return _ctx.SemanticModel?.GetDeclaredSymbol(node); }
+        catch { return null; }
+    }
+
     private void WriteDestructor(ClassDeclarationSyntax node, string name, string baseType)
     {
+        var sym = DeclaredSymbol(node);
+        if (Arc.UsesDispose(sym))
+        {
+            WriteArcLifecycle(node, name, baseType, Arc.Root(sym)!);
+            return;
+        }
+
         bool isRootClass = string.IsNullOrEmpty(baseType);
 
         if (_mode == TranspileMode.HeaderOnly)
@@ -315,7 +328,82 @@ public sealed class CSharpToC : CSharpSyntaxWalker
         _ctx.WriteLine("if (!self) return;");
         if (isRootClass)
             _ctx.WriteLine("if (--self->_rc > 0) return;");
+        WriteFieldCleanup(node, name);
 
+        // When a base _Free is called it chains up to the root class which calls free(self).
+        // Calling free(self) again here would be a double-free. Only the root class frees memory.
+        bool delegatedToBase = !string.IsNullOrEmpty(baseType)
+            && baseType != "SwitchApp"
+            && !IsControlSubclass(baseType)
+            && !_ctx.InterfaceTypes.Contains(baseType); // interface base has no _Free chain
+
+        if (delegatedToBase)
+            _ctx.WriteLine($"{baseType}_Free(({baseType}*)self);");
+        else
+            _ctx.WriteLine("free(self);");
+        _ctx.Dedent();
+        _ctx.Out.WriteLine("}");
+        _ctx.Out.WriteLine();
+
+        if (isRootClass)
+        {
+            _ctx.Out.WriteLine($"{name}* {name}_Retain({name}* self)");
+            _ctx.Out.WriteLine("{");
+            _ctx.Out.WriteLine($"    if (self) self->_rc++;");
+            _ctx.Out.WriteLine($"    return self;");
+            _ctx.Out.WriteLine("}");
+            _ctx.Out.WriteLine();
+        }
+    }
+
+    /// Reference-counted user class (see <see cref="Arc"/>):
+    ///   T_Dispose — releases T's own fields, then the base's (no memory freed)
+    ///   T_Free    — drops one reference; at zero runs the dynamic type's _Dispose, frees
+    ///   T_Retain  — takes one reference
+    /// Free/Retain work on the root's counter, so any static type in the chain is fine.
+    private void WriteArcLifecycle(ClassDeclarationSyntax node, string name, string baseType, string root)
+    {
+        bool hasBase = !string.IsNullOrEmpty(baseType);
+        if (_mode == TranspileMode.HeaderOnly)
+        {
+            _ctx.Out.WriteLine($"void {name}_Dispose({name}* self);");
+            _ctx.Out.WriteLine($"void {name}_Free({name}* self);");
+            _ctx.Out.WriteLine($"{name}* {name}_Retain({name}* self);");
+            return;
+        }
+
+        _ctx.Out.WriteLine($"void {name}_Dispose({name}* self)");
+        _ctx.Out.WriteLine("{");
+        _ctx.Indent();
+        WriteFieldCleanup(node, name);
+        if (hasBase)
+            _ctx.WriteLine($"{baseType}_Dispose(({baseType}*)self);");
+        _ctx.Dedent();
+        _ctx.Out.WriteLine("}");
+        _ctx.Out.WriteLine();
+
+        _ctx.Out.WriteLine($"void {name}_Free({name}* self)");
+        _ctx.Out.WriteLine("{");
+        _ctx.Out.WriteLine("    if (!self) return;");
+        _ctx.Out.WriteLine($"    {root}* _o = ({root}*)self;");
+        _ctx.Out.WriteLine("    if (--_o->_rc > 0) return;");
+        _ctx.Out.WriteLine("    _o->_dtor(_o);");
+        _ctx.Out.WriteLine("    free(_o);");
+        _ctx.Out.WriteLine("}");
+        _ctx.Out.WriteLine();
+
+        _ctx.Out.WriteLine($"{name}* {name}_Retain({name}* self)");
+        _ctx.Out.WriteLine("{");
+        _ctx.Out.WriteLine($"    if (self) (({root}*)self)->_rc++;");
+        _ctx.Out.WriteLine("    return self;");
+        _ctx.Out.WriteLine("}");
+        _ctx.Out.WriteLine();
+    }
+
+    /// The user destructor body (C# finalizer) followed by releasing the class's own
+    /// heap fields.
+    private void WriteFieldCleanup(ClassDeclarationSyntax node, string name)
+    {
         // Benutzerdefinierter Destruktor-Body (falls vorhanden) VOR dem automatischen Cleanup ausführen.
         // C#-Konvention: Finalizer läuft zuerst, danach GC → hier: user-code, dann field-cleanup.
         var customDtor = node.Members.OfType<DestructorDeclarationSyntax>().FirstOrDefault();
@@ -400,31 +488,6 @@ public sealed class CSharpToC : CSharpSyntaxWalker
                     _ctx.WriteLine($"if ({fieldExpr}) {{ {cType}_Free({fieldExpr}); {fieldExpr} = NULL; }}");
                 }
             }
-        }
-
-        // When a base _Free is called it chains up to the root class which calls free(self).
-        // Calling free(self) again here would be a double-free. Only the root class frees memory.
-        bool delegatedToBase = !string.IsNullOrEmpty(baseType)
-            && baseType != "SwitchApp"
-            && !IsControlSubclass(baseType)
-            && !_ctx.InterfaceTypes.Contains(baseType); // interface base has no _Free chain
-
-        if (delegatedToBase)
-            _ctx.WriteLine($"{baseType}_Free(({baseType}*)self);");
-        else
-            _ctx.WriteLine("free(self);");
-        _ctx.Dedent();
-        _ctx.Out.WriteLine("}");
-        _ctx.Out.WriteLine();
-
-        if (isRootClass)
-        {
-            _ctx.Out.WriteLine($"{name}* {name}_Retain({name}* self)");
-            _ctx.Out.WriteLine("{");
-            _ctx.Out.WriteLine($"    if (self) self->_rc++;");
-            _ctx.Out.WriteLine($"    return self;");
-            _ctx.Out.WriteLine("}");
-            _ctx.Out.WriteLine();
         }
     }
 
@@ -623,6 +686,8 @@ public sealed class CSharpToC : CSharpSyntaxWalker
             if (VTableBuilder.HasVirtualMethods(node))
                 _ctx.WriteLine(name + "_vtable* vtable;");
             _ctx.WriteLine("int _rc;");
+            if (Arc.UsesDispose(DeclaredSymbol(node)))
+                _ctx.WriteLine("void (*_dtor)(void* self);   // _Dispose of the dynamic type");
         }
         else
         {
@@ -1071,6 +1136,8 @@ public sealed class CSharpToC : CSharpSyntaxWalker
                     }
                     catch { }
                 }
+                else
+                    initVal = Arc.RetainIfShared(v.Initializer.Value, initVal, _ctx);
                 _ctx.WriteLine("self->" + prefix + fieldName + " = " + initVal + ";");
             }
         }
@@ -1084,7 +1151,7 @@ public sealed class CSharpToC : CSharpSyntaxWalker
 
             var initPfx = TypeRegistry.HasNoPrefix(prop.Identifier.Text) ? "" : "f_";
             _ctx.WriteLine("self->" + initPfx + prop.Identifier.Text + " = "
-                + _exprWriter.Write(prop.Initializer.Value) + ";");
+                + Arc.RetainIfShared(prop.Initializer.Value, _exprWriter.Write(prop.Initializer.Value), _ctx) + ";");
         }
 
         // Auto-init List<T> properties/fields with no explicit initializer to List_T_New()

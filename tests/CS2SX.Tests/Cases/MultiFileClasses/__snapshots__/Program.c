@@ -16,8 +16,8 @@ void MultiFileClassesApp_Init(MultiFileClassesApp* self)
 
 void MultiFileClassesApp_OnInit(MultiFileClassesApp* self)
 {
-    List_Shape_Add(self->f_shapes, (Shape*)(Square_New(2.0f)));
-    List_Shape_Add(self->f_shapes, (Shape*)(Square_New(3.0f)));
+    List_Shape_AddNew(self->f_shapes, (Shape*)(Square_New(2.0f)));
+    List_Shape_AddNew(self->f_shapes, (Shape*)(Square_New(3.0f)));
     CS2SX_Stopwatch_Start(self->f_timer);
     self->f_frameTimer = CS2SX_Stopwatch_StartNew();
 }

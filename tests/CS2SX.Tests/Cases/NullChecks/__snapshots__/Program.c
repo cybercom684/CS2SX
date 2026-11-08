@@ -16,6 +16,7 @@ Node* Node_New(void)
     Node* self = (Node*)calloc(1, sizeof(Node));
     if (!self) return NULL;
     self->_rc = 1;
+    self->_dtor = (void (*)(void*))Node_Dispose;
     self->vtable = &Node_vtable_instance;
     Node_Ctor(self);
     return self;
@@ -31,17 +32,23 @@ const char* Node_Kind(Node* self)
     return "node";
 }
 
+void Node_Dispose(Node* self)
+{
+    if (self->f_Next) { Node_Free(self->f_Next); self->f_Next = NULL; }
+}
+
 void Node_Free(Node* self)
 {
     if (!self) return;
-    if (--self->_rc > 0) return;
-    if (self->f_Next) { Node_Free(self->f_Next); self->f_Next = NULL; }
-    free(self);
+    Node* _o = (Node*)self;
+    if (--_o->_rc > 0) return;
+    _o->_dtor(_o);
+    free(_o);
 }
 
 Node* Node_Retain(Node* self)
 {
-    if (self) self->_rc++;
+    if (self) ((Node*)self)->_rc++;
     return self;
 }
 
@@ -54,6 +61,7 @@ Square* Square_New(void)
     Square* self = (Square*)calloc(1, sizeof(Square));
     if (!self) return NULL;
     self->_rc = 1;
+    self->_dtor = (void (*)(void*))Square_Dispose;
     Square_Ctor(self);
     return self;
 }
@@ -63,16 +71,22 @@ int Square_Area(Square* self)
     return 4;
 }
 
+void Square_Dispose(Square* self)
+{
+}
+
 void Square_Free(Square* self)
 {
     if (!self) return;
-    if (--self->_rc > 0) return;
-    free(self);
+    Square* _o = (Square*)self;
+    if (--_o->_rc > 0) return;
+    _o->_dtor(_o);
+    free(_o);
 }
 
 Square* Square_Retain(Square* self)
 {
-    if (self) self->_rc++;
+    if (self) ((Square*)self)->_rc++;
     return self;
 }
 

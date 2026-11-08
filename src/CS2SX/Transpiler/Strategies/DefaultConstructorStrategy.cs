@@ -204,6 +204,8 @@ public sealed class DefaultConstructorStrategy : IConstructorStrategy
         ctx.WriteLine("if (!self) return NULL;");
         if (m.RcPath != null)
             ctx.WriteLine($"self->{m.RcPath}_rc = 1;");
+        if (m.RcPath != null && Arc.UsesDispose(m.Symbol))
+            ctx.WriteLine($"self->{m.RcPath}_dtor = (void (*)(void*)){name}_Dispose;");
         if (m.BaseVTable || m.OwnVTable)
             ctx.WriteLine($"self->{m.RcPath}vtable = &{name}_vtable_instance;");
         if (m.IsException)

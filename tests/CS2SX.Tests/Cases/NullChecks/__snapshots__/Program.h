@@ -14,6 +14,7 @@ struct Node
 {
     Node_vtable* vtable;
     int _rc;
+    void (*_dtor)(void* self);   // _Dispose of the dynamic type
     int f_Value;
     Node* f_Next;
     const char* f_Name;
@@ -24,11 +25,13 @@ void Node_Ctor(Node* self);
 int Node_Get(Node* self);
 const char* Node_Kind(Node* self);
 
+void Node_Dispose(Node* self);
 void Node_Free(Node* self);
 Node* Node_Retain(Node* self);
 struct Square
 {
     int _rc;
+    void (*_dtor)(void* self);   // _Dispose of the dynamic type
     /* implements IShape */
 };
 
@@ -36,6 +39,7 @@ Square* Square_New(void);
 void Square_Ctor(Square* self);
 int Square_Area(Square* self);
 
+void Square_Dispose(Square* self);
 void Square_Free(Square* self);
 Square* Square_Retain(Square* self);
 extern IShape_vtable Square_IShape_vtable_instance;

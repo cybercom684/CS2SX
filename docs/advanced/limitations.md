@@ -4,9 +4,30 @@ Diese Seite beschreibt, was CS2SX nicht unterstützt und wie man die häufigsten
 
 ---
 
-## Speicher: kein Garbage Collector
+## Speicher: Referenzzählung statt Garbage Collector
 
-Das transpilierte Programm hat keine .NET-Laufzeit und damit keinen Garbage Collector. Objekte, Listen und Strings, die in Feldern liegen, leben, bis die App endet oder das besitzende Objekt freigegeben wird. Für typische Homebrew-Apps ist das unkritisch. Wer aber in jedem Frame neue Objekte erzeugt (`new` in `OnFrame`), verbraucht stetig Speicher.
+Das transpilierte Programm hat keine .NET-Laufzeit und damit keinen Garbage Collector. Objekte eigener Klassen werden stattdessen referenzgezählt:
+
+- **Felder und `List<T>` halten je eine Referenz.** Entfernt `RemoveAt`/`Remove`/`Clear` ein Objekt, wird es nur zerstört, wenn kein anderes Feld und keine andere Liste es noch hält.
+- **Zerstörung ist virtuell:** Ein `Circle` in einer `List<Shape>` räumt beim Entfernen auch seine eigenen Felder auf. Ein C#-Finalizer (`~Circle()`) läuft dabei mit.
+- **Noch nicht freigegeben werden:**
+  - lokale Objekte, die nie in einem Feld oder einer Liste landen,
+  - der alte Wert eines überschriebenen Felds,
+  - Objekte, die sich gegenseitig referenzieren (Zyklen).
+
+Für typische Homebrew-Apps ist das unkritisch. Wer aber in jedem Frame neue Objekte nur in lokalen Variablen erzeugt (`new` in `OnFrame`), verbraucht stetig Speicher.
+
+Eine Lücke gibt es noch: Ein Objekt, das nur noch eine **lokale Variable** hält, kann zerstört werden, wenn es aus seiner letzten Liste entfernt wird:
+
+```csharp
+var n = _queue[0];
+_queue.RemoveAt(0);     // _queue hielt die letzte Referenz → n ist zerstört
+n.Run();                // FALSCH
+
+var n = _queue[0];
+n.Run();                // RICHTIG — erst benutzen
+_queue.RemoveAt(0);     // dann entfernen (oder vorher einem Feld zuweisen)
+```
 
 ```csharp
 // UNGÜNSTIG — 60 neue Objekte pro Sekunde, die nie freigegeben werden

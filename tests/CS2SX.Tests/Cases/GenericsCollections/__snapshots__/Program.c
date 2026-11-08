@@ -13,20 +13,27 @@ Item* Item_New(const char* name, int count)
     Item* self = (Item*)calloc(1, sizeof(Item));
     if (!self) return NULL;
     self->_rc = 1;
+    self->_dtor = (void (*)(void*))Item_Dispose;
     Item_Ctor(self, name, count);
     return self;
+}
+
+void Item_Dispose(Item* self)
+{
 }
 
 void Item_Free(Item* self)
 {
     if (!self) return;
-    if (--self->_rc > 0) return;
-    free(self);
+    Item* _o = (Item*)self;
+    if (--_o->_rc > 0) return;
+    _o->_dtor(_o);
+    free(_o);
 }
 
 Item* Item_Retain(Item* self)
 {
-    if (self) self->_rc++;
+    if (self) ((Item*)self)->_rc++;
     return self;
 }
 
@@ -73,8 +80,8 @@ void GenericsCollectionsApp_OnInit(GenericsCollectionsApp* self)
         printf("%s\n", _ps_3 ? _ps_3 : "");
     }
     List_Item* items = List_Item_New();
-    List_Item_Add(items, Item_New("sword", 1));
-    List_Item_Add(items, Item_New("potion", 4));
+    List_Item_AddNew(items, Item_New("sword", 1));
+    List_Item_AddNew(items, Item_New("potion", 4));
     const char* _ps_4 = CS2SX_NN(List_Item_Get(items, 1))->f_Name;
     printf("%s\n", _ps_4 ? _ps_4 : "");
     Box_int* box = Box_int_New(42);

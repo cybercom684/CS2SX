@@ -12,6 +12,7 @@ Bullet* Bullet_New(void)
     Bullet* self = (Bullet*)calloc(1, sizeof(Bullet));
     if (!self) return NULL;
     self->_rc = 1;
+    self->_dtor = (void (*)(void*))Bullet_Dispose;
     Bullet_Ctor(self);
     return self;
 }
@@ -26,16 +27,22 @@ int Bullet_IsAlive(Bullet* self)
     return self->f_Y > 0;
 }
 
+void Bullet_Dispose(Bullet* self)
+{
+}
+
 void Bullet_Free(Bullet* self)
 {
     if (!self) return;
-    if (--self->_rc > 0) return;
-    free(self);
+    Bullet* _o = (Bullet*)self;
+    if (--_o->_rc > 0) return;
+    _o->_dtor(_o);
+    free(_o);
 }
 
 Bullet* Bullet_Retain(Bullet* self)
 {
-    if (self) self->_rc++;
+    if (self) ((Bullet*)self)->_rc++;
     return self;
 }
 
@@ -56,6 +63,7 @@ Timer* Timer_New(void)
     Timer* self = (Timer*)calloc(1, sizeof(Timer));
     if (!self) return NULL;
     self->_rc = 1;
+    self->_dtor = (void (*)(void*))Timer_Dispose;
     Timer_Ctor(self);
     return self;
 }
@@ -70,16 +78,22 @@ int Timer_IsAlive(Timer* self)
     return self->f_Left > 0;
 }
 
+void Timer_Dispose(Timer* self)
+{
+}
+
 void Timer_Free(Timer* self)
 {
     if (!self) return;
-    if (--self->_rc > 0) return;
-    free(self);
+    Timer* _o = (Timer*)self;
+    if (--_o->_rc > 0) return;
+    _o->_dtor(_o);
+    free(_o);
 }
 
 Timer* Timer_Retain(Timer* self)
 {
-    if (self) self->_rc++;
+    if (self) ((Timer*)self)->_rc++;
     return self;
 }
 

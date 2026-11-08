@@ -13,20 +13,27 @@ Enemy* Enemy_New(const char* name, int hp)
     Enemy* self = (Enemy*)calloc(1, sizeof(Enemy));
     if (!self) return NULL;
     self->_rc = 1;
+    self->_dtor = (void (*)(void*))Enemy_Dispose;
     Enemy_Ctor(self, name, hp);
     return self;
+}
+
+void Enemy_Dispose(Enemy* self)
+{
 }
 
 void Enemy_Free(Enemy* self)
 {
     if (!self) return;
-    if (--self->_rc > 0) return;
-    free(self);
+    Enemy* _o = (Enemy*)self;
+    if (--_o->_rc > 0) return;
+    _o->_dtor(_o);
+    free(_o);
 }
 
 Enemy* Enemy_Retain(Enemy* self)
 {
-    if (self) self->_rc++;
+    if (self) ((Enemy*)self)->_rc++;
     return self;
 }
 

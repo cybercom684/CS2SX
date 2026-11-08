@@ -8,6 +8,7 @@
 struct Item
 {
     int _rc;
+    void (*_dtor)(void* self);   // _Dispose of the dynamic type
     const char* f_Name;
     int f_Count;
 };
@@ -15,6 +16,7 @@ struct Item
 Item* Item_New(const char* name, int count);
 void Item_Ctor(Item* self, const char* name, int count);
 
+void Item_Dispose(Item* self);
 void Item_Free(Item* self);
 Item* Item_Retain(Item* self);
 struct GenericsCollectionsApp

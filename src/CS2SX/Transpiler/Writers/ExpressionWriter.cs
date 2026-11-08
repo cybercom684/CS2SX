@@ -797,6 +797,10 @@ public sealed class ExpressionWriter : IExpressionWriter
         var op = assign.OperatorToken.Text;
         var right = Write(assign.Right);
 
+        // A field of a reference-counted class owns one reference (see Arc).
+        if (op == "=" && IsOwningStore(assign.Left))
+            right = Arc.RetainIfShared(assign.Right, right, _ctx);
+
         // Delegates/events: `d += h` / `d -= h` build a new invocation list (multicast).
         if ((op == "+=" || op == "-=") && IsDelegateTyped(assign.Left))
         {
@@ -881,6 +885,23 @@ public sealed class ExpressionWriter : IExpressionWriter
             return WriteTupleDeconstruction(tupleLeft, right);
 
         return Write(assign.Left) + " " + op + " " + right;
+    }
+
+    /// The assignment target is a field or auto-property (storage the object owns),
+    /// not a local, parameter or property with its own setter.
+    private bool IsOwningStore(ExpressionSyntax left)
+    {
+        if (_ctx.SemanticModel == null) return false;
+        try
+        {
+            var sym = _ctx.SemanticModel.GetSymbolInfo(left).Symbol;
+            if (sym is IFieldSymbol f) return !f.IsConst && Arc.Root(f.Type) != null;
+            if (sym is IPropertySymbol p && Arc.Root(p.Type) != null)
+                return p.DeclaringSyntaxReferences.FirstOrDefault()?.GetSyntax() is PropertyDeclarationSyntax pd
+                       && PropertyWriter.IsAutoProperty(pd);
+        }
+        catch { }
+        return false;
     }
 
     private string? TryWrapAsInterface(string exprRaw, string exprCode, string targetIfaceName)
@@ -1361,6 +1382,20 @@ public sealed class ExpressionWriter : IExpressionWriter
     private string WriteMemberAssignment(AssignmentExpressionSyntax assign,
         MemberAccessExpressionSyntax mem, string op, string right)
     {
+        // Static field/property of a user class (Counter.Total += 5): a global, not
+        // a member of an object — same C name as reading it.
+        if (_ctx.SemanticModel != null)
+        {
+            try
+            {
+                var target = _ctx.SemanticModel.GetSymbolInfo(mem).Symbol;
+                if (target is IFieldSymbol { IsStatic: true, IsConst: false } or IPropertySymbol { IsStatic: true }
+                    && TranspilerContext.IsUserCode(target.ContainingType))
+                    return Write(mem) + " " + op + " " + right;
+            }
+            catch { }
+        }
+
         var obj = NullCheck.Wrap(mem.Expression, Write(mem.Expression), _ctx);
         var prop = mem.Name.Identifier.Text;
         var objRaw = mem.Expression.ToString();

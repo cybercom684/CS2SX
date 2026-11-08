@@ -243,6 +243,12 @@ public static class TypeRegistry
         if (hasConstructor) s_userStructsWithCtor.Add(name);
     }
     public static bool IsUserStruct(string csType) => s_userStructTypes.Contains(csType.Trim());
+
+    // Reference-counted user class → root class of its hierarchy (Transpiler.Arc).
+    private static Dictionary<string, string> s_arcRoots = new(StringComparer.Ordinal);
+    public static void SetArcRoots(Dictionary<string, string> roots) => s_arcRoots = roots;
+    public static string? ArcRoot(string className) =>
+        s_arcRoots.TryGetValue(className.Trim(), out var r) ? r : null;
     /// True when the struct declares an explicit constructor → `new T(..)` calls T_New(..).
     public static bool UserStructHasConstructor(string csType) => s_userStructsWithCtor.Contains(csType.Trim());
 

@@ -10,20 +10,27 @@ Settings* Settings_New(void)
     Settings* self = (Settings*)calloc(1, sizeof(Settings));
     if (!self) return NULL;
     self->_rc = 1;
+    self->_dtor = (void (*)(void*))Settings_Dispose;
     Settings_Ctor(self);
     return self;
+}
+
+void Settings_Dispose(Settings* self)
+{
 }
 
 void Settings_Free(Settings* self)
 {
     if (!self) return;
-    if (--self->_rc > 0) return;
-    free(self);
+    Settings* _o = (Settings*)self;
+    if (--_o->_rc > 0) return;
+    _o->_dtor(_o);
+    free(_o);
 }
 
 Settings* Settings_Retain(Settings* self)
 {
-    if (self) self->_rc++;
+    if (self) ((Settings*)self)->_rc++;
     return self;
 }
 
@@ -37,6 +44,7 @@ Player* Player_New_1(const char* name)
     Player* self = (Player*)calloc(1, sizeof(Player));
     if (!self) return NULL;
     self->_rc = 1;
+    self->_dtor = (void (*)(void*))Player_Dispose;
     Player_Ctor_1(self, name);
     return self;
 }
@@ -52,6 +60,7 @@ Player* Player_New_2(const char* name, int level)
     Player* self = (Player*)calloc(1, sizeof(Player));
     if (!self) return NULL;
     self->_rc = 1;
+    self->_dtor = (void (*)(void*))Player_Dispose;
     Player_Ctor_2(self, name, level);
     return self;
 }
@@ -60,17 +69,23 @@ void Player_Free(Player* self)
 {
 }
 
+void Player_Dispose(Player* self)
+{
+    if (self->f_Settings) { Settings_Free(self->f_Settings); self->f_Settings = NULL; }
+}
+
 void Player_Free(Player* self)
 {
     if (!self) return;
-    if (--self->_rc > 0) return;
-    if (self->f_Settings) { Settings_Free(self->f_Settings); self->f_Settings = NULL; }
-    free(self);
+    Player* _o = (Player*)self;
+    if (--_o->_rc > 0) return;
+    _o->_dtor(_o);
+    free(_o);
 }
 
 Player* Player_Retain(Player* self)
 {
-    if (self) self->_rc++;
+    if (self) ((Player*)self)->_rc++;
     return self;
 }
 

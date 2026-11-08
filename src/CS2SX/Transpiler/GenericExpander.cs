@@ -98,7 +98,10 @@ public sealed class GenericExpander
                 var guard = "CS2SX_LIST_PTR_" + userClass + "_DEFINED";
                 headerSb.AppendLine($"#ifndef {guard}");
                 headerSb.AppendLine($"#define {guard}");
-                headerSb.AppendLine($"CS2SX_LIST_DEFINE_PTR({userClass})");
+                var arcRoot = TypeRegistry.ArcRoot(userClass);
+                headerSb.AppendLine(arcRoot != null
+                    ? $"CS2SX_LIST_DEFINE_RC({userClass}, {arcRoot})"
+                    : $"CS2SX_LIST_DEFINE_PTR({userClass})");
                 headerSb.AppendLine($"#endif");
                 Log.Info($"GenericExpander: List<{userClass}> → CS2SX_LIST_DEFINE_PTR({userClass})");
             }

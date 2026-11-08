@@ -72,6 +72,12 @@ static inline void CS2SX_ArrCheck(const void* a, int i)
 #define CS2SX_AT(a, i) (*({ __typeof__(&(a)[0]) _cs2sx_a = (a); int _cs2sx_i = (int)(i); \
     CS2SX_ArrCheck(_cs2sx_a, _cs2sx_i); _cs2sx_a + _cs2sx_i; }))
 
+/// Takes a reference to x (a user-class object, may be NULL) for a field or
+/// collection that stores it; Root is the root class of its hierarchy. Keeps the
+/// C type of x and evaluates it once.
+#define CS2SX_RETAIN(Root, x) ({ __typeof__(x) _cs2sx_r = (x); \
+    Root##_Retain((Root*)_cs2sx_r); _cs2sx_r; })
+
 /// Frees a heap array created by CS2SX_ArrNew/CS2SX_ArrFromInit (NULL-safe).
 void CS2SX_ArrFree(void* a);
 
@@ -578,6 +584,72 @@ static inline void List_##T##_Remove(List_##T* l, int idx) {                    
     l->count--; }                                                                                   \
 static inline void List_##T##_RemoveValue(List_##T* l, T* val) {                                   \
     if (!l) CS2SX_ThrowNullRef();                                                                                 \
+    for (int _i = 0; _i < l->count; _i++) {                                                        \
+        if (l->data[_i] == val) { List_##T##_Remove(l, _i); return; } } }                         \
+static inline void List_##T##_Reverse(List_##T* l) {                                               \
+    if (!l || l->count < 2) return;                                                                 \
+    int _lo = 0, _hi = l->count - 1;                                                               \
+    while (_lo < _hi) { T* _t = l->data[_lo]; l->data[_lo] = l->data[_hi];                        \
+        l->data[_hi] = _t; _lo++; _hi--; } }
+
+// ── List<T> für referenzgezählte User-Klassen ────────────────────────────────
+// Wie CS2SX_LIST_DEFINE_PTR, aber die Liste hält eine Referenz pro Element:
+// Add/Insert/Set nehmen eine Referenz (Root_Retain); Remove/RemoveValue/Clear/Free
+// und das Überschreiben per Set geben sie ab (Root_Free). AddNew/InsertNew
+// übernehmen ein frisch erzeugtes Objekt (new T(..)), dessen Referenz schon der
+// Liste gehören soll.
+#define CS2SX_LIST_DEFINE_RC(T, Root)                                                               \
+Root* Root##_Retain(Root* self);                                                                    \
+void  Root##_Free(Root* self);                                                                      \
+typedef struct { T** data; int count; int capacity; } List_##T;                                     \
+static inline List_##T* List_##T##_New(void) {                                                      \
+    List_##T* l = (List_##T*)malloc(sizeof(List_##T));                                              \
+    if (!l) return NULL;                                                                            \
+    l->data = (T**)malloc(CS2SX_LIST_INITIAL_CAP * sizeof(T*));                                    \
+    l->count = 0; l->capacity = CS2SX_LIST_INITIAL_CAP; return l; }                                \
+static inline void List_##T##_AddNew(List_##T* l, T* val) {                                        \
+    if (!l) CS2SX_ThrowNullRef();                                                                   \
+    if (l->count >= l->capacity) {                                                                  \
+        l->capacity *= 2;                                                                           \
+        l->data = (T**)realloc(l->data, l->capacity * sizeof(T*)); }                               \
+    l->data[l->count++] = val; }                                                                    \
+static inline void List_##T##_Add(List_##T* l, T* val) {                                           \
+    if (!l) CS2SX_ThrowNullRef();                                                                   \
+    Root##_Retain((Root*)val); List_##T##_AddNew(l, val); }                                         \
+static inline T*   List_##T##_Get(List_##T* l, int i) {                                            \
+    CS2SX_ListCheck(l ? l->count : -1, i); return l->data[i]; }                                     \
+static inline void List_##T##_Set(List_##T* l, int i, T* val) {                                    \
+    CS2SX_ListCheck(l ? l->count : -1, i);                                                          \
+    Root##_Retain((Root*)val); T* _old = l->data[i]; l->data[i] = val;                            \
+    Root##_Free((Root*)_old); }                                                                     \
+static inline void List_##T##_InsertNew(List_##T* l, int idx, T* val) {                            \
+    CS2SX_ListCheck(l ? l->count + 1 : -1, idx);                                                    \
+    List_##T##_AddNew(l, val);                                                                      \
+    for (int _i = l->count - 1; _i > idx; _i--) l->data[_i] = l->data[_i - 1];                    \
+    l->data[idx] = val; }                                                                           \
+static inline void List_##T##_Insert(List_##T* l, int idx, T* val) {                               \
+    CS2SX_ListCheck(l ? l->count + 1 : -1, idx);                                                    \
+    Root##_Retain((Root*)val); List_##T##_InsertNew(l, idx, val); }                                 \
+static inline int  List_##T##_Count(List_##T* l)       { return l ? l->count : 0; }                \
+static inline void List_##T##_Clear(List_##T* l) {                                                 \
+    if (!l) return;                                                                                 \
+    int _n = l->count; l->count = 0;                                                                \
+    for (int _i = 0; _i < _n; _i++) Root##_Free((Root*)l->data[_i]); }                             \
+static inline void List_##T##_Free(List_##T* l) {                                                  \
+    if (!l) return; List_##T##_Clear(l); free(l->data); free(l); }                                  \
+static inline int  List_##T##_Contains(List_##T* l, T* val) {                                      \
+    if (!l) CS2SX_ThrowNullRef();                                                                   \
+    for (int _i = 0; _i < l->count; _i++) { if (l->data[_i] == val) return 1; } return 0; }       \
+static inline int  List_##T##_IndexOf(List_##T* l, T* val) {                                       \
+    if (!l) CS2SX_ThrowNullRef();                                                                   \
+    for (int _i = 0; _i < l->count; _i++) { if (l->data[_i] == val) return _i; } return -1; }     \
+static inline void List_##T##_Remove(List_##T* l, int idx) {                                       \
+    CS2SX_ListCheck(l ? l->count : -1, idx);                                                        \
+    T* _old = l->data[idx];                                                                         \
+    for (int _i = idx; _i < l->count - 1; _i++) l->data[_i] = l->data[_i + 1];                   \
+    l->count--; Root##_Free((Root*)_old); }                                                         \
+static inline void List_##T##_RemoveValue(List_##T* l, T* val) {                                   \
+    if (!l) CS2SX_ThrowNullRef();                                                                   \
     for (int _i = 0; _i < l->count; _i++) {                                                        \
         if (l->data[_i] == val) { List_##T##_Remove(l, _i); return; } } }                         \
 static inline void List_##T##_Reverse(List_##T* l) {                                               \

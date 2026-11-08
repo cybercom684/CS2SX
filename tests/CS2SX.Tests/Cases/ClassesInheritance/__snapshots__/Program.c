@@ -18,6 +18,7 @@ Shape* Shape_New(const char* name)
     Shape* self = (Shape*)calloc(1, sizeof(Shape));
     if (!self) return NULL;
     self->_rc = 1;
+    self->_dtor = (void (*)(void*))Shape_Dispose;
     self->vtable = &Shape_vtable_instance;
     Shape_Ctor(self, name);
     return self;
@@ -30,16 +31,22 @@ const char* Shape_Describe(Shape* self)
     return _sb0;
 }
 
+void Shape_Dispose(Shape* self)
+{
+}
+
 void Shape_Free(Shape* self)
 {
     if (!self) return;
-    if (--self->_rc > 0) return;
-    free(self);
+    Shape* _o = (Shape*)self;
+    if (--_o->_rc > 0) return;
+    _o->_dtor(_o);
+    free(_o);
 }
 
 Shape* Shape_Retain(Shape* self)
 {
-    if (self) self->_rc++;
+    if (self) ((Shape*)self)->_rc++;
     return self;
 }
 
@@ -57,6 +64,7 @@ Rect* Rect_New(float w, float h)
     Rect* self = (Rect*)calloc(1, sizeof(Rect));
     if (!self) return NULL;
     self->base._rc = 1;
+    self->base._dtor = (void (*)(void*))Rect_Dispose;
     self->base.vtable = &Rect_vtable_instance;
     Rect_Ctor(self, w, h);
     return self;
@@ -67,10 +75,24 @@ float Rect_Area(Rect* self)
     return self->f_W * self->f_H;
 }
 
+void Rect_Dispose(Rect* self)
+{
+    Shape_Dispose((Shape*)self);
+}
+
 void Rect_Free(Rect* self)
 {
     if (!self) return;
-    Shape_Free((Shape*)self);
+    Shape* _o = (Shape*)self;
+    if (--_o->_rc > 0) return;
+    _o->_dtor(_o);
+    free(_o);
+}
+
+Rect* Rect_Retain(Rect* self)
+{
+    if (self) ((Shape*)self)->_rc++;
+    return self;
 }
 
 static Shape_vtable Rect_vtable_instance =
@@ -92,6 +114,7 @@ Square* Square_New(float side)
     Square* self = (Square*)calloc(1, sizeof(Square));
     if (!self) return NULL;
     self->base.base._rc = 1;
+    self->base.base._dtor = (void (*)(void*))Square_Dispose;
     self->base.base.vtable = &Square_vtable_instance;
     Square_Ctor(self, side);
     return self;
@@ -104,10 +127,24 @@ const char* Square_Describe(Square* self)
     return _sb0;
 }
 
+void Square_Dispose(Square* self)
+{
+    Rect_Dispose((Rect*)self);
+}
+
 void Square_Free(Square* self)
 {
     if (!self) return;
-    Rect_Free((Rect*)self);
+    Shape* _o = (Shape*)self;
+    if (--_o->_rc > 0) return;
+    _o->_dtor(_o);
+    free(_o);
+}
+
+Square* Square_Retain(Square* self)
+{
+    if (self) ((Shape*)self)->_rc++;
+    return self;
 }
 
 static Shape_vtable Square_vtable_instance =
@@ -129,6 +166,7 @@ Circle* Circle_New(float r)
     Circle* self = (Circle*)calloc(1, sizeof(Circle));
     if (!self) return NULL;
     self->base._rc = 1;
+    self->base._dtor = (void (*)(void*))Circle_Dispose;
     self->base.vtable = &Circle_vtable_instance;
     Circle_Ctor(self, r);
     return self;
@@ -139,10 +177,24 @@ float Circle_Area(Circle* self)
     return 3.14159f * self->f_r * self->f_r;
 }
 
+void Circle_Dispose(Circle* self)
+{
+    Shape_Dispose((Shape*)self);
+}
+
 void Circle_Free(Circle* self)
 {
     if (!self) return;
-    Shape_Free((Shape*)self);
+    Shape* _o = (Shape*)self;
+    if (--_o->_rc > 0) return;
+    _o->_dtor(_o);
+    free(_o);
+}
+
+Circle* Circle_Retain(Circle* self)
+{
+    if (self) ((Shape*)self)->_rc++;
+    return self;
 }
 
 static Shape_vtable Circle_vtable_instance =

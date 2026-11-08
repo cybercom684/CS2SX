@@ -1,4 +1,4 @@
-using CS2SX.Core;
+﻿using CS2SX.Core;
 using CS2SX.Transpiler.Writers;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
@@ -19,6 +19,8 @@ public static class ProjectTypeScanner
     public static void RegisterUserTypes(IEnumerable<string> sourceFiles)
     {
         var options = new CSharpParseOptions(LanguageVersion.Latest);
+        var classes = new Dictionary<string, (string? baseName, bool excluded)>(StringComparer.Ordinal);
+        var interfaces = new HashSet<string>(StringComparer.Ordinal);
 
         foreach (var file in sourceFiles)
         {
@@ -47,10 +49,50 @@ public static class ProjectTypeScanner
 
                     case ClassDeclarationSyntax cls:
                         RegisterOperators(cls);
+                        classes[cls.Identifier.Text] = (cls.BaseList?.Types.FirstOrDefault()?.Type.ToString(),
+                            cls.TypeParameterList != null || cls.Modifiers.Any(m => m.IsKind(SyntaxKind.StaticKeyword)));
+                        break;
+
+                    case RecordDeclarationSyntax recCls:
+                        classes[recCls.Identifier.Text] = (recCls.BaseList?.Types.FirstOrDefault()?.Type.ToString(),
+                            recCls.TypeParameterList != null);
+                        break;
+
+                    case InterfaceDeclarationSyntax iface:
+                        interfaces.Add(iface.Identifier.Text);
                         break;
                 }
             }
         }
+
+        RegisterArcRoots(classes, interfaces);
+    }
+
+    /// Reference-counted class hierarchies (see Transpiler.Arc): a user class whose
+    /// base chain consists of user classes only. Its root is the class without a base
+    /// class (interfaces do not count). Mirrors Arc.Root, but from syntax, because
+    /// _generics.h is written before the files are transpiled.
+    private static void RegisterArcRoots(
+        Dictionary<string, (string? baseName, bool excluded)> classes, HashSet<string> interfaces)
+    {
+        bool IsInterfaceName(string n) =>
+            interfaces.Contains(n) || (n.Length > 1 && n[0] == 'I' && char.IsUpper(n[1]) && !classes.ContainsKey(n));
+
+        var roots = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var name in classes.Keys)
+        {
+            string cur = name;
+            string? root = null;
+            for (int hops = 0; hops < 64; hops++)
+            {
+                if (!classes.TryGetValue(cur, out var info) || info.excluded) break;
+                var b = info.baseName?.Split('<')[0].Trim();
+                if (b == null || b == "object" || IsInterfaceName(b)) { root = cur; break; }
+                cur = b;   // a non-user base (SwitchApp, Exception, …) ends the loop above
+            }
+            if (root != null) roots[name] = root;
+        }
+        TypeRegistry.SetArcRoots(roots);
     }
 
     private static bool HasInstanceCtor(TypeDeclarationSyntax type) =>

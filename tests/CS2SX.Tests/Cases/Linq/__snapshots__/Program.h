@@ -8,6 +8,7 @@
 struct Enemy
 {
     int _rc;
+    void (*_dtor)(void* self);   // _Dispose of the dynamic type
     const char* f_Name;
     int f_Hp;
 };
@@ -15,6 +16,7 @@ struct Enemy
 Enemy* Enemy_New(const char* name, int hp);
 void Enemy_Ctor(Enemy* self, const char* name, int hp);
 
+void Enemy_Dispose(Enemy* self);
 void Enemy_Free(Enemy* self);
 Enemy* Enemy_Retain(Enemy* self);
 struct LinqApp

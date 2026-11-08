@@ -8,6 +8,7 @@
 struct Point
 {
     int _rc;
+    void (*_dtor)(void* self);   // _Dispose of the dynamic type
     int f_X;
     int f_Y;
     const char* f_Tag;
@@ -22,6 +23,7 @@ void Point_Ctor_2(Point* self, int x, int y);
 Point* Point_New_3(int x, int y, const char* tag);
 void Point_Ctor_3(Point* self, int x, int y, const char* tag);
 
+void Point_Dispose(Point* self);
 void Point_Free(Point* self);
 Point* Point_Retain(Point* self);
 struct Point3
@@ -35,7 +37,9 @@ void Point3_Ctor_3(Point3* self, int x, int y, int z);
 Point3* Point3_New_1(int v);
 void Point3_Ctor_1(Point3* self, int v);
 
+void Point3_Dispose(Point3* self);
 void Point3_Free(Point3* self);
+Point3* Point3_Retain(Point3* self);
 struct ParseError
 {
     Exception base;
@@ -50,6 +54,7 @@ void ParseError_Free(ParseError* self);
 struct Counter
 {
     int _rc;
+    void (*_dtor)(void* self);   // _Dispose of the dynamic type
     Action_int_t f_Changed;
     int value;
 };
@@ -58,6 +63,7 @@ Counter* Counter_New(void);
 void Counter_Ctor(Counter* self);
 void Counter_Add(Counter* self, int n);
 
+void Counter_Dispose(Counter* self);
 void Counter_Free(Counter* self);
 Counter* Counter_Retain(Counter* self);
 struct LanguagePhase4App
