@@ -188,7 +188,7 @@ string getrimmt = "  hallo  ".Trim();
 string ersetzt = name.Replace("Switch", "NX");
 ```
 
-> **Wichtig:** Interpolierte Strings erzeugen Stack-Buffer. Nicht in Feldern speichern — nur in lokalen Variablen oder direkt in Ausgabefunktionen verwenden.
+> **Hinweis:** Interpolierte Strings sind auf 1023 Zeichen begrenzt. Feldzuweisungen kopieren sie dauerhaft, lokale Variablen gelten für den laufenden Frame, siehe [Grenzen](advanced/limitations.md#strings-länge-und-lebensdauer).
 
 ---
 

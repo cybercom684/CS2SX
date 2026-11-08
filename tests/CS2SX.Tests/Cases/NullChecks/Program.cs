@@ -45,5 +45,8 @@ public class NullChecksApp : SwitchApp
         IShape real = new Square();
         Console.WriteLine("ok " + n.Get() + " " + n.Kind() + " " + real.Area() + " "
             + (missing?.Name ?? "none"));                              // ok 1 node 4 none
+
+        // The string building of a ternary branch runs only when that branch is taken.
+        Console.WriteLine(Try(() => { var t = missing != null ? "Name: " + missing.Name : "-"; }));  // none
     }
 }

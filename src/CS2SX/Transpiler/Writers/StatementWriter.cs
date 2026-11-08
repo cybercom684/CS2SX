@@ -249,6 +249,8 @@ public sealed class StatementWriter
 
             var (cTypeFinal, isPtr) = InferLocalType(declType, v);
             if (string.IsNullOrWhiteSpace(cTypeFinal)) cTypeFinal = "int";
+            // Inference can yield a C# keyword (e.g. `var s = c ? "a" : "b"` → "string").
+            if (cTypeFinal is "string" or "bool") cTypeFinal = TypeRegistry.MapType(cTypeFinal);
 
             // Build the initializer first (this emits any LINQ/collection expansion
             // and returns the resulting expression — often a registered temp var).

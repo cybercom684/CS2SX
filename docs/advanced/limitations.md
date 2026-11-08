@@ -1,18 +1,60 @@
 # Grenzen und Workarounds
 
-Diese Seite beschreibt was CS2SX nicht unterstützt und wie man die häufigsten Einschränkungen umgeht.
+Diese Seite beschreibt, was CS2SX nicht unterstützt und wie man die häufigsten Einschränkungen umgeht. Stand: 0.5, jeder Punkt ist gegen den aktuellen Transpiler geprüft.
+
+---
+
+## Speicher: kein Garbage Collector
+
+Das transpilierte Programm hat keine .NET-Laufzeit und damit keinen Garbage Collector. Objekte, Listen und Strings, die in Feldern liegen, leben, bis die App endet oder das besitzende Objekt freigegeben wird. Für typische Homebrew-Apps ist das unkritisch. Wer aber in jedem Frame neue Objekte erzeugt (`new` in `OnFrame`), verbraucht stetig Speicher.
+
+```csharp
+// UNGÜNSTIG — 60 neue Objekte pro Sekunde, die nie freigegeben werden
+public override void OnFrame()
+{
+    var p = new Partikel();
+    ...
+}
+
+// BESSER — einmal anlegen und wiederverwenden
+private readonly List<Partikel> _pool = new List<Partikel>();
+```
+
+---
+
+## Strings: Länge und Lebensdauer
+
+Strings aus Verkettung, Interpolation oder `ToString()` entstehen in einem Ring aus 512 Puffern zu je 1 KB.
+
+- **Länge:** Ein so erzeugter String ist auf **1023 Zeichen** begrenzt, längere werden abgeschnitten. Für lange Texte `StringBuilder` verwenden.
+- **Felder:** Beim Zuweisen an ein Feld wird der String auf den Heap kopiert und bleibt gültig.
+- **Lokale Variablen und Rückgabewerte:** Diese zeigen in den Ring. Sie bleiben für etwa 512 weitere String-Operationen gültig, also für den Rest des Frames, aber nicht dauerhaft.
+
+```csharp
+private string _status = "";
+
+public string Status() => $"Punkte: {_score}";   // OK — Rückgabewert für den Aufrufer
+
+public override void OnFrame()
+{
+    _status = Status();              // OK — Feldzuweisung kopiert den String
+    string tmp = Status();           // OK — im selben Frame verwenden
+}
+```
+
+Problematisch ist nur, einen lokalen String in einer Sammlung oder einem Objekt aufzubewahren, ohne ihn einem `string`-Feld zuzuweisen, z. B. in einer `List<string>`, die über viele Frames wächst. Dann den String über ein Feld oder `StringBuilder` führen.
 
 ---
 
 ## Lambda: erfasste lokale Variablen sind Kopien
 
-Felder sieht eine Lambda live (über `this`). Erfasste **lokale Variablen** werden aber beim Erzeugen der Lambda kopiert. Schreibt die Lambda in eine solche Variable, sieht die Methode die Änderung nicht. `cs2sx check` warnt in diesem Fall.
+Felder sieht eine Lambda live (über `this`). Erfasste **lokale Variablen** werden aber beim Erzeugen der Lambda kopiert. Schreibt die Lambda in eine solche Variable, sieht die Methode die Änderung nicht. Der Transpiler warnt in diesem Fall.
 
 ```csharp
 // FALSCH — zaehler ist eine lokale Variable; die Lambda erhöht ihre Kopie
 int zaehler = 0;
 Action cb = () => zaehler++;
-cb();                       // zaehler bleibt 0 (Warnung von cs2sx check)
+cb();                       // zaehler bleibt 0 (Warnung beim Build)
 
 // RICHTIG — geteilten Zustand in ein Feld legen
 private int _zaehler;
@@ -21,60 +63,71 @@ Action cb = () => _zaehler++;   // wirkt auf das Feld
 
 ---
 
-## Ternary-Operator mit Null-Objekt
+## Keine generischen Methoden
 
-CS2SX baut `snprintf`-Ausdrücke für String-Verkettungen vor der Bedingungsprüfung. Ein Ternary der bei `null` auf Felder des Objekts zugreift crasht.
-
-```csharp
-// FALSCH — snprintf wertet found.Name aus bevor null geprüft wird → Crash
-NamedItem found = Search("X");
-_result = found != null ? "Name: " + found.Name : "nicht gefunden";
-
-// RICHTIG — if/else trennt die Code-Pfade klar
-if (found != null)
-    _result = "Name: " + found.Name;
-else
-    _result = "nicht gefunden";
-```
-
----
-
-## Environment.Exit(0)
-
-`Environment.Exit(0)` ruft direkt `exit()` auf und überspringt libnx-Cleanup. Auf echter Hardware erscheint die Fehlermeldung **„Software wurde wegen eines Fehlers beendet"**.
-
-```csharp
-// FALSCH — bricht hart ab, keine saubere Rückkehr ins Homebrew-Menü
-if (Input.IsDown(NpadButton.Plus))
-    Environment.Exit(0);
-
-// RICHTIG — Quit-Flag setzen, Loop endet von selbst
-private bool _quit;
-public override void OnFrame()
-{
-    if (Input.IsDown(NpadButton.Plus)) _quit = true;
-    if (_quit) return;
-    // ... Frame-Code
-}
-```
-
----
-
-## Strings als Felder
-
-**Problem:** Interpolierte Strings erzeugen Stack-Buffer. Werden sie in Feldern gespeichert, entsteht ein dangling pointer im generierten C.
+Generische **Klassen** werden für jeden verwendeten konkreten Typ erzeugt (`Stack<int>`, `Pool<Gegner>`). Generische **Methoden** (`T Max<T>(T a, T b)`) werden dagegen nicht unterstützt, auch ohne Constraints.
 
 ```csharp
 // FALSCH
-private string _text;
-public void Update() { _text = $"Wert: {_wert}"; }
+public static T Max<T>(T a, T b) where T : IComparable<T> => a.CompareTo(b) > 0 ? a : b;
 
-// RICHTIG — String-Literal oder direktes Ausgeben
-private string _text = "Standardwert";
-public void Update() { Console.WriteLine($"Wert: {_wert}"); }
+// RICHTIG — eine Methode pro Typ
+public static int Max(int a, int b) => a > b ? a : b;
+public static float Max(float a, float b) => a > b ? a : b;
+```
 
-// RICHTIG — wenn Feldwert dynamisch sein muss: Hilfsklasse/Methode
-public string GetText() => $"Wert: {_wert}";
+---
+
+## Kein `record with { }`
+
+```csharp
+public record Punkt(int X, int Y);
+
+// FALSCH — with-Ausdruck nicht unterstützt
+var p2 = p1 with { X = 10 };
+
+// RICHTIG — manuell kopieren
+var p2 = new Punkt(10, p1.Y);
+```
+
+---
+
+## Kein `foreach` über Ranges
+
+```csharp
+// FALSCH
+foreach (var i in 0..10) { }
+
+// RICHTIG
+for (int i = 0; i < 10; i++) { }
+```
+
+---
+
+## Kein `new object()` und kein `lock`
+
+`lock` wird ignoriert (mit Warnung). Der App-Code läuft im Main-Thread; die Laufzeit nutzt Threads nur intern, z. B. für HTTP. `new object()` als Sperrobjekt wird nicht unterstützt.
+
+---
+
+## Kein Async/Await
+
+`async`/`await` wird synchron ausgegeben. Alles läuft im Main-Thread.
+
+```csharp
+// FALSCH — await täuscht Asynchronität vor, die nicht existiert
+await Task.Delay(1000);
+
+// RICHTIG — Zeit messen
+private readonly Stopwatch _uhr = Stopwatch.StartNew();
+public override void OnFrame()
+{
+    if (_uhr.ElapsedMilliseconds >= 1000)
+    {
+        _uhr.Restart();
+        // verzögerte Aktion
+    }
+}
 ```
 
 ---
@@ -94,125 +147,18 @@ Console.WriteLine(_ziel?.Name ?? "kein Ziel");
 
 ---
 
-## Kein Async/Await
+## Environment.Exit(0)
 
-`async`/`await` wird synchron ausgegeben. Alle Aufgaben laufen im Main-Thread.
-
-```csharp
-// FALSCH — await täuscht Asynchronität vor, die nicht existiert
-await Task.Delay(1000);
-
-// RICHTIG — Frame-Counter als Timer
-private int _timer = 0;
-public override void OnFrame()
-{
-    _timer++;
-    if (_timer >= 60)  // 60 Frames ≈ 1 Sekunde
-    {
-        _timer = 0;
-        // verzögerte Aktion
-    }
-}
-```
-
----
-
-## Kein `foreach` über Ranges
-
-```csharp
-// FALSCH — Range-Expression in foreach nicht unterstützt
-foreach (var i in 0..10) { }
-
-// RICHTIG
-for (int i = 0; i < 10; i++) { }
-```
-
----
-
-## Generics nur mit konkreten Typen
-
-```csharp
-// FALSCH — Generic-Constraint zur Laufzeit
-public T Max<T>(T a, T b) where T : IComparable<T>
-    => a.CompareTo(b) > 0 ? a : b;
-
-// RICHTIG — separate Methoden für jeden Typ
-public int MaxInt(int a, int b) => a > b ? a : b;
-public float MaxFloat(float a, float b) => a > b ? a : b;
-```
-
----
-
-## Kein `record with { }` Ausdruck
-
-```csharp
-public record Punkt(int X, int Y);
-
-// FALSCH — with-Expression nicht unterstützt
-var p2 = p1 with { X = 10 };
-
-// RICHTIG — manuell kopieren
-var p2 = new Punkt(10, p1.Y);
-```
-
----
-
-## Events: Nur ein Subscriber
-
-```csharp
-// Nur der letzte Subscriber wird ausgeführt
-_button.OnClick += HandlerA;
-_button.OnClick += HandlerB;  // HandlerA wird überschrieben!
-
-// RICHTIG — wrapper Methode
-_button.OnClick = () => { HandlerA(); HandlerB(); };
-```
-
----
-
-## Kein `lock`
-
-`lock` wird als no-op transpiliert. Nintendo Switch Homebrew läuft sowieso single-threaded.
-
----
-
-## String-Interpolation in Rückgabewerten
-
-```csharp
-// FALSCH — gibt Pointer auf lokalen Stack-Buffer zurück
-public string GetStatus() => $"Score: {_score}";
-
-// RICHTIG — statischen Puffer oder String-Literal zurückgeben
-private string _statusBuf = "";
-public string GetStatus()
-{
-    _statusBuf = _score > 0 ? "Aktiv" : "Bereit";
-    return _statusBuf;
-}
-```
+`Environment.Exit(0)` ruft direkt `exit()` auf und überspringt das libnx-Cleanup. Auf echter Hardware erscheint dann die Meldung **„Software wurde wegen eines Fehlers beendet"**. Stattdessen `App.Quit()` aufrufen: Die Hauptschleife endet nach dem aktuellen Frame, und `OnExit()` läuft noch. Die Plus-Taste beendet die App ohnehin automatisch.
 
 ---
 
 ## Reflection
 
-Reflection (`.GetType()`, `Activator.CreateInstance()`, `MethodInfo` etc.) ist grundsätzlich nicht verfügbar — die .NET Runtime existiert im transpilierten C nicht. Es gibt keine Alternative; Reflection-lastigen Code muss anders strukturiert werden (z.B. mit einer expliziten Factory-Methode oder einem Registry-Dictionary).
-
----
-
-## `StringBuilder`
-
-`StringBuilder` wird grundsätzlich unterstützt, aber die Ausgabe von `ToString()` hat die gleiche Einschränkung wie interpolierte Strings — nicht in Feldern speichern.
-
-```csharp
-// RICHTIG — direkt ausgeben
-var sb = new System.Text.StringBuilder();
-sb.Append("Hallo");
-sb.Append(" Switch");
-Console.WriteLine(sb.ToString());
-```
+Reflection (`Activator.CreateInstance()`, `MethodInfo` usw.) gibt es nicht, weil die .NET-Laufzeit im transpilierten C fehlt. Stattdessen eine explizite Factory-Methode oder ein Dictionary mit Konstruktor-Delegates verwenden.
 
 ---
 
 ## `ulong` statt `IntPtr` für externe Handles
 
-Siehe [Externe Libraries](external-libs.md#opake-handle-typen) für eine ausführliche Erklärung.
+Siehe [Externe Libraries](external-libs.md#opake-handle-typen).

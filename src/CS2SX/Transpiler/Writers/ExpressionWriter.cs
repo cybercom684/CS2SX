@@ -1398,8 +1398,7 @@ public sealed class ExpressionWriter : IExpressionWriter
         if (prop == "Text" && isBuiltinTextControl)
         {
             if (assign.Right is ConditionalExpressionSyntax cond)
-                return "Label_SetText(" + obj + ", (" + Write(cond.Condition) + ") ? "
-                     + Write(cond.WhenTrue) + " : " + Write(cond.WhenFalse) + ")";
+                return "Label_SetText(" + obj + ", " + WriteConditional(cond) + ")";
             if (assign.Right is InterpolatedStringExpressionSyntax interp)
                 return FormatStringBuilder.BuildLabelSetText(obj, interp, _ctx, Write);
             if (assign.Right is LiteralExpressionSyntax litStr
@@ -2603,7 +2602,32 @@ public sealed class ExpressionWriter : IExpressionWriter
         || csType is "TouchState" or "StickPos" or "BatteryInfo" or "TimeInfo" or "MotionState";
 
     private string WriteConditional(ConditionalExpressionSyntax cond)
-        => "(" + Write(cond.Condition) + " ? " + Write(cond.WhenTrue) + " : " + Write(cond.WhenFalse) + ")";
+    {
+        var c = Write(cond.Condition);
+        // A branch may hoist statements (string building, temporaries) in front of the
+        // current statement. Those must only run when their branch is taken — otherwise
+        // `x != null ? "a" + x.Name : "-"` dereferences x before the check. Such a branch
+        // becomes a GNU statement expression that holds its own hoisted statements.
+        var t = WriteBranch(cond.WhenTrue);
+        var f = WriteBranch(cond.WhenFalse);
+        return "(" + c + " ? " + t + " : " + f + ")";
+    }
+
+    private string WriteBranch(ExpressionSyntax branch)
+    {
+        var sb = _ctx.Out.GetStringBuilder();
+        var start = sb.Length;
+        var expr = Write(branch);
+        if (sb.Length == start) return expr;
+
+        var hoisted = sb.ToString(start, sb.Length - start);
+        var lines = hoisted.Split('\n').Select(l => l.Trim()).Where(l => l.Length > 0).ToList();
+        // Preprocessor lines and line comments cannot be folded into one expression.
+        if (lines.Any(l => l.StartsWith('#') || l.StartsWith("//"))) return expr;
+
+        sb.Length = start;
+        return "({ " + string.Join(" ", lines) + " " + expr + "; })";
+    }
 
     private string WriteCast(CastExpressionSyntax cast)
     {

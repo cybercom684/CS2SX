@@ -205,7 +205,7 @@ public class FontSwitchApp : SwitchApp
         }
 
         if (Input.IsDown(NpadButton.Plus))
-            Environment.Exit(0);
+            App.Quit();
     }
 }
 ```
@@ -214,15 +214,8 @@ public class FontSwitchApp : SwitchApp
 
 ## Wichtige Regeln
 
-**Kein `$"..."` in Feldern speichern:**
-```csharp
-// FALSCH — dangling pointer im generierten C
-_status = $"Fehler: {errCode}";
+**Strings aus Interpolation sind auf 1023 Zeichen begrenzt**, siehe [Grenzen](limitations.md#strings-länge-und-lebensdauer).
 
-// RICHTIG — direkt ausgeben oder String-Literal
-Console.WriteLine($"Fehler: {errCode}");
-_status = "Fehler aufgetreten";
-```
 
 **Library-Ressourcen in OnExit() freigeben:**
 ```csharp
