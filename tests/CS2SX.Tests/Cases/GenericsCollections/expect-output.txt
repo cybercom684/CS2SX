@@ -1,0 +1,6 @@
+count: 9 first: 0
+a,b,c
+apple=4
+pear=5
+potion
+box: 42

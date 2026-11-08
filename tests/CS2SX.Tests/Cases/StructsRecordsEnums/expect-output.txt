@@ -1,0 +1,6 @@
+3 10 7
+anna 500
+playing
+running 1
+active
+few lives

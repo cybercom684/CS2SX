@@ -1,0 +1,6 @@
+2 10 1
+28 9 1
+True True
+5 3
+troll
+bat

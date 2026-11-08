@@ -1,0 +1,13 @@
+Hello Switch, score=1234, ratio=0.75
+SWITCH switch 6
+wit
+contains
+Twwitch
+padded
+True
+3
+3 parts, last=c
+a-b-c
+empty
+77 1234
+0;1;2;

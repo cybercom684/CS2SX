@@ -17,7 +17,10 @@ public static partial class Cs2sxCli
 {
     private static readonly string s_cliDll = Path.Combine(AppContext.BaseDirectory, "CS2SX.dll");
 
-    public static CliResult Run(string workingDir, params string[] args)
+    public static CliResult Run(string workingDir, params string[] args) =>
+        RunWithEnv(workingDir, null, args);
+
+    public static CliResult RunWithEnv(string workingDir, IReadOnlyDictionary<string, string>? env, params string[] args)
     {
         if (!File.Exists(s_cliDll))
             throw new FileNotFoundException("CS2SX.dll not found next to the test assembly", s_cliDll);
@@ -34,6 +37,8 @@ public static partial class Cs2sxCli
         psi.ArgumentList.Add(s_cliDll);
         foreach (var a in args) psi.ArgumentList.Add(a);
         psi.Environment["NO_COLOR"] = "1";
+        if (env != null)
+            foreach (var (k, v) in env) psi.Environment[k] = v;
 
         using var p = Process.Start(psi)!;
         var stdout = p.StandardOutput.ReadToEndAsync();

@@ -1,6 +1,49 @@
 // Runtime module for switchforms.h — generated split: state and non-trivial functions live
 // here exactly once (a header `static` would give every translation unit its own copy).
 #include "cs2sx_prelude.h"
+#include <sys/iosupport.h>
+
+// ── Test output (runtime tests) ─────────────────────────────────────────────
+// With g_cs2sx_test_output set (build with CS2SX_TEST_OUTPUT=1) every stdout line
+// is also sent to svcOutputDebugString; emulators log it as guest output, where the
+// test harness reads it. stdout keeps going to the console when one is active.
+extern int g_cs2sx_test_output;
+static const devoptab_t* s_cs2sx_console_stdout;
+static devoptab_t s_cs2sx_test_stdout;
+static char s_cs2sx_test_line[1024];
+static size_t s_cs2sx_test_len;
+
+static ssize_t cs2sx_test_write(struct _reent* r, void* fd, const char* ptr, size_t len)
+{
+    for (size_t i = 0; i < len; i++)
+    {
+        if (ptr[i] == '\n')
+        {
+            svcOutputDebugString(s_cs2sx_test_line, s_cs2sx_test_len);
+            s_cs2sx_test_len = 0;
+        }
+        else if (ptr[i] != '\r' && s_cs2sx_test_len < sizeof(s_cs2sx_test_line))
+            s_cs2sx_test_line[s_cs2sx_test_len++] = ptr[i];
+    }
+    if (s_cs2sx_console_stdout && s_cs2sx_console_stdout->write_r)
+        return s_cs2sx_console_stdout->write_r(r, fd, ptr, len);
+    return (ssize_t)len;
+}
+
+void CS2SX_InstallTestOutput(int console_active)
+{
+    if (!g_cs2sx_test_output) return;
+    const devoptab_t* cur = devoptab_list[STD_OUT];
+    if (cur != &s_cs2sx_test_stdout)
+        s_cs2sx_console_stdout = cur;
+    if (!console_active)
+        s_cs2sx_console_stdout = NULL;
+    s_cs2sx_test_stdout = s_cs2sx_console_stdout ? *s_cs2sx_console_stdout : (devoptab_t){ 0 };
+    s_cs2sx_test_stdout.name = "cs2sx_test";
+    s_cs2sx_test_stdout.write_r = cs2sx_test_write;
+    devoptab_list[STD_OUT] = &s_cs2sx_test_stdout;
+    setvbuf(stdout, NULL, _IONBF, 0);
+}
 
 void* CS2SX_ArrNew(int count, size_t elemSize)
 {

@@ -1,0 +1,4 @@
+Hello from CS2SX!
+Press + to exit.
+seconds: 1
+seconds: 2

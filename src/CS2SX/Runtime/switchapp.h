@@ -224,6 +224,8 @@ extern u64         g_cs2sx_kHeld;
 extern u64         g_cs2sx_kUp;
 extern int         g_cs2sx_want_exit;   // set to break the main loop (clean exit)
 extern int         g_cs2sx_has_romfs;   // 1 when the .nro embeds a romfs (build-time)
+extern int         g_cs2sx_test_output; // 1: mirror stdout to svcOutputDebugString (runtime tests)
+void CS2SX_InstallTestOutput(int console_active);
 
 // Requests a clean exit of the app (the main loop breaks after the current frame;
 // OnExit + cleanup still run). App.Quit() in C#.
@@ -358,6 +360,7 @@ static inline void SwitchApp_Run(SwitchApp* self)
     // The text console is up before OnInit, so Console.WriteLine there is visible.
     // An app that calls Graphics.Init() in OnInit switches to the GPU afterwards.
     consoleInit(NULL);
+    CS2SX_InstallTestOutput(1);
     if (self->OnInit)
         self->OnInit(self);
 
@@ -367,10 +370,12 @@ static inline void SwitchApp_Run(SwitchApp* self)
     if (g_gfx_init)
     {
         consoleExit(NULL);
+        CS2SX_InstallTestOutput(0);   // no console behind stdout any more
         use_gfx = CS2SX_Gfx_Start();
         if (!use_gfx)
         {
             consoleInit(NULL);
+            CS2SX_InstallTestOutput(1);
             printf("[cs2sx] GPU initialisation failed - running in text mode\n");
         }
     }

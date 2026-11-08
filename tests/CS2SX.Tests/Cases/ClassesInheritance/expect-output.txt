@@ -1,0 +1,4 @@
+Rect with area 6
+Circle with area 3.14159
+[Square with area 16]
+created: 3

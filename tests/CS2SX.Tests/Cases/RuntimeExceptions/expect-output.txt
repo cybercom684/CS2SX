@@ -1,0 +1,27 @@
+parse 42 2.5 True
+FormatException
+FormatException
+OverflowException
+OverflowException
+ArgumentNullException
+FormatException
+try False 0
+ArgumentOutOfRangeException
+ArgumentOutOfRangeException
+ArgumentOutOfRangeException
+dict 3
+KeyNotFoundException
+ArgumentException
+InvalidOperationException
+InvalidOperationException
+IndexOutOfRangeException
+NullReferenceException
+InvalidOperationException
+InvalidOperationException
+DivideByZeroException
+ArgumentOutOfRangeException
+FileNotFoundException
+fmt 0.1 1E+21 1.5 True 1000000 1E-05
+b-a-b 2.25
+3.14 False
+done

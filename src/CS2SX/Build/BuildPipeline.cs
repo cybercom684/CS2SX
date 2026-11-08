@@ -1232,6 +1232,9 @@ public sealed class BuildPipeline
         w.WriteLine("u64          g_cs2sx_kUp   = 0;");
         w.WriteLine("int          g_cs2sx_want_exit = 0;");
         w.WriteLine($"int          g_cs2sx_has_romfs = {(hasRomfs ? 1 : 0)};");   // romfs/ embedded in the .nro   // set by CS2SX_App_Quit / LaunchNro
+        // CS2SX_TEST_OUTPUT=1: stdout is mirrored to svcOutputDebugString, which
+        // emulators log as guest output — the runtime tests read it from there.
+        w.WriteLine($"int          g_cs2sx_test_output = {(Environment.GetEnvironmentVariable("CS2SX_TEST_OUTPUT") == "1" ? 1 : 0)};");
         w.WriteLine("unsigned int _cs2sx_rand_state = 12345u;");
         w.WriteLine();
         w.WriteLine("char   _cs2sx_arena[CS2SX_ARENA_SIZE];");

@@ -1,0 +1,3 @@
+alive: 2
+alive: 2
+alive: 2

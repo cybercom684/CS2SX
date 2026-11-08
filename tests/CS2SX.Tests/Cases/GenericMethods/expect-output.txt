@@ -1,0 +1,7 @@
+max 7 2.5 pear
+swap 2 1
+pick b 4
+repeat 3 9
+larger 20
+default 0
+count 2

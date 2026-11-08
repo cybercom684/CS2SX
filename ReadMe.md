@@ -172,7 +172,7 @@ docs/               die Dokumentation
 dotnet test
 ```
 
-Die Tests übersetzen jede Beispiel-App, vergleichen den erzeugten C-Code mit gespeicherten Snapshots und bauen sie mit devkitPro zu einer `.nro` (dieser Teil wird ohne devkitPro übersprungen). Wie die Snapshots aktualisiert werden, steht in [tests/README.md](tests/README.md). Aufbau und Regeln der C-Laufzeit beschreibt [src/CS2SX/Runtime/README.md](src/CS2SX/Runtime/README.md).
+Die Tests übersetzen jede Beispiel-App, vergleichen den erzeugten C-Code mit gespeicherten Snapshots und bauen sie mit devkitPro zu einer `.nro` (dieser Teil wird ohne devkitPro übersprungen). Mit `CS2SX_RYUJINX=<Pfad zu Ryujinx.exe>` laufen die Apps zusätzlich im Emulator, und ihre Ausgabe wird mit der erwarteten verglichen. Wie die Snapshots aktualisiert werden, steht in [tests/README.md](tests/README.md). Aufbau und Regeln der C-Laufzeit beschreibt [src/CS2SX/Runtime/README.md](src/CS2SX/Runtime/README.md).
 
 **Release:** Die Version steht in `Directory.Build.props`. Ein gepushter Tag startet die GitHub Action, die testet, baut und das Release veröffentlicht:
 
