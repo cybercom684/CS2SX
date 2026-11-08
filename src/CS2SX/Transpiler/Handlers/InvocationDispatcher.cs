@@ -116,6 +116,20 @@ public sealed class InvocationDispatcher
     public string? Dispatch(InvocationExpressionSyntax inv)
     {
         var calleeStr = inv.Expression.ToString();
+        // System.Console.WriteLine → Console.WriteLine: handlers match the type name,
+        // a namespace in front of it is only qualification.
+        if (inv.Expression is MemberAccessExpressionSyntax { Expression: MemberAccessExpressionSyntax qualified } nsCall
+            && _ctx.SemanticModel != null)
+        {
+            try
+            {
+                if (_ctx.SemanticModel.GetSymbolInfo(qualified).Symbol is INamedTypeSymbol qualifiedType
+                    && qualified.Expression is var nsPart
+                    && _ctx.SemanticModel.GetSymbolInfo(nsPart).Symbol is INamespaceSymbol)
+                    calleeStr = qualifiedType.Name + "." + nsCall.Name;
+            }
+            catch { }
+        }
 
         var rawArgs = inv.ArgumentList.Arguments
             .Select(a => BuildArg(a))

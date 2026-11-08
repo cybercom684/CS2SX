@@ -34,6 +34,7 @@ int Profile_Add(Profile* self, Nullable_int bonus)
 
 void Profile_Dispose(Profile* self)
 {
+    CS2SX_StrDrop(self->f_Nickname); self->f_Nickname = NULL;
 }
 
 void Profile_Free(Profile* self)
@@ -62,7 +63,7 @@ void NullableValuesApp_OnInit(NullableValuesApp* self)
     Profile* p = Profile_New();
     p->f_BestScore = ((Nullable_int){ 120, 1 });
     p->f_LastMode = ((Nullable_Mode){ Mode_Run, 1 });
-    p->f_Nickname = NULL;
+    CS2SX_STR_STORE(p->f_Nickname, NULL);
     Nullable_int found = Profile_Find(p, 3);
     Nullable_int missing = Profile_Find(p, -1);
     Nullable_int fallback = ((missing).has ? (missing) : (found));

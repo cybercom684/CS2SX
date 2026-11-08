@@ -115,6 +115,35 @@ char* _cs2sx_next_buf(void)
     return _cs2sx_arena + pos;
 }
 
+// ── Owned strings of fields ─────────────────────────────────────────────────
+// A string field holds its own heap copy, marked by a header in front of the
+// characters, so overwriting the field can free the old value — and leave alone
+// what it does not own (literals, borrowed pointers).
+#define CS2SX_STR_MAGIC 0x52545343u   /* "CSTR" */
+typedef struct { unsigned int magic; unsigned int reserved; } CS2SX_StrHdr;
+
+const char* CS2SX_StrOwn(const char* s)
+{
+    if (!s) return NULL;
+    size_t len = strlen(s);
+    CS2SX_StrHdr* h = (CS2SX_StrHdr*)malloc(sizeof(CS2SX_StrHdr) + len + 1);
+    if (!h) return NULL;
+    h->magic = CS2SX_STR_MAGIC;
+    h->reserved = 0;
+    char* chars = (char*)(h + 1);
+    memcpy(chars, s, len + 1);
+    return chars;
+}
+
+void CS2SX_StrDrop(const char* s)
+{
+    if (!s) return;
+    CS2SX_StrHdr* h = (CS2SX_StrHdr*)s - 1;
+    if (h->magic != CS2SX_STR_MAGIC) return;   // not an owned copy — never free
+    h->magic = 0;                               // dropped once only
+    CS2SX_ReleaseLater(h, free);                // readers keep it until the next frame
+}
+
 char* _cs2sx_heap_strdup(const char* src)
 {
     if (!src) return NULL;

@@ -54,7 +54,7 @@ void Point_Ctor_3(Point* self, int x, int y, const char* tag)
 {
     self->f_X = x;
     self->f_Y = y;
-    self->f_Tag = _cs2sx_heap_strdup(tag);
+    CS2SX_STR_STORE(self->f_Tag, tag);
 }
 
 Point* Point_New_3(int x, int y, const char* tag)
@@ -70,6 +70,7 @@ Point* Point_New_3(int x, int y, const char* tag)
 
 void Point_Dispose(Point* self)
 {
+    CS2SX_StrDrop(self->f_Tag); self->f_Tag = NULL;
 }
 
 void Point_Free(Point* self)

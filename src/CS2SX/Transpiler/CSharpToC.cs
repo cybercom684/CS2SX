@@ -310,6 +310,20 @@ public sealed class CSharpToC : CSharpSyntaxWalker
             VisitClassDeclaration(nested);
     }
 
+    /// Initial value of a class field: strings get their own marked copy (see
+    /// CS2SX_STR_STORE), reference-counted objects a reference.
+    private string FieldInit(ExpressionSyntax value, string code)
+    {
+        try
+        {
+            if (code != "NULL"
+                && _ctx.SemanticModel?.GetTypeInfo(value).ConvertedType?.SpecialType == SpecialType.System_String)
+                return "CS2SX_StrOwn(" + code + ")";
+        }
+        catch { }
+        return Arc.RetainIfShared(value, code, _ctx);
+    }
+
     private INamedTypeSymbol? DeclaredSymbol(ClassDeclarationSyntax node)
     {
         try { return _ctx.SemanticModel?.GetDeclaredSymbol(node); }
@@ -438,6 +452,18 @@ public sealed class CSharpToC : CSharpSyntaxWalker
 
             var csType = ResolveFieldType(field);
 
+            // String fields own a marked copy (CS2SX_STR_STORE).
+            if (csType.TrimEnd('?') == "string")
+            {
+                foreach (var v in field.Declaration.Variables)
+                {
+                    var fieldName = v.Identifier.Text.TrimStart('_');
+                    var prefix = TypeRegistry.HasNoPrefix(fieldName) ? "" : "f_";
+                    _ctx.WriteLine($"CS2SX_StrDrop(self->{prefix}{fieldName}); self->{prefix}{fieldName} = NULL;");
+                }
+                continue;
+            }
+
             // Nullable value types are inline value structs — nothing to free.
             if (NullableHandler.IsNullable(csType)) continue;
 
@@ -507,6 +533,20 @@ public sealed class CSharpToC : CSharpSyntaxWalker
                     _ctx.WriteLine($"if ({fieldExpr}) {{ {cType}_Free({fieldExpr}); {fieldExpr} = NULL; }}");
                 }
             }
+        }
+
+        // Auto-properties are fields too: their strings and objects are owned.
+        foreach (var prop in node.Members.OfType<PropertyDeclarationSyntax>())
+        {
+            if (prop.Modifiers.Any(m => m.IsKind(SyntaxKind.StaticKeyword))) continue;
+            if (!PropertyWriter.IsAutoProperty(prop)) continue;
+            var csType = ResolvePropertyType(prop).TrimEnd('?');
+            var pfx = TypeRegistry.HasNoPrefix(prop.Identifier.Text) ? "" : "f_";
+            var expr = $"self->{pfx}{prop.Identifier.Text}";
+            if (csType == "string")
+                _ctx.WriteLine($"CS2SX_StrDrop({expr}); {expr} = NULL;");
+            else if (TypeRegistry.ArcRoot(csType) is { } root)
+                _ctx.WriteLine($"if ({expr}) {{ {root}_Free(({root}*){expr}); {expr} = NULL; }}");
         }
     }
 
@@ -982,7 +1022,7 @@ public sealed class CSharpToC : CSharpSyntaxWalker
                 _ctx.Out.WriteLine($"__attribute__((constructor)) static void {name}_{fieldName}_Init(void)");
                 _ctx.Out.WriteLine("{");
                 _ctx.Indent();
-                var initVal = Arc.RetainIfShared(v.Initializer.Value, _exprWriter.Write(v.Initializer.Value), _ctx);   // may hoist statements here
+                var initVal = FieldInit(v.Initializer.Value, _exprWriter.Write(v.Initializer.Value));   // may hoist statements here
                 _ctx.WriteLine($"{name}_{fieldName} = {initVal};");
                 _ctx.Dedent();
                 _ctx.Out.WriteLine("}");
@@ -1181,7 +1221,7 @@ public sealed class CSharpToC : CSharpSyntaxWalker
                     catch { }
                 }
                 else
-                    initVal = Arc.RetainIfShared(v.Initializer.Value, initVal, _ctx);
+                    initVal = FieldInit(v.Initializer.Value, initVal);
                 _ctx.WriteLine("self->" + prefix + fieldName + " = " + initVal + ";");
             }
         }
@@ -1195,7 +1235,7 @@ public sealed class CSharpToC : CSharpSyntaxWalker
 
             var initPfx = TypeRegistry.HasNoPrefix(prop.Identifier.Text) ? "" : "f_";
             _ctx.WriteLine("self->" + initPfx + prop.Identifier.Text + " = "
-                + Arc.RetainIfShared(prop.Initializer.Value, _exprWriter.Write(prop.Initializer.Value), _ctx) + ";");
+                + FieldInit(prop.Initializer.Value, _exprWriter.Write(prop.Initializer.Value)) + ";");
         }
 
         // Auto-init List<T> properties/fields with no explicit initializer to List_T_New()
@@ -1267,7 +1307,7 @@ public sealed class CSharpToC : CSharpSyntaxWalker
                 var fieldName = v.Identifier.Text.TrimStart('_');
                 var fp = TypeRegistry.HasNoPrefix(fieldName) ? "" : "f_";
                 _ctx.WriteLine(prefix + fp + fieldName + " = "
-                    + Arc.RetainIfShared(v.Initializer.Value, _exprWriter.Write(v.Initializer.Value), _ctx) + ";");
+                    + FieldInit(v.Initializer.Value, _exprWriter.Write(v.Initializer.Value)) + ";");
             }
         }
         foreach (var prop in node.Members.OfType<PropertyDeclarationSyntax>())
@@ -1277,7 +1317,7 @@ public sealed class CSharpToC : CSharpSyntaxWalker
             if (prop.Initializer == null) continue;
             var initPfx = TypeRegistry.HasNoPrefix(prop.Identifier.Text) ? "" : "f_";
             _ctx.WriteLine(prefix + initPfx + prop.Identifier.Text + " = "
-                + Arc.RetainIfShared(prop.Initializer.Value, _exprWriter.Write(prop.Initializer.Value), _ctx) + ";");
+                + FieldInit(prop.Initializer.Value, _exprWriter.Write(prop.Initializer.Value)) + ";");
         }
         foreach (var prop in node.Members.OfType<PropertyDeclarationSyntax>())
         {

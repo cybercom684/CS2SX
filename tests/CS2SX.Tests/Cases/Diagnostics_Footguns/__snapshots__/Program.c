@@ -37,7 +37,7 @@ Settings* Settings_Retain(Settings* self)
 
 void Player_Ctor_1(Player* self, const char* name)
 {
-    self->f_Name = _cs2sx_heap_strdup(name);
+    CS2SX_STR_STORE(self->f_Name, name);
 }
 
 Player* Player_New_1(const char* name)
@@ -74,6 +74,7 @@ void Player_Free(Player* self)
 
 void Player_Dispose(Player* self)
 {
+    CS2SX_StrDrop(self->f_Name); self->f_Name = NULL;
     if (self->f_Settings) { Settings_Free(self->f_Settings); self->f_Settings = NULL; }
 }
 

@@ -9,7 +9,7 @@ static Shape_vtable Shape_vtable_instance =
 
 void Shape_Ctor(Shape* self, const char* name)
 {
-    self->f_Name = _cs2sx_heap_strdup(name);
+    CS2SX_STR_STORE(self->f_Name, name);
     Shape_Created++;
 }
 
@@ -34,6 +34,7 @@ const char* Shape_Describe(Shape* self)
 
 void Shape_Dispose(Shape* self)
 {
+    CS2SX_StrDrop(self->f_Name); self->f_Name = NULL;
 }
 
 void Shape_Free(Shape* self)
@@ -108,7 +109,7 @@ static Shape_vtable Square_vtable_instance;
 void Square_Ctor(Square* self, float side)
 {
     Rect_Ctor((Rect*)self, side, side);
-    self->base.base.f_Name = "Square";
+    CS2SX_STR_STORE(self->base.base.f_Name, "Square");
 }
 
 Square* Square_New(float side)

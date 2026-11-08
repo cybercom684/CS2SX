@@ -4,7 +4,7 @@
 
 void Enemy_Ctor(Enemy* self, const char* name, int hp)
 {
-    self->f_Name = _cs2sx_heap_strdup(name);
+    CS2SX_STR_STORE(self->f_Name, name);
     self->f_Hp = hp;
 }
 
@@ -21,6 +21,7 @@ Enemy* Enemy_New(const char* name, int hp)
 
 void Enemy_Dispose(Enemy* self)
 {
+    CS2SX_StrDrop(self->f_Name); self->f_Name = NULL;
 }
 
 void Enemy_Free(Enemy* self)

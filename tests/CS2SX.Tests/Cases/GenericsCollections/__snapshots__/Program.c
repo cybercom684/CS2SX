@@ -4,7 +4,7 @@
 
 void Item_Ctor(Item* self, const char* name, int count)
 {
-    self->f_Name = _cs2sx_heap_strdup(name);
+    CS2SX_STR_STORE(self->f_Name, name);
     self->f_Count = count;
 }
 
@@ -21,6 +21,7 @@ Item* Item_New(const char* name, int count)
 
 void Item_Dispose(Item* self)
 {
+    CS2SX_StrDrop(self->f_Name); self->f_Name = NULL;
 }
 
 void Item_Free(Item* self)

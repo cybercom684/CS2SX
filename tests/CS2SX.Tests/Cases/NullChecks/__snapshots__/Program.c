@@ -36,6 +36,7 @@ const char* Node_Kind(Node* self)
 void Node_Dispose(Node* self)
 {
     if (self->f_Next) { Node_Free(self->f_Next); self->f_Next = NULL; }
+    CS2SX_StrDrop(self->f_Name); self->f_Name = NULL;
 }
 
 void Node_Free(Node* self)

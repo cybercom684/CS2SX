@@ -78,6 +78,15 @@ static inline void CS2SX_ArrCheck(const void* a, int i)
 #define CS2SX_RETAIN(Root, x) ({ __typeof__(x) _cs2sx_r = (x); \
     Root##_Retain((Root*)_cs2sx_r); _cs2sx_r; })
 
+/// String fields own a marked heap copy (CS2SX_StrOwn). Storing replaces it and
+/// frees the previous copy at the next frame (CS2SX_StrDrop ignores literals and
+/// anything not owned). lv is evaluated once; the value is the new copy.
+const char* CS2SX_StrOwn(const char* s);
+void CS2SX_StrDrop(const char* s);
+#define CS2SX_STR_STORE(lv, v) ({ __typeof__(&(lv)) _cs2sx_sp = &(lv); \
+    const char* _cs2sx_sn = CS2SX_StrOwn(v); const char* _cs2sx_so = *_cs2sx_sp; \
+    *_cs2sx_sp = _cs2sx_sn; CS2SX_StrDrop(_cs2sx_so); _cs2sx_sn; })
+
 /// Stores v (already holding its reference) into the field lv and gives up the
 /// field's previous reference at the next frame (CS2SX_ReleaseLater). lv is
 /// evaluated once; the expression's value is v.

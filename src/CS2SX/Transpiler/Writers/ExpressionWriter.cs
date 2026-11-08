@@ -876,6 +876,22 @@ public sealed class ExpressionWriter : IExpressionWriter
         var op = assign.OperatorToken.Text;
         var right = Write(assign.Right);
 
+        // String field/property of a class: it owns a marked heap copy; the previous
+        // copy is freed at the next frame (CS2SX_STR_STORE).
+        if ((op == "=" || op == "+=") && IsOwnedStringField(assign.Left))
+        {
+            var target = Write(assign.Left);
+            var value = right;
+            if (op == "+=")
+            {
+                var buf = _ctx.NextStringBuf();
+                _ctx.Out.WriteLine(_ctx.Tab + "snprintf(" + buf + ", CS2SX_STRBUF_SIZE, \"%s%s\", "
+                    + target + " ? " + target + " : \"\", " + right + " ? " + right + " : \"\");");
+                value = buf;
+            }
+            return "CS2SX_STR_STORE(" + target + ", " + value + ")";
+        }
+
         // A field of a reference-counted class owns one reference (see Arc): take one
         // for the new value, give up the old one (deferred to the next frame).
         if (op == "=" && OwningStoreRoot(assign.Left) is { } storeRoot)
@@ -966,6 +982,27 @@ public sealed class ExpressionWriter : IExpressionWriter
             return WriteDeconstruction(assign.Left, assign.Right, right);
 
         return Write(assign.Left) + " " + op + " " + right;
+    }
+
+    /// A string field or auto-property of a user class (static or instance): storage
+    /// that owns its string (CS2SX_StrOwn). Struct members keep the old behaviour —
+    /// struct copies would share the string.
+    private bool IsOwnedStringField(ExpressionSyntax left)
+    {
+        if (_ctx.SemanticModel == null) return false;
+        try
+        {
+            var sym = _ctx.SemanticModel.GetSymbolInfo(left).Symbol;
+            if (sym?.ContainingType is not { TypeKind: TypeKind.Class } owner
+                || !TranspilerContext.IsUserCode(owner))
+                return false;
+            if (sym is IFieldSymbol { IsConst: false } f)
+                return f.Type.SpecialType == SpecialType.System_String;
+            return sym is IPropertySymbol p && p.Type.SpecialType == SpecialType.System_String
+                   && p.DeclaringSyntaxReferences.FirstOrDefault()?.GetSyntax() is PropertyDeclarationSyntax pd
+                   && PropertyWriter.IsAutoProperty(pd);
+        }
+        catch { return false; }
     }
 
     /// Root class of the element type when <paramref name="elem"/> indexes an array of a
@@ -2608,7 +2645,9 @@ public sealed class ExpressionWriter : IExpressionWriter
                 var cp = isRuntimeInit
                     ? TypeRegistry.MapProperty(propName)
                     : (TypeRegistry.HasNoPrefix(propName) ? propName : "f_" + propName);
-                if (OwningStoreRoot(asgn.Left) is { } initRoot)
+                if (IsOwnedStringField(asgn.Left))
+                    _ctx.Out.WriteLine(_ctx.Tab + "CS2SX_STR_STORE(" + tmp + "->" + cp + ", " + propVal + ");");
+                else if (OwningStoreRoot(asgn.Left) is { } initRoot)
                     _ctx.Out.WriteLine(_ctx.Tab + "CS2SX_ARC_STORE(" + initRoot + ", " + tmp + "->" + cp + ", "
                         + Arc.RetainIfShared(asgn.Right, propVal, _ctx) + ");");
                 else

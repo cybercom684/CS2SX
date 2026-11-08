@@ -5,7 +5,7 @@
 
 void MenuEntry_Ctor(MenuEntry* self, const char* title)
 {
-    self->f_Title = _cs2sx_heap_strdup(title);
+    CS2SX_STR_STORE(self->f_Title, title);
 }
 
 MenuEntry* MenuEntry_New(const char* title)
@@ -21,6 +21,7 @@ MenuEntry* MenuEntry_New(const char* title)
 
 void MenuEntry_Dispose(MenuEntry* self)
 {
+    CS2SX_StrDrop(self->f_Title); self->f_Title = NULL;
 }
 
 void MenuEntry_Free(MenuEntry* self)
