@@ -44,7 +44,7 @@ void Board_Free(Board* self)
 {
     if (!self) return;
     if (--self->_rc > 0) return;
-    if (self->f_Cells) { free(self->f_Cells); self->f_Cells = NULL; }
+    CS2SX_ArrFree(self->f_Cells); self->f_Cells = NULL;
     free(self);
 }
 

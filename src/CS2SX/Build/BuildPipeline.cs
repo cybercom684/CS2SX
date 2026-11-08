@@ -1058,29 +1058,73 @@ public sealed class BuildPipeline
     /// If the source contains a class that derives from a user-defined (transpiled) base,
     /// returns "#include "BaseClass.h"\n"; otherwise returns empty string.
     /// </summary>
+    /// <summary>
+    /// #includes of the headers that must be complete before this file's structs: the
+    /// files declaring the base class of each class here, and those declaring user
+    /// structs embedded by value in fields. A forward declaration is not enough for a
+    /// by-value member (`Page base;`). Types are located by declaration, not by file
+    /// name — a base class may live anywhere (Page in Ui.cs).
+    /// </summary>
     private static string GetUserDefinedBaseInclude(string source, IReadOnlyList<string> transpiledFiles)
     {
         try
         {
+            var typeToFile = TypeToFileMap(transpiledFiles);
             var tree = Microsoft.CodeAnalysis.CSharp.CSharpSyntaxTree.ParseText(source);
-            var cls = tree.GetRoot().DescendantNodes()
-                .OfType<ClassDeclarationSyntax>()
-                .FirstOrDefault(c => c.BaseList?.Types.Any() == true);
-            if (cls == null) return "";
+            var root = tree.GetRoot();
+            var ownTypes = new HashSet<string>(root.DescendantNodes().OfType<BaseTypeDeclarationSyntax>()
+                .Select(t => t.Identifier.Text), StringComparer.Ordinal);
 
-            var baseTypeSyntax = cls.BaseList!.Types.First().Type.ToString().Trim();
-            var baseName = baseTypeSyntax.Split('<')[0].Trim();
+            var needed = new List<string>();
+            void Need(string typeName)
+            {
+                var name = typeName.Split('<')[0].Trim();
+                if (ownTypes.Contains(name) || s_builtinBaseTypes.Contains(name)) return;
+                if (typeToFile.TryGetValue(name, out var file) && !needed.Contains(file)) needed.Add(file);
+            }
 
-            if (s_builtinBaseTypes.Contains(baseName)) return "";
+            foreach (var cls in root.DescendantNodes().OfType<ClassDeclarationSyntax>())
+            {
+                var first = cls.BaseList?.Types.FirstOrDefault()?.Type.ToString();
+                if (first != null) Need(first);   // interfaces map to no file here
+            }
+            foreach (var field in root.DescendantNodes().OfType<FieldDeclarationSyntax>())
+            {
+                var t = field.Declaration.Type.ToString().Trim();
+                if (s_structTypes.Contains(t)) Need(t);
+            }
 
-            // Only include if the base type is one of the transpiled user files
-            var transpiledNames = transpiledFiles
-                .Select(f => Path.GetFileNameWithoutExtension(f));
-            if (!transpiledNames.Contains(baseName, StringComparer.Ordinal)) return "";
-
-            return $"#include \"{baseName}.h\"\n";
+            return string.Concat(needed.Select(f => $"#include \"{f}.h\"\n"));
         }
         catch { return ""; }
+    }
+
+    private static Dictionary<string, string>? s_typeToFile;
+    private static IReadOnlyList<string>? s_typeToFileFor;
+    private static HashSet<string> s_structTypes = new(StringComparer.Ordinal);
+
+    /// Type name → header base name (classes and structs; interfaces are in _interfaces.h).
+    private static Dictionary<string, string> TypeToFileMap(IReadOnlyList<string> files)
+    {
+        if (s_typeToFile != null && ReferenceEquals(s_typeToFileFor, files)) return s_typeToFile;
+        var map = new Dictionary<string, string>(StringComparer.Ordinal);
+        var structs = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var f in files)
+        {
+            var root = Microsoft.CodeAnalysis.CSharp.CSharpSyntaxTree.ParseText(File.ReadAllText(f)).GetRoot();
+            foreach (var t in root.DescendantNodes().OfType<TypeDeclarationSyntax>()
+                         .Where(t => t is ClassDeclarationSyntax or StructDeclarationSyntax or RecordDeclarationSyntax))
+            {
+                map.TryAdd(t.Identifier.Text, Path.GetFileNameWithoutExtension(f));
+                if (t is StructDeclarationSyntax
+                    || t is RecordDeclarationSyntax r && r.ClassOrStructKeyword.Text == "struct")
+                    structs.Add(t.Identifier.Text);
+            }
+        }
+        s_typeToFile = map;
+        s_typeToFileFor = files;
+        s_structTypes = structs;
+        return map;
     }
 
     private static List<string> SplitSimpleGenericArgs(string s)

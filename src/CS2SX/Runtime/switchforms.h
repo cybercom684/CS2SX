@@ -68,7 +68,8 @@ static inline void CS2SX_ArrCheck(const void* a, int i)
 
 /// a[i] with the check, still an lvalue (a[i] = v, a[i]++, &a[i]); a and i are
 /// evaluated once.
-#define CS2SX_AT(a, i) (*({ __typeof__(a) _cs2sx_a = (a); int _cs2sx_i = (int)(i); \
+/// (&(a)[0] makes fixed-size C arrays — e.g. TouchState.x — decay to a pointer.)
+#define CS2SX_AT(a, i) (*({ __typeof__(&(a)[0]) _cs2sx_a = (a); int _cs2sx_i = (int)(i); \
     CS2SX_ArrCheck(_cs2sx_a, _cs2sx_i); _cs2sx_a + _cs2sx_i; }))
 
 /// Frees a heap array created by CS2SX_ArrNew/CS2SX_ArrFromInit (NULL-safe).

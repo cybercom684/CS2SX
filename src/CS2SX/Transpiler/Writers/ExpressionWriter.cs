@@ -1695,15 +1695,16 @@ public sealed class ExpressionWriter : IExpressionWriter
                         return TypeRegistry.IsUserDefinedEnum(fld.ContainingType.Name)
                             ? TypeRegistry.EnumMemberCName(fld.ContainingType.Name, fld.Name)
                             : fld.Name;
-                    // Static-class const field (like AppCategory.Tools = "Tools")
-                    if (fld.IsConst && fld.ContainingType?.IsStatic == true)
+                    // const field via the type name (AppCategory.Tools, Stats.History) — of a
+                    // static or an ordinary class/struct alike
+                    if (fld.IsConst && fld.ContainingType != null && TranspilerContext.IsUserCode(fld.ContainingType))
                     {
                         // Inline the literal value when available — needed for C static array initializers
                         // which require compile-time constants (const char* variables are NOT constants in C)
                         if (fld.ConstantValue is string sv)
                             return "\"" + sv.Replace("\\", "\\\\").Replace("\"", "\\\"") + "\"";
                         if (fld.ConstantValue != null)
-                            return fld.ConstantValue.ToString() ?? (fld.ContainingType.Name + "_" + fld.Name);
+                            return CConstantLiteral(fld.ConstantValue);
                         return fld.ContainingType.Name + "_" + fld.Name;
                     }
                     // Static readonly field on a static class → ClassName_FieldName
@@ -2183,6 +2184,20 @@ public sealed class ExpressionWriter : IExpressionWriter
             _ => Convert.ToString(v, System.Globalization.CultureInfo.InvariantCulture) ?? "0",
         };
     }
+
+    /// A C# constant as a C literal, independent of the machine's culture
+    /// (2.5f → "2.5f", not "2,5"; true → "1").
+    internal static string CConstantLiteral(object value) => value switch
+    {
+        bool b => b ? "1" : "0",
+        float f => f.ToString("R", System.Globalization.CultureInfo.InvariantCulture) + "f",
+        double d => d.ToString("R", System.Globalization.CultureInfo.InvariantCulture),
+        char c => ((int)c).ToString(System.Globalization.CultureInfo.InvariantCulture),
+        long l => l.ToString(System.Globalization.CultureInfo.InvariantCulture) + "LL",
+        ulong ul => ul.ToString(System.Globalization.CultureInfo.InvariantCulture) + "ULL",
+        uint ui => ui.ToString(System.Globalization.CultureInfo.InvariantCulture) + "u",
+        _ => Convert.ToString(value, System.Globalization.CultureInfo.InvariantCulture) ?? "0",
+    };
 
     /// The constructor a `new T(...)` resolves to (null without semantic model).
     private IMethodSymbol? ResolveCtor(SyntaxNode? creation)
@@ -2700,7 +2715,7 @@ public sealed class ExpressionWriter : IExpressionWriter
             return objTypeName + "_get(" + objExpr + ", " + index + ")";
 
         // C# arrays are bounds-checked (IndexOutOfRange / NullReference), see CS2SX_AT.
-        if (IsSingleDimArray(elem.Expression))
+        if (IsSingleDimArray(elem.Expression) && !IsRuntimeFixedArray(elem.Expression))
             return "CS2SX_AT(" + objExpr + ", " + index + ")";
 
         return objExpr + "[" + index + "]";
@@ -2732,6 +2747,20 @@ public sealed class ExpressionWriter : IExpressionWriter
     {
         if (_ctx.SemanticModel == null) return false;
         try { return _ctx.SemanticModel.GetTypeInfo(expr).Type is IArrayTypeSymbol { Rank: 1 }; }
+        catch { return false; }
+    }
+
+    /// Array fields of SDK value structs (e.g. TouchState.x) are fixed-size C arrays
+    /// without the CS2SX array header, so CS2SX_AT must not read one in front of them.
+    private bool IsRuntimeFixedArray(ExpressionSyntax expr)
+    {
+        if (_ctx.SemanticModel == null) return false;
+        try
+        {
+            var sym = _ctx.SemanticModel.GetSymbolInfo(expr).Symbol;
+            var owner = (sym as IFieldSymbol)?.ContainingType ?? (sym as IPropertySymbol)?.ContainingType;
+            return owner is { IsValueType: true } && !TranspilerContext.IsUserCode(owner);
+        }
         catch { return false; }
     }
 

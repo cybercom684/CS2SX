@@ -40,6 +40,6 @@ void ArraysApp_OnInit(ArraysApp* self)
 void ArraysApp_Free(ArraysApp* self)
 {
     if (!self) return;
-    if (self->f_weights) { free(self->f_weights); self->f_weights = NULL; }
+    CS2SX_ArrFree(self->f_weights); self->f_weights = NULL;
     free(self);
 }

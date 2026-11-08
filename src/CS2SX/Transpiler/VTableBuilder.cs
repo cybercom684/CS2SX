@@ -59,11 +59,11 @@ public static class VTableBuilder
 
         foreach (var method in virtuals)
         {
-            var retC  = TypeRegistry.MapType(method.ReturnType.ToString().Trim());
+            var retC  = SlotType(method.ReturnType.ToString().Trim());
             var parms = new List<string> { "void* self" };
             foreach (var p in method.ParameterList.Parameters)
             {
-                var pt = TypeRegistry.MapType(p.Type?.ToString().Trim() ?? "int");
+                var pt = SlotType(p.Type?.ToString().Trim() ?? "int");
                 parms.Add(pt + " " + p.Identifier.Text);
             }
             output.WriteLine("    " + retC + " (*" + method.Identifier.Text
@@ -144,10 +144,10 @@ public static class VTableBuilder
             var mName = method.Identifier.Text;
             methodNames.Add(mName);
             // Cast to match vtable slot signature (void* self) to avoid -Wincompatible-pointer-types
-            var retC = TypeRegistry.MapType(method.ReturnType.ToString().Trim());
+            var retC = SlotType(method.ReturnType.ToString().Trim());
             var castParms = new List<string> { "void*" };
             foreach (var p in method.ParameterList.Parameters)
-                castParms.Add(TypeRegistry.MapType(p.Type?.ToString().Trim() ?? "int"));
+                castParms.Add(SlotType(p.Type?.ToString().Trim() ?? "int"));
             var castType = retC + "(*)(" + string.Join(", ", castParms) + ")";
             output.WriteLine($"    .{mName} = ({castType}){className}_{mName},");
         }
@@ -183,12 +183,10 @@ public static class VTableBuilder
                     foreach (var (slotName, (bm, implementor)) in allSlots)
                     {
                         if (overriddenNames.Contains(slotName)) continue;
-                        var retC = TypeRegistry.MapType(
-                            TranspilerContext.FormatTypeSymbol(bm.ReturnType));
+                        var retC = SlotType(TranspilerContext.FormatTypeSymbol(bm.ReturnType));
                         var castParms = new List<string> { "void*" };
                         foreach (var p in bm.Parameters)
-                            castParms.Add(TypeRegistry.MapType(
-                                TranspilerContext.FormatTypeSymbol(p.Type)));
+                            castParms.Add(SlotType(TranspilerContext.FormatTypeSymbol(p.Type)));
                         var castType = retC + "(*)(" + string.Join(", ", castParms) + ")";
                         output.WriteLine(
                             $"    .{slotName} = ({castType}){implementor.Name}_{slotName},");
@@ -233,10 +231,10 @@ public static class VTableBuilder
         foreach (var method in GetVirtualMethods(node))
         {
             if (method.Modifiers.Any(m => m.IsKind(SyntaxKind.AbstractKeyword))) continue;
-            var retC = TypeRegistry.MapType(method.ReturnType.ToString().Trim());
+            var retC = SlotType(method.ReturnType.ToString().Trim());
             var castParms = new List<string> { "void*" };
             foreach (var p in method.ParameterList.Parameters)
-                castParms.Add(TypeRegistry.MapType(p.Type?.ToString().Trim() ?? "int"));
+                castParms.Add(SlotType(p.Type?.ToString().Trim() ?? "int"));
             var castType = retC + "(*)(" + string.Join(", ", castParms) + ")";
             output.WriteLine($"    .{method.Identifier.Text} = ({castType}){className}_{method.Identifier.Text},");
         }
@@ -349,6 +347,14 @@ public static class VTableBuilder
         => "self->vtable = &" + className + "_vtable_instance;";
 
     // ── Utility ───────────────────────────────────────────────────────────
+
+    /// C type of a vtable slot's parameter/return: the method's own C type, so class
+    /// types keep their pointer (Ui → Ui*), or calls through the slot would not compile.
+    private static string SlotType(string csType)
+    {
+        var mapped = TypeRegistry.MapType(csType);
+        return !mapped.EndsWith("*") && CSharpToC.NeedsPtr(csType) ? mapped + "*" : mapped;
+    }
 
     public static bool HasVirtualMethods(ClassDeclarationSyntax node)
         => GetVirtualMethods(node).Count > 0 || GetVirtualProperties(node).Count > 0;

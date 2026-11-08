@@ -333,25 +333,23 @@ public sealed class CSharpToC : CSharpSyntaxWalker
 
         foreach (var field in node.Members.OfType<FieldDeclarationSyntax>())
         {
-            if (field.Modifiers.Any(m => m.IsKind(SyntaxKind.StaticKeyword))) continue;
+            if (field.Modifiers.Any(m => m.IsKind(SyntaxKind.StaticKeyword) || m.IsKind(SyntaxKind.ConstKeyword))) continue;
 
             var csType = ResolveFieldType(field);
 
             // Nullable value types are inline value structs — nothing to free.
             if (NullableHandler.IsNullable(csType)) continue;
 
-            // FIX: Array-Felder (T[]) werden per calloc/malloc allokiert → müssen free'd werden
+            // Array fields are header arrays (CS2SX_ArrNew): the allocation starts at the
+            // header before the pointer, so plain free() would corrupt the heap.
+            // CS2SX_ArrFree also leaves stack/static arrays alone.
             if (csType.EndsWith("[]"))
             {
-                var innerType = csType[..^2].Trim();
-                if (!TypeRegistry.IsLibNxStruct(innerType))
+                foreach (var v in field.Declaration.Variables)
                 {
-                    foreach (var v in field.Declaration.Variables)
-                    {
-                        var fieldName = v.Identifier.Text.TrimStart('_');
-                        var prefix = TypeRegistry.HasNoPrefix(fieldName) ? "" : "f_";
-                        _ctx.WriteLine($"if (self->{prefix}{fieldName}) {{ free(self->{prefix}{fieldName}); self->{prefix}{fieldName} = NULL; }}");
-                    }
+                    var fieldName = v.Identifier.Text.TrimStart('_');
+                    var prefix = TypeRegistry.HasNoPrefix(fieldName) ? "" : "f_";
+                    _ctx.WriteLine($"CS2SX_ArrFree(self->{prefix}{fieldName}); self->{prefix}{fieldName} = NULL;");
                 }
                 continue;
             }
@@ -503,7 +501,7 @@ public sealed class CSharpToC : CSharpSyntaxWalker
         // Fields and field-like events (event Action<int> Changed; is a delegate field).
         foreach (var field in node.Members.OfType<BaseFieldDeclarationSyntax>())
         {
-            if (field.Modifiers.Any(m => m.IsKind(SyntaxKind.StaticKeyword))) continue;
+            if (field.Modifiers.Any(m => m.IsKind(SyntaxKind.StaticKeyword) || m.IsKind(SyntaxKind.ConstKeyword))) continue;
             if (field.Modifiers.Any(m => m.IsKind(SyntaxKind.ConstKeyword))) continue;
 
             var csType = ResolveFieldType(field);
@@ -663,13 +661,14 @@ public sealed class CSharpToC : CSharpSyntaxWalker
     {
         foreach (var field in node.Members.OfType<BaseFieldDeclarationSyntax>())
         {
-            if (field.Modifiers.Any(m => m.IsKind(SyntaxKind.StaticKeyword))) continue;
+            if (field.Modifiers.Any(m => m.IsKind(SyntaxKind.StaticKeyword) || m.IsKind(SyntaxKind.ConstKeyword))) continue;
 
             var csType = ResolveFieldType(field);
             var cType = ResolveConcreteType(csType);
             var needPtr = !cType.EndsWith("*")
                        && !_ctx.EnumDefs.ContainsKey(csType)
                        && (TypeRegistry.NeedsPointerSuffix(csType)
+                       || csType.TrimEnd('?') == "Stopwatch"   // runtime returns CS2SX_Stopwatch*
                        || TypeRegistry.IsStringBuilder(csType)
                        || TypeRegistry.IsControlType(csType));
             var ptr = needPtr ? "*" : "";
@@ -709,7 +708,7 @@ public sealed class CSharpToC : CSharpSyntaxWalker
 
             var csType = ResolvePropertyType(prop);
             var cType = TypeRegistry.MapType(csType);
-            var ptr = !cType.EndsWith("*") && NeedsPtr(csType) ? "*" : "";
+            var ptr = !cType.EndsWith("*") && (NeedsPtr(csType) || csType.TrimEnd('?') == "Stopwatch") ? "*" : "";
             var propPfx = TypeRegistry.HasNoPrefix(prop.Identifier.Text) ? "" : "f_";
             _ctx.WriteLine(cType + ptr + " " + propPfx + prop.Identifier + ";");
         }
@@ -1050,7 +1049,7 @@ public sealed class CSharpToC : CSharpSyntaxWalker
     {
         foreach (var field in node.Members.OfType<FieldDeclarationSyntax>())
         {
-            if (field.Modifiers.Any(m => m.IsKind(SyntaxKind.StaticKeyword))) continue;
+            if (field.Modifiers.Any(m => m.IsKind(SyntaxKind.StaticKeyword) || m.IsKind(SyntaxKind.ConstKeyword))) continue;
 
             foreach (var v in field.Declaration.Variables)
             {
@@ -1104,7 +1103,7 @@ public sealed class CSharpToC : CSharpSyntaxWalker
 
         foreach (var field in node.Members.OfType<FieldDeclarationSyntax>())
         {
-            if (field.Modifiers.Any(m => m.IsKind(SyntaxKind.StaticKeyword))) continue;
+            if (field.Modifiers.Any(m => m.IsKind(SyntaxKind.StaticKeyword) || m.IsKind(SyntaxKind.ConstKeyword))) continue;
             var csType = field.Declaration.Type.ToString().Trim();
             if (!TypeRegistry.IsList(csType)) continue;
             var inner = TypeRegistry.GetListInnerType(csType) ?? "int";
@@ -1150,7 +1149,7 @@ public sealed class CSharpToC : CSharpSyntaxWalker
     {
         foreach (var field in node.Members.OfType<FieldDeclarationSyntax>())
         {
-            if (field.Modifiers.Any(m => m.IsKind(SyntaxKind.StaticKeyword))) continue;
+            if (field.Modifiers.Any(m => m.IsKind(SyntaxKind.StaticKeyword) || m.IsKind(SyntaxKind.ConstKeyword))) continue;
             foreach (var v in field.Declaration.Variables)
             {
                 if (v.Initializer == null) continue;

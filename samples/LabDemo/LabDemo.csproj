@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Switch API + `dotnet build` -> LabDemo.nro (needs the cs2sx tool on PATH). -->
+    <PackageReference Include="CS2SX.Switch" Version="0.5.1" />
+  </ItemGroup>
+
+</Project>

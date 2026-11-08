@@ -1,0 +1,7 @@
+bin/
+obj/
+cs2sx_out/
+romfs/
+*.nro
+*.nacp
+*.elf

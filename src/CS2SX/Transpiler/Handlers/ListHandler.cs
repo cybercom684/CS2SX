@@ -52,6 +52,11 @@ public sealed class ListHandler : InvocationHandlerBase
         var inner = TypeRegistry.GetListInnerType(listType) ?? "int";
         bool isUserClass = !TypeRegistry.IsPrimitive(inner) && inner != "string";
 
+        // List<Base>.Add(derived): the C element type is Base* — upcast (the base struct
+        // is the first member, so the pointer is the same).
+        if (method is "Add" or "Insert" && args.Count > 0)
+            UpcastElement(inv.ArgumentList.Arguments[^1].Expression, args, args.Count - 1, ctx);
+
         // For user-class lists: free elements before Clear / on RemoveAt
         if (method == "Clear" && isUserClass)
         {
@@ -191,6 +196,21 @@ public sealed class ListHandler : InvocationHandlerBase
             _ => listExpr + "->" + method + "(" + JoinArgs(args) + ")",
         };
         return true;
+    }
+
+    private static void UpcastElement(ExpressionSyntax arg, List<string> args, int index, TranspilerContext ctx)
+    {
+        if (ctx.SemanticModel == null) return;
+        try
+        {
+            var ti = ctx.SemanticModel.GetTypeInfo(arg);
+            if (ti.Type is not INamedTypeSymbol from || ti.ConvertedType is not INamedTypeSymbol to) return;
+            if (from.TypeKind != TypeKind.Class || to.TypeKind != TypeKind.Class) return;
+            if (SymbolEqualityComparer.Default.Equals(from, to)) return;
+            if (!TranspilerContext.IsUserCode(to)) return;
+            args[index] = "(" + TypeRegistry.MapType(TranspilerContext.FormatTypeSymbol(to)) + "*)(" + args[index] + ")";
+        }
+        catch { }
     }
 
     private static string BuildCustomSort(
