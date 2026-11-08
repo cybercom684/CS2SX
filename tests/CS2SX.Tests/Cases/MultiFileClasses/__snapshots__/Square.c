@@ -21,6 +21,7 @@ Square* Square_New(float side)
     self->base._dtor = (void (*)(void*))Square_Dispose;
     self->base.vtable = &Square_vtable_instance;
     Square_Ctor(self, side);
+    CS2SX_ReleaseLater(self, (CS2SX_FreeFn)Square_Free);
     return self;
 }
 

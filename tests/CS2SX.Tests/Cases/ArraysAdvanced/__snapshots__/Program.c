@@ -13,6 +13,7 @@ Board* Board_New(int n)
     self->_rc = 1;
     self->_dtor = (void (*)(void*))Board_Dispose;
     Board_Ctor(self, n);
+    CS2SX_ReleaseLater(self, (CS2SX_FreeFn)Board_Free);
     return self;
 }
 

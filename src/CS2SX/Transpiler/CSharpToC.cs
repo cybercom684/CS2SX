@@ -1,4 +1,4 @@
-// Datei: Transpiler/CSharpToC.cs
+﻿// Datei: Transpiler/CSharpToC.cs
 //
 // FIX: VisitMethodDeclaration() ruft _ctx.FlushLambdaPreludes() auf,
 //      BEVOR die Methodensignatur in den Output geschrieben wird.
@@ -917,7 +917,7 @@ public sealed class CSharpToC : CSharpSyntaxWalker
                         var fieldName = v.Identifier.Text.TrimStart('_');
                         if (v.Initializer != null)
                         {
-                            var initVal = _exprWriter.Write(v.Initializer.Value);
+                            var initVal = Arc.RetainIfShared(v.Initializer.Value, _exprWriter.Write(v.Initializer.Value), _ctx);
                             // Function-call initializers (like Stack_T_New()) are NOT C compile-time constants.
                             // Emit NULL globally and initialize in a generated static constructor.
                             bool isRuntimeInit = initVal.Contains("_New()") || initVal.Contains("_New(")
@@ -982,7 +982,7 @@ public sealed class CSharpToC : CSharpSyntaxWalker
                 _ctx.Out.WriteLine($"__attribute__((constructor)) static void {name}_{fieldName}_Init(void)");
                 _ctx.Out.WriteLine("{");
                 _ctx.Indent();
-                var initVal = _exprWriter.Write(v.Initializer.Value);   // may hoist statements here
+                var initVal = Arc.RetainIfShared(v.Initializer.Value, _exprWriter.Write(v.Initializer.Value), _ctx);   // may hoist statements here
                 _ctx.WriteLine($"{name}_{fieldName} = {initVal};");
                 _ctx.Dedent();
                 _ctx.Out.WriteLine("}");
@@ -1267,7 +1267,7 @@ public sealed class CSharpToC : CSharpSyntaxWalker
                 var fieldName = v.Identifier.Text.TrimStart('_');
                 var fp = TypeRegistry.HasNoPrefix(fieldName) ? "" : "f_";
                 _ctx.WriteLine(prefix + fp + fieldName + " = "
-                    + _exprWriter.Write(v.Initializer.Value) + ";");
+                    + Arc.RetainIfShared(v.Initializer.Value, _exprWriter.Write(v.Initializer.Value), _ctx) + ";");
             }
         }
         foreach (var prop in node.Members.OfType<PropertyDeclarationSyntax>())
@@ -1277,7 +1277,7 @@ public sealed class CSharpToC : CSharpSyntaxWalker
             if (prop.Initializer == null) continue;
             var initPfx = TypeRegistry.HasNoPrefix(prop.Identifier.Text) ? "" : "f_";
             _ctx.WriteLine(prefix + initPfx + prop.Identifier.Text + " = "
-                + _exprWriter.Write(prop.Initializer.Value) + ";");
+                + Arc.RetainIfShared(prop.Initializer.Value, _exprWriter.Write(prop.Initializer.Value), _ctx) + ";");
         }
         foreach (var prop in node.Members.OfType<PropertyDeclarationSyntax>())
         {
@@ -1778,6 +1778,9 @@ public sealed class CSharpToC : CSharpSyntaxWalker
                     ? $"self->f_{fieldName} = CS2SX_RETAIN({arcRoot}, {fieldName});"
                     : $"self->f_{fieldName} = {fieldName};");
             }
+            // The initial reference belongs to the current frame (see T_New).
+            if (TypeRegistry.ArcRoot(name) != null)
+                _ctx.WriteLine($"CS2SX_ReleaseLater(self, (CS2SX_FreeFn){name}_Free);");
             _ctx.Dedent();
             _ctx.Out.WriteLine("    return self;");
             _ctx.Out.WriteLine("}");

@@ -14,6 +14,7 @@ Point* Point_New_0(void)
     self->_rc = 1;
     self->_dtor = (void (*)(void*))Point_Dispose;
     Point_Ctor_0(self);
+    CS2SX_ReleaseLater(self, (CS2SX_FreeFn)Point_Free);
     return self;
 }
 
@@ -29,6 +30,7 @@ Point* Point_New_1(int v)
     self->_rc = 1;
     self->_dtor = (void (*)(void*))Point_Dispose;
     Point_Ctor_1(self, v);
+    CS2SX_ReleaseLater(self, (CS2SX_FreeFn)Point_Free);
     return self;
 }
 
@@ -44,6 +46,7 @@ Point* Point_New_2(int x, int y)
     self->_rc = 1;
     self->_dtor = (void (*)(void*))Point_Dispose;
     Point_Ctor_2(self, x, y);
+    CS2SX_ReleaseLater(self, (CS2SX_FreeFn)Point_Free);
     return self;
 }
 
@@ -61,6 +64,7 @@ Point* Point_New_3(int x, int y, const char* tag)
     self->_rc = 1;
     self->_dtor = (void (*)(void*))Point_Dispose;
     Point_Ctor_3(self, x, y, tag);
+    CS2SX_ReleaseLater(self, (CS2SX_FreeFn)Point_Free);
     return self;
 }
 
@@ -96,6 +100,7 @@ Point3* Point3_New_3(int x, int y, int z)
     self->base._rc = 1;
     self->base._dtor = (void (*)(void*))Point3_Dispose;
     Point3_Ctor_3(self, x, y, z);
+    CS2SX_ReleaseLater(self, (CS2SX_FreeFn)Point3_Free);
     return self;
 }
 
@@ -111,6 +116,7 @@ Point3* Point3_New_1(int v)
     self->base._rc = 1;
     self->base._dtor = (void (*)(void*))Point3_Dispose;
     Point3_Ctor_1(self, v);
+    CS2SX_ReleaseLater(self, (CS2SX_FreeFn)Point3_Free);
     return self;
 }
 
@@ -169,6 +175,7 @@ Counter* Counter_New(void)
     self->_rc = 1;
     self->_dtor = (void (*)(void*))Counter_Dispose;
     Counter_Ctor(self);
+    CS2SX_ReleaseLater(self, (CS2SX_FreeFn)Counter_Free);
     return self;
 }
 

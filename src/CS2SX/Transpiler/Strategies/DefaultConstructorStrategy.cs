@@ -212,6 +212,11 @@ public sealed class DefaultConstructorStrategy : IConstructorStrategy
             ctx.WriteLine($"((Exception*)self)->_type = &{TypeRegistry.ExceptionTypeInfo(name)};");
         names.Insert(0, "self");
         ctx.WriteLine($"{name}_Ctor{sfx}({string.Join(", ", names)});");
+        // The initial reference belongs to the current frame: whatever keeps the
+        // object (field, collection, …) takes its own; otherwise it is freed when
+        // the next frame starts.
+        if (m.RcPath != null && Arc.UsesDispose(m.Symbol))
+            ctx.WriteLine($"CS2SX_ReleaseLater(self, (CS2SX_FreeFn){name}_Free);");
         ctx.WriteLine("return self;");
         ctx.Dedent();
         ctx.Out.WriteLine("}");

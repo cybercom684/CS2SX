@@ -19,6 +19,7 @@ Node* Node_New(void)
     self->_dtor = (void (*)(void*))Node_Dispose;
     self->vtable = &Node_vtable_instance;
     Node_Ctor(self);
+    CS2SX_ReleaseLater(self, (CS2SX_FreeFn)Node_Free);
     return self;
 }
 
@@ -63,6 +64,7 @@ Square* Square_New(void)
     self->_rc = 1;
     self->_dtor = (void (*)(void*))Square_Dispose;
     Square_Ctor(self);
+    CS2SX_ReleaseLater(self, (CS2SX_FreeFn)Square_Free);
     return self;
 }
 
@@ -366,7 +368,7 @@ void NullChecksApp_OnInit(NullChecksApp* self)
     _env_9->list = list;
     const char* _ps_12 = NullChecksApp_Try(CS2SX_Delegate_New((void*)_lambda_9, _env_9, 1));
     printf("%s\n", _ps_12 ? _ps_12 : "");
-    IShape* real = Square_as_IShape(Square_New());
+    IShape* real = Square_as_IShape(CS2SX_RETAIN(Square, Square_New()));
     char* _sb0 = _cs2sx_next_buf();
     snprintf(_sb0, CS2SX_STRBUF_SIZE, "ok %d %s %d %s", Node_Get(n), n->vtable->Kind(n), ({ __auto_type _cs2sx_r = real; _cs2sx_r->vtable->Area(_cs2sx_r->obj); }), (((missing != NULL ? missing->f_Name : NULL) ?: "none")));
     const char* _ps_13 = _sb0;

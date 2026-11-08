@@ -10,14 +10,14 @@ void MultiFileClassesApp_Init(MultiFileClassesApp* self)
     ((SwitchApp*)self)->OnInit = (void(*)(SwitchApp*))MultiFileClassesApp_OnInit;
     ((SwitchApp*)self)->OnFrame = (void(*)(SwitchApp*))MultiFileClassesApp_OnFrame;
     self->f_shapes = List_Shape_New();
-    self->f_painter = Painter_New();
+    self->f_painter = CS2SX_RETAIN(Painter, Painter_New());
     self->f_timer = CS2SX_Stopwatch_New();
 }
 
 void MultiFileClassesApp_OnInit(MultiFileClassesApp* self)
 {
-    List_Shape_AddNew(self->f_shapes, (Shape*)(Square_New(2.0f)));
-    List_Shape_AddNew(self->f_shapes, (Shape*)(Square_New(3.0f)));
+    List_Shape_Add(self->f_shapes, (Shape*)(Square_New(2.0f)));
+    List_Shape_Add(self->f_shapes, (Shape*)(Square_New(3.0f)));
     CS2SX_Stopwatch_Start(self->f_timer);
     self->f_frameTimer = CS2SX_Stopwatch_StartNew();
 }

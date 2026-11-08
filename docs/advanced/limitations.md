@@ -27,38 +27,23 @@ Für diese Konstrukte gibt es keine Übersetzung nach C. `cs2sx build` und `cs2s
 
 ## Speicher: Referenzzählung statt Garbage Collector
 
-Das transpilierte Programm hat keine .NET-Laufzeit und damit keinen Garbage Collector. Objekte eigener Klassen werden stattdessen referenzgezählt:
+Das transpilierte Programm hat keine .NET-Laufzeit und damit keinen Garbage Collector. Objekte eigener Klassen werden stattdessen referenzgezählt. Im Alltag verhält sich das wie in C#:
 
-- **Felder und `List<T>` halten je eine Referenz.** Ein Objekt wird zerstört, wenn kein Feld und keine Liste es mehr hält: nach `RemoveAt`/`Remove`/`Clear`, nach dem Überschreiben eines Felds (`_ziel = anderes;`, `_ziel = null;`) oder wenn das besitzende Objekt selbst zerstört wird.
-- **Erst zum nächsten Frame:** Die Zerstörung passiert am Anfang des nächsten Frames. Lokale Variablen und Parameter bleiben bis dahin gültig, auch wenn ihr Objekt gerade aus der letzten Liste entfernt wurde:
+- **Was niemand behält, wird freigegeben.** Ein Objekt, das nur in lokalen Variablen lebt (`var p = new Partikel();` in `OnFrame`), wird am Anfang des nächsten Frames zerstört. Neue Objekte pro Frame sind also kein Speicherleck.
+- **Was etwas behält, bleibt.** Halten können Felder und Properties, `List`, `Dictionary`, `Stack`, `Queue`, `HashSet`, Arrays, generische Klassen (`Box<Item>`), Structs, Tupel, Interface- und `object`-Werte sowie Lambdas und Event-Handler. Jede dieser Stellen hält eine eigene Referenz.
+- **Erst zum nächsten Frame:** Wird ein Objekt losgelassen (`RemoveAt`, `Pop`, `Remove`, `Clear`, ein überschriebenes Feld), stirbt es frühestens am Anfang des nächsten Frames. Lokale Variablen bleiben bis dahin gültig:
 
   ```csharp
-  var n = _queue[0];
-  _queue.RemoveAt(0);
+  var n = _queue.Dequeue();
   n.Run();                // OK — n lebt bis zum Ende des Frames
   ```
 
 - **Zerstörung ist virtuell:** Ein `Circle` in einer `List<Shape>` räumt auch seine eigenen Felder auf. Ein C#-Finalizer (`~Circle()`) läuft dabei mit.
-- **Nicht freigegeben werden:**
-  - Objekte, die nur in lokalen Variablen leben und nie in einem Feld oder einer Liste landen,
-  - Objekte, die sich gegenseitig referenzieren (Zyklen).
 
-Für typische Homebrew-Apps ist das unkritisch. Wer aber in jedem Frame neue Objekte nur in lokalen Variablen erzeugt (`new` in `OnFrame`), verbraucht stetig Speicher.
+**Nicht freigegeben werden:**
 
-**Wichtig:** `Dictionary`, `Stack`, `Queue`, `HashSet`, Arrays, Interface-Variablen und Lambdas halten **keine** eigene Referenz. Wird ein Objekt aus seinem letzten Feld bzw. seiner letzten Liste entfernt, ist es ab dem nächsten Frame auch dort ungültig. Solche Objekte zusätzlich in einem Feld oder einer `List<T>` halten.
-
-```csharp
-// UNGÜNSTIG — 60 neue Objekte pro Sekunde, die nie freigegeben werden
-public override void OnFrame()
-{
-    var p = new Partikel();
-    ...
-}
-
-// BESSER — einmal anlegen und wiederverwenden
-private readonly List<Partikel> _pool = new List<Partikel>();
-```
-
+- Objekte, die sich gegenseitig referenzieren (Zyklen, z. B. `a.Next = b; b.Prev = a;`). Bei solchen Strukturen die Verweise vor dem Wegwerfen auf `null` setzen.
+- Objekte, die über ein Struct, ein Tupel, ein Interface-/`object`-Wert, oder einen Methoden-Delegate (`+= obj.Methode`) gehalten wurden. Diese Stellen geben ihre Referenz nicht zurück.
 ---
 
 ## Strings: Länge und Lebensdauer

@@ -21,6 +21,7 @@ Shape* Shape_New(const char* name)
     self->_dtor = (void (*)(void*))Shape_Dispose;
     self->vtable = &Shape_vtable_instance;
     Shape_Ctor(self, name);
+    CS2SX_ReleaseLater(self, (CS2SX_FreeFn)Shape_Free);
     return self;
 }
 
@@ -67,6 +68,7 @@ Rect* Rect_New(float w, float h)
     self->base._dtor = (void (*)(void*))Rect_Dispose;
     self->base.vtable = &Rect_vtable_instance;
     Rect_Ctor(self, w, h);
+    CS2SX_ReleaseLater(self, (CS2SX_FreeFn)Rect_Free);
     return self;
 }
 
@@ -117,6 +119,7 @@ Square* Square_New(float side)
     self->base.base._dtor = (void (*)(void*))Square_Dispose;
     self->base.base.vtable = &Square_vtable_instance;
     Square_Ctor(self, side);
+    CS2SX_ReleaseLater(self, (CS2SX_FreeFn)Square_Free);
     return self;
 }
 
@@ -169,6 +172,7 @@ Circle* Circle_New(float r)
     self->base._dtor = (void (*)(void*))Circle_Dispose;
     self->base.vtable = &Circle_vtable_instance;
     Circle_Ctor(self, r);
+    CS2SX_ReleaseLater(self, (CS2SX_FreeFn)Circle_Free);
     return self;
 }
 

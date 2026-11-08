@@ -34,7 +34,9 @@ internal static class Arc
     public static bool UsesDispose(INamedTypeSymbol? sym) =>
         sym != null && !sym.IsRecord && Root(sym) != null;
 
-    /// A value that already owns its reference (+1): `new T(..)`, null, default.
+    /// A value that needs no reference: null / default. (A new object's initial
+    /// reference belongs to the current frame — see T_New — so a store retains it
+    /// like any other object; whatever ends up nowhere is freed at the next frame.)
     public static bool IsFresh(ExpressionSyntax e)
     {
         while (true)
@@ -46,8 +48,7 @@ internal static class Arc
                 case PostfixUnaryExpressionSyntax { RawKind: (int)SyntaxKind.SuppressNullableWarningExpression } s:
                     e = s.Operand; continue;
             }
-            return e is BaseObjectCreationExpressionSyntax
-                || e.IsKind(SyntaxKind.NullLiteralExpression)
+            return e.IsKind(SyntaxKind.NullLiteralExpression)
                 || e.IsKind(SyntaxKind.DefaultLiteralExpression)
                 || e is DefaultExpressionSyntax;
         }

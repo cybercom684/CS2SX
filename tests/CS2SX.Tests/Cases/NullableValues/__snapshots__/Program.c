@@ -18,6 +18,7 @@ Profile* Profile_New(void)
     self->_rc = 1;
     self->_dtor = (void (*)(void*))Profile_Dispose;
     Profile_Ctor(self);
+    CS2SX_ReleaseLater(self, (CS2SX_FreeFn)Profile_Free);
     return self;
 }
 

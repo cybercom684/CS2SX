@@ -12,6 +12,7 @@ Settings* Settings_New(void)
     self->_rc = 1;
     self->_dtor = (void (*)(void*))Settings_Dispose;
     Settings_Ctor(self);
+    CS2SX_ReleaseLater(self, (CS2SX_FreeFn)Settings_Free);
     return self;
 }
 
@@ -46,6 +47,7 @@ Player* Player_New_1(const char* name)
     self->_rc = 1;
     self->_dtor = (void (*)(void*))Player_Dispose;
     Player_Ctor_1(self, name);
+    CS2SX_ReleaseLater(self, (CS2SX_FreeFn)Player_Free);
     return self;
 }
 
@@ -62,6 +64,7 @@ Player* Player_New_2(const char* name, int level)
     self->_rc = 1;
     self->_dtor = (void (*)(void*))Player_Dispose;
     Player_Ctor_2(self, name, level);
+    CS2SX_ReleaseLater(self, (CS2SX_FreeFn)Player_Free);
     return self;
 }
 

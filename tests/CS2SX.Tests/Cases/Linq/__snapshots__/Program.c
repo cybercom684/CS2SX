@@ -15,6 +15,7 @@ Enemy* Enemy_New(const char* name, int hp)
     self->_rc = 1;
     self->_dtor = (void (*)(void*))Enemy_Dispose;
     Enemy_Ctor(self, name, hp);
+    CS2SX_ReleaseLater(self, (CS2SX_FreeFn)Enemy_Free);
     return self;
 }
 

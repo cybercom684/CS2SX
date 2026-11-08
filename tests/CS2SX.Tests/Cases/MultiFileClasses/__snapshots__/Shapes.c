@@ -20,6 +20,7 @@ Shape* Shape_New(void)
     self->_dtor = (void (*)(void*))Shape_Dispose;
     self->vtable = &Shape_vtable_instance;
     Shape_Ctor(self);
+    CS2SX_ReleaseLater(self, (CS2SX_FreeFn)Shape_Free);
     return self;
 }
 
@@ -53,6 +54,7 @@ Painter* Painter_New(void)
     self->_rc = 1;
     self->_dtor = (void (*)(void*))Painter_Dispose;
     Painter_Ctor(self);
+    CS2SX_ReleaseLater(self, (CS2SX_FreeFn)Painter_Free);
     return self;
 }
 

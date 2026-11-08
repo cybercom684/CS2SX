@@ -28,6 +28,7 @@ Score* Score_New(const char* Player, int Points)
     self->_rc = 1;
     self->f_Player = Player;
     self->f_Points = Points;
+    CS2SX_ReleaseLater(self, (CS2SX_FreeFn)Score_Free);
     return self;
 }
 

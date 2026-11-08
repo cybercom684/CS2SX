@@ -14,6 +14,7 @@ Bullet* Bullet_New(void)
     self->_rc = 1;
     self->_dtor = (void (*)(void*))Bullet_Dispose;
     Bullet_Ctor(self);
+    CS2SX_ReleaseLater(self, (CS2SX_FreeFn)Bullet_Free);
     return self;
 }
 
@@ -65,6 +66,7 @@ Timer* Timer_New(void)
     self->_rc = 1;
     self->_dtor = (void (*)(void*))Timer_Dispose;
     Timer_Ctor(self);
+    CS2SX_ReleaseLater(self, (CS2SX_FreeFn)Timer_Free);
     return self;
 }
 
@@ -117,7 +119,7 @@ void InterfacesApp_OnInit(InterfacesApp* self)
     Bullet* b = Bullet_New();
     b->f_Y = 50;
     List_IUpdatable_Add(self->f_things, Bullet_as_IUpdatable(CS2SX_RETAIN(Bullet, b)));
-    List_IUpdatable_Add(self->f_things, Timer_as_IUpdatable(Timer_New()));
+    List_IUpdatable_Add(self->f_things, Timer_as_IUpdatable(CS2SX_RETAIN(Timer, Timer_New())));
 }
 
 void InterfacesApp_OnFrame(InterfacesApp* self)

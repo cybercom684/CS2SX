@@ -14,6 +14,7 @@ InputMapper* InputMapper_New(void)
     self->_rc = 1;
     self->_dtor = (void (*)(void*))InputMapper_Dispose;
     InputMapper_Ctor(self);
+    CS2SX_ReleaseLater(self, (CS2SX_FreeFn)InputMapper_Free);
     return self;
 }
 

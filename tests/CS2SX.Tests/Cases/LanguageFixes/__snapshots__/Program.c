@@ -28,6 +28,7 @@ Outer* Outer_New(void)
     self->_rc = 1;
     self->_dtor = (void (*)(void*))Outer_Dispose;
     Outer_Ctor(self);
+    CS2SX_ReleaseLater(self, (CS2SX_FreeFn)Outer_Free);
     return self;
 }
 
@@ -67,6 +68,7 @@ Inner* Inner_New(void)
     self->_rc = 1;
     self->_dtor = (void (*)(void*))Inner_Dispose;
     Inner_Ctor(self);
+    CS2SX_ReleaseLater(self, (CS2SX_FreeFn)Inner_Free);
     return self;
 }
 
@@ -116,6 +118,7 @@ Registry* Registry_New(void)
     self->_rc = 1;
     self->_dtor = (void (*)(void*))Registry_Dispose;
     Registry_Ctor(self);
+    CS2SX_ReleaseLater(self, (CS2SX_FreeFn)Registry_Free);
     return self;
 }
 
@@ -150,6 +153,7 @@ Link* Link_New(void)
     self->_rc = 1;
     self->_dtor = (void (*)(void*))Link_Dispose;
     Link_Ctor(self);
+    CS2SX_ReleaseLater(self, (CS2SX_FreeFn)Link_Free);
     return self;
 }
 
@@ -266,7 +270,7 @@ void LanguageFixesApp_OnInit(LanguageFixesApp* self)
     int some = ({ __auto_type _nc_12 = (head->f_Next != NULL ? ((Nullable_int){ head->f_Next->f_Value, 1 }) : ((Nullable_int){0})); ((_nc_12).has ? (_nc_12).value : (-1)); });
     Link* _link_13 = Link_New();
     _link_13->f_Value = 9;
-    CS2SX_ARC_STORE(Link, head->f_Next, _link_13);
+    CS2SX_ARC_STORE(Link, head->f_Next, CS2SX_RETAIN(Link, _link_13));
     int other = ({ __auto_type _nc_14 = (head->f_Next != NULL ? ((Nullable_int){ head->f_Next->f_Value, 1 }) : ((Nullable_int){0})); ((_nc_14).has ? (_nc_14).value : (-1)); });
     char* _sb7 = _cs2sx_next_buf();
     snprintf(_sb7, CS2SX_STRBUF_SIZE, "nullcond %d %d", some, other);

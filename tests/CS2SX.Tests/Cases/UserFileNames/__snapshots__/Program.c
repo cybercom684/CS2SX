@@ -7,8 +7,8 @@ void UserFileNamesApp_Init(UserFileNamesApp* self)
 {
     if (!self) return;
     ((SwitchApp*)self)->OnFrame = (void(*)(SwitchApp*))UserFileNamesApp_OnFrame;
-    self->f_input = InputMapper_New();
-    self->f_entry = MenuEntry_New("Start");
+    self->f_input = CS2SX_RETAIN(InputMapper, InputMapper_New());
+    self->f_entry = CS2SX_RETAIN(MenuEntry, MenuEntry_New("Start"));
 }
 
 void UserFileNamesApp_OnFrame(UserFileNamesApp* self)

@@ -15,6 +15,7 @@ MenuEntry* MenuEntry_New(const char* title)
     self->_rc = 1;
     self->_dtor = (void (*)(void*))MenuEntry_Dispose;
     MenuEntry_Ctor(self, title);
+    CS2SX_ReleaseLater(self, (CS2SX_FreeFn)MenuEntry_Free);
     return self;
 }
 

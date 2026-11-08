@@ -65,6 +65,7 @@ Node* Node_New(int v)
     self->_rc = 1;
     self->_dtor = (void (*)(void*))Node_Dispose;
     Node_Ctor(self, v);
+    CS2SX_ReleaseLater(self, (CS2SX_FreeFn)Node_Free);
     return self;
 }
 
