@@ -12,5 +12,5 @@ Program.cs(44): Sprungmarken (again:)
 Program.cs(46): goto wird nicht unterstützt
 Program.cs(9): Eigene delegate-Typen (Op)
 Program.cs(11): Generische Structs (Box<…>)
-Program.cs(15): Generische Methoden (Pick<…>)
+Program.cs(15): Diese generische Methode (Pick<…>) wird nicht unterstützt
 Program.cs(17): yield return wird nicht unterstützt

@@ -30,8 +30,10 @@ internal static class UnsupportedSyntax
         WithExpressionSyntax =>
             "with-Ausdrücke werden nicht unterstützt — eine Kopie mit new anlegen: new Punkt(10, p.Y).",
 
+        // Plain generic methods are specialised beforehand (GenericMethodMonomorphizer);
+        // what reaches this point is virtual/abstract, in an interface or a generic type.
         MethodDeclarationSyntax { TypeParameterList: not null } m =>
-            $"Generische Methoden ({m.Identifier.Text}<…>) werden nicht unterstützt — je eine Überladung pro Typ schreiben oder eine generische Klasse verwenden.",
+            $"Diese generische Methode ({m.Identifier.Text}<…>) wird nicht unterstützt — generische Methoden dürfen nicht virtual/abstract/override sein und nicht in Interfaces oder generischen Klassen stehen.",
 
         StructDeclarationSyntax { TypeParameterList: not null } s =>
             $"Generische Structs ({s.Identifier.Text}<…>) werden nicht unterstützt — eine generische Klasse verwenden.",

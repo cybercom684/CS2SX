@@ -47,8 +47,9 @@ public sealed class CheckCommand
             return 1;
         }
 
-        var files = reader.SourceFiles
-            .ToList();
+        // Same generic-method specialisation as the build (into a temp folder).
+        var files = GenericMethodMonomorphizer.Rewrite(reader.SourceFiles.ToList(),
+            Path.Combine(Path.GetTempPath(), "cs2sx-check-" + Environment.ProcessId));
 
         // FIX: Gleiche Analyse wie BuildPipeline
         var apiSourceDir = RuntimeExporter.ExportApiSourcesToTemp();

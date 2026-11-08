@@ -122,7 +122,9 @@ public sealed class BuildPipeline
             apiSourceDir = RuntimeExporter.ExportApiSourcesToTemp();
 
             var apiSourceFiles = Directory.GetFiles(apiSourceDir, "*.cs").ToList();
-            var appSourceFiles = reader.SourceFiles.ToList();
+            // Generic methods are specialised per type at the C# level first; every later
+            // stage (forward declarations, generics, transpiling) sees the result.
+            var appSourceFiles = GenericMethodMonomorphizer.Rewrite(reader.SourceFiles.ToList(), _buildDir);
             var allForFwd = apiSourceFiles.Concat(appSourceFiles).ToList();
             var forwardPath = Path.Combine(_buildDir, "_forward.h");
             WriteForwardDeclarations(allForFwd, forwardPath, expandedTypeNames: null);
@@ -136,8 +138,7 @@ public sealed class BuildPipeline
             sGenerics.Status = StageStatus.Running;
             sGenerics.Detail = "collecting instantiations…";
 
-            var transpiledFiles = appSourceFiles
-                .ToList();
+            var transpiledFiles = appSourceFiles.ToList();
 
             // Project-wide type facts (user enums/structs, operator overloads) must be
             // known before generics expansion and before any file is transpiled.

@@ -12,7 +12,7 @@ Für diese Konstrukte gibt es keine Übersetzung nach C. `cs2sx build` und `cs2s
 |---|---|
 | `foreach (var i in 0..10)`, Ranges `s[1..3]` | `for`-Schleife, `Substring`, `GetRange` |
 | `p with { X = 1 }` | `new Punkt(1, p.Y)` |
-| generische Methoden `T Max<T>(…)`, generische Structs | Überladungen pro Typ, generische Klasse |
+| generische Methoden, die `virtual`/`abstract`/`override` sind oder in Interfaces bzw. generischen Klassen stehen; generische Structs | nicht-virtuelle generische Methode, generische Klasse |
 | lokale Funktionen | private Methode |
 | LINQ-Abfragesyntax `from x in … select x` | `list.Where(…).Select(…)` |
 | Collection-Ausdrücke `[1, 2, 3]` | `new List<int> { 1, 2, 3 }` |

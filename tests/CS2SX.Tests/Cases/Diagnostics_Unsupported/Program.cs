@@ -12,7 +12,7 @@ public struct Box<T> { public T V; }
 
 public class Diagnostics_UnsupportedApp : SwitchApp
 {
-    private static T Pick<T>(T a, T b) => a;
+    public virtual T Pick<T>(T a, T b) => a;
 
     private static IEnumerable<int> Gen() { yield return 1; }
 

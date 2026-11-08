@@ -404,9 +404,18 @@ public class Behälter<T>
 
 var b = new Behälter<int>(42);
 int w = b.HoleWert();
+
+// Generische Methoden — Typargumente werden wie in C# abgeleitet
+public static T Max<T>(T a, T b) where T : IComparable<T> => a.CompareTo(b) > 0 ? a : b;
+public static void Tausche<T>(ref T a, ref T b) { T t = a; a = b; b = t; }
+
+int m = Max(3, 7);             // → Max_int
+string s = Max("Apfel", "Birne");   // → Max_str
 ```
 
-Generics werden zur Compilezeit expandiert — ähnlich wie C++ Templates. Nur konkrete Typen (kein `T` zur Laufzeit).
+Generics werden zur Compilezeit expandiert, ähnlich wie C++ Templates: Für jeden verwendeten Typ entsteht eine eigene Kopie der Klasse bzw. Methode. Das gilt auch für generische Methoden, die andere generische Methoden aufrufen, und für generische Erweiterungsmethoden.
+
+Nicht unterstützt sind generische Methoden, die `virtual`/`abstract`/`override` sind oder in Interfaces bzw. generischen Klassen stehen, sowie generische Structs (`struct Box<T>`). Der Build meldet sie mit Zeile und Hinweis.
 
 ---
 

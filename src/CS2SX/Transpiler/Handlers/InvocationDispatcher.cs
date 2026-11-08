@@ -21,7 +21,6 @@ public sealed class InvocationDispatcher
     private readonly IReadOnlyList<IInvocationHandler> _handlers;
     private readonly TranspilerContext _ctx;
     private readonly Func<SyntaxNode?, string> _writeExpr;
-    private GenericMethodExpander? _genericMethodExpander;
 
     // LINQ methods whose lambda arguments must NOT be pre-evaluated by BuildArg.
     // LinqHandler accesses the lambda directly from raw syntax and lifts it with the
@@ -105,19 +104,6 @@ public sealed class InvocationDispatcher
     }
 
     public InvocationDispatcher(
-     TranspilerContext ctx,
-     Func<SyntaxNode?, string> writeExpr,
-     ExtensionMethodHandler extensionHandler,
-     GenericMethodExpander? genericMethodExpander = null)
-    {
-        _ctx = ctx;
-        _writeExpr = writeExpr;
-        _handlers = BuildHandlers(extensionHandler);
-        _genericMethodExpander = genericMethodExpander;
-    }
-
-
-    public InvocationDispatcher(
         TranspilerContext ctx,
         Func<SyntaxNode?, string> writeExpr,
         ExtensionMethodHandler extensionHandler)
@@ -142,28 +128,22 @@ public sealed class InvocationDispatcher
         var delegateCall = TryWriteDelegateInvoke(inv, args);
         if (delegateCall != null) return delegateCall;
 
-        if (inv.Expression is GenericNameSyntax genName && _genericMethodExpander != null)
-        {
-            var typeArgs = genName.TypeArgumentList.Arguments
-                .Select(a => a.ToString().Trim())
-                .ToList();
-            var parts = calleeStr.Split('.');
-            var cn = parts.Length > 1 ? string.Join(".", parts[..^1]) : _ctx.CurrentClass;
-            var mn = parts[^1].Contains('<') ? parts[^1][..parts[^1].IndexOf('<')] : parts[^1];
-
-            var resolved = _genericMethodExpander.TryResolve(cn, mn, typeArgs,
-                out var specCode);
-            if (resolved != null)
-            {
-                if (!string.IsNullOrEmpty(specCode))
-                    _ctx.PendingLambdaPreludes.Add(specCode);
-                var argStr = string.Join(", ", args);
-                return resolved + "(" + argStr + ")";
-            }
-        }
-
         var qualifiedStatic = TryWriteQualifiedStaticCall(inv, args);
         if (qualifiedStatic != null) return qualifiedStatic;
+
+        // a.CompareTo(b) on numbers/char/enums → -1 / 0 / 1 (each side evaluated once)
+        if (inv.Expression is MemberAccessExpressionSyntax { Name.Identifier.Text: "CompareTo" } ct
+            && args.Count == 1 && _ctx.SemanticModel != null)
+        {
+            try
+            {
+                var t = _ctx.SemanticModel.GetTypeInfo(ct.Expression).Type;
+                if (t != null && (t.TypeKind == TypeKind.Enum || t.SpecialType is >= SpecialType.System_Char and <= SpecialType.System_Double))
+                    return "({ __auto_type _cmp_a = (" + _writeExpr(ct.Expression) + "); __auto_type _cmp_b = ("
+                         + args[0] + "); (_cmp_a > _cmp_b) - (_cmp_a < _cmp_b); })";
+            }
+            catch { }
+        }
 
         // flags.HasFlag(F.B) → ((flags & F_B) == F_B)
         if (inv.Expression is MemberAccessExpressionSyntax { Name.Identifier.Text: "HasFlag" } hf
