@@ -31,7 +31,7 @@ struct CS2SX_Delegate
 };
 
 /// Header of a closure environment (the struct of captured variables).
-typedef struct CS2SX_Env { int _rc; } CS2SX_Env;
+typedef struct CS2SX_Env { int _rc; void (*_dtor)(void* env); } CS2SX_Env;   // _dtor: releases captured objects
 
 #define CS2SX_DELEGATE_STATIC(fn) { -1, (void*)(fn), NULL, 0, NULL }
 #define CS2SX_ENV_NEW(T) ((T*)CS2SX_Env_New(sizeof(T)))

@@ -50,7 +50,36 @@ public sealed class ExpressionWriter : IExpressionWriter
         var code = WriteCore(node);
         if (node is not ExpressionSyntax expr) return code;
         code = ApplyUserConversion(expr, code);
+        code = ApplyEscapeRetain(expr, code);
         return ApplyNullableConversion(expr, code);
+    }
+
+    /// A reference-counted object that is kept by something that does not count —
+    /// an array initializer element, an interface value or an `object` — takes a
+    /// reference here, so releases elsewhere cannot destroy it under them.
+    private string ApplyEscapeRetain(ExpressionSyntax expr, string code)
+    {
+        if (_ctx.SemanticModel == null || code.Length == 0) return code;
+        try
+        {
+            var ti = _ctx.SemanticModel.GetTypeInfo(expr);
+            if (Arc.Root(ti.Type) == null) return code;
+            bool arrayElement = expr.Parent is InitializerExpressionSyntax init
+                                && init.IsKind(SyntaxKind.ArrayInitializerExpression);
+            bool boxed = ti.ConvertedType is { TypeKind: TypeKind.Interface }
+                         || ti.ConvertedType?.SpecialType == SpecialType.System_Object;
+            // (node, 1) — a tuple element (not a deconstruction target)
+            bool tupleElement = expr.Parent is ArgumentSyntax { Parent: TupleExpressionSyntax te }
+                                && !(te.Parent is AssignmentExpressionSyntax a && a.Left == te);
+            // holder.Node = x / new Holder { Node = x } on a struct member
+            bool structMember = expr.Parent is AssignmentExpressionSyntax { Left: var left } asg
+                                && asg.Right == expr
+                                && _ctx.SemanticModel.GetSymbolInfo(left).Symbol is IFieldSymbol or IPropertySymbol
+                                && _ctx.SemanticModel.GetSymbolInfo(left).Symbol!.ContainingType?.TypeKind == TypeKind.Struct;
+            return arrayElement || boxed || tupleElement || structMember
+                ? Arc.RetainIfShared(expr, code, _ctx) : code;
+        }
+        catch { return code; }
     }
 
     /// C function of a user-defined conversion operator (`implicit operator int(M m)`
@@ -939,6 +968,18 @@ public sealed class ExpressionWriter : IExpressionWriter
         return Write(assign.Left) + " " + op + " " + right;
     }
 
+    /// Root class of the element type when <paramref name="elem"/> indexes an array of a
+    /// reference-counted class.
+    private string? ArcElementRoot(ElementAccessExpressionSyntax elem)
+    {
+        try
+        {
+            return _ctx.SemanticModel?.GetTypeInfo(elem.Expression).Type is IArrayTypeSymbol at
+                ? Arc.Root(at.ElementType) : null;
+        }
+        catch { return null; }
+    }
+
     /// Root class when the assignment target is a field or auto-property of a class
     /// (storage that owns a reference) typed as a reference-counted class; null for
     /// locals, parameters, properties with their own setter and struct members
@@ -1640,7 +1681,14 @@ public sealed class ExpressionWriter : IExpressionWriter
     {
         // Arrays (bounds-checked, multi-dimensional): the element access is an lvalue.
         if (IsSingleDimArray(elemLeft.Expression) || elemLeft.ArgumentList.Arguments.Count > 1)
+        {
+            // Elements of reference-counted classes: the array holds a reference.
+            if (op == "=" && ArcElementRoot(elemLeft) is { } elemRoot
+                && elemLeft.Parent is AssignmentExpressionSyntax asg)
+                return "CS2SX_ARC_STORE(" + elemRoot + ", " + WriteElementAccess(elemLeft) + ", "
+                     + Arc.RetainIfShared(asg.Right, right, _ctx) + ")";
             return WriteElementAccess(elemLeft) + " " + op + " " + right;
+        }
 
         var obj = Write(elemLeft.Expression);
         var key = Write(elemLeft.ArgumentList.Arguments[0].Expression);

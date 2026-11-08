@@ -116,7 +116,7 @@ void InterfacesApp_OnInit(InterfacesApp* self)
 {
     Bullet* b = Bullet_New();
     b->f_Y = 50;
-    List_IUpdatable_Add(self->f_things, Bullet_as_IUpdatable(b));
+    List_IUpdatable_Add(self->f_things, Bullet_as_IUpdatable(CS2SX_RETAIN(Bullet, b)));
     List_IUpdatable_Add(self->f_things, Timer_as_IUpdatable(Timer_New()));
 }
 

@@ -15,7 +15,11 @@ static void env_retain(void* env)
 
 static void env_release(void* env)
 {
-    if (env && --((CS2SX_Env*)env)->_rc == 0) free(env);
+    if (env && --((CS2SX_Env*)env)->_rc == 0)
+    {
+        if (((CS2SX_Env*)env)->_dtor) ((CS2SX_Env*)env)->_dtor(env);
+        free(env);
+    }
 }
 
 CS2SX_Delegate* CS2SX_Delegate_New(void* fn, void* target, int ownsTarget)

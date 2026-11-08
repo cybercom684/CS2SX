@@ -446,11 +446,16 @@ public sealed class CSharpToC : CSharpSyntaxWalker
             // CS2SX_ArrFree also leaves stack/static arrays alone.
             if (csType.EndsWith("[]"))
             {
+                var elemRoot = TypeRegistry.ArcRoot(csType[..^2].TrimEnd('?'));
                 foreach (var v in field.Declaration.Variables)
                 {
                     var fieldName = v.Identifier.Text.TrimStart('_');
                     var prefix = TypeRegistry.HasNoPrefix(fieldName) ? "" : "f_";
-                    _ctx.WriteLine($"CS2SX_ArrFree(self->{prefix}{fieldName}); self->{prefix}{fieldName} = NULL;");
+                    var arr = $"self->{prefix}{fieldName}";
+                    // The array holds a reference per element (reference-counted classes).
+                    if (elemRoot != null)
+                        _ctx.WriteLine($"for (int _ai = 0; _ai < CS2SX_ArrLen({arr}); _ai++) {elemRoot}_Free(({elemRoot}*){arr}[_ai]);");
+                    _ctx.WriteLine($"CS2SX_ArrFree({arr}); {arr} = NULL;");
                 }
                 continue;
             }
@@ -459,6 +464,7 @@ public sealed class CSharpToC : CSharpSyntaxWalker
             if (TypeRegistry.IsRegisteredInterface(csType)) continue;
 
             var needsFree = TypeRegistry.NeedsPointerSuffix(csType)
+                         && !TypeRegistry.IsTuple(csType)   // value struct
                          && !TypeRegistry.IsPrimitive(csType)
                          && csType != "string"
                          && !TypeRegistry.IsLibNxStruct(csType);
@@ -745,6 +751,7 @@ public sealed class CSharpToC : CSharpSyntaxWalker
             var cType = ResolveConcreteType(csType);
             var needPtr = !cType.EndsWith("*")
                        && !_ctx.EnumDefs.ContainsKey(csType)
+                       && !TypeRegistry.IsTuple(csType)   // _TupleN_… is a value struct
                        && (TypeRegistry.NeedsPointerSuffix(csType)
                        || csType.TrimEnd('?') == "Stopwatch"   // runtime returns CS2SX_Stopwatch*
                        || TypeRegistry.IsStringBuilder(csType)

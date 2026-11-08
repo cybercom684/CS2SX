@@ -387,7 +387,34 @@ public sealed class GenericInstantiationCollector
 
         // List<UserClass>-Instantiierungen sammeln (für CS2SX_LIST_DEFINE_PTR)
         foreach (var gn in root.DescendantNodes().OfType<GenericNameSyntax>())
+        {
             TryRegisterListUserClass(gn);
+            TryRegisterUserCollection(gn);
+        }
+    }
+
+    /// Stack/Queue/HashSet/Dictionary with a user type (class, struct, enum) as an
+    /// argument: their C types are not predefined in switchforms.h — _generics.h
+    /// defines them (GenericExpander).
+    public IReadOnlySet<(string Kind, string? Key, string Elem)> UserCollectionInstantiations => _userCollections;
+    private readonly HashSet<(string Kind, string? Key, string Elem)> _userCollections = new();
+
+    private void TryRegisterUserCollection(GenericNameSyntax gn)
+    {
+        var kind = gn.Identifier.Text;
+        var args = gn.TypeArgumentList.Arguments.Select(a => a.ToString().Trim()).ToList();
+        if (args.Any(a => a.Contains('<') || a.Contains('(') || a.EndsWith('?'))) return;
+        static bool IsUserType(string t) =>
+            !TypeRegistry.IsPrimitive(t) && t != "string" && t != "object";
+        switch (kind)
+        {
+            case "Stack" or "Queue" or "HashSet" when args.Count == 1 && IsUserType(args[0]):
+                _userCollections.Add((kind, null, args[0]));
+                break;
+            case "Dictionary" when args.Count == 2 && (IsUserType(args[0]) || IsUserType(args[1])):
+                _userCollections.Add((kind, args[0], args[1]));
+                break;
+        }
     }
 
     private void TryRegisterListUserClass(GenericNameSyntax gn)

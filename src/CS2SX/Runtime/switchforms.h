@@ -690,31 +690,62 @@ typedef void* voidptr;
 CS2SX_LIST_DEFINE(voidptr)
 
 // ============================================================================
-// Stack<T> — LIFO using growable array
+// Element hooks of Stack / Queue / HashSet / Dictionary
+// ============================================================================
+// KEEP(x) is the value the collection stores for x, DROP(x) gives it up again.
+// Numbers: CS2SX_ID / CS2SX_NOREF. Reference-counted user classes: T_RcKeep /
+// T_RcDrop (CS2SX_RC_HOOKS) — the collection holds one reference per element and
+// gives it up deferred to the next frame, so a value just popped or removed stays
+// valid for the rest of the frame. String keys: a heap copy (the caller's string
+// may be a per-frame temporary).
+
+#define CS2SX_ID(x)        (x)
+#define CS2SX_NOREF(x)     ((void)0)
+#define CS2SX_EQ(a, b)     ((a) == (b))
+#define CS2SX_EQ_STR(a, b) (strcmp((a), (b)) == 0)
+#define CS2SX_STR_KEEP(x)  _cs2sx_heap_strdup(x)
+#define CS2SX_STR_DROP(x)  CS2SX_ReleaseLater((void*)(x), free)
+#define CS2SX_NOCHECK(k)   ((void)0)
+#define CS2SX_KEYCHECK_STR(k) do { if (!(k)) CS2SX_ThrowArgNull("key"); } while (0)
+
+/// T_RcKeep / T_RcDrop for a reference-counted user class T with root class Root.
+#define CS2SX_RC_HOOKS(T, Root)                                                                     \
+Root* Root##_Retain(Root* self);                                                                    \
+void  Root##_Free(Root* self);                                                                      \
+static inline T* T##_RcKeep(T* p) { Root##_Retain((Root*)p); return p; }                            \
+static inline void T##_RcDrop(T* p) { CS2SX_ReleaseLater(p, (CS2SX_FreeFn)Root##_Free); }
+
+// ============================================================================
+// Stack<T> — LIFO using growable array   (N: name suffix, E: element C type)
 // ============================================================================
 
-#define CS2SX_STACK_DEFINE(T)                                                                       \
-typedef struct { T* data; int count; int capacity; } Stack_##T;                                     \
-static inline Stack_##T* Stack_##T##_New(void) {                                                    \
-    Stack_##T* s = (Stack_##T*)malloc(sizeof(Stack_##T));                                           \
+#define CS2SX_STACK_DEFINE_EX(N, E, KEEP, DROP)                                                     \
+typedef struct { E* data; int count; int capacity; } Stack_##N;                                     \
+static inline Stack_##N* Stack_##N##_New(void) {                                                    \
+    Stack_##N* s = (Stack_##N*)malloc(sizeof(Stack_##N));                                           \
     if (!s) return NULL;                                                                             \
-    s->data = (T*)malloc(8 * sizeof(T)); s->count = 0; s->capacity = 8; return s; }                \
-static inline void Stack_##T##_Push(Stack_##T* s, T val) {                                         \
-    if (!s) CS2SX_ThrowNullRef();                                                                                  \
+    s->data = (E*)malloc(8 * sizeof(E)); s->count = 0; s->capacity = 8; return s; }                \
+static inline void Stack_##N##_Push(Stack_##N* s, E val) {                                         \
+    if (!s) CS2SX_ThrowNullRef();                                                                    \
     if (s->count >= s->capacity) {                                                                   \
         s->capacity *= 2;                                                                            \
-        s->data = (T*)realloc(s->data, s->capacity * sizeof(T)); }                                  \
-    s->data[s->count++] = val; }                                                                    \
-static inline T Stack_##T##_Pop(Stack_##T* s) {                                                     \
+        s->data = (E*)realloc(s->data, s->capacity * sizeof(E)); }                                  \
+    s->data[s->count++] = KEEP(val); }                                                              \
+static inline E Stack_##N##_Pop(Stack_##N* s) {                                                     \
     if (!s) CS2SX_ThrowNullRef();                                                                    \
     if (s->count == 0) CS2SX_ThrowInvalidOp("Stack empty.");                                         \
-    return s->data[--s->count]; }                                                                    \
-static inline T Stack_##T##_Peek(Stack_##T* s) {                                                    \
+    E _v = s->data[--s->count]; DROP(_v); return _v; }                                               \
+static inline E Stack_##N##_Peek(Stack_##N* s) {                                                    \
     if (!s) CS2SX_ThrowNullRef();                                                                    \
     if (s->count == 0) CS2SX_ThrowInvalidOp("Stack empty.");                                         \
     return s->data[s->count - 1]; }                                                                  \
-static inline void Stack_##T##_Clear(Stack_##T* s) { if (s) s->count = 0; }                        \
-static inline void Stack_##T##_Free(Stack_##T* s) { if (s) { free(s->data); free(s); } }
+static inline void Stack_##N##_Clear(Stack_##N* s) {                                                \
+    if (!s) return;                                                                                  \
+    while (s->count > 0) { E _v = s->data[--s->count]; DROP(_v); } }                                 \
+static inline void Stack_##N##_Free(Stack_##N* s) {                                                 \
+    if (s) { Stack_##N##_Clear(s); free(s->data); free(s); } }
+
+#define CS2SX_STACK_DEFINE(T) CS2SX_STACK_DEFINE_EX(T, T, CS2SX_ID, CS2SX_NOREF)
 
 CS2SX_STACK_DEFINE(int)
 CS2SX_STACK_DEFINE(float)
@@ -724,76 +755,91 @@ CS2SX_STACK_DEFINE(double)
 // Queue<T> — FIFO using circular buffer
 // ============================================================================
 
-#define CS2SX_QUEUE_DEFINE(T)                                                                       \
-typedef struct { T* data; int head; int tail; int count; int capacity; } Queue_##T;                 \
-static inline Queue_##T* Queue_##T##_New(void) {                                                    \
-    Queue_##T* q = (Queue_##T*)malloc(sizeof(Queue_##T));                                           \
+#define CS2SX_QUEUE_DEFINE_EX(N, E, KEEP, DROP)                                                     \
+typedef struct { E* data; int head; int tail; int count; int capacity; } Queue_##N;                 \
+static inline Queue_##N* Queue_##N##_New(void) {                                                    \
+    Queue_##N* q = (Queue_##N*)malloc(sizeof(Queue_##N));                                           \
     if (!q) return NULL;                                                                             \
-    q->data = (T*)malloc(8 * sizeof(T));                                                             \
+    q->data = (E*)malloc(8 * sizeof(E));                                                             \
     q->head = 0; q->tail = 0; q->count = 0; q->capacity = 8; return q; }                           \
-static inline void Queue_##T##_Enqueue(Queue_##T* q, T val) {                                       \
-    if (!q) CS2SX_ThrowNullRef();                                                                                   \
+static inline void Queue_##N##_Enqueue(Queue_##N* q, E val) {                                       \
+    if (!q) CS2SX_ThrowNullRef();                                                                    \
     if (q->count >= q->capacity) {                                                                    \
         int nc = q->capacity * 2;                                                                     \
-        T* nd = (T*)malloc(nc * sizeof(T));                                                           \
+        E* nd = (E*)malloc(nc * sizeof(E));                                                           \
         for (int _i = 0; _i < q->count; _i++)                                                        \
             nd[_i] = q->data[(q->head + _i) % q->capacity];                                          \
         free(q->data); q->data = nd; q->head = 0; q->tail = q->count; q->capacity = nc; }            \
-    q->data[q->tail] = val; q->tail = (q->tail + 1) % q->capacity; q->count++; }                   \
-static inline T Queue_##T##_Dequeue(Queue_##T* q) {                                                  \
+    q->data[q->tail] = KEEP(val); q->tail = (q->tail + 1) % q->capacity; q->count++; }             \
+static inline E Queue_##N##_Dequeue(Queue_##N* q) {                                                  \
     if (!q) CS2SX_ThrowNullRef();                                                                     \
     if (q->count == 0) CS2SX_ThrowInvalidOp("Queue empty.");                                          \
-    T val = q->data[q->head]; q->head = (q->head + 1) % q->capacity; q->count--; return val; }      \
-static inline T Queue_##T##_Peek(Queue_##T* q) {                                                     \
+    E val = q->data[q->head]; q->head = (q->head + 1) % q->capacity; q->count--;                    \
+    DROP(val); return val; }                                                                          \
+static inline E Queue_##N##_Peek(Queue_##N* q) {                                                     \
     if (!q) CS2SX_ThrowNullRef();                                                                     \
     if (q->count == 0) CS2SX_ThrowInvalidOp("Queue empty.");                                          \
     return q->data[q->head]; }                                                                        \
-static inline void Queue_##T##_Clear(Queue_##T* q) {                                                 \
-    if (q) { q->head = 0; q->tail = 0; q->count = 0; } }                                             \
-static inline void Queue_##T##_Free(Queue_##T* q) { if (q) { free(q->data); free(q); } }
+static inline void Queue_##N##_Clear(Queue_##N* q) {                                                 \
+    if (!q) return;                                                                                   \
+    for (int _i = 0; _i < q->count; _i++) { E _v = q->data[(q->head + _i) % q->capacity]; DROP(_v); } \
+    q->head = 0; q->tail = 0; q->count = 0; }                                                        \
+static inline void Queue_##N##_Free(Queue_##N* q) {                                                  \
+    if (q) { Queue_##N##_Clear(q); free(q->data); free(q); } }
+
+#define CS2SX_QUEUE_DEFINE(T) CS2SX_QUEUE_DEFINE_EX(T, T, CS2SX_ID, CS2SX_NOREF)
 
 CS2SX_QUEUE_DEFINE(int)
 CS2SX_QUEUE_DEFINE(float)
 CS2SX_QUEUE_DEFINE(double)
 
 // ============================================================================
-// HashSet<T> — sorted unique array (suitable for small-to-medium sets)
+// HashSet<T> — unique array (suitable for small-to-medium sets)
 // ============================================================================
 
-#define CS2SX_HASHSET_DEFINE(T)                                                                     \
-typedef struct { T* data; int count; int capacity; } HashSet_##T;                                   \
-static inline HashSet_##T* HashSet_##T##_New(void) {                                                \
-    HashSet_##T* s = (HashSet_##T*)malloc(sizeof(HashSet_##T));                                     \
+#define CS2SX_HASHSET_DEFINE_EX(N, E, KEEP, DROP)                                                   \
+typedef struct { E* data; int count; int capacity; } HashSet_##N;                                   \
+static inline HashSet_##N* HashSet_##N##_New(void) {                                                \
+    HashSet_##N* s = (HashSet_##N*)malloc(sizeof(HashSet_##N));                                     \
     if (!s) return NULL;                                                                              \
-    s->data = (T*)malloc(8 * sizeof(T)); s->count = 0; s->capacity = 8; return s; }                \
-static inline int HashSet_##T##_Contains(HashSet_##T* s, T val) {                                   \
-    if (!s) CS2SX_ThrowNullRef();                                                                                 \
+    s->data = (E*)malloc(8 * sizeof(E)); s->count = 0; s->capacity = 8; return s; }                \
+static inline int HashSet_##N##_Contains(HashSet_##N* s, E val) {                                   \
+    if (!s) CS2SX_ThrowNullRef();                                                                    \
     for (int _i = 0; _i < s->count; _i++) if (s->data[_i] == val) return 1; return 0; }            \
-static inline int HashSet_##T##_Add(HashSet_##T* s, T val) {                                        \
-    if (!s || HashSet_##T##_Contains(s, val)) return 0;                                              \
+static inline int HashSet_##N##_Add(HashSet_##N* s, E val) {                                        \
+    if (!s) CS2SX_ThrowNullRef();                                                                    \
+    if (HashSet_##N##_Contains(s, val)) return 0;                                                    \
     if (s->count >= s->capacity) {                                                                    \
         s->capacity *= 2;                                                                             \
-        s->data = (T*)realloc(s->data, s->capacity * sizeof(T)); }                                   \
-    s->data[s->count++] = val; return 1; }                                                           \
-static inline int HashSet_##T##_Remove(HashSet_##T* s, T val) {                                     \
-    if (!s) CS2SX_ThrowNullRef();                                                                                 \
+        s->data = (E*)realloc(s->data, s->capacity * sizeof(E)); }                                   \
+    s->data[s->count++] = KEEP(val); return 1; }                                                     \
+static inline int HashSet_##N##_Remove(HashSet_##N* s, E val) {                                     \
+    if (!s) CS2SX_ThrowNullRef();                                                                    \
     for (int _i = 0; _i < s->count; _i++) if (s->data[_i] == val) {                                 \
+        E _v = s->data[_i];                                                                          \
         for (int _j = _i; _j < s->count-1; _j++) s->data[_j] = s->data[_j+1];                      \
-        s->count--; return 1; } return 0; }                                                           \
-static inline void HashSet_##T##_Clear(HashSet_##T* s) { if (s) s->count = 0; }                    \
-static inline void HashSet_##T##_Free(HashSet_##T* s) { if (s) { free(s->data); free(s); } }      \
-static inline void HashSet_##T##_UnionWith(HashSet_##T* dst, HashSet_##T* src) {                   \
+        s->count--; DROP(_v); return 1; } return 0; }                                                 \
+static inline void HashSet_##N##_Clear(HashSet_##N* s) {                                            \
+    if (!s) return;                                                                                  \
+    for (int _i = 0; _i < s->count; _i++) { E _v = s->data[_i]; DROP(_v); }                         \
+    s->count = 0; }                                                                                  \
+static inline void HashSet_##N##_Free(HashSet_##N* s) {                                             \
+    if (s) { HashSet_##N##_Clear(s); free(s->data); free(s); } }                                     \
+static inline void HashSet_##N##_UnionWith(HashSet_##N* dst, HashSet_##N* src) {                   \
     if (!dst || !src) return;                                                                        \
-    for (int _i = 0; _i < src->count; _i++) HashSet_##T##_Add(dst, src->data[_i]); }               \
-static inline void HashSet_##T##_IntersectWith(HashSet_##T* dst, HashSet_##T* src) {               \
+    for (int _i = 0; _i < src->count; _i++) HashSet_##N##_Add(dst, src->data[_i]); }               \
+static inline void HashSet_##N##_IntersectWith(HashSet_##N* dst, HashSet_##N* src) {               \
     if (!dst || !src) return;                                                                        \
     int _n = 0;                                                                                      \
-    for (int _i = 0; _i < dst->count; _i++)                                                         \
-        if (HashSet_##T##_Contains(src, dst->data[_i])) dst->data[_n++] = dst->data[_i];           \
+    for (int _i = 0; _i < dst->count; _i++) {                                                       \
+        if (HashSet_##N##_Contains(src, dst->data[_i])) dst->data[_n++] = dst->data[_i];           \
+        else { E _v = dst->data[_i]; DROP(_v); } }                                                   \
     dst->count = _n; }                                                                               \
-static inline void HashSet_##T##_ExceptWith(HashSet_##T* dst, HashSet_##T* src) {                  \
+static inline void HashSet_##N##_ExceptWith(HashSet_##N* dst, HashSet_##N* src) {                  \
     if (!dst || !src) return;                                                                        \
-    for (int _i = 0; _i < src->count; _i++) HashSet_##T##_Remove(dst, src->data[_i]); }
+    for (int _i = 0; _i < src->count; _i++) HashSet_##N##_Remove(dst, src->data[_i]); }
+
+#define CS2SX_HASHSET_DEFINE(T) CS2SX_HASHSET_DEFINE_EX(T, T, CS2SX_ID, CS2SX_NOREF)
 
 CS2SX_HASHSET_DEFINE(int)
 CS2SX_HASHSET_DEFINE(float)
@@ -907,88 +953,65 @@ List_str* String_Split_Whitespace(const char* s);
 
 #define CS2SX_DICT_INITIAL_CAP 8
 
-#define CS2SX_DICT_DEFINE(K, V)                                                                         \
-typedef struct { K* keys; V* vals; int count; int capacity; } Dict_##K##_##V;                           \
-static inline Dict_##K##_##V* Dict_##K##_##V##_New(void) {                                             \
-    Dict_##K##_##V* d = (Dict_##K##_##V*)malloc(sizeof(Dict_##K##_##V));                               \
+/// Dict_<KN>_<VN> with key C type KE and value C type VE. KEEP/DROP hooks per key
+/// and value (see "Element hooks"), KEQ compares keys, KCHECK validates a key.
+#define CS2SX_DICT_DEFINE_EX(KN, KE, VN, VE, KKEEP, KDROP, VKEEP, VDROP, KEQ, KCHECK)               \
+typedef struct { KE* keys; VE* vals; int count; int capacity; } Dict_##KN##_##VN;                     \
+static inline Dict_##KN##_##VN* Dict_##KN##_##VN##_New(void) {                                        \
+    Dict_##KN##_##VN* d = (Dict_##KN##_##VN*)malloc(sizeof(Dict_##KN##_##VN));                        \
     if (!d) return NULL;                                                                                \
-    d->keys = (K*)malloc(CS2SX_DICT_INITIAL_CAP * sizeof(K));                                          \
-    d->vals = (V*)malloc(CS2SX_DICT_INITIAL_CAP * sizeof(V));                                          \
+    d->keys = (KE*)malloc(CS2SX_DICT_INITIAL_CAP * sizeof(KE));                                         \
+    d->vals = (VE*)malloc(CS2SX_DICT_INITIAL_CAP * sizeof(VE));                                         \
     d->count = 0; d->capacity = CS2SX_DICT_INITIAL_CAP; return d; }                                    \
-static inline int Dict_##K##_##V##_ContainsKey(Dict_##K##_##V* d, K key);                            \
-static inline void Dict_##K##_##V##_Add(Dict_##K##_##V* d, K key, V val) {                             \
+static inline int Dict_##KN##_##VN##_IndexOf(Dict_##KN##_##VN* d, KE key) {                           \
+    for (int _i = 0; _i < d->count; _i++) { if (KEQ(d->keys[_i], key)) return _i; } return -1; }      \
+static inline int Dict_##KN##_##VN##_ContainsKey(Dict_##KN##_##VN* d, KE key) {                       \
     if (!d) CS2SX_ThrowNullRef();                                                                       \
-    if (Dict_##K##_##V##_ContainsKey(d, key)) CS2SX_ThrowDuplicateKey();                               \
+    KCHECK(key);                                                                                        \
+    return Dict_##KN##_##VN##_IndexOf(d, key) >= 0; }                                                  \
+static inline void Dict_##KN##_##VN##_Add(Dict_##KN##_##VN* d, KE key, VE val) {                      \
+    if (!d) CS2SX_ThrowNullRef();                                                                       \
+    KCHECK(key);                                                                                        \
+    if (Dict_##KN##_##VN##_IndexOf(d, key) >= 0) CS2SX_ThrowDuplicateKey();                            \
     if (d->count >= d->capacity) {                                                                      \
         d->capacity *= 2;                                                                               \
-        d->keys = (K*)realloc(d->keys, d->capacity * sizeof(K));                                        \
-        d->vals = (V*)realloc(d->vals, d->capacity * sizeof(V)); }                                      \
-    d->keys[d->count] = key; d->vals[d->count] = val; d->count++; }                                    \
-static inline int Dict_##K##_##V##_ContainsKey(Dict_##K##_##V* d, K key) {                             \
-    for (int _i = 0; _i < d->count; _i++) { if (d->keys[_i] == key) return 1; } return 0; }           \
-static inline int Dict_##K##_##V##_TryGetValue(Dict_##K##_##V* d, K key, V* out_val) {                 \
-    for (int _i = 0; _i < d->count; _i++) {                                                            \
-        if (d->keys[_i] == key) { *out_val = d->vals[_i]; return 1; } } return 0; }                    \
-static inline V Dict_##K##_##V##_Get(Dict_##K##_##V* d, K key) {                                       \
-    V _v; memset(&_v, 0, sizeof(V));                                                                    \
+        d->keys = (KE*)realloc(d->keys, d->capacity * sizeof(KE));                                      \
+        d->vals = (VE*)realloc(d->vals, d->capacity * sizeof(VE)); }                                    \
+    d->keys[d->count] = KKEEP(key); d->vals[d->count] = VKEEP(val); d->count++; }                     \
+static inline int Dict_##KN##_##VN##_TryGetValue(Dict_##KN##_##VN* d, KE key, VE* out_val) {          \
     if (!d) CS2SX_ThrowNullRef();                                                                       \
-    if (!Dict_##K##_##V##_TryGetValue(d, key, &_v)) CS2SX_ThrowKeyNotFound(); return _v; }             \
-static inline void Dict_##K##_##V##_Set(Dict_##K##_##V* d, K key, V val) {                             \
-    for (int _i = 0; _i < d->count; _i++) {                                                            \
-        if (d->keys[_i] == key) { d->vals[_i] = val; return; } }                                       \
-    Dict_##K##_##V##_Add(d, key, val); }                                                                \
-static inline void Dict_##K##_##V##_Remove(Dict_##K##_##V* d, K key) {                                 \
-    for (int _i = 0; _i < d->count; _i++) {                                                            \
-        if (d->keys[_i] == key) {                                                                       \
-            for (int _j = _i; _j < d->count - 1; _j++) {                                               \
-                d->keys[_j] = d->keys[_j+1]; d->vals[_j] = d->vals[_j+1]; }                           \
-            d->count--; return; } } }                                                                   \
-static inline void Dict_##K##_##V##_Clear(Dict_##K##_##V* d) { if (d) d->count = 0; }                  \
-static inline void Dict_##K##_##V##_Free(Dict_##K##_##V* d)  {                                         \
-    if (d) { free(d->keys); free(d->vals); free(d); } }
+    KCHECK(key);                                                                                        \
+    int _i = Dict_##KN##_##VN##_IndexOf(d, key);                                                        \
+    if (_i < 0) return 0;                                                                               \
+    *out_val = d->vals[_i]; return 1; }                                                                 \
+static inline VE Dict_##KN##_##VN##_Get(Dict_##KN##_##VN* d, KE key) {                                \
+    VE _v; memset(&_v, 0, sizeof(VE));                                                                  \
+    if (!Dict_##KN##_##VN##_TryGetValue(d, key, &_v)) CS2SX_ThrowKeyNotFound(); return _v; }           \
+static inline void Dict_##KN##_##VN##_Set(Dict_##KN##_##VN* d, KE key, VE val) {                      \
+    if (!d) CS2SX_ThrowNullRef();                                                                       \
+    KCHECK(key);                                                                                        \
+    int _i = Dict_##KN##_##VN##_IndexOf(d, key);                                                        \
+    if (_i < 0) { Dict_##KN##_##VN##_Add(d, key, val); return; }                                       \
+    VE _old = d->vals[_i]; d->vals[_i] = VKEEP(val); VDROP(_old); }                                    \
+static inline void Dict_##KN##_##VN##_Remove(Dict_##KN##_##VN* d, KE key) {                           \
+    if (!d) CS2SX_ThrowNullRef();                                                                       \
+    KCHECK(key);                                                                                        \
+    int _i = Dict_##KN##_##VN##_IndexOf(d, key);                                                        \
+    if (_i < 0) return;                                                                                 \
+    KE _k = d->keys[_i]; VE _v = d->vals[_i];                                                           \
+    for (int _j = _i; _j < d->count - 1; _j++) { d->keys[_j] = d->keys[_j+1]; d->vals[_j] = d->vals[_j+1]; } \
+    d->count--; KDROP(_k); VDROP(_v); }                                                                 \
+static inline void Dict_##KN##_##VN##_Clear(Dict_##KN##_##VN* d) {                                    \
+    if (!d) return;                                                                                     \
+    for (int _i = 0; _i < d->count; _i++) { KE _k = d->keys[_i]; VE _v = d->vals[_i]; KDROP(_k); VDROP(_v); } \
+    d->count = 0; }                                                                                     \
+static inline void Dict_##KN##_##VN##_Free(Dict_##KN##_##VN* d) {                                     \
+    if (d) { Dict_##KN##_##VN##_Clear(d); free(d->keys); free(d->vals); free(d); } }
 
-#define CS2SX_DICT_DEFINE_STR_KEY(V)                                                                    \
-typedef struct { const char** keys; V* vals; int count; int capacity; } Dict_str_##V;                   \
-static inline Dict_str_##V* Dict_str_##V##_New(void) {                                                  \
-    Dict_str_##V* d = (Dict_str_##V*)malloc(sizeof(Dict_str_##V));                                      \
-    if (!d) return NULL;                                                                                \
-    d->keys = (const char**)malloc(CS2SX_DICT_INITIAL_CAP * sizeof(const char*));                      \
-    d->vals = (V*)malloc(CS2SX_DICT_INITIAL_CAP * sizeof(V));                                          \
-    d->count = 0; d->capacity = CS2SX_DICT_INITIAL_CAP; return d; }                                    \
-static inline int Dict_str_##V##_ContainsKey(Dict_str_##V* d, const char* key);                         \
-static inline void Dict_str_##V##_Add(Dict_str_##V* d, const char* key, V val) {                        \
-    if (!d) CS2SX_ThrowNullRef();                                                                       \
-    if (!key) CS2SX_ThrowArgNull("key");                                                                \
-    if (Dict_str_##V##_ContainsKey(d, key)) CS2SX_ThrowDuplicateKey();                                 \
-    if (d->count >= d->capacity) {                                                                      \
-        d->capacity *= 2;                                                                               \
-        d->keys = (const char**)realloc(d->keys, d->capacity * sizeof(const char*));                    \
-        d->vals = (V*)realloc(d->vals, d->capacity * sizeof(V)); }                                      \
-    d->keys[d->count] = key; d->vals[d->count] = val; d->count++; }                                    \
-static inline int Dict_str_##V##_ContainsKey(Dict_str_##V* d, const char* key) {                        \
-    for (int _i = 0; _i < d->count; _i++) {                                                            \
-        if (strcmp(d->keys[_i], key) == 0) return 1; } return 0; }                                     \
-static inline int Dict_str_##V##_TryGetValue(Dict_str_##V* d, const char* key, V* out_val) {            \
-    for (int _i = 0; _i < d->count; _i++) {                                                            \
-        if (strcmp(d->keys[_i], key) == 0) { *out_val = d->vals[_i]; return 1; } } return 0; }         \
-static inline V Dict_str_##V##_Get(Dict_str_##V* d, const char* key) {                                  \
-    V _v; memset(&_v, 0, sizeof(V));                                                                    \
-    if (!d) CS2SX_ThrowNullRef();                                                                       \
-    if (!key) CS2SX_ThrowArgNull("key");                                                                \
-    if (!Dict_str_##V##_TryGetValue(d, key, &_v)) CS2SX_ThrowKeyNotFound(); return _v; }              \
-static inline void Dict_str_##V##_Set(Dict_str_##V* d, const char* key, V val) {                        \
-    for (int _i = 0; _i < d->count; _i++) {                                                            \
-        if (strcmp(d->keys[_i], key) == 0) { d->vals[_i] = val; return; } }                            \
-    Dict_str_##V##_Add(d, key, val); }                                                                  \
-static inline void Dict_str_##V##_Remove(Dict_str_##V* d, const char* key) {                            \
-    for (int _i = 0; _i < d->count; _i++) {                                                            \
-        if (strcmp(d->keys[_i], key) == 0) {                                                            \
-            for (int _j = _i; _j < d->count - 1; _j++) {                                               \
-                d->keys[_j] = d->keys[_j+1]; d->vals[_j] = d->vals[_j+1]; }                           \
-            d->count--; return; } } }                                                                   \
-static inline void Dict_str_##V##_Clear(Dict_str_##V* d) { if (d) d->count = 0; }                       \
-static inline void Dict_str_##V##_Free(Dict_str_##V* d)  {                                              \
-    if (d) { free(d->keys); free(d->vals); free(d); } }
+#define CS2SX_DICT_DEFINE(K, V) \
+    CS2SX_DICT_DEFINE_EX(K, K, V, V, CS2SX_ID, CS2SX_NOREF, CS2SX_ID, CS2SX_NOREF, CS2SX_EQ, CS2SX_NOCHECK)
+#define CS2SX_DICT_DEFINE_STR_KEY(V) \
+    CS2SX_DICT_DEFINE_EX(str, const char*, V, V, CS2SX_STR_KEEP, CS2SX_STR_DROP, CS2SX_ID, CS2SX_NOREF, CS2SX_EQ_STR, CS2SX_KEYCHECK_STR)
 
 CS2SX_DICT_DEFINE(int, int)
 CS2SX_DICT_DEFINE(int, float)

@@ -23,11 +23,69 @@ public sealed class GenericExpander
         _collector = collector;
     }
 
-    public (string headerPath, string implPath) WriteToFiles(string buildDir)
+    /// Stack/Queue/HashSet/Dictionary over user types (CS2SX_*_DEFINE_EX). Elements of
+    /// reference-counted classes are owned by the collection (CS2SX_RC_HOOKS); string
+    /// keys and values are kept as heap copies.
+    private void WriteUserCollections(System.Text.StringBuilder sb)
+    {
+        if (_collector.UserCollectionInstantiations.Count == 0) return;
+        sb.AppendLine();
+        sb.AppendLine("// ── Stack / Queue / HashSet / Dictionary over user types ─────────────");
+
+        // (name suffix, C element type, keep hook, drop hook) — null when unsupported
+        (string name, string cType, string keep, string drop)? Element(string cs)
+        {
+            if (cs == "string") return ("str", "const char*", "CS2SX_STR_KEEP", "CS2SX_STR_DROP");
+            if (TypeRegistry.IsPrimitive(cs) || TypeRegistry.IsUserDefinedEnum(cs))
+            {
+                var c = TypeRegistry.MapType(cs);
+                return (c.Replace(" ", "_"), c, "CS2SX_ID", "CS2SX_NOREF");
+            }
+            if (TypeRegistry.IsUserStruct(cs)) return null;   // needs the full struct definition
+            var cls = TypeRegistry.MapType(cs);
+            var root = TypeRegistry.ArcRoot(cs);
+            if (root == null) return (cls, cls + "*", "CS2SX_ID", "CS2SX_NOREF");
+            var guard = "CS2SX_RCHOOKS_" + cls;
+            sb.AppendLine($"#ifndef {guard}");
+            sb.AppendLine($"#define {guard}");
+            sb.AppendLine($"CS2SX_RC_HOOKS({cls}, {root})");
+            sb.AppendLine("#endif");
+            return (cls, cls + "*", cls + "_RcKeep", cls + "_RcDrop");
+        }
+
+        foreach (var (kind, key, elem) in _collector.UserCollectionInstantiations
+                     .OrderBy(c => c.Kind).ThenBy(c => c.Key).ThenBy(c => c.Elem))
+        {
+            if (Element(elem) is not { } e) continue;
+            if (kind == "Dictionary")
+            {
+                if (Element(key!) is not { } k) continue;
+                var name = $"Dict_{k.name}_{e.name}";
+                var isStrKey = key == "string";
+                sb.AppendLine($"#ifndef CS2SX_{name}_DEFINED");
+                sb.AppendLine($"#define CS2SX_{name}_DEFINED");
+                sb.AppendLine($"CS2SX_DICT_DEFINE_EX({k.name}, {k.cType}, {e.name}, {e.cType}, {k.keep}, {k.drop}, {e.keep}, {e.drop}, "
+                            + (isStrKey ? "CS2SX_EQ_STR, CS2SX_KEYCHECK_STR)" : "CS2SX_EQ, CS2SX_NOCHECK)"));
+                sb.AppendLine("#endif");
+            }
+            else
+            {
+                var macro = kind switch { "Stack" => "STACK", "Queue" => "QUEUE", _ => "HASHSET" };
+                var prefix = kind == "HashSet" ? "HashSet" : kind;
+                sb.AppendLine($"#ifndef CS2SX_{prefix}_{e.name}_DEFINED");
+                sb.AppendLine($"#define CS2SX_{prefix}_{e.name}_DEFINED");
+                sb.AppendLine($"CS2SX_{macro}_DEFINE_EX({e.name}, {e.cType}, {e.keep}, {e.drop})");
+                sb.AppendLine("#endif");
+            }
+        }
+    }
+
+    public (string headerPath, string implPath) WriteToFiles(string buildDir, IReadOnlyList<string>? userSources = null)
     {
         if (_collector.Instantiations.Count == 0
             && _collector.ListOfUserClassInstantiations.Count == 0
-            && _collector.ListOfDelegateInstantiations.Count == 0)
+            && _collector.ListOfDelegateInstantiations.Count == 0
+            && _collector.UserCollectionInstantiations.Count == 0)
             return (string.Empty, string.Empty);
 
         var headerSb = new System.Text.StringBuilder();
@@ -46,7 +104,9 @@ public sealed class GenericExpander
         {
             try
             {
-                sharedSemanticBuilder = new SemanticModelBuilder(allGenericSources);
+                // With the user's sources, so the type arguments (Box<Node> → Node) resolve.
+                sharedSemanticBuilder = new SemanticModelBuilder(
+                    allGenericSources.Concat(userSources ?? Array.Empty<string>()).ToList());
                 Log.Debug($"GenericExpander: SemanticModel für {allGenericSources.Count} Generic-Quelle(n) aufgebaut");
             }
             catch (Exception ex)
@@ -116,6 +176,8 @@ public sealed class GenericExpander
             headerSb.AppendLine("#endif");
         }
 
+        WriteUserCollections(headerSb);
+
         var headerPath = Path.Combine(buildDir, "_generics.h");
         var implPath = Path.Combine(buildDir, "_generics.c");
 
@@ -148,7 +210,9 @@ public sealed class GenericExpander
         SemanticModel? semanticModel = null;
         if (semanticBuilder != null)
         {
-            semanticModel = semanticBuilder.GetModelForBaseName(inst.BaseName);
+            // The specialised source declares the expanded class (Box_Node).
+            semanticModel = semanticBuilder.GetModelForBaseName(inst.CName)
+                            ?? semanticBuilder.GetModelForBaseName(inst.BaseName);
             if (semanticModel == null)
                 Log.Debug($"GenericExpander: Kein SemanticModel für '{inst.BaseName}' — Transpile ohne Typ-Info");
         }

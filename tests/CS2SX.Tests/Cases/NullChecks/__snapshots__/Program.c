@@ -146,6 +146,12 @@ static void _lambda_0(void* _env)
     int v = CS2SX_NN(missing)->f_Value;
 }
 
+static void _envdtor_0(void* _e)
+{
+    struct _cap_0* _c = (struct _cap_0*)_e;
+    CS2SX_ReleaseLater(_c->missing, (CS2SX_FreeFn)Node_Free);
+}
+
 struct _cap_1
 {
     CS2SX_Env _hdr;
@@ -157,6 +163,12 @@ static void _lambda_1(void* _env)
     struct _cap_1* _c = (struct _cap_1*)_env;
     Node* missing = _c->missing;
     CS2SX_NN(missing)->f_Value = 5;
+}
+
+static void _envdtor_1(void* _e)
+{
+    struct _cap_1* _c = (struct _cap_1*)_e;
+    CS2SX_ReleaseLater(_c->missing, (CS2SX_FreeFn)Node_Free);
 }
 
 struct _cap_2
@@ -172,6 +184,12 @@ static void _lambda_2(void* _env)
     Node_Get(CS2SX_NN(missing));
 }
 
+static void _envdtor_2(void* _e)
+{
+    struct _cap_2* _c = (struct _cap_2*)_e;
+    CS2SX_ReleaseLater(_c->missing, (CS2SX_FreeFn)Node_Free);
+}
+
 struct _cap_3
 {
     CS2SX_Env _hdr;
@@ -185,6 +203,12 @@ static void _lambda_3(void* _env)
     ({ __auto_type _cs2sx_r = CS2SX_NN(missing); _cs2sx_r->vtable->Kind(_cs2sx_r); });
 }
 
+static void _envdtor_3(void* _e)
+{
+    struct _cap_3* _c = (struct _cap_3*)_e;
+    CS2SX_ReleaseLater(_c->missing, (CS2SX_FreeFn)Node_Free);
+}
+
 struct _cap_4
 {
     CS2SX_Env _hdr;
@@ -196,6 +220,12 @@ static void _lambda_4(void* _env)
     struct _cap_4* _c = (struct _cap_4*)_env;
     Node* n = _c->n;
     int v = CS2SX_NN(n->f_Next)->f_Value;
+}
+
+static void _envdtor_4(void* _e)
+{
+    struct _cap_4* _c = (struct _cap_4*)_e;
+    CS2SX_ReleaseLater(_c->n, (CS2SX_FreeFn)Node_Free);
 }
 
 struct _cap_5
@@ -273,7 +303,13 @@ static void _lambda_10(void* _env)
 {
     struct _cap_10* _c = (struct _cap_10*)_env;
     Node* missing = _c->missing;
-    const char* t = (missing != NULL ? ({ char* _sb1 = _cs2sx_next_buf(); snprintf(_sb1, CS2SX_STRBUF_SIZE, "Name: %s", CS2SX_NN(missing)->f_Name); _sb1; }) : "-");
+    const char* t = (CS2SX_RETAIN(Node, missing) != NULL ? ({ char* _sb1 = _cs2sx_next_buf(); snprintf(_sb1, CS2SX_STRBUF_SIZE, "Name: %s", CS2SX_NN(missing)->f_Name); _sb1; }) : "-");
+}
+
+static void _envdtor_10(void* _e)
+{
+    struct _cap_10* _c = (struct _cap_10*)_e;
+    CS2SX_ReleaseLater(_c->missing, (CS2SX_FreeFn)Node_Free);
 }
 
 void NullChecksApp_OnInit(NullChecksApp* self)
@@ -283,23 +319,28 @@ void NullChecksApp_OnInit(NullChecksApp* self)
     Node* n = _node_2;
     Node* missing = NULL;
     struct _cap_0* _env_0 = CS2SX_ENV_NEW(struct _cap_0);
-    _env_0->missing = missing;
+    _env_0->missing = CS2SX_RETAIN(Node, missing);
+    _env_0->_hdr._dtor = _envdtor_0;
     const char* _ps_3 = NullChecksApp_Try(CS2SX_Delegate_New((void*)_lambda_0, _env_0, 1));
     printf("%s\n", _ps_3 ? _ps_3 : "");
     struct _cap_1* _env_1 = CS2SX_ENV_NEW(struct _cap_1);
-    _env_1->missing = missing;
+    _env_1->missing = CS2SX_RETAIN(Node, missing);
+    _env_1->_hdr._dtor = _envdtor_1;
     const char* _ps_4 = NullChecksApp_Try(CS2SX_Delegate_New((void*)_lambda_1, _env_1, 1));
     printf("%s\n", _ps_4 ? _ps_4 : "");
     struct _cap_2* _env_2 = CS2SX_ENV_NEW(struct _cap_2);
-    _env_2->missing = missing;
+    _env_2->missing = CS2SX_RETAIN(Node, missing);
+    _env_2->_hdr._dtor = _envdtor_2;
     const char* _ps_5 = NullChecksApp_Try(CS2SX_Delegate_New((void*)_lambda_2, _env_2, 1));
     printf("%s\n", _ps_5 ? _ps_5 : "");
     struct _cap_3* _env_3 = CS2SX_ENV_NEW(struct _cap_3);
-    _env_3->missing = missing;
+    _env_3->missing = CS2SX_RETAIN(Node, missing);
+    _env_3->_hdr._dtor = _envdtor_3;
     const char* _ps_6 = NullChecksApp_Try(CS2SX_Delegate_New((void*)_lambda_3, _env_3, 1));
     printf("%s\n", _ps_6 ? _ps_6 : "");
     struct _cap_4* _env_4 = CS2SX_ENV_NEW(struct _cap_4);
-    _env_4->n = n;
+    _env_4->n = CS2SX_RETAIN(Node, n);
+    _env_4->_hdr._dtor = _envdtor_4;
     const char* _ps_7 = NullChecksApp_Try(CS2SX_Delegate_New((void*)_lambda_4, _env_4, 1));
     printf("%s\n", _ps_7 ? _ps_7 : "");
     IShape* shape = NULL;
@@ -331,7 +372,8 @@ void NullChecksApp_OnInit(NullChecksApp* self)
     const char* _ps_13 = _sb0;
     printf("%s\n", _ps_13 ? _ps_13 : "");
     struct _cap_10* _env_10 = CS2SX_ENV_NEW(struct _cap_10);
-    _env_10->missing = missing;
+    _env_10->missing = CS2SX_RETAIN(Node, missing);
+    _env_10->_hdr._dtor = _envdtor_10;
     const char* _ps_14 = NullChecksApp_Try(CS2SX_Delegate_New((void*)_lambda_10, _env_10, 1));
     printf("%s\n", _ps_14 ? _ps_14 : "");
 }

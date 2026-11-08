@@ -515,6 +515,12 @@ public sealed class TranspilerContext
 
         if (type.Name == "StringBuilder") return "StringBuilder";
 
+        // User generic classes keep their arguments (Box<Node>), so they map to the
+        // expanded C type (Box_Node) instead of the bare name.
+        if (type is INamedTypeSymbol userGeneric && userGeneric.TypeArguments.Length > 0
+            && userGeneric.TypeKind == TypeKind.Class && IsUserCode(userGeneric.OriginalDefinition))
+            return userGeneric.Name + "<" + string.Join(",", userGeneric.TypeArguments.Select(FormatTypeSymbol)) + ">";
+
         // Generic delegate types: Action<T>, Func<T,R>, etc.
         if (type is INamedTypeSymbol delegateType
             && delegateType.TypeArguments.Length > 0

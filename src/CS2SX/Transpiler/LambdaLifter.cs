@@ -177,13 +177,34 @@ public sealed class LambdaLifter
             _ctx.PendingLambdaPreludes.Add(sb.ToString());
             return $"(&_dg_{id})";
         }
+        // Captured objects of reference-counted classes (incl. `this`) are held by the
+        // environment: retained when it is filled, released with it (deferred).
+        var owned = caps.Select(c => (cap: c, root: TypeRegistry.ArcRoot(c.CsType.TrimEnd('?'))))
+                        .Where(x => x.root != null).ToList();
+        if (owned.Count > 0)
+        {
+            sb.AppendLine($"static void _envdtor_{id}(void* _e)");
+            sb.AppendLine("{");
+            sb.AppendLine($"    struct {capStruct}* _c = (struct {capStruct}*)_e;");
+            foreach (var (cap, root) in owned)
+                sb.AppendLine($"    CS2SX_ReleaseLater(_c->{cap.CapName}, (CS2SX_FreeFn){root}_Free);");
+            sb.AppendLine("}");
+            sb.AppendLine();
+        }
         _ctx.PendingLambdaPreludes.Add(sb.ToString());
 
         // A fresh environment per evaluation (inside a loop: per iteration).
         var env = "_env_" + id;
         _ctx.WriteLine($"struct {capStruct}* {env} = CS2SX_ENV_NEW(struct {capStruct});");
         foreach (var cap in caps)
-            _ctx.WriteLine($"{env}->{cap.CapName} = {cap.CExpr};");
+        {
+            var root = owned.FirstOrDefault(o => o.cap == cap).root;
+            _ctx.WriteLine(root != null
+                ? $"{env}->{cap.CapName} = CS2SX_RETAIN({root}, {cap.CExpr});"
+                : $"{env}->{cap.CapName} = {cap.CExpr};");
+        }
+        if (owned.Count > 0)
+            _ctx.WriteLine($"{env}->_hdr._dtor = _envdtor_{id};");
         return $"CS2SX_Delegate_New((void*){name}, {env}, 1)";
     }
 

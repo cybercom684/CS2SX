@@ -154,7 +154,7 @@ public sealed class BuildPipeline
             var ifaceHeaderPath = interfaceExpander.WriteInterfaceHeader(_buildDir);
 
             var genericExpander = new GenericExpander(genericCollector);
-            var (genericHeaderPath, genericImplPath) = genericExpander.WriteToFiles(_buildDir);
+            var (genericHeaderPath, genericImplPath) = genericExpander.WriteToFiles(_buildDir, transpiledFiles);
 
             var expandedNames = genericExpander.GetExpandedTypeNames().ToList();
             var listUserClasses = genericCollector.ListOfUserClassInstantiations;
@@ -220,7 +220,15 @@ public sealed class BuildPipeline
             cFiles.AddRange(runtimeSources);   // runtime modules — compiled once, then cached
 
             if (!string.IsNullOrEmpty(genericImplPath) && File.Exists(genericImplPath))
+            {
+                // Expanded generic classes call functions of the user's classes
+                // (Box<Node> releases its Node): include every header like any C file.
+                var impl = File.ReadAllText(genericImplPath);
+                impl = impl.Replace("#include \"_generics.h\"\n",
+                    string.Concat(allHeaders.Select(h => $"#include \"{h}\"\n")));
+                File.WriteAllText(genericImplPath, impl);
                 cFiles.Add(genericImplPath);
+            }
 
             int transpiled = 0;
             int skipped = 0;
