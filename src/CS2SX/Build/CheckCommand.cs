@@ -97,7 +97,11 @@ public sealed class CheckCommand
                 diags.AddRange(hResult.Diagnostics);
                 diags.AddRange(cResult.Diagnostics);
 
+                // A line with an error needs no further "check generated C" warnings.
+                var errorLines = diags.Where(d => d.Severity == DiagnosticSeverity.Error)
+                    .Select(d => d.CsLine).ToHashSet();
                 diags = diags
+                    .Where(d => d.Severity != DiagnosticSeverity.Warning || !errorLines.Contains(d.CsLine))
                     .DistinctBy(d => (d.CsFile, d.CsLine, d.Message))
                     .OrderBy(d => d.CsLine)
                     .ToList();

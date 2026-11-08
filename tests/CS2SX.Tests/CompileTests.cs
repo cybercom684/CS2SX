@@ -22,6 +22,15 @@ public class CompileTests
         var result = Cs2sxCli.Run(projectDir, "build", csproj);
         var nro = Path.Combine(projectDir, name + ".nro");
 
+        if (tc.ExpectsErrors)
+        {
+            // Rejected before GCC: no compiler output, no .nro.
+            Assert.True(result.ExitCode != 0, $"'{name}' must be rejected:\n{result}");
+            Assert.Contains("the C compiler was not run", result.Output);
+            Assert.False(File.Exists(nro));
+            return;
+        }
+
         var knownIssue = Path.Combine(tc.SourceDir, "known-issue.txt");
         if (File.Exists(knownIssue))
         {

@@ -27,4 +27,20 @@ public class DiagnosticsTests
             Assert.True(result.Output.Contains(e, StringComparison.Ordinal),
                 $"expected warning containing \"{e}\" not reported:\n{result}");
     }
+
+    public static IEnumerable<object[]> ErrorCases => TestCase.All(c => c.ExpectsErrors);
+
+    [Theory]
+    [MemberData(nameof(ErrorCases))]
+    public void Check_reports_expected_errors(string name)
+    {
+        var tc = TestCase.Get(name);
+        var csproj = tc.CreateProject("check");
+        var result = Cs2sxCli.Run(Path.GetDirectoryName(csproj)!, "check", csproj);
+
+        Assert.True(result.ExitCode != 0, $"check must fail for '{name}':\n{result}");
+        foreach (var e in tc.ExpectedErrors)
+            Assert.True(result.Output.Contains(e, StringComparison.Ordinal),
+                $"expected error containing \"{e}\" not reported:\n{result}");
+    }
 }

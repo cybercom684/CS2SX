@@ -117,6 +117,14 @@ public sealed class CSharpToC : CSharpSyntaxWalker
                 Log.Error($"{_ctx.CurrentFile}({line}): CS{d.Id}: {d.GetMessage()}");
             }
 
+        // Constructs without a C translation: errors with a workaround; the build
+        // stops before GCC (see BuildPipeline).
+        if (_mode == TranspileMode.Implementation)
+            UnsupportedSyntax.Report(tree.GetRoot(), semanticModel, (node, message) =>
+                _ctx.Diagnostics.Error(_ctx.CurrentFile,
+                    node.GetLocation().GetLineSpan().StartLinePosition.Line + 1,
+                    message, node.ToString().Split('\n')[0].Trim()));
+
         Visit(tree.GetRoot());
 
         return new TranspileResult(

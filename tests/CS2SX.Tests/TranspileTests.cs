@@ -5,6 +5,7 @@ namespace CS2SX.Tests;
 
 /// Every case must transpile without errors, and the generated C must match its
 /// approved snapshot. Runs without devkitPro.
+/// Cases with `expect-errors.txt` must instead be rejected with those errors.
 public class TranspileTests
 {
     public static IEnumerable<object[]> Cases => TestCase.All();
@@ -18,6 +19,16 @@ public class TranspileTests
         var projectDir = Path.GetDirectoryName(csproj)!;
 
         var result = Cs2sxCli.Run(projectDir, "build", csproj, "--transpile-only");
+
+        if (tc.ExpectsErrors)
+        {
+            Assert.True(result.ExitCode != 0, $"'{name}' must be rejected:\n{result}");
+            foreach (var e in tc.ExpectedErrors)
+                Assert.True(result.Output.Contains(e, StringComparison.Ordinal),
+                    $"expected error containing \"{e}\" not reported:\n{result}");
+            return;
+        }
+
         Assert.True(result.ExitCode == 0, $"transpile failed:\n{result}");
 
         var buildDir = Path.Combine(projectDir, "cs2sx_out");

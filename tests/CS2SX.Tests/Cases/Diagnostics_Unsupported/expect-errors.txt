@@ -1,0 +1,16 @@
+# One substring per line: an error CS2SX must report for Program.cs.
+Program.cs(22): foreach über einen Range
+Program.cs(25): Ranges (a..b) werden nicht unterstützt
+Program.cs(28): with-Ausdrücke werden nicht unterstützt
+Program.cs(30): Lokale Funktionen (Sq)
+Program.cs(33): LINQ-Abfragesyntax
+Program.cs(35): Collection-Ausdrücke
+Program.cs(37): new object() wird nicht unterstützt
+Program.cs(39): dynamic wird nicht unterstützt
+Program.cs(41): GetType() (Reflection) wird nur bei Exceptions unterstützt
+Program.cs(44): Sprungmarken (again:)
+Program.cs(46): goto wird nicht unterstützt
+Program.cs(9): Eigene delegate-Typen (Op)
+Program.cs(11): Generische Structs (Box<…>)
+Program.cs(15): Generische Methoden (Pick<…>)
+Program.cs(17): yield return wird nicht unterstützt

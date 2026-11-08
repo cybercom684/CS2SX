@@ -4,6 +4,27 @@ Diese Seite beschreibt, was CS2SX nicht unterstützt und wie man die häufigsten
 
 ---
 
+## Was der Build ablehnt
+
+Für diese Konstrukte gibt es keine Übersetzung nach C. `cs2sx build` und `cs2sx check` melden sie als Fehler mit Datei, Zeile und Workaround. Der C-Compiler läuft dann gar nicht erst.
+
+| Konstrukt | Stattdessen |
+|---|---|
+| `foreach (var i in 0..10)`, Ranges `s[1..3]` | `for`-Schleife, `Substring`, `GetRange` |
+| `p with { X = 1 }` | `new Punkt(1, p.Y)` |
+| generische Methoden `T Max<T>(…)`, generische Structs | Überladungen pro Typ, generische Klasse |
+| lokale Funktionen | private Methode |
+| LINQ-Abfragesyntax `from x in … select x` | `list.Where(…).Select(…)` |
+| Collection-Ausdrücke `[1, 2, 3]` | `new List<int> { 1, 2, 3 }` |
+| eigene `delegate`-Typen | `Action<…>`, `Func<…>` |
+| `goto`, Sprungmarken | Schleifen, `break`/`continue` |
+| `yield return` | Werte in einer `List<T>` sammeln |
+| `new object()`, `dynamic` | eigene Klasse, konkreter Typ |
+| `stackalloc`, `Span<T>`, `unsafe`, Zeiger | normale Arrays |
+| `GetType()` (außer bei Exceptions) | `is`/`switch` auf den Typ |
+
+---
+
 ## Speicher: Referenzzählung statt Garbage Collector
 
 Das transpilierte Programm hat keine .NET-Laufzeit und damit keinen Garbage Collector. Objekte eigener Klassen werden stattdessen referenzgezählt:
@@ -77,47 +98,6 @@ cb();                       // zaehler bleibt 0 (Warnung beim Build)
 // RICHTIG — geteilten Zustand in ein Feld legen
 private int _zaehler;
 Action cb = () => _zaehler++;   // wirkt auf das Feld
-```
-
----
-
-## Keine generischen Methoden
-
-Generische **Klassen** werden für jeden verwendeten konkreten Typ erzeugt (`Stack<int>`, `Pool<Gegner>`). Generische **Methoden** (`T Max<T>(T a, T b)`) werden dagegen nicht unterstützt, auch ohne Constraints.
-
-```csharp
-// FALSCH
-public static T Max<T>(T a, T b) where T : IComparable<T> => a.CompareTo(b) > 0 ? a : b;
-
-// RICHTIG — eine Methode pro Typ
-public static int Max(int a, int b) => a > b ? a : b;
-public static float Max(float a, float b) => a > b ? a : b;
-```
-
----
-
-## Kein `record with { }`
-
-```csharp
-public record Punkt(int X, int Y);
-
-// FALSCH — with-Ausdruck nicht unterstützt
-var p2 = p1 with { X = 10 };
-
-// RICHTIG — manuell kopieren
-var p2 = new Punkt(10, p1.Y);
-```
-
----
-
-## Kein `foreach` über Ranges
-
-```csharp
-// FALSCH
-foreach (var i in 0..10) { }
-
-// RICHTIG
-for (int i = 0; i < 10; i++) { }
 ```
 
 ---

@@ -21,6 +21,14 @@ public sealed class TestCase
 
     public override string ToString() => Name;
 
+    /// `expect-errors.txt`: the case must be rejected; each non-comment line is a
+    /// substring of an error CS2SX reports (the C compiler must not run).
+    public string ExpectErrorsFile => Path.Combine(SourceDir, "expect-errors.txt");
+    public bool ExpectsErrors => File.Exists(ExpectErrorsFile);
+    public IEnumerable<string> ExpectedErrors => !ExpectsErrors ? Array.Empty<string>()
+        : File.ReadAllLines(ExpectErrorsFile).Select(l => l.Trim())
+            .Where(l => l.Length > 0 && !l.StartsWith('#'));
+
     public static string CasesRoot
     {
         get

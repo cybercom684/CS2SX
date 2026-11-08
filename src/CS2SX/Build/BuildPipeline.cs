@@ -1,4 +1,4 @@
-// Datei: Build/BuildPipeline.cs
+﻿// Datei: Build/BuildPipeline.cs
 //
 // FIXES in dieser Version:
 //   FIX-1: catch-Block nutzt renderer.MarkFirstRunningAsFailed() statt einer
@@ -223,6 +223,7 @@ public sealed class BuildPipeline
 
             int transpiled = 0;
             int skipped = 0;
+            int transpileErrors = 0;
 
             var allTranspiledHeaders = transpiledFiles
                 .Select(f => Path.Combine(_buildDir, Path.GetFileNameWithoutExtension(f) + ".h"))
@@ -373,7 +374,11 @@ public sealed class BuildPipeline
                     .OrderBy(d => d.CsLine)
                     .ToList();
 
-                foreach (var d in allDiags.Where(d => d.Severity == DiagnosticSeverity.Warning))
+                // A line with an error needs no further "check generated C" warnings.
+                var errorLines = allDiags.Where(d => d.Severity == DiagnosticSeverity.Error)
+                    .Select(d => d.CsLine).ToHashSet();
+                foreach (var d in allDiags.Where(d => d.Severity == DiagnosticSeverity.Warning
+                                                      && !errorLines.Contains(d.CsLine)))
                     Log.Warning($"{Path.GetFileName(d.CsFile ?? "")}({d.CsLine}): {d.Message}"
                         + (d.Context != null ? $"\n  code: {d.Context}" : ""));
 
@@ -385,9 +390,22 @@ public sealed class BuildPipeline
 
                 warnings += allDiags.Count(d => d.Severity == DiagnosticSeverity.Warning);
 
+                var fileErrors = allDiags.Count(d => d.Severity == DiagnosticSeverity.Error);
+                if (fileErrors > 0)
+                {
+                    // Not a usable translation: drop it so the next build transpiles the
+                    // file again (unchanged files are skipped) and reports the errors.
+                    transpileErrors += fileErrors;
+                    File.Delete(cPath);
+                    File.Delete(hPath);
+                }
+
                 cFiles.Add(cPath);
                 transpiled++;
             }
+
+            if (transpileErrors > 0)
+                throw new CSharpErrorsException(transpileErrors);
 
             sTranspile.Detail = transpiled > 0
                 ? $"{transpiled} transpiled, {skipped} unchanged"
@@ -519,7 +537,8 @@ public sealed class BuildPipeline
             // FIX-1: Kein hartcodiertes String-Array mehr.
             // Der Renderer findet den fehlgeschlagenen Stage selbst.
             renderer.MarkFirstRunningAsFailed();
-            renderer.Complete(DateTime.Now - started, warnings, errors: 1);
+            renderer.Complete(DateTime.Now - started, warnings,
+                errors: ex is CSharpErrorsException ce ? ce.Count : 1);
             throw;
         }
         finally
@@ -1243,4 +1262,14 @@ public sealed class BuildPipeline
         }
         return null;
     }
+}
+
+/// The C# code has errors CS2SX reports itself (unsupported constructs); the build
+/// stops before the C compiler runs.
+public sealed class CSharpErrorsException : Exception
+{
+    public int Count { get; }
+    public CSharpErrorsException(int count)
+        : base($"{count} error(s) in the C# code — fix them first (the C compiler was not run).")
+        => Count = count;
 }
