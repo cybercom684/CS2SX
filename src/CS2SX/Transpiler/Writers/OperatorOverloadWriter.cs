@@ -135,6 +135,10 @@ public static class OperatorOverloadWriter
         s_conversions.Contains(sourceType + ".implicit_" + targetType.Replace(".", "_"))
      || s_conversions.Contains(sourceType + ".explicit_" + targetType.Replace(".", "_"));
 
+    /// C name of a user-defined conversion operator declared in <paramref name="owner"/>.
+    public static string ConversionFunctionName(string owner, string targetType, bool isImplicit) =>
+        owner + "_" + (isImplicit ? "implicit_" : "explicit_") + targetType.Replace(".", "_");
+
     public static string GetConversionFunctionName(string sourceType, string targetType)
     {
         var suffix = s_conversions.Contains(sourceType + ".implicit_" + targetType.Replace(".", "_"))

@@ -59,6 +59,8 @@ public sealed class StructWriter
             _ctx.WriteLine(MethodSignature(method, name) + ";");
         foreach (var op in node.Members.OfType<OperatorDeclarationSyntax>())
             _ctx.WriteLine(OperatorSignature(op, name) + ";");
+        foreach (var conv in node.Members.OfType<ConversionOperatorDeclarationSyntax>())
+            _ctx.WriteLine(ConversionSignature(conv, name) + ";");
         _ctx.WriteLine("int " + name + "_Equals(" + name + " a, " + name + " b);");
         _ctx.WriteLine("");
     }
@@ -94,6 +96,14 @@ public sealed class StructWriter
             _ctx.WriteLine(OperatorSignature(op, name));
             _ctx.IsStaticMethod = true;
             WriteBody(op.Body, op.ExpressionBody, hasReturn: true);
+        }
+
+        foreach (var conv in node.Members.OfType<ConversionOperatorDeclarationSyntax>())
+        {
+            _ctx.ClearMethodContext();
+            _ctx.WriteLine(ConversionSignature(conv, name));
+            _ctx.IsStaticMethod = true;
+            WriteBody(conv.Body, conv.ExpressionBody, hasReturn: true);
         }
 
         _ctx.WriteLine("int " + name + "_Equals(" + name + " a, " + name + " b)");
@@ -210,6 +220,18 @@ public sealed class StructWriter
         var ret = MapReturnType(op.ReturnType.ToString().Trim());
         return ret + " " + OperatorOverloadWriter.GetFunctionName(name, op.OperatorToken.Text)
              + "(" + ParamList(op.ParameterList, "void") + ")";
+    }
+
+    /// implicit/explicit operator T(S s) → T S_implicit_T(S s), same naming as classes
+    /// (OperatorOverloadWriter.ConversionFunctionName).
+    private string ConversionSignature(ConversionOperatorDeclarationSyntax conv, string name)
+    {
+        var target = conv.Type.ToString().Trim();
+        var isImplicit = conv.ImplicitOrExplicitKeyword.IsKind(SyntaxKind.ImplicitKeyword);
+        OperatorOverloadWriter.RegisterConversion(name, target, isImplicit);
+        return MapReturnType(target) + " "
+             + OperatorOverloadWriter.ConversionFunctionName(name, target, isImplicit)
+             + "(" + ParamList(conv.ParameterList, "void") + ")";
     }
 
     private string ParamList(ParameterListSyntax paramList, string empty)

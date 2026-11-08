@@ -162,6 +162,24 @@ public sealed class InvocationDispatcher
             }
         }
 
+        var qualifiedStatic = TryWriteQualifiedStaticCall(inv, args);
+        if (qualifiedStatic != null) return qualifiedStatic;
+
+        // flags.HasFlag(F.B) → ((flags & F_B) == F_B)
+        if (inv.Expression is MemberAccessExpressionSyntax { Name.Identifier.Text: "HasFlag" } hf
+            && args.Count == 1 && _ctx.SemanticModel != null)
+        {
+            try
+            {
+                if (_ctx.SemanticModel.GetTypeInfo(hf.Expression).Type?.TypeKind == TypeKind.Enum)
+                {
+                    var self = _writeExpr(hf.Expression);
+                    return "(((" + self + ") & (" + args[0] + ")) == (" + args[0] + "))";
+                }
+            }
+            catch { }
+        }
+
         foreach (var handler in _handlers)
         {
             if (handler.TryHandle(inv, calleeStr, args, _ctx, _writeExpr, out var result))
@@ -171,6 +189,30 @@ public sealed class InvocationDispatcher
         // Return null — WriteInvocation will try TryWriteDirectUserClassCall next,
         // and only warn if it truly falls through to the raw-passthrough fallback.
         return null;
+    }
+
+    /// `Game.Helper(x)` — a static method of a (non-static) user class called through
+    /// the class name: a plain C function, the type name is not an argument.
+    /// (Static classes are handled by the regular handlers.)
+    private string? TryWriteQualifiedStaticCall(InvocationExpressionSyntax inv, List<string> args)
+    {
+        if (inv.Expression is not MemberAccessExpressionSyntax ma || _ctx.SemanticModel == null)
+            return null;
+        try
+        {
+            if (_ctx.SemanticModel.GetSymbolInfo(inv).Symbol is not IMethodSymbol
+                {
+                    IsStatic: true, IsExtensionMethod: false, MethodKind: MethodKind.Ordinary,
+                    ContainingType: { IsStatic: false, IsGenericType: false, TypeKind: TypeKind.Class } owner,
+                } m
+                || !TranspilerContext.IsUserCode(m)
+                || _ctx.SemanticModel.GetSymbolInfo(ma.Expression).Symbol is not INamedTypeSymbol
+                || inv.ArgumentList.Arguments.Any(a => !a.RefKindKeyword.IsKind(SyntaxKind.None)))
+                return null;
+            var cName = CSharpToC.BuildCMethodName(owner.Name, m.Name, m.Parameters.Length, _ctx.OverloadedMethods);
+            return cName + "(" + string.Join(", ", args) + ")";
+        }
+        catch { return null; }
     }
 
     private string? TryWriteDelegateInvoke(InvocationExpressionSyntax inv, List<string> args)

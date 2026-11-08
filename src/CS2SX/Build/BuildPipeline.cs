@@ -1038,6 +1038,27 @@ public sealed class BuildPipeline
             }
         }
 
+        // Tuple types ((int, string) → _Tuple2_int_str) are value structs used in
+        // signatures, locals and fields of any file: define each once, here.
+        var tupleTypes = new SortedSet<string>(StringComparer.Ordinal);
+        foreach (var f in sourceFiles)
+        {
+            try
+            {
+                var root = Microsoft.CodeAnalysis.CSharp.CSharpSyntaxTree.ParseText(File.ReadAllText(f)).GetRoot();
+                foreach (var tt in root.DescendantNodes().OfType<TupleTypeSyntax>())
+                    tupleTypes.Add(tt.ToString());
+            }
+            catch { }
+        }
+        if (tupleTypes.Count > 0)
+        {
+            sb.AppendLine();
+            sb.AppendLine("// Tuple types");
+            foreach (var t in tupleTypes)
+                sb.Append(TypeRegistry.GenerateTupleStruct(t));
+        }
+
         // FIX: Custom-Header aus dem Projektverzeichnis anhängen.
         // _forward.h wird von JEDEM generierten .h includiert → Custom-Funktionen
         // (z.B. Freetype_FT_Init_FreeType aus freetype_main.h) sind damit in

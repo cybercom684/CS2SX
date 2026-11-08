@@ -303,6 +303,11 @@ public sealed class CSharpToC : CSharpSyntaxWalker
         }
 
         _ctx.ClearClassContext();
+
+        // Nested classes become ordinary C types named after their simple name
+        // (Outer.Inner → Inner), emitted after the outer class.
+        foreach (var nested in node.Members.OfType<ClassDeclarationSyntax>())
+            VisitClassDeclaration(nested);
     }
 
     private INamedTypeSymbol? DeclaredSymbol(ClassDeclarationSyntax node)
@@ -955,12 +960,36 @@ public sealed class CSharpToC : CSharpSyntaxWalker
             foreach (var v in field.Declaration.Variables)
             {
                 var fieldName = v.Identifier.Text.TrimStart('_');
-                var init = v.Initializer != null
-                    ? " = " + _exprWriter.Write(v.Initializer.Value)
-                    : "";
-                _ctx.Out.WriteLine($"{cType}{ptr} {name}_{fieldName}{init};");
+                if (v.Initializer == null || IsCConstantInitializer(v.Initializer.Value))
+                {
+                    var init = v.Initializer != null
+                        ? " = " + _exprWriter.Write(v.Initializer.Value)
+                        : "";
+                    _ctx.Out.WriteLine($"{cType}{ptr} {name}_{fieldName}{init};");
+                    continue;
+                }
+
+                // `static List<int> Items = new List<int>();`: not a C constant
+                // expression — zero-initialise the global, assign before main().
+                _ctx.Out.WriteLine($"{cType}{ptr} {name}_{fieldName};");
+                _ctx.Out.WriteLine($"__attribute__((constructor)) static void {name}_{fieldName}_Init(void)");
+                _ctx.Out.WriteLine("{");
+                _ctx.Indent();
+                var initVal = _exprWriter.Write(v.Initializer.Value);   // may hoist statements here
+                _ctx.WriteLine($"{name}_{fieldName} = {initVal};");
+                _ctx.Dedent();
+                _ctx.Out.WriteLine("}");
             }
         }
+    }
+
+    /// The initializer is a compile-time constant in C (literal, const, null,
+    /// default), so it can stay in the global's definition.
+    private bool IsCConstantInitializer(ExpressionSyntax init)
+    {
+        if (init is LiteralExpressionSyntax or DefaultExpressionSyntax) return true;
+        try { return _ctx.SemanticModel?.GetConstantValue(init).HasValue == true; }
+        catch { return false; }
     }
 
     private void WriteStaticConstructor(ClassDeclarationSyntax node, string name)
@@ -1983,6 +2012,7 @@ public sealed class CSharpToC : CSharpSyntaxWalker
     {
         var cMapped = TypeRegistry.MapType(csType);
         if (cMapped.EndsWith("*")) return false; // MapType already added pointer
+        if (TypeRegistry.IsTuple(csType)) return false;   // _TupleN_… is a value struct
         return TypeRegistry.NeedsPointerSuffix(csType)
             || TypeRegistry.IsStringBuilder(csType)
             || TypeRegistry.IsList(csType)

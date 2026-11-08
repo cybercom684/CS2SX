@@ -65,6 +65,7 @@ public static class ProjectTypeScanner
             }
         }
 
+        TypeRegistry.SetUserClassNames(classes.Keys);
         RegisterArcRoots(classes, interfaces);
     }
 

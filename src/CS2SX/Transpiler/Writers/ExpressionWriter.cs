@@ -45,8 +45,35 @@ public sealed class ExpressionWriter : IExpressionWriter
     {
         if (node is ExpressionSyntax mg && TryWriteMethodGroupConversion(mg) is { } dg)
             return dg;
+        if (node is CastExpressionSyntax userCast && UserConversion(_ctx.SemanticModel?.GetSymbolInfo(userCast).Symbol) is { } castFn)
+            return castFn + "(" + Write(userCast.Expression) + ")";
         var code = WriteCore(node);
-        return node is ExpressionSyntax expr ? ApplyNullableConversion(expr, code) : code;
+        if (node is not ExpressionSyntax expr) return code;
+        code = ApplyUserConversion(expr, code);
+        return ApplyNullableConversion(expr, code);
+    }
+
+    /// C function of a user-defined conversion operator (`implicit operator int(M m)`
+    /// → M_implicit_int), or null when <paramref name="symbol"/> is none.
+    private static string? UserConversion(ISymbol? symbol) =>
+        symbol is IMethodSymbol { MethodKind: MethodKind.Conversion } m && TranspilerContext.IsUserCode(m)
+            ? OperatorOverloadWriter.ConversionFunctionName(m.ContainingType.Name,
+                TranspilerContext.FormatTypeSymbol(m.ReturnType), m.Name == "op_Implicit")
+            : null;
+
+    /// Implicit user-defined conversions where C# applies them (initializer,
+    /// assignment, argument, return): `int x = m;` → `int x = M_implicit_int(m);`.
+    private string ApplyUserConversion(ExpressionSyntax expr, string code)
+    {
+        if (_ctx.SemanticModel == null || code.Length == 0) return code;
+        try
+        {
+            var conv = Microsoft.CodeAnalysis.CSharp.CSharpExtensions.GetConversion(_ctx.SemanticModel, expr);
+            return conv.IsUserDefined && UserConversion(conv.MethodSymbol) is { } fn
+                ? fn + "(" + code + ")"
+                : code;
+        }
+        catch { return code; }
     }
 
     /// A method group converted to a delegate (`ev += OnChanged`, `Run(Helper.Parse)`)
@@ -754,9 +781,32 @@ public sealed class ExpressionWriter : IExpressionWriter
             }
             catch { }
         }
-        return isVoidCall
-            ? "(" + receiver + " != NULL ? " + accessExpr + " : (void)0)"
-            : NullableHandler.WriteNullConditional(receiver, accessExpr);
+        if (isVoidCall)
+            return "(" + receiver + " != NULL ? " + accessExpr + " : (void)0)";
+
+        // x?.Count where Count is a value type: C# makes it int? — a Nullable_int
+        // that is empty when x is null (`x?.Count ?? 0` then reads .has/.value).
+        try
+        {
+            if (_ctx.SemanticModel?.GetTypeInfo(condAccess).Type is INamedTypeSymbol
+                {
+                    OriginalDefinition.SpecialType: SpecialType.System_Nullable_T,
+                } nt
+                && _ctx.SemanticModel.GetTypeInfo(condAccess.WhenNotNull).Type is { } inner
+                && inner.OriginalDefinition.SpecialType != SpecialType.System_Nullable_T)
+            {
+                var innerCs = TranspilerContext.FormatTypeSymbol(nt.TypeArguments[0]);
+                if (TypeRegistry.IsNullableValueInner(innerCs))
+                {
+                    var cName = TypeRegistry.NullableCName(innerCs);
+                    return "(" + receiver + " != NULL ? " + NullableHandler.WrapValue(cName, accessExpr)
+                         + " : " + NullableHandler.Null(cName) + ")";
+                }
+            }
+        }
+        catch { }
+
+        return NullableHandler.WriteNullConditional(receiver, accessExpr);
     }
 
     // ── Assignment ────────────────────────────────────────────────────────────
@@ -883,8 +933,8 @@ public sealed class ExpressionWriter : IExpressionWriter
             }
         }
 
-        if (assign.Left is TupleExpressionSyntax tupleLeft)
-            return WriteTupleDeconstruction(tupleLeft, right);
+        if (assign.Left is TupleExpressionSyntax or DeclarationExpressionSyntax)
+            return WriteDeconstruction(assign.Left, assign.Right, right);
 
         return Write(assign.Left) + " " + op + " " + right;
     }
@@ -923,28 +973,64 @@ public sealed class ExpressionWriter : IExpressionWriter
         return bareType + "_as_" + targetIfaceName + "(" + exprCode + ")";
     }
 
-    private string WriteTupleDeconstruction(TupleExpressionSyntax tupleLeft, string right)
+    /// `(a, b) = t`, `var (a, b) = t`, `(var a, int b) = t`, discards with `_`:
+    /// the tuple is evaluated once into a temporary, then each target gets itemN.
+    /// New variables are declared with the element types of the tuple.
+    private string WriteDeconstruction(ExpressionSyntax left, ExpressionSyntax rightNode, string right)
     {
-        var names = tupleLeft.Arguments.Select(a => a.Expression.ToString()).ToList();
-        var tmpName = _ctx.NextTmp("tup");
-        // FIX: __auto_type speichert das Tuple-Ergebnis ohne den exakten C-Struct-Typ zu kennen.
-        // Zuvor wurde nur int=0 deklariert und der eigentliche Aufruf/Zuweisung nie emittiert.
-        _ctx.Out.WriteLine(_ctx.Tab + "__auto_type " + tmpName + " = " + right + ";");
-        var fields = new[] { "item1", "item2", "item3", "item4", "item5", "item6", "item7" };
-        for (int i = 0; i < names.Count; i++)
+        // (name, declares a new variable) per element; name null = discard
+        var targets = new List<(string? name, bool isNew)>();
+        switch (left)
         {
-            var varName = names[i];
-            if (varName == "_") continue;
-            var fieldName = i < fields.Length ? fields[i] : "item" + (i + 1);
-            if (!_ctx.LocalTypes.ContainsKey(varName))
+            case DeclarationExpressionSyntax { Designation: ParenthesizedVariableDesignationSyntax pd }:
+                foreach (var v in pd.Variables)
+                    targets.Add(v is SingleVariableDesignationSyntax s ? (s.Identifier.Text, true) : (null, false));
+                break;
+            case TupleExpressionSyntax te:
+                foreach (var a in te.Arguments)
+                    targets.Add(a.Expression switch
+                    {
+                        DeclarationExpressionSyntax { Designation: SingleVariableDesignationSyntax s } => (s.Identifier.Text, true),
+                        DeclarationExpressionSyntax => (null, false),
+                        IdentifierNameSyntax { Identifier.Text: "_" } => (null, false),
+                        var e => (Write(e), false),
+                    });
+                break;
+            default:
+                return Write(left) + " = " + right;
+        }
+
+        IReadOnlyList<ITypeSymbol>? elemTypes = null;
+        try
+        {
+            if (_ctx.SemanticModel?.GetTypeInfo(rightNode).Type is INamedTypeSymbol { IsTupleType: true } tt)
+                elemTypes = tt.TupleElements.Select(e => e.Type).ToList();
+        }
+        catch { }
+
+        var tmp = _ctx.NextTmp("tup");
+        _ctx.Out.WriteLine(_ctx.Tab + "__auto_type " + tmp + " = " + right + ";");
+        for (int i = 0; i < targets.Count; i++)
+        {
+            var (name, isNew) = targets[i];
+            if (name == null) continue;
+            var item = tmp + ".item" + (i + 1);
+            if (!isNew)
             {
-                _ctx.Out.WriteLine(_ctx.Tab + "__auto_type " + varName + " = " + tmpName + "." + fieldName + ";");
-                _ctx.LocalTypes[varName] = "var";
+                _ctx.Out.WriteLine(_ctx.Tab + name + " = " + item + ";");
+                continue;
             }
+            var csType = elemTypes != null && i < elemTypes.Count
+                ? TranspilerContext.FormatTypeSymbol(elemTypes[i]) : null;
+            string cType;
+            if (csType == null) cType = "__auto_type";
             else
             {
-                _ctx.Out.WriteLine(_ctx.Tab + varName + " = " + tmpName + "." + fieldName + ";");
+                cType = TypeRegistry.MapType(csType);
+                if (!cType.EndsWith("*") && CS2SX.Transpiler.CSharpToC.NeedsPtr(csType)) cType += "*";
             }
+            _ctx.Out.WriteLine(_ctx.Tab + cType + " " + name + " = " + item + ";");
+            _ctx.LocalTypes[name] = csType ?? "var";
         }
         return "";
     }
@@ -1564,6 +1650,8 @@ public sealed class ExpressionWriter : IExpressionWriter
         string? lt = null, ft = null;
         _ctx.LocalTypes.TryGetValue(objRaw, out lt);
         _ctx.FieldTypes.TryGetValue(objKey, out ft);
+        // Any other receiver (Other.Map, obj.Items, a call result): its semantic type.
+        if (lt == null && ft == null) lt = _ctx.GetSemanticType(elemLeft.Expression);
 
         bool isDict = (lt != null && TypeRegistry.IsDictionary(lt))
                    || (ft != null && TypeRegistry.IsDictionary(ft));
@@ -2253,6 +2341,8 @@ public sealed class ExpressionWriter : IExpressionWriter
         InitializerExpressionSyntax? initializer,
         SyntaxNode? creation = null)
     {
+        typeName = TypeRegistry.NestedToSimple(typeName);   // new Outer.Inner() → Inner_New()
+
         // new string(char c, int count) → CS2SX_RepeatChar(c, count)
         // new string(char[] arr) or new string(char[] arr, int start, int count)
         if (typeName == "string" && argList != null)

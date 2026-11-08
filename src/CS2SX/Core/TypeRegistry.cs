@@ -244,6 +244,24 @@ public static class TypeRegistry
     }
     public static bool IsUserStruct(string csType) => s_userStructTypes.Contains(csType.Trim());
 
+    // User classes, including nested ones. A nested class is emitted under its simple
+    // name, so `Outer.Inner` (in syntax-derived type strings) maps to `Inner`.
+    private static HashSet<string> s_userClassNames = new(StringComparer.Ordinal);
+    public static void SetUserClassNames(IEnumerable<string> names) =>
+        s_userClassNames = new HashSet<string>(names, StringComparer.Ordinal);
+
+    public static string NestedToSimple(string csType)
+    {
+        if (!csType.Contains('.') || csType.Contains('<') || csType.Contains('(')) return csType;
+        var suffix = csType.EndsWith('?') ? "?" : "";
+        var bare = csType.TrimEnd('?');
+        var last = bare[(bare.LastIndexOf('.') + 1)..];
+        var outer = bare[..bare.LastIndexOf('.')];
+        var outerLast = outer[(outer.LastIndexOf('.') + 1)..];
+        return s_userClassNames.Contains(last) && s_userClassNames.Contains(outerLast)
+            ? last + suffix : csType;
+    }
+
     // Reference-counted user class → root class of its hierarchy (Transpiler.Arc).
     private static Dictionary<string, string> s_arcRoots = new(StringComparer.Ordinal);
     public static void SetArcRoots(Dictionary<string, string> roots) => s_arcRoots = roots;
@@ -333,7 +351,7 @@ public static class TypeRegistry
 
     public static string MapType(string csType)
     {
-        csType = csType.Trim();
+        csType = NestedToSimple(csType.Trim());
 
         // decimal → double (precision loss — warn at call sites)
         if (IsDecimalType(csType)) return "double";
@@ -747,26 +765,23 @@ public static class TypeRegistry
         var fields = new[] { "item1", "item2", "item3", "item4", "item5", "item6", "item7" };
 
         var sb = new System.Text.StringBuilder();
+        // Guarded: the same tuple type is defined in _forward.h and may appear again in
+        // a header or _generics.h.
+        sb.AppendLine($"#ifndef CS2SX_TUPLE_{name}_DEFINED");
+        sb.AppendLine($"#define CS2SX_TUPLE_{name}_DEFINED");
         sb.AppendLine($"typedef struct {name} {{");
         for (int i = 0; i < elements.Count; i++)
         {
             var elem = elements[i].Trim();
+            // Named tuple: "(int score, string name)" → only the type part counts
             var spaceIdx = elem.LastIndexOf(' ');
-            string cType;
-            if (spaceIdx >= 0)
-            {
-                // Named tuple: "(int score, string name)" → int, const char*
-                var typePart = elem[..spaceIdx].Trim();
-                cType = typePart == "string" ? "const char*" : MapType(typePart);
-            }
-            else
-            {
-                cType = elem == "string" ? "const char*" : MapType(elem);
-            }
-            var needPtr = cType != "const char*" && NeedsPointerSuffix(elem);
+            var typePart = spaceIdx >= 0 ? elem[..spaceIdx].Trim() : elem;
+            var cType = typePart == "string" ? "const char*" : MapType(typePart);
+            var needPtr = cType != "const char*" && !cType.EndsWith("*") && NeedsPointerSuffix(typePart);
             sb.AppendLine($"    {cType}{(needPtr ? "*" : "")} {fields[i]};");
         }
         sb.AppendLine($"}} {name};");
+        sb.AppendLine("#endif");
         return sb.ToString();
     }
 
