@@ -2,7 +2,7 @@
   <!-- Shared by every project in the repo: one version for the cs2sx tool and the
        CS2SX.Switch API package, so `cs2sx new` always references the matching API. -->
   <PropertyGroup>
-    <Version>0.5.1</Version>
+    <Version>0.5.2</Version>
     <Authors>CS2SX</Authors>
     <LangVersion>latest</LangVersion>
   </PropertyGroup>

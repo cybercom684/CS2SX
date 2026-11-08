@@ -13,6 +13,17 @@
     <CS2SXTool Condition="'$(CS2SXTool)' == ''">cs2sx</CS2SXTool>
   </PropertyGroup>
 
+  <!-- File/Directory/Path come from CS2SX.Switch (the SD card), not System.IO, and
+       System.Net.Http does not exist on the Switch (use CS2SX.Switch.Http). The SDK
+       adds its implicit usings after a package's .props, so they are removed here,
+       right before the global usings file is generated. -->
+  <Target Name="CS2SXRemoveImplicitUsings" BeforeTargets="GenerateGlobalUsings">
+    <ItemGroup>
+      <Using Remove="System.IO" />
+      <Using Remove="System.Net.Http" />
+    </ItemGroup>
+  </Target>
+
   <Target Name="CS2SXBuildNro"
           AfterTargets="Build"
           Condition="'$(CS2SXBuildNro)' == 'true' and '$(DesignTimeBuild)' != 'true' and '$(BuildingForLiveUnitTesting)' != 'true'">

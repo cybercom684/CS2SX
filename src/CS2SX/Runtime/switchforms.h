@@ -700,7 +700,7 @@ CS2SX_LIST_DEFINE(voidptr)
 // may be a per-frame temporary).
 
 #define CS2SX_ID(x)        (x)
-#define CS2SX_NOREF(x)     ((void)0)
+#define CS2SX_NOREF(x)     ((void)(x))
 #define CS2SX_EQ(a, b)     ((a) == (b))
 #define CS2SX_EQ_STR(a, b) (strcmp((a), (b)) == 0)
 #define CS2SX_STR_KEEP(x)  _cs2sx_heap_strdup(x)

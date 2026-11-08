@@ -13,10 +13,7 @@
 
   <ItemGroup>
     <Using Include="CS2SX.Switch" />
-    <!-- File/Directory/Path come from CS2SX.Switch (the SD card), not System.IO;
-         both imported would make them ambiguous. -->
-    <Using Remove="System.IO" />
-    <!-- Use CS2SX.Switch.Http instead (System.Net.Http does not exist on the Switch). -->
-    <Using Remove="System.Net.Http" />
+    <!-- System.IO / System.Net.Http are removed in CS2SX.Switch.targets: the SDK adds
+         its implicit usings after this file. -->
   </ItemGroup>
 </Project>
