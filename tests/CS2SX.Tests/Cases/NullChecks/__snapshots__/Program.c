@@ -9,6 +9,7 @@ static Node_vtable Node_vtable_instance =
 
 void Node_Ctor(Node* self)
 {
+    CS2SX_TRACE("Node..ctor", "Program.cs");
 }
 
 Node* Node_New(void)
@@ -25,11 +26,15 @@ Node* Node_New(void)
 
 int Node_Get(Node* self)
 {
+    CS2SX_TRACE("Node.Get", "Program.cs");
+    CS2SX_LINE(11);
     return self->f_Value;
 }
 
 const char* Node_Kind(Node* self)
 {
+    CS2SX_TRACE("Node.Kind", "Program.cs");
+    CS2SX_LINE(12);
     return "node";
 }
 
@@ -56,6 +61,7 @@ Node* Node_Retain(Node* self)
 
 void Square_Ctor(Square* self)
 {
+    CS2SX_TRACE("Square..ctor", "Program.cs");
 }
 
 Square* Square_New(void)
@@ -71,6 +77,8 @@ Square* Square_New(void)
 
 int Square_Area(Square* self)
 {
+    CS2SX_TRACE("Square.Area", "Program.cs");
+    CS2SX_LINE(16);
     return 4;
 }
 
@@ -107,12 +115,16 @@ void NullChecksApp_Init(NullChecksApp* self)
 
 const char* NullChecksApp_Try(Action_t action)
 {
+    CS2SX_TRACE("NullChecksApp.Try", "Program.cs");
+    CS2SX_LINE(22);
     {
         CS2SX_ExFrame _exf_0;
         CS2SX_ExPush(&_exf_0);
         if (setjmp(_exf_0.buf) == 0)
         {
+            CS2SX_LINE(22);
             Action_Invoke(action);
+            CS2SX_LINE(22);
             {
                 __auto_type _ret_1 = "none";
                 CS2SX_ExPop(&_exf_0);
@@ -125,11 +137,13 @@ const char* NullChecksApp_Try(Action_t action)
             Exception* _exf_0_ex = _exf_0.ex;
             if (CS2SX_Exc_Is(_exf_0_ex, &CS2SX_TI_NullReferenceException))
             {
+                CS2SX_LINE(23);
                 return "NRE";
             }
             else if (1)
             {
                 Exception* e = (Exception*)_exf_0_ex;
+                CS2SX_LINE(24);
                 return CS2SX_Exc_TypeName((Exception*)(e));
             }
         }
@@ -144,8 +158,10 @@ struct _cap_0
 
 static void _lambda_0(void* _env)
 {
+    CS2SX_TRACE("NullChecksApp.<lambda>", "Program.cs");
     struct _cap_0* _c = (struct _cap_0*)_env;
     Node* missing = _c->missing;
+    CS2SX_LINE(31);
     int v = CS2SX_NN(missing)->f_Value;
 }
 
@@ -163,8 +179,10 @@ struct _cap_1
 
 static void _lambda_1(void* _env)
 {
+    CS2SX_TRACE("NullChecksApp.<lambda>", "Program.cs");
     struct _cap_1* _c = (struct _cap_1*)_env;
     Node* missing = _c->missing;
+    CS2SX_LINE(32);
     CS2SX_NN(missing)->f_Value = 5;
 }
 
@@ -182,6 +200,7 @@ struct _cap_2
 
 static void _lambda_2(void* _env)
 {
+    CS2SX_TRACE("NullChecksApp.<lambda>", "Program.cs");
     struct _cap_2* _c = (struct _cap_2*)_env;
     Node* missing = _c->missing;
     Node_Get(CS2SX_NN(missing));
@@ -201,6 +220,7 @@ struct _cap_3
 
 static void _lambda_3(void* _env)
 {
+    CS2SX_TRACE("NullChecksApp.<lambda>", "Program.cs");
     struct _cap_3* _c = (struct _cap_3*)_env;
     Node* missing = _c->missing;
     ({ __auto_type _cs2sx_r = CS2SX_NN(missing); _cs2sx_r->vtable->Kind(_cs2sx_r); });
@@ -220,8 +240,10 @@ struct _cap_4
 
 static void _lambda_4(void* _env)
 {
+    CS2SX_TRACE("NullChecksApp.<lambda>", "Program.cs");
     struct _cap_4* _c = (struct _cap_4*)_env;
     Node* n = _c->n;
+    CS2SX_LINE(35);
     int v = CS2SX_NN(n->f_Next)->f_Value;
 }
 
@@ -239,6 +261,7 @@ struct _cap_5
 
 static void _lambda_5(void* _env)
 {
+    CS2SX_TRACE("NullChecksApp.<lambda>", "Program.cs");
     struct _cap_5* _c = (struct _cap_5*)_env;
     IShape* shape = _c->shape;
     ({ __auto_type _cs2sx_r = CS2SX_NN(shape); _cs2sx_r->vtable->Area(_cs2sx_r->obj); });
@@ -252,8 +275,10 @@ struct _cap_6
 
 static void _lambda_6(void* _env)
 {
+    CS2SX_TRACE("NullChecksApp.<lambda>", "Program.cs");
     struct _cap_6* _c = (struct _cap_6*)_env;
     const char* s = _c->s;
+    CS2SX_LINE(39);
     int l = strlen(CS2SX_NN(s));
 }
 
@@ -265,6 +290,7 @@ struct _cap_7
 
 static void _lambda_7(void* _env)
 {
+    CS2SX_TRACE("NullChecksApp.<lambda>", "Program.cs");
     struct _cap_7* _c = (struct _cap_7*)_env;
     const char* s = _c->s;
     String_ToUpper(CS2SX_NN(s));
@@ -278,9 +304,16 @@ struct _cap_8
 
 static void _lambda_8(void* _env)
 {
+    CS2SX_TRACE("NullChecksApp.<lambda>", "Program.cs");
     struct _cap_8* _c = (struct _cap_8*)_env;
     List_int* list = _c->list;
     List_int_Add(list, 1);
+}
+
+static void _envdtor_8(void* _e)
+{
+    struct _cap_8* _c = (struct _cap_8*)_e;
+    CS2SX_ReleaseLater(_c->list, (CS2SX_FreeFn)List_int_Free);
 }
 
 struct _cap_9
@@ -291,9 +324,17 @@ struct _cap_9
 
 static void _lambda_9(void* _env)
 {
+    CS2SX_TRACE("NullChecksApp.<lambda>", "Program.cs");
     struct _cap_9* _c = (struct _cap_9*)_env;
     List_int* list = _c->list;
+    CS2SX_LINE(43);
     int c = CS2SX_NN(list)->count;
+}
+
+static void _envdtor_9(void* _e)
+{
+    struct _cap_9* _c = (struct _cap_9*)_e;
+    CS2SX_ReleaseLater(_c->list, (CS2SX_FreeFn)List_int_Free);
 }
 
 struct _cap_10
@@ -304,8 +345,10 @@ struct _cap_10
 
 static void _lambda_10(void* _env)
 {
+    CS2SX_TRACE("NullChecksApp.<lambda>", "Program.cs");
     struct _cap_10* _c = (struct _cap_10*)_env;
     Node* missing = _c->missing;
+    CS2SX_LINE(50);
     const char* t = (CS2SX_RETAIN(Node, missing) != NULL ? ({ char* _sb1 = _cs2sx_next_buf(); snprintf(_sb1, CS2SX_STRBUF_SIZE, "Name: %s", CS2SX_NN(missing)->f_Name); _sb1; }) : "-");
 }
 
@@ -317,63 +360,84 @@ static void _envdtor_10(void* _e)
 
 void NullChecksApp_OnInit(NullChecksApp* self)
 {
+    CS2SX_TRACE("NullChecksApp.OnInit", "Program.cs");
+    CS2SX_LINE(29);
     Node* _node_2 = Node_New();
     _node_2->f_Value = 1;
     Node* n = _node_2;
+    CS2SX_LINE(30);
     Node* missing = NULL;
+    CS2SX_LINE(31);
     struct _cap_0* _env_0 = CS2SX_ENV_NEW(struct _cap_0);
     _env_0->missing = CS2SX_RETAIN(Node, missing);
     _env_0->_hdr._dtor = _envdtor_0;
     const char* _ps_3 = NullChecksApp_Try(CS2SX_Delegate_New((void*)_lambda_0, _env_0, 1));
     printf("%s\n", _ps_3 ? _ps_3 : "");
+    CS2SX_LINE(32);
     struct _cap_1* _env_1 = CS2SX_ENV_NEW(struct _cap_1);
     _env_1->missing = CS2SX_RETAIN(Node, missing);
     _env_1->_hdr._dtor = _envdtor_1;
     const char* _ps_4 = NullChecksApp_Try(CS2SX_Delegate_New((void*)_lambda_1, _env_1, 1));
     printf("%s\n", _ps_4 ? _ps_4 : "");
+    CS2SX_LINE(33);
     struct _cap_2* _env_2 = CS2SX_ENV_NEW(struct _cap_2);
     _env_2->missing = CS2SX_RETAIN(Node, missing);
     _env_2->_hdr._dtor = _envdtor_2;
     const char* _ps_5 = NullChecksApp_Try(CS2SX_Delegate_New((void*)_lambda_2, _env_2, 1));
     printf("%s\n", _ps_5 ? _ps_5 : "");
+    CS2SX_LINE(34);
     struct _cap_3* _env_3 = CS2SX_ENV_NEW(struct _cap_3);
     _env_3->missing = CS2SX_RETAIN(Node, missing);
     _env_3->_hdr._dtor = _envdtor_3;
     const char* _ps_6 = NullChecksApp_Try(CS2SX_Delegate_New((void*)_lambda_3, _env_3, 1));
     printf("%s\n", _ps_6 ? _ps_6 : "");
+    CS2SX_LINE(35);
     struct _cap_4* _env_4 = CS2SX_ENV_NEW(struct _cap_4);
     _env_4->n = CS2SX_RETAIN(Node, n);
     _env_4->_hdr._dtor = _envdtor_4;
     const char* _ps_7 = NullChecksApp_Try(CS2SX_Delegate_New((void*)_lambda_4, _env_4, 1));
     printf("%s\n", _ps_7 ? _ps_7 : "");
+    CS2SX_LINE(36);
     IShape* shape = NULL;
+    CS2SX_LINE(37);
     struct _cap_5* _env_5 = CS2SX_ENV_NEW(struct _cap_5);
     _env_5->shape = shape;
     const char* _ps_8 = NullChecksApp_Try(CS2SX_Delegate_New((void*)_lambda_5, _env_5, 1));
     printf("%s\n", _ps_8 ? _ps_8 : "");
+    CS2SX_LINE(38);
     const char* s = NULL;
+    CS2SX_LINE(39);
     struct _cap_6* _env_6 = CS2SX_ENV_NEW(struct _cap_6);
     _env_6->s = s;
     const char* _ps_9 = NullChecksApp_Try(CS2SX_Delegate_New((void*)_lambda_6, _env_6, 1));
     printf("%s\n", _ps_9 ? _ps_9 : "");
+    CS2SX_LINE(40);
     struct _cap_7* _env_7 = CS2SX_ENV_NEW(struct _cap_7);
     _env_7->s = s;
     const char* _ps_10 = NullChecksApp_Try(CS2SX_Delegate_New((void*)_lambda_7, _env_7, 1));
     printf("%s\n", _ps_10 ? _ps_10 : "");
+    CS2SX_LINE(41);
     List_int* list = NULL;
+    CS2SX_LINE(42);
     struct _cap_8* _env_8 = CS2SX_ENV_NEW(struct _cap_8);
-    _env_8->list = list;
+    _env_8->list = List_int_Retain(list);
+    _env_8->_hdr._dtor = _envdtor_8;
     const char* _ps_11 = NullChecksApp_Try(CS2SX_Delegate_New((void*)_lambda_8, _env_8, 1));
     printf("%s\n", _ps_11 ? _ps_11 : "");
+    CS2SX_LINE(43);
     struct _cap_9* _env_9 = CS2SX_ENV_NEW(struct _cap_9);
-    _env_9->list = list;
+    _env_9->list = List_int_Retain(list);
+    _env_9->_hdr._dtor = _envdtor_9;
     const char* _ps_12 = NullChecksApp_Try(CS2SX_Delegate_New((void*)_lambda_9, _env_9, 1));
     printf("%s\n", _ps_12 ? _ps_12 : "");
+    CS2SX_LINE(45);
     IShape* real = Square_as_IShape(CS2SX_RETAIN(Square, Square_New()));
+    CS2SX_LINE(46);
     char* _sb0 = _cs2sx_next_buf();
     snprintf(_sb0, CS2SX_STRBUF_SIZE, "ok %d %s %d %s", Node_Get(n), n->vtable->Kind(n), ({ __auto_type _cs2sx_r = real; _cs2sx_r->vtable->Area(_cs2sx_r->obj); }), (((missing != NULL ? missing->f_Name : NULL) ?: "none")));
     const char* _ps_13 = _sb0;
     printf("%s\n", _ps_13 ? _ps_13 : "");
+    CS2SX_LINE(50);
     struct _cap_10* _env_10 = CS2SX_ENV_NEW(struct _cap_10);
     _env_10->missing = CS2SX_RETAIN(Node, missing);
     _env_10->_hdr._dtor = _envdtor_10;

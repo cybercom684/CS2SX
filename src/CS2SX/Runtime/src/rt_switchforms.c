@@ -2,6 +2,14 @@
 // here exactly once (a header `static` would give every translation unit its own copy).
 #include "cs2sx_prelude.h"
 #include <sys/iosupport.h>
+#include <malloc.h>
+
+/// GC.GetTotalMemory: bytes currently allocated on the heap.
+long long CS2SX_HeapUsed(void)
+{
+    struct mallinfo mi = mallinfo();
+    return (long long)mi.uordblks;
+}
 
 // ── Test output (runtime tests) ─────────────────────────────────────────────
 // With g_cs2sx_test_output set (build with CS2SX_TEST_OUTPUT=1) every stdout line
@@ -232,6 +240,8 @@ StringBuilder* StringBuilder_New(int capacity)
     sb->buf[0] = '\0';
     sb->length = 0;
     sb->capacity = capacity;
+    sb->_rc = 1;
+    CS2SX_ReleaseLater(sb, (CS2SX_FreeFn)StringBuilder_Free);   // the frame's reference
     return sb;
 }
 
@@ -525,6 +535,8 @@ List_str* List_str_New(void)
     if (!l) return NULL;
     l->data = (char**)malloc(CS2SX_LIST_INITIAL_CAP * sizeof(char*));
     l->count = 0; l->capacity = CS2SX_LIST_INITIAL_CAP;
+    l->_rc = 1;
+    CS2SX_ReleaseLater(l, (CS2SX_FreeFn)List_str_Free);   // the frame's reference
     return l;
 }
 
@@ -542,7 +554,7 @@ void List_str_Add(List_str* l, const char* val)
 
 void List_str_Free(List_str* l)
 {
-    if (!l) return;
+    if (!l || --l->_rc > 0) return;
     for (int i = 0; i < l->count; i++) free(l->data[i]);
     free(l->data);
     free(l);
@@ -553,7 +565,7 @@ const char** CS2SX_StrArr_FromList(List_str* l)
     int n = l ? l->count : 0;
     const char** a = (const char**)CS2SX_ArrNew(n, sizeof(const char*));
     if (a && n > 0) memcpy((void*)a, l->data, (size_t)n * sizeof(char*));
-    if (l) { free(l->data); free(l); }
+    if (l) l->count = 0;   // the strings now belong to the array; the list itself to the frame
     return a;
 }
 
@@ -648,7 +660,7 @@ List_str* String_Split_RemoveEmpty(const char* s, const char* sep)
     for (int _i = 0; _i < raw->count; _i++)
         if (raw->data[_i] && raw->data[_i][0] != '\0')
             List_str_Add(result, raw->data[_i]);
-    List_str_Free(raw);
+    // raw belongs to the frame (released at the next frame)
     return result;
 }
 
@@ -682,7 +694,10 @@ Dict_str_str* Dict_str_str_New(void)
     if (!d) return NULL;
     d->keys = (const char**)malloc(CS2SX_DICT_INITIAL_CAP * sizeof(const char*));
     d->vals = (const char**)malloc(CS2SX_DICT_INITIAL_CAP * sizeof(const char*));
-    d->count = 0; d->capacity = CS2SX_DICT_INITIAL_CAP; return d;
+    d->count = 0; d->capacity = CS2SX_DICT_INITIAL_CAP;
+    d->_rc = 1;
+    CS2SX_ReleaseLater(d, (CS2SX_FreeFn)Dict_str_str_Free);   // the frame's reference
+    return d;
 }
 
 void Dict_str_str_Add(Dict_str_str* d, const char* key, const char* val)

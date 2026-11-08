@@ -17,6 +17,12 @@ public sealed class StatementWriter
     }
     public void Write(StatementSyntax stmt)
     {
+        // C# line for exception stack traces — only for statements in a block (an
+        // unbraced `if (x) stmt;` must not end up guarding just this update).
+        if (stmt is not (BlockSyntax or EmptyStatementSyntax or LocalFunctionStatementSyntax or LabeledStatementSyntax)
+            && stmt.Parent is BlockSyntax or SwitchSectionSyntax)
+            _ctx.WriteLine($"CS2SX_LINE({stmt.GetLocation().GetLineSpan().StartLinePosition.Line + 1});");
+
         switch (stmt)
         {
             case ReturnStatementSyntax ret: WriteReturn(ret); break;
@@ -1825,7 +1831,12 @@ public sealed class StatementWriter
         if (stmt is BlockSyntax block)
             foreach (var s in block.Statements) Write(s);
         else
+        {
+            // Unbraced body (`if (x) Call();`): inside these braces the line is safe.
+            if (stmt is not (EmptyStatementSyntax or LocalFunctionStatementSyntax))
+                _ctx.WriteLine($"CS2SX_LINE({stmt.GetLocation().GetLineSpan().StartLinePosition.Line + 1});");
             Write(stmt);
+        }
         _ctx.Dedent();
         _ctx.WriteLine("}");
     }

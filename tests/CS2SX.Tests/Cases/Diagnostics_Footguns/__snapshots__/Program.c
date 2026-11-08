@@ -3,6 +3,7 @@
 
 void Settings_Ctor(Settings* self)
 {
+    CS2SX_TRACE("Settings..ctor", "Program.cs");
 }
 
 Settings* Settings_New(void)
@@ -37,6 +38,8 @@ Settings* Settings_Retain(Settings* self)
 
 void Player_Ctor_1(Player* self, const char* name)
 {
+    CS2SX_TRACE("Player..ctor", "Program.cs");
+    CS2SX_LINE(12);
     CS2SX_STR_STORE(self->f_Name, name);
 }
 
@@ -53,7 +56,9 @@ Player* Player_New_1(const char* name)
 
 void Player_Ctor_2(Player* self, const char* name, int level)
 {
+    CS2SX_TRACE("Player..ctor", "Program.cs");
     Player_Ctor_1(self, name);
+    CS2SX_LINE(13);
     self->f_Level = level;
 }
 
@@ -70,6 +75,7 @@ Player* Player_New_2(const char* name, int level)
 
 void Player_Free(Player* self)
 {
+    CS2SX_TRACE("Player.Free", "Program.cs");
 }
 
 void Player_Dispose(Player* self)
@@ -101,7 +107,10 @@ void Diagnostics_FootgunsApp_Init(Diagnostics_FootgunsApp* self)
 
 void Diagnostics_FootgunsApp_OnInit(Diagnostics_FootgunsApp* self)
 {
+    CS2SX_TRACE("Diagnostics_FootgunsApp.OnInit", "Program.cs");
+    CS2SX_LINE(22);
     Player* p = Player_New_1("x");
+    CS2SX_LINE(23);
     const char* _ps_0 = p->f_Name;
     printf("%s\n", _ps_0 ? _ps_0 : "");
 }

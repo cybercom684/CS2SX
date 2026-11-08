@@ -26,7 +26,8 @@ public sealed class StringBuilderHandler : InvocationHandlerBase
         string sbExpr;
         // Fluent chain: sb.Append(a).Append(b) — the receiver is itself a call that
         // returns the builder (all Append* runtime functions return StringBuilder*).
-        if (mem.Expression is InvocationExpressionSyntax
+        // Also any other receiver typed StringBuilder (holder.Log.Append(…)).
+        if (mem.Expression is InvocationExpressionSyntax or MemberAccessExpressionSyntax or ElementAccessExpressionSyntax
             && ctx.GetSemanticType(mem.Expression) is "StringBuilder" or "System.Text.StringBuilder")
             sbExpr = writeExpr(mem.Expression);
         else if (!TryResolveStringBuilder(objStr, ctx, out sbExpr))

@@ -5,6 +5,7 @@
 
 void InputMapper_Ctor(InputMapper* self)
 {
+    CS2SX_TRACE("InputMapper..ctor", "Input.cs");
 }
 
 InputMapper* InputMapper_New(void)
@@ -20,8 +21,11 @@ InputMapper* InputMapper_New(void)
 
 void InputMapper_Poll(InputMapper* self)
 {
+    CS2SX_TRACE("InputMapper.Poll", "Input.cs");
+    CS2SX_LINE(9);
     if ((g_cs2sx_kDown & HidNpadButton_A))
     {
+        CS2SX_LINE(9);
         self->f_Presses++;
     }
 }

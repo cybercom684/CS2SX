@@ -321,7 +321,15 @@ public sealed class CSharpToC : CSharpSyntaxWalker
                 return "CS2SX_StrOwn(" + code + ")";
         }
         catch { }
-        return Arc.RetainIfShared(value, code, _ctx);
+        return Arc.RetainAny(value, code, _ctx);
+    }
+
+    /// Frame of the C# call trace for the current function (cs2sx_exc.h): shows up as
+    /// "at Class.Method (File.cs:line)" in exception stack traces.
+    internal void WriteTraceFrame(string member)
+    {
+        var owner = string.IsNullOrEmpty(_ctx.CurrentClass) ? "" : _ctx.CurrentClass + ".";
+        _ctx.WriteLine($"CS2SX_TRACE(\"{owner}{member}\", \"{_ctx.CurrentFile}\");");
     }
 
     private INamedTypeSymbol? DeclaredSymbol(ClassDeclarationSyntax node)
@@ -478,9 +486,12 @@ public sealed class CSharpToC : CSharpSyntaxWalker
                     var fieldName = v.Identifier.Text.TrimStart('_');
                     var prefix = TypeRegistry.HasNoPrefix(fieldName) ? "" : "f_";
                     var arr = $"self->{prefix}{fieldName}";
-                    // The array holds a reference per element (reference-counted classes).
+                    // The array holds a reference per element (reference-counted classes,
+                    // collections).
                     if (elemRoot != null)
                         _ctx.WriteLine($"for (int _ai = 0; _ai < CS2SX_ArrLen({arr}); _ai++) {elemRoot}_Free(({elemRoot}*){arr}[_ai]);");
+                    else if (Arc.CollectionPrefix(csType[..^2]) is { } elemColl)
+                        _ctx.WriteLine($"for (int _ai = 0; _ai < CS2SX_ArrLen({arr}); _ai++) {elemColl}_Free({arr}[_ai]);");
                     _ctx.WriteLine($"CS2SX_ArrFree({arr}); {arr} = NULL;");
                 }
                 continue;
@@ -547,6 +558,8 @@ public sealed class CSharpToC : CSharpSyntaxWalker
                 _ctx.WriteLine($"CS2SX_StrDrop({expr}); {expr} = NULL;");
             else if (TypeRegistry.ArcRoot(csType) is { } root)
                 _ctx.WriteLine($"if ({expr}) {{ {root}_Free(({root}*){expr}); {expr} = NULL; }}");
+            else if (Arc.CollectionPrefix(csType) is { } coll)
+                _ctx.WriteLine($"if ({expr}) {{ {coll}_Free({expr}); {expr} = NULL; }}");
         }
     }
 
@@ -957,7 +970,7 @@ public sealed class CSharpToC : CSharpSyntaxWalker
                         var fieldName = v.Identifier.Text.TrimStart('_');
                         if (v.Initializer != null)
                         {
-                            var initVal = Arc.RetainIfShared(v.Initializer.Value, _exprWriter.Write(v.Initializer.Value), _ctx);
+                            var initVal = Arc.RetainAny(v.Initializer.Value, _exprWriter.Write(v.Initializer.Value), _ctx);
                             // Function-call initializers (like Stack_T_New()) are NOT C compile-time constants.
                             // Emit NULL globally and initialize in a generated static constructor.
                             bool isRuntimeInit = initVal.Contains("_New()") || initVal.Contains("_New(")
@@ -1249,7 +1262,7 @@ public sealed class CSharpToC : CSharpSyntaxWalker
             if (!TypeRegistry.IsList(csType)) continue;
             var inner = TypeRegistry.GetListInnerType(csType) ?? "int";
             var cInner = inner == "string" ? "str" : TypeRegistry.MapType(inner);
-            _ctx.WriteLine("self->f_" + prop.Identifier.Text + " = List_" + cInner + "_New();");
+            _ctx.WriteLine("self->f_" + prop.Identifier.Text + " = List_" + cInner + "_Retain(List_" + cInner + "_New());");
         }
 
         foreach (var field in node.Members.OfType<FieldDeclarationSyntax>())
@@ -1264,7 +1277,7 @@ public sealed class CSharpToC : CSharpSyntaxWalker
                 if (v.Initializer != null) continue;
                 var fieldName = v.Identifier.Text.TrimStart('_');
                 var prefix = TypeRegistry.HasNoPrefix(fieldName) ? "" : "f_";
-                _ctx.WriteLine("self->" + prefix + fieldName + " = List_" + cInner + "_New();");
+                _ctx.WriteLine("self->" + prefix + fieldName + " = List_" + cInner + "_Retain(List_" + cInner + "_New());");
             }
         }
     }
@@ -1328,7 +1341,7 @@ public sealed class CSharpToC : CSharpSyntaxWalker
             if (!TypeRegistry.IsList(csType)) continue;
             var inner = TypeRegistry.GetListInnerType(csType) ?? "int";
             var cInner = inner == "string" ? "str" : TypeRegistry.MapType(inner);
-            _ctx.WriteLine(prefix + "f_" + prop.Identifier.Text + " = List_" + cInner + "_New();");
+            _ctx.WriteLine(prefix + "f_" + prop.Identifier.Text + " = List_" + cInner + "_Retain(List_" + cInner + "_New());");
         }
     }
 
@@ -1650,12 +1663,14 @@ public sealed class CSharpToC : CSharpSyntaxWalker
 
         if (_ctx.CurrentReturnBuffer != null)
             _ctx.WriteLine("static char _ret_buf[CS2SX_RETURN_BUF_SIZE];");
+        WriteTraceFrame(node.Identifier.Text);
 
         if (node.Body != null)
             foreach (var stmt in node.Body.Statements)
                 _stmtWriter.Write(stmt);
         else if (node.ExpressionBody != null)
         {
+            _ctx.WriteLine($"CS2SX_LINE({node.ExpressionBody.GetLocation().GetLineSpan().StartLinePosition.Line + 1});");
             var exprCode = _exprWriter.Write(node.ExpressionBody.Expression);
             if (cReturnType == "void")
                 _ctx.WriteLine(exprCode + ";");
@@ -1814,9 +1829,12 @@ public sealed class CSharpToC : CSharpSyntaxWalker
             {
                 // The record's Free releases class-typed members, so it takes a reference.
                 var arcRoot = TypeRegistry.ArcRoot(csType.TrimEnd('?'));
+                var collPrefix = Arc.CollectionPrefix(csType);
                 _ctx.WriteLine(arcRoot != null
                     ? $"self->f_{fieldName} = CS2SX_RETAIN({arcRoot}, {fieldName});"
-                    : $"self->f_{fieldName} = {fieldName};");
+                    : collPrefix != null
+                        ? $"self->f_{fieldName} = {collPrefix}_Retain({fieldName});"   // freed with the record
+                        : $"self->f_{fieldName} = {fieldName};");
             }
             // The initial reference belongs to the current frame (see T_New).
             if (TypeRegistry.ArcRoot(name) != null)

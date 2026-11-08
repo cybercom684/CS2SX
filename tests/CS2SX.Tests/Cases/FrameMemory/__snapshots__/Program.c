@@ -6,6 +6,7 @@
 int Counter_Freed;
 void Counter_Ctor(Counter* self)
 {
+    CS2SX_TRACE("Counter..ctor", "Program.cs");
 }
 
 Counter* Counter_New(void)
@@ -40,6 +41,8 @@ Counter* Counter_Retain(Counter* self)
 
 void Item_Ctor(Item* self, int v)
 {
+    CS2SX_TRACE("Item..ctor", "Program.cs");
+    CS2SX_LINE(15);
     self->f_V = v;
 }
 
@@ -56,6 +59,7 @@ Item* Item_New(int v)
 
 void Item_Dispose(Item* self)
 {
+    CS2SX_LINE(16);
     Counter_Freed++;
 }
 
@@ -76,6 +80,8 @@ Item* Item_Retain(Item* self)
 
 void Wrapped_Ctor(Wrapped* self, int v)
 {
+    CS2SX_TRACE("Wrapped..ctor", "Program.cs");
+    CS2SX_LINE(24);
     self->f_V = v;
 }
 
@@ -92,11 +98,14 @@ Wrapped* Wrapped_New(int v)
 
 int Wrapped_Get(Wrapped* self)
 {
+    CS2SX_TRACE("Wrapped.Get", "Program.cs");
+    CS2SX_LINE(25);
     return self->f_V;
 }
 
 void Wrapped_Dispose(Wrapped* self)
 {
+    CS2SX_LINE(26);
     Counter_Freed += 100;
 }
 
@@ -131,22 +140,28 @@ void FrameMemoryApp_Init(FrameMemoryApp* self)
 {
     if (!self) return;
     ((SwitchApp*)self)->OnFrame = (void(*)(SwitchApp*))FrameMemoryApp_OnFrame;
-    self->f_dict = Dict_str_Item_New();
-    self->f_stack = Stack_Item_New();
-    self->f_queue = Queue_Item_New();
-    self->f_set = HashSet_Item_New();
+    self->f_dict = Dict_str_Item_Retain(Dict_str_Item_New());
+    self->f_stack = Stack_Item_Retain(Stack_Item_New());
+    self->f_queue = Queue_Item_Retain(Queue_Item_New());
+    self->f_set = HashSet_Item_Retain(HashSet_Item_New());
     self->f_arr = (Item**)CS2SX_ArrNew(1, sizeof(Item*));
     self->f_box = Box_Item_New(Item_New(15));
 }
 
 int FrameMemoryApp_Garbage()
 {
+    CS2SX_TRACE("FrameMemoryApp.Garbage", "Program.cs");
+    CS2SX_LINE(56);
     int sum = 0;
+    CS2SX_LINE(57);
     for (int i = 0; i < 5; i++)
     {
+        CS2SX_LINE(59);
         Item* t = Item_New(i);
+        CS2SX_LINE(60);
         sum += t->f_V;
     }
+    CS2SX_LINE(62);
     return sum;
 }
 
@@ -158,6 +173,7 @@ struct _cap_0
 
 static int _lambda_0(void* _env)
 {
+    CS2SX_TRACE("FrameMemoryApp.<lambda>", "Program.cs");
     struct _cap_0* _c = (struct _cap_0*)_env;
     Item* cap = _c->cap;
     return cap->f_V;
@@ -171,55 +187,84 @@ static void _envdtor_0(void* _e)
 
 void FrameMemoryApp_OnFrame(FrameMemoryApp* self)
 {
+    CS2SX_TRACE("FrameMemoryApp.OnFrame", "Program.cs");
+    CS2SX_LINE(67);
     self->f_frame++;
+    CS2SX_LINE(68);
     switch (self->f_frame)
     {
         case 1:
+            CS2SX_LINE(71);
             FrameMemoryApp_Garbage();
+            CS2SX_LINE(72);
             char* _sb0 = _cs2sx_next_buf();
             snprintf(_sb0, CS2SX_STRBUF_SIZE, "k%d", self->f_frame);
             Dict_str_Item_Set(self->f_dict, _sb0, Item_New(10));
+            CS2SX_LINE(73);
             Stack_Item_Push(self->f_stack, Item_New(11));
+            CS2SX_LINE(74);
             Queue_Item_Enqueue(self->f_queue, Item_New(12));
+            CS2SX_LINE(75);
             HashSet_Item_Add(self->f_set, Item_New(13));
+            CS2SX_LINE(76);
             CS2SX_ARC_STORE(Item, CS2SX_AT(self->f_arr, 0), CS2SX_RETAIN(Item, Item_New(14)));
+            CS2SX_LINE(77);
             self->f_pair.A = CS2SX_RETAIN(Item, Item_New(16));
+            CS2SX_LINE(78);
             self->f_iface = Wrapped_as_IHas(CS2SX_RETAIN(Wrapped, Wrapped_New(17)));
+            CS2SX_LINE(79);
             Item* cap = Item_New(18);
+            CS2SX_LINE(80);
             struct _cap_0* _env_0 = CS2SX_ENV_NEW(struct _cap_0);
             _env_0->cap = CS2SX_RETAIN(Item, cap);
             _env_0->_hdr._dtor = _envdtor_0;
             self->f_fn = CS2SX_Delegate_New((void*)_lambda_0, _env_0, 1);
+            CS2SX_LINE(81);
             CS2SX_ARC_STORE(Item, self->f_field, CS2SX_RETAIN(Item, Item_New(19)));
+            CS2SX_LINE(82);
             break;
         case 2:
+            CS2SX_LINE(84);
             char* _sb1 = _cs2sx_next_buf();
             snprintf(_sb1, CS2SX_STRBUF_SIZE, "garbage %d", Counter_Freed);
             const char* _ps_0 = _sb1;
             printf("%s\n", _ps_0 ? _ps_0 : "");
+            CS2SX_LINE(85);
             break;
         case 3:
+            CS2SX_LINE(87);
             char* _sb2 = _cs2sx_next_buf();
             snprintf(_sb2, CS2SX_STRBUF_SIZE, "kept %d %d %d %d %d %d %d %d %d %d %d", CS2SX_NN(Dict_str_Item_Get(self->f_dict, "k1"))->f_V, CS2SX_NN(Stack_Item_Peek(self->f_stack))->f_V, CS2SX_NN(Queue_Item_Peek(self->f_queue))->f_V, CS2SX_NN(self->f_set)->count, CS2SX_NN(CS2SX_AT(self->f_arr, 0))->f_V, CS2SX_NN(CS2SX_NN(self->f_box)->f_Value)->f_V, CS2SX_NN(self->f_pair.A)->f_V, ({ __auto_type _cs2sx_r = CS2SX_NN(self->f_iface); _cs2sx_r->vtable->Get(_cs2sx_r->obj); }), Func_int_Invoke(self->f_fn), CS2SX_NN(self->f_field)->f_V, Counter_Freed);
             const char* _ps_1 = _sb2;
             printf("%s\n", _ps_1 ? _ps_1 : "");
+            CS2SX_LINE(91);
             Dict_str_Item_Remove(self->f_dict, "k1");
+            CS2SX_LINE(92);
             Item* popped = Stack_Item_Pop(self->f_stack);
+            CS2SX_LINE(93);
             Item* dequeued = Queue_Item_Dequeue(self->f_queue);
+            CS2SX_LINE(94);
             HashSet_Item_Clear(self->f_set);
+            CS2SX_LINE(95);
             CS2SX_ARC_STORE(Item, CS2SX_AT(self->f_arr, 0), NULL);
+            CS2SX_LINE(96);
             CS2SX_ARC_STORE(Item, CS2SX_NN(self->f_box)->f_Value, NULL);
+            CS2SX_LINE(97);
             CS2SX_ARC_STORE(Item, self->f_field, NULL);
+            CS2SX_LINE(98);
             char* _sb3 = _cs2sx_next_buf();
             snprintf(_sb3, CS2SX_STRBUF_SIZE, "same frame %d %d %d", CS2SX_NN(popped)->f_V, CS2SX_NN(dequeued)->f_V, Counter_Freed);
             const char* _ps_2 = _sb3;
             printf("%s\n", _ps_2 ? _ps_2 : "");
+            CS2SX_LINE(99);
             break;
         case 4:
+            CS2SX_LINE(101);
             char* _sb4 = _cs2sx_next_buf();
             snprintf(_sb4, CS2SX_STRBUF_SIZE, "released %d", Counter_Freed);
             const char* _ps_3 = _sb4;
             printf("%s\n", _ps_3 ? _ps_3 : "");
+            CS2SX_LINE(102);
             break;
     }
 }

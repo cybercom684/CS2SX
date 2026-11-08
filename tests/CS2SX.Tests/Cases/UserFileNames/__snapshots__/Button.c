@@ -5,6 +5,8 @@
 
 void MenuEntry_Ctor(MenuEntry* self, const char* title)
 {
+    CS2SX_TRACE("MenuEntry..ctor", "Button.cs");
+    CS2SX_LINE(4);
     CS2SX_STR_STORE(self->f_Title, title);
 }
 

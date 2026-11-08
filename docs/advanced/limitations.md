@@ -29,9 +29,9 @@ Unterstützt (CS2SX schreibt es vor dem Übersetzen um): lokale Funktionen ohne 
 
 ## Speicher: Referenzzählung statt Garbage Collector
 
-Das transpilierte Programm hat keine .NET-Laufzeit und damit keinen Garbage Collector. Objekte eigener Klassen werden stattdessen referenzgezählt. Im Alltag verhält sich das wie in C#:
+Das transpilierte Programm hat keine .NET-Laufzeit und damit keinen Garbage Collector. Objekte eigener Klassen, Collections (`List`, `Dictionary`, `Stack`, `Queue`, `HashSet`) und `StringBuilder` werden stattdessen referenzgezählt. Im Alltag verhält sich das wie in C#:
 
-- **Was niemand behält, wird freigegeben.** Ein Objekt, das nur in lokalen Variablen lebt (`var p = new Partikel();` in `OnFrame`), wird am Anfang des nächsten Frames zerstört. Neue Objekte pro Frame sind also kein Speicherleck.
+- **Was niemand behält, wird freigegeben.** Ein Objekt, das nur in lokalen Variablen lebt (`var p = new Partikel();` in `OnFrame`), wird am Anfang des nächsten Frames zerstört. Neue Objekte pro Frame sind also kein Speicherleck, das gilt auch für Zwischenergebnisse wie `gegner.Where(…).ToList()`.
 - **Was etwas behält, bleibt.** Halten können Felder und Properties, `List`, `Dictionary`, `Stack`, `Queue`, `HashSet`, Arrays, generische Klassen (`Box<Item>`), Structs, Tupel, Interface- und `object`-Werte sowie Lambdas und Event-Handler. Jede dieser Stellen hält eine eigene Referenz.
 - **Erst zum nächsten Frame:** Wird ein Objekt losgelassen (`RemoveAt`, `Pop`, `Remove`, `Clear`, ein überschriebenes Feld), stirbt es frühestens am Anfang des nächsten Frames. Lokale Variablen bleiben bis dahin gültig:
 
@@ -46,6 +46,23 @@ Das transpilierte Programm hat keine .NET-Laufzeit und damit keinen Garbage Coll
 
 - Objekte, die sich gegenseitig referenzieren (Zyklen, z. B. `a.Next = b; b.Prev = a;`). Bei solchen Strukturen die Verweise vor dem Wegwerfen auf `null` setzen.
 - Objekte, die über ein Struct, ein Tupel, ein Interface-/`object`-Wert, oder einen Methoden-Delegate (`+= obj.Methode`) gehalten wurden. Diese Stellen geben ihre Referenz nicht zurück.
+
+`GC.GetTotalMemory(false)` liefert den belegten Heap in Bytes, praktisch, um ein Speicherleck zu finden. `GC.Collect()` hat nichts zu tun.
+
+---
+
+## Abstürze: Exception mit C#-Zeile
+
+Eine nicht abgefangene Exception beendet die App mit Meldung und Aufrufkette, im Fehlerdialog der Switch und im Debug-Log:
+
+```
+Unhandled exception. System.NullReferenceException: Object reference not set to an instance of an object.
+   at Enemy.Hit (Enemy.cs:10)
+   at Game.OnFrame (Program.cs:23)
+```
+
+Auch `e.StackTrace` liefert diese Kette.
+
 ---
 
 ## Strings: Länge und Lebensdauer

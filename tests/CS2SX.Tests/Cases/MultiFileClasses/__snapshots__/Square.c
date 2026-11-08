@@ -8,8 +8,10 @@ static Shape_vtable Square_vtable_instance;
 
 void Square_Ctor(Square* self, float side)
 {
+    CS2SX_TRACE("Square..ctor", "Square.cs");
     self->f_history = (int*)CS2SX_ArrNew(4, sizeof(int));
     Shape_Ctor((Shape*)self);
+    CS2SX_LINE(6);
     self->f_side = side;
 }
 
@@ -27,8 +29,12 @@ Square* Square_New(float side)
 
 float Square_Area(Square* self, Painter* p, float factor)
 {
+    CS2SX_TRACE("Square.Area", "Square.cs");
+    CS2SX_LINE(11);
     CS2SX_NN(p)->f_Calls++;
+    CS2SX_LINE(12);
     CS2SX_AT(self->f_history, CS2SX_NN(p)->f_Calls % 4) = CS2SX_NN(p)->f_Calls;
+    CS2SX_LINE(13);
     return self->f_side * self->f_side * factor * Shape_Scale;
 }
 

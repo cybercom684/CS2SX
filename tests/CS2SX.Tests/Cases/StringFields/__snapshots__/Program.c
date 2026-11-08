@@ -3,6 +3,7 @@
 
 void Label2_Ctor(Label2* self)
 {
+    CS2SX_TRACE("Label2..ctor", "Program.cs");
     self->f_Name = CS2SX_StrOwn("n");
     self->f_Text = CS2SX_StrOwn("init");
 }
@@ -53,42 +54,58 @@ void StringFieldsApp_Init(StringFieldsApp* self)
 
 void StringFieldsApp_OnFrame(StringFieldsApp* self)
 {
+    CS2SX_TRACE("StringFieldsApp.OnFrame", "Program.cs");
+    CS2SX_LINE(21);
     self->f_frame++;
+    CS2SX_LINE(22);
     if (self->f_frame <= 3)
     {
+        CS2SX_LINE(24);
         char* _sb0 = _cs2sx_next_buf();
         snprintf(_sb0, CS2SX_STRBUF_SIZE, "frame %d", self->f_frame);
         CS2SX_STR_STORE(self->f_status, _sb0);
+        CS2SX_LINE(25);
         char* _sb1 = _cs2sx_next_buf();
         snprintf(_sb1, CS2SX_STRBUF_SIZE, "%d;", self->f_frame);
         char* _sb2 = _cs2sx_next_buf();
         snprintf(_sb2, CS2SX_STRBUF_SIZE, "%s%s", self->f_log ? self->f_log : "", _sb1 ? _sb1 : "");
         CS2SX_STR_STORE(self->f_log, _sb2);
+        CS2SX_LINE(26);
         char* _sb3 = _cs2sx_next_buf();
         snprintf(_sb3, CS2SX_STRBUF_SIZE, "f%d", self->f_frame);
         CS2SX_STR_STORE(StringFieldsApp_s_last, _sb3);
+        CS2SX_LINE(27);
         char* _sb4 = _cs2sx_next_buf();
         snprintf(_sb4, CS2SX_STRBUF_SIZE, "text %d", self->f_frame);
         CS2SX_STR_STORE(CS2SX_NN(self->f_label)->f_Text, _sb4);
+        CS2SX_LINE(28);
         char* _sb5 = _cs2sx_next_buf();
         snprintf(_sb5, CS2SX_STRBUF_SIZE, "obj%d", self->f_frame);
         CS2SX_STR_STORE(CS2SX_NN(self->f_label)->f_Name, _sb5);
+        CS2SX_LINE(29);
         CS2SX_STR_STORE(self->f_status, self->f_status);
     }
+    CS2SX_LINE(31);
     if (self->f_frame == 5)
     {
+        CS2SX_LINE(33);
         int len = 0;
+        CS2SX_LINE(34);
         for (int i = 0; i < 2000; i++)
         {
+            CS2SX_LINE(36);
             char* _sb6 = _cs2sx_next_buf();
             snprintf(_sb6, CS2SX_STRBUF_SIZE, "junk %d %d", i, i * i);
             const char* junk = _sb6;
+            CS2SX_LINE(37);
             len += strlen(junk);
         }
+        CS2SX_LINE(39);
         char* _sb7 = _cs2sx_next_buf();
         snprintf(_sb7, CS2SX_STRBUF_SIZE, "%s | %s | %s | %s | %s", self->f_status, self->f_log, StringFieldsApp_s_last, CS2SX_NN(self->f_label)->f_Text, CS2SX_NN(self->f_label)->f_Name);
         const char* _ps_1 = _sb7;
         printf("%s\n", _ps_1 ? _ps_1 : "");
+        CS2SX_LINE(40);
         char* _sb8 = _cs2sx_next_buf();
         snprintf(_sb8, CS2SX_STRBUF_SIZE, "churn %s", CS2SX_BoolStr((len > 0)));
         const char* _ps_2 = _sb8;

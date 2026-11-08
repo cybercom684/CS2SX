@@ -6,7 +6,9 @@ Vec2 Vec2_New(float x, float y)
 {
     Vec2 _self_value = {0};
     Vec2* self = &_self_value;
+    CS2SX_LINE(6);
     self->X = x;
+    CS2SX_LINE(6);
     self->Y = y;
     return _self_value;
 }
@@ -46,8 +48,12 @@ void OperatorOverloadingApp_Init(OperatorOverloadingApp* self)
 
 void OperatorOverloadingApp_OnFrame(OperatorOverloadingApp* self)
 {
+    CS2SX_TRACE("OperatorOverloadingApp.OnFrame", "Program.cs");
+    CS2SX_LINE(22);
     self->f_pos = Vec2_op_add(self->f_pos, Vec2_op_mul(self->f_vel, 0.5f));
+    CS2SX_LINE(23);
     Vec2 d = Vec2_op_sub(self->f_pos, Vec2_New(1, 1));
+    CS2SX_LINE(24);
     char* _sb0 = _cs2sx_next_buf();
     snprintf(_sb0, CS2SX_STRBUF_SIZE, "%s,%s dot=%s", Float_ToString(self->f_pos.X), Float_ToString(self->f_pos.Y), Float_ToString(Vec2_Dot(&d, self->f_vel)));
     const char* _ps_0 = _sb0;

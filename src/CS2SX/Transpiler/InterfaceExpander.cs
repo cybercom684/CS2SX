@@ -426,11 +426,13 @@ public sealed class InterfaceExpander
         {
             sb.AppendLine($"#ifndef CS2SX_STACK_{ifaceName}_DEFINED");
             sb.AppendLine($"#define CS2SX_STACK_{ifaceName}_DEFINED");
-            sb.AppendLine($"typedef struct {{ {ifaceName}** data; int count; int capacity; }} Stack_{ifaceName}_ptr;");
+            sb.AppendLine($"typedef struct {{ {ifaceName}** data; int count; int capacity; int _rc; }} Stack_{ifaceName}_ptr;");
+            sb.AppendLine($"static inline void Stack_{ifaceName}_Free(Stack_{ifaceName}_ptr* s);");
+            sb.AppendLine($"static inline Stack_{ifaceName}_ptr* Stack_{ifaceName}_Retain(Stack_{ifaceName}_ptr* s) {{ if (s) s->_rc++; return s; }}");
             sb.AppendLine($"static inline Stack_{ifaceName}_ptr* Stack_{ifaceName}_New(void) {{");
             sb.AppendLine($"    Stack_{ifaceName}_ptr* s = (Stack_{ifaceName}_ptr*)malloc(sizeof(Stack_{ifaceName}_ptr));");
             sb.AppendLine($"    if (!s) return NULL;");
-            sb.AppendLine($"    s->data = ({ifaceName}**)malloc(8 * sizeof({ifaceName}*)); s->count = 0; s->capacity = 8; return s; }}");
+            sb.AppendLine($"    s->data = ({ifaceName}**)malloc(8 * sizeof({ifaceName}*)); s->count = 0; s->capacity = 8; s->_rc = 1; CS2SX_ReleaseLater(s, (CS2SX_FreeFn)Stack_{ifaceName}_Free); return s; }}");
             sb.AppendLine($"static inline void Stack_{ifaceName}_Push(Stack_{ifaceName}_ptr* s, {ifaceName}* val) {{");
             sb.AppendLine($"    if (!s) return;");
             sb.AppendLine($"    if (s->count >= s->capacity) {{ s->capacity *= 2; s->data = ({ifaceName}**)realloc(s->data, s->capacity * sizeof({ifaceName}*)); }}");
@@ -441,7 +443,7 @@ public sealed class InterfaceExpander
             sb.AppendLine($"static inline {ifaceName}* Stack_{ifaceName}_Peek(Stack_{ifaceName}_ptr* s) {{");
             sb.AppendLine($"    if (!s || s->count == 0) return NULL;");
             sb.AppendLine($"    return s->data[s->count - 1]; }}");
-            sb.AppendLine($"static inline void Stack_{ifaceName}_Free(Stack_{ifaceName}_ptr* s) {{ if (s) {{ free(s->data); free(s); }} }}");
+            sb.AppendLine($"static inline void Stack_{ifaceName}_Free(Stack_{ifaceName}_ptr* s) {{ if (!s || --s->_rc > 0) return; free(s->data); free(s); }}");
             sb.AppendLine($"#endif");
         }
         var content = sb.ToString();

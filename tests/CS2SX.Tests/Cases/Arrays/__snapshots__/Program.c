@@ -12,28 +12,40 @@ void ArraysApp_Init(ArraysApp* self)
 
 void ArraysApp_OnInit(ArraysApp* self)
 {
+    CS2SX_TRACE("ArraysApp.OnInit", "Program.cs");
+    CS2SX_LINE(11);
     CS2SX_ARR_LOCAL(int, grid, 4);
+    CS2SX_LINE(12);
     for (int i = 0; i < 4; i++)
     {
+        CS2SX_LINE(12);
         CS2SX_AT(grid, i) = i * 10;
     }
+    CS2SX_LINE(14);
     CS2SX_AT(ArraysApp_s_table, 2) = 7;
+    CS2SX_LINE(15);
     char* _sb0 = _cs2sx_next_buf();
     snprintf(_sb0, CS2SX_STRBUF_SIZE, "%d %d %s %d", CS2SX_AT(grid, 3), CS2SX_AT(ArraysApp_s_table, 2), CS2SX_AT(ArraysApp_s_names, 1), CS2SX_ArrLen(CS2SX_NN(ArraysApp_s_names)));
     const char* _ps_0 = _sb0;
     printf("%s\n", _ps_0 ? _ps_0 : "");
+    CS2SX_LINE(17);
     CS2SX_ARR_LOCAL(int, data, 4, 9, 4, 7, 1);
+    CS2SX_LINE(18);
     qsort(data, 4, sizeof(*data), _cs2sx_cmp_int);
+    CS2SX_LINE(19);
     char* _sb1 = _cs2sx_next_buf();
     snprintf(_sb1, CS2SX_STRBUF_SIZE, "%d %d", CS2SX_AT(data, 0), CS2SX_AT(data, 4 - 1));
     const char* _ps_1 = _sb1;
     printf("%s\n", _ps_1 ? _ps_1 : "");
+    CS2SX_LINE(21);
     float total = 0;
+    CS2SX_LINE(22);
     for (int _i_w = 0; _i_w < (int)(CS2SX_ArrLen(self->f_weights)); _i_w++)
     {
         float w = self->f_weights[_i_w];
         total += w;
     }
+    CS2SX_LINE(23);
     printf("%s\n", Float_ToString(total));
 }
 

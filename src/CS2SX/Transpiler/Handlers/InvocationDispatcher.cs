@@ -142,6 +142,11 @@ public sealed class InvocationDispatcher
         var delegateCall = TryWriteDelegateInvoke(inv, args);
         if (delegateCall != null) return delegateCall;
 
+        // GC: memory is reference-counted; GetTotalMemory reports the heap in use,
+        // Collect has nothing to do (releases happen at the next frame anyway).
+        if (calleeStr is "GC.GetTotalMemory") return "CS2SX_HeapUsed()";
+        if (calleeStr is "GC.Collect" or "GC.WaitForPendingFinalizers") return "((void)0)";
+
         var qualifiedStatic = TryWriteQualifiedStaticCall(inv, args);
         if (qualifiedStatic != null) return qualifiedStatic;
 

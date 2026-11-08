@@ -5,6 +5,7 @@
 int Counter_Disposed;
 void Counter_Ctor(Counter* self)
 {
+    CS2SX_TRACE("Counter..ctor", "Program.cs");
 }
 
 Counter* Counter_New(void)
@@ -39,6 +40,8 @@ Counter* Counter_Retain(Counter* self)
 
 void Node_Ctor(Node* self, int v)
 {
+    CS2SX_TRACE("Node..ctor", "Program.cs");
+    CS2SX_LINE(15);
     self->f_V = v;
 }
 
@@ -55,6 +58,7 @@ Node* Node_New(int v)
 
 void Node_Dispose(Node* self)
 {
+    CS2SX_LINE(16);
     Counter_Disposed++;
 }
 
@@ -75,6 +79,7 @@ Node* Node_Retain(Node* self)
 
 void Shape_Ctor(Shape* self)
 {
+    CS2SX_TRACE("Shape..ctor", "Program.cs");
 }
 
 Shape* Shape_New(void)
@@ -90,6 +95,7 @@ Shape* Shape_New(void)
 
 void Shape_Dispose(Shape* self)
 {
+    CS2SX_LINE(21);
     Counter_Disposed += 10;
 }
 
@@ -110,6 +116,7 @@ Shape* Shape_Retain(Shape* self)
 
 void Circle_Ctor(Circle* self)
 {
+    CS2SX_TRACE("Circle..ctor", "Program.cs");
     self->f_Center = CS2SX_RETAIN(Node, Node_New(7));
     Shape_Ctor((Shape*)self);
 }
@@ -127,6 +134,7 @@ Circle* Circle_New(void)
 
 void Circle_Dispose(Circle* self)
 {
+    CS2SX_LINE(27);
     Counter_Disposed += 100;
     if (self->f_Center) { Node_Free(self->f_Center); self->f_Center = NULL; }
     Shape_Dispose((Shape*)self);
@@ -149,6 +157,7 @@ Circle* Circle_Retain(Circle* self)
 
 void Holder_Ctor(Holder* self)
 {
+    CS2SX_TRACE("Holder..ctor", "Program.cs");
 }
 
 Holder* Holder_New(void)
@@ -212,17 +221,24 @@ void RefCountingApp_Init(RefCountingApp* self)
     if (!self) return;
     ((SwitchApp*)self)->OnInit = (void(*)(SwitchApp*))RefCountingApp_OnInit;
     ((SwitchApp*)self)->OnFrame = (void(*)(SwitchApp*))RefCountingApp_OnFrame;
-    self->f_nodes = List_Node_New();
-    self->f_shapes = List_Shape_New();
+    self->f_nodes = List_Node_Retain(List_Node_New());
+    self->f_shapes = List_Shape_Retain(List_Shape_New());
 }
 
 void RefCountingApp_OnInit(RefCountingApp* self)
 {
+    CS2SX_TRACE("RefCountingApp.OnInit", "Program.cs");
+    CS2SX_LINE(49);
     List_Node_Add(self->f_nodes, Node_New(1));
+    CS2SX_LINE(50);
     List_Node_Remove(self->f_nodes, 0);
+    CS2SX_LINE(51);
     List_Node_Add(self->f_nodes, Node_New(2));
+    CS2SX_LINE(52);
     Node* borrowed = List_Node_Get(self->f_nodes, 0);
+    CS2SX_LINE(53);
     List_Node_Remove(self->f_nodes, 0);
+    CS2SX_LINE(54);
     char* _sb0 = _cs2sx_next_buf();
     snprintf(_sb0, CS2SX_STRBUF_SIZE, "0 same-frame %d %d", Counter_Disposed, CS2SX_NN(borrowed)->f_V);
     const char* _ps_0 = _sb0;
@@ -231,59 +247,90 @@ void RefCountingApp_OnInit(RefCountingApp* self)
 
 void RefCountingApp_OnFrame(RefCountingApp* self)
 {
+    CS2SX_TRACE("RefCountingApp.OnFrame", "Program.cs");
+    CS2SX_LINE(59);
     self->f_frame++;
+    CS2SX_LINE(60);
     if (self->f_frame > 7)
     {
+        CS2SX_LINE(60);
         return;
     }
+    CS2SX_LINE(61);
     char* _sb1 = _cs2sx_next_buf();
     snprintf(_sb1, CS2SX_STRBUF_SIZE, "%d %d", self->f_frame, Counter_Disposed);
     const char* _ps_1 = _sb1;
     printf("%s", _ps_1 ? _ps_1 : "");
+    CS2SX_LINE(63);
     switch (self->f_frame)
     {
         case 1:
+            CS2SX_LINE(66);
             printf(" (2)\n");
+            CS2SX_LINE(67);
             List_Node_Add(self->f_nodes, Node_New(3));
+            CS2SX_LINE(68);
             CS2SX_ARC_STORE(Node, self->f_kept, CS2SX_RETAIN(Node, List_Node_Get(self->f_nodes, 0)));
+            CS2SX_LINE(69);
             List_Node_Remove(self->f_nodes, 0);
+            CS2SX_LINE(70);
             break;
         case 2:
+            CS2SX_LINE(72);
             char* _sb2 = _cs2sx_next_buf();
             snprintf(_sb2, CS2SX_STRBUF_SIZE, " (2) kept %d", CS2SX_NN(self->f_kept)->f_V);
             const char* _ps_2 = _sb2;
             printf("%s\n", _ps_2 ? _ps_2 : "");
+            CS2SX_LINE(73);
             CS2SX_ARC_STORE(Node, self->f_kept, CS2SX_RETAIN(Node, Node_New(4)));
+            CS2SX_LINE(74);
             break;
         case 3:
+            CS2SX_LINE(76);
             printf(" (3)\n");
+            CS2SX_LINE(77);
             CS2SX_ARC_STORE(Node, self->f_kept, CS2SX_RETAIN(Node, self->f_kept));
+            CS2SX_LINE(78);
             break;
         case 4:
+            CS2SX_LINE(80);
             char* _sb3 = _cs2sx_next_buf();
             snprintf(_sb3, CS2SX_STRBUF_SIZE, " (3) kept %d", CS2SX_NN(self->f_kept)->f_V);
             const char* _ps_3 = _sb3;
             printf("%s\n", _ps_3 ? _ps_3 : "");
+            CS2SX_LINE(81);
             CS2SX_ARC_STORE(Node, self->f_kept, NULL);
+            CS2SX_LINE(82);
             break;
         case 5:
+            CS2SX_LINE(84);
             printf(" (4)\n");
+            CS2SX_LINE(85);
             List_Shape_Add(self->f_shapes, (Shape*)(Circle_New()));
+            CS2SX_LINE(86);
             List_Shape_Clear(self->f_shapes);
+            CS2SX_LINE(87);
             break;
         case 6:
+            CS2SX_LINE(89);
             printf(" (115)\n");
+            CS2SX_LINE(90);
             Holder* _holder_4 = Holder_New();
             CS2SX_ARC_STORE(Node, _holder_4->f_Kept, CS2SX_RETAIN(Node, Node_New(5)));
             CS2SX_ARC_STORE(Holder, self->f_holder, CS2SX_RETAIN(Holder, _holder_4));
+            CS2SX_LINE(91);
             CS2SX_ARC_STORE(Pair, self->f_pair, CS2SX_RETAIN(Pair, Pair_New(CS2SX_NN(self->f_holder)->f_Kept, 1)));
+            CS2SX_LINE(92);
             CS2SX_ARC_STORE(Holder, self->f_holder, NULL);
+            CS2SX_LINE(93);
             break;
         case 7:
+            CS2SX_LINE(95);
             char* _sb4 = _cs2sx_next_buf();
             snprintf(_sb4, CS2SX_STRBUF_SIZE, " (115) pair %d", CS2SX_NN(CS2SX_NN(self->f_pair)->f_First)->f_V);
             const char* _ps_5 = _sb4;
             printf("%s\n", _ps_5 ? _ps_5 : "");
+            CS2SX_LINE(96);
             break;
     }
 }

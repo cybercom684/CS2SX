@@ -10,6 +10,7 @@ static Shape_vtable Shape_vtable_instance =
 
 void Shape_Ctor(Shape* self)
 {
+    CS2SX_TRACE("Shape..ctor", "Shapes.cs");
 }
 
 Shape* Shape_New(void)
@@ -45,6 +46,7 @@ Shape* Shape_Retain(Shape* self)
 
 void Painter_Ctor(Painter* self)
 {
+    CS2SX_TRACE("Painter..ctor", "Shapes.cs");
 }
 
 Painter* Painter_New(void)

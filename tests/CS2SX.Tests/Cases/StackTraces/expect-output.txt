@@ -1,0 +1,7 @@
+IndexOutOfRangeException
+   at Game.Read (Program.cs:4)
+   at Game.Step (Program.cs:7)
+   at StackTracesApp.OnInit (Program.cs:20)
+   at StackTracesApp.Helper (Program.cs:35)
+   at StackTracesApp.OnInit (Program.cs:27)
+after

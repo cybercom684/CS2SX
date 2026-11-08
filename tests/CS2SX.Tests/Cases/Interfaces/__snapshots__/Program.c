@@ -5,6 +5,7 @@
 
 void Bullet_Ctor(Bullet* self)
 {
+    CS2SX_TRACE("Bullet..ctor", "Program.cs");
 }
 
 Bullet* Bullet_New(void)
@@ -20,11 +21,15 @@ Bullet* Bullet_New(void)
 
 void Bullet_Update(Bullet* self, float dt)
 {
+    CS2SX_TRACE("Bullet.Update", "Program.cs");
+    CS2SX_LINE(12);
     self->f_Y -= 100 * dt;
 }
 
 int Bullet_IsAlive(Bullet* self)
 {
+    CS2SX_TRACE("Bullet.IsAlive", "Program.cs");
+    CS2SX_LINE(13);
     return self->f_Y > 0;
 }
 
@@ -56,6 +61,7 @@ IUpdatable_vtable Bullet_IUpdatable_vtable_instance =
 
 void Timer_Ctor(Timer* self)
 {
+    CS2SX_TRACE("Timer..ctor", "Program.cs");
     self->f_Left = 2;
 }
 
@@ -72,11 +78,15 @@ Timer* Timer_New(void)
 
 void Timer_Update(Timer* self, float dt)
 {
+    CS2SX_TRACE("Timer.Update", "Program.cs");
+    CS2SX_LINE(19);
     self->f_Left -= dt;
 }
 
 int Timer_IsAlive(Timer* self)
 {
+    CS2SX_TRACE("Timer.IsAlive", "Program.cs");
+    CS2SX_LINE(20);
     return self->f_Left > 0;
 }
 
@@ -111,29 +121,41 @@ void InterfacesApp_Init(InterfacesApp* self)
     if (!self) return;
     ((SwitchApp*)self)->OnInit = (void(*)(SwitchApp*))InterfacesApp_OnInit;
     ((SwitchApp*)self)->OnFrame = (void(*)(SwitchApp*))InterfacesApp_OnFrame;
-    self->f_things = List_IUpdatable_New();
+    self->f_things = List_IUpdatable_Retain(List_IUpdatable_New());
 }
 
 void InterfacesApp_OnInit(InterfacesApp* self)
 {
+    CS2SX_TRACE("InterfacesApp.OnInit", "Program.cs");
+    CS2SX_LINE(29);
     Bullet* b = Bullet_New();
+    CS2SX_LINE(30);
     b->f_Y = 50;
+    CS2SX_LINE(31);
     List_IUpdatable_Add(self->f_things, Bullet_as_IUpdatable(CS2SX_RETAIN(Bullet, b)));
+    CS2SX_LINE(32);
     List_IUpdatable_Add(self->f_things, Timer_as_IUpdatable(CS2SX_RETAIN(Timer, Timer_New())));
 }
 
 void InterfacesApp_OnFrame(InterfacesApp* self)
 {
+    CS2SX_TRACE("InterfacesApp.OnFrame", "Program.cs");
+    CS2SX_LINE(37);
     int alive = 0;
+    CS2SX_LINE(38);
     for (int _i_t = 0; _i_t < (int)(self->f_things->count); _i_t++)
     {
         IUpdatable* t = List_IUpdatable_Get(self->f_things, _i_t);
+        CS2SX_LINE(40);
         ({ __auto_type _cs2sx_r = CS2SX_NN(t); _cs2sx_r->vtable->Update(_cs2sx_r->obj, 1.0f / 60.0f); });
+        CS2SX_LINE(41);
         if (({ __auto_type _cs2sx_r = CS2SX_NN(t); _cs2sx_r->vtable->IsAlive(_cs2sx_r->obj); }))
         {
+            CS2SX_LINE(41);
             alive++;
         }
     }
+    CS2SX_LINE(43);
     char* _sb0 = _cs2sx_next_buf();
     snprintf(_sb0, CS2SX_STRBUF_SIZE, "alive: %d", alive);
     const char* _ps_0 = _sb0;

@@ -34,7 +34,31 @@ struct Exception
     const char*           f_Message;          // owned copy
     const char*           f_ParamName;        // owned copy or NULL
     Exception*            f_InnerException;   // retained or NULL
+    const char*           f_StackTrace;       // "   at Game.Update (Game.cs:42)\n…", set when thrown
 };
+
+// ── C# call trace (for StackTrace and crash reports) ──────────────────────────
+// Every transpiled method declares a frame (CS2SX_TRACE) that is popped
+// automatically when it returns; every statement records its C# line
+// (CS2SX_LINE). A throw copies the chain into the exception.
+typedef struct CS2SX_TraceFrame CS2SX_TraceFrame;
+struct CS2SX_TraceFrame
+{
+    CS2SX_TraceFrame* prev;
+    const char*       method;   // "Game.Update"
+    const char*       file;     // "Game.cs"
+    int               line;
+};
+
+extern _Thread_local CS2SX_TraceFrame* g_cs2sx_trace;
+
+static inline void cs2sx_trace_leave(CS2SX_TraceFrame* f) { g_cs2sx_trace = f->prev; }
+
+#define CS2SX_TRACE(method, file)                                                       \
+    __attribute__((cleanup(cs2sx_trace_leave))) CS2SX_TraceFrame _cs2sx_tf =           \
+        { g_cs2sx_trace, (method), (file), 0 };                                         \
+    g_cs2sx_trace = &_cs2sx_tf
+#define CS2SX_LINE(n) (g_cs2sx_trace->line = (n))
 
 // The System exception hierarchy. Keep in sync with TypeRegistry.BuiltinExceptions.
 #define CS2SX_EXCEPTION_TYPES(X)                                    \
@@ -74,9 +98,10 @@ const char* CS2SX_Exc_ToString(const Exception* ex);   // "System.FormatExceptio
 typedef struct CS2SX_ExFrame CS2SX_ExFrame;
 struct CS2SX_ExFrame
 {
-    jmp_buf        buf;
-    CS2SX_ExFrame* prev;
-    Exception*     ex;      // the caught exception once setjmp returns non-zero
+    jmp_buf           buf;
+    CS2SX_ExFrame*    prev;
+    Exception*        ex;      // the caught exception once setjmp returns non-zero
+    CS2SX_TraceFrame* trace;   // trace depth of the try (restored by a throw)
 };
 
 extern _Thread_local CS2SX_ExFrame* g_cs2sx_ex_top;
@@ -85,6 +110,7 @@ static inline void CS2SX_ExPush(CS2SX_ExFrame* f)
 {
     f->prev = g_cs2sx_ex_top;
     f->ex = NULL;
+    f->trace = g_cs2sx_trace;
     g_cs2sx_ex_top = f;
 }
 

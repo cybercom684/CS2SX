@@ -34,6 +34,48 @@ internal static class Arc
     public static bool UsesDispose(INamedTypeSymbol? sym) =>
         sym != null && !sym.IsRecord && Root(sym) != null;
 
+    /// C prefix of a reference-counted collection type (List_int, Dict_str_Node,
+    /// Stack_float, HashSet_Item, StringBuilder), or null for any other type.
+    public static string? CollectionPrefix(ITypeSymbol? t)
+    {
+        if (t == null || t is IErrorTypeSymbol) return null;
+        var cs = TranspilerContext.FormatTypeSymbol(t).TrimEnd('?');
+        return CollectionPrefix(cs);
+    }
+
+    public static string? CollectionPrefix(string cs)
+    {
+        cs = cs.Trim().TrimEnd('?');
+        if (TypeRegistry.IsStringBuilder(cs)) return "StringBuilder";
+        if (TypeRegistry.IsList(cs))
+        {
+            var inner = TypeRegistry.GetListInnerType(cs) ?? "int";
+            return "List_" + (inner == "string" ? "str" : TypeRegistry.MapType(inner).TrimEnd('*').Replace(" ", "_"));
+        }
+        if (TypeRegistry.IsDictionary(cs) && TypeRegistry.GetDictionaryTypes(cs) is { } kv)
+        {
+            string N(string x) => x == "string" ? "str" : TypeRegistry.MapType(x).TrimEnd('*').Replace(" ", "_");
+            return "Dict_" + N(kv.key) + "_" + N(kv.val);
+        }
+        if (TypeRegistry.IsStack(cs) || TypeRegistry.IsQueue(cs) || TypeRegistry.IsHashSet(cs))
+            return TypeRegistry.MapType(cs).TrimEnd('*').Trim();
+        return null;
+    }
+
+    /// <paramref name="code"/> with a reference taken, for a store that keeps the
+    /// object or collection (fields, records, closures, …). Null/default need none.
+    public static string RetainAny(ExpressionSyntax value, string code, TranspilerContext ctx)
+    {
+        if (IsFresh(value) || code == "NULL" || ctx.SemanticModel == null) return code;
+        try
+        {
+            var t = ctx.SemanticModel.GetTypeInfo(value).Type;
+            if (CollectionPrefix(t) is { } p) return p + "_Retain(" + code + ")";
+        }
+        catch { }
+        return RetainIfShared(value, code, ctx);
+    }
+
     /// A value that needs no reference: null / default. (A new object's initial
     /// reference belongs to the current frame — see T_New — so a store retains it
     /// like any other object; whatever ends up nowhere is freed at the next frame.)

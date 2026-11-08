@@ -125,6 +125,7 @@ public sealed class DefaultConstructorStrategy : IConstructorStrategy
         ctx.Out.WriteLine($"void {name}_Ctor{sfx}({string.Join(", ", decls)})");
         ctx.Out.WriteLine("{");
         ctx.Indent();
+        transpiler.WriteTraceFrame(".ctor");
 
         var init = ctor?.Initializer;
         if (init != null && init.ThisOrBaseKeyword.IsKind(SyntaxKind.ThisKeyword))

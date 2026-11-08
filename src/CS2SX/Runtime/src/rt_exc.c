@@ -3,6 +3,26 @@
 
 _Thread_local CS2SX_ExFrame* g_cs2sx_ex_top = NULL;
 
+// Bottom of the trace stack: CS2SX_LINE always has a frame to write to.
+static CS2SX_TraceFrame s_cs2sx_trace_root = { NULL, NULL, NULL, 0 };   // shared: only a sentinel
+_Thread_local CS2SX_TraceFrame* g_cs2sx_trace = &s_cs2sx_trace_root;
+
+/// "   at Game.Update (Game.cs:42)\n…" for the current trace (innermost first).
+static char* trace_capture(void)
+{
+    char buf[1536];
+    size_t n = 0;
+    int frames = 0;
+    for (CS2SX_TraceFrame* f = g_cs2sx_trace; f && f->method && n < sizeof buf - 1; f = f->prev)
+    {
+        if (++frames > 24) { n += snprintf(buf + n, sizeof buf - n, "   ...\n"); break; }
+        n += snprintf(buf + n, sizeof buf - n, "   at %s (%s:%d)\n", f->method, f->file ? f->file : "?", f->line);
+        if (n >= sizeof buf) n = sizeof buf - 1;
+    }
+    buf[n] = 0;
+    return n > 0 ? strdup(buf) : NULL;
+}
+
 const CS2SX_TypeInfo CS2SX_TI_Exception =
     { "Exception", NULL, "Exception of type 'System.Exception' was thrown." };
 
@@ -76,6 +96,7 @@ void Exception_Free(Exception* self)
     if (!self || --self->_rc > 0) return;
     free((void*)self->f_Message);
     free((void*)self->f_ParamName);
+    free((void*)self->f_StackTrace);
     Exception_Free(self->f_InnerException);
     free(self);
 }
@@ -119,10 +140,19 @@ const char* CS2SX_Exc_ToString(const Exception* ex)
 // user (system error dialog), then quit like an unhandled .NET exception would.
 __attribute__((noreturn)) static void exc_unhandled(Exception* ex)
 {
-    char msg[768];
-    snprintf(msg, sizeof msg, "Unhandled exception. %s", CS2SX_Exc_ToString(ex));
+    char msg[2048];
+    snprintf(msg, sizeof msg, "Unhandled exception. %s%s%s", CS2SX_Exc_ToString(ex),
+             ex->f_StackTrace ? "\n" : "", ex->f_StackTrace ? ex->f_StackTrace : "");
     fprintf(stderr, "%s\n", msg);
-    svcOutputDebugString(msg, strlen(msg));
+    // One debug-log entry per line (message, then "   at …" frames).
+    for (const char* line = msg; *line; )
+    {
+        const char* end = strchr(line, '\n');
+        size_t len = end ? (size_t)(end - line) : strlen(line);
+        svcOutputDebugString(line, len);
+        if (!end) break;
+        line = end + 1;
+    }
     if (appletGetAppletType() != AppletType_None)
     {
         ErrorApplicationConfig cfg;
@@ -135,9 +165,11 @@ __attribute__((noreturn)) static void exc_unhandled(Exception* ex)
 void CS2SX_Throw(Exception* ex)
 {
     if (!ex) ex = CS2SX_Exc_New(&CS2SX_TI_NullReferenceException, NULL, NULL, NULL);
+    if (!ex->f_StackTrace) ex->f_StackTrace = trace_capture();   // a rethrow keeps the original
     CS2SX_ExFrame* f = g_cs2sx_ex_top;
     if (!f) exc_unhandled(ex);
     g_cs2sx_ex_top = f->prev;
+    g_cs2sx_trace = f->trace;   // the frames between throw and catch are gone
     f->ex = ex;
     longjmp(f->buf, 1);
 }

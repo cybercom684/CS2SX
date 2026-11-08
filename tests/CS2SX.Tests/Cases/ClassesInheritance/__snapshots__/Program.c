@@ -9,7 +9,10 @@ static Shape_vtable Shape_vtable_instance =
 
 void Shape_Ctor(Shape* self, const char* name)
 {
+    CS2SX_TRACE("Shape..ctor", "Program.cs");
+    CS2SX_LINE(8);
     CS2SX_STR_STORE(self->f_Name, name);
+    CS2SX_LINE(9);
     Shape_Created++;
 }
 
@@ -27,6 +30,8 @@ Shape* Shape_New(const char* name)
 
 const char* Shape_Describe(Shape* self)
 {
+    CS2SX_TRACE("Shape.Describe", "Program.cs");
+    CS2SX_LINE(16);
     char* _sb0 = _cs2sx_next_buf();
     snprintf(_sb0, CS2SX_STRBUF_SIZE, "%s with area %s", self->f_Name, Float_ToString(self->vtable->Area(self)));
     return _sb0;
@@ -56,8 +61,11 @@ static Shape_vtable Rect_vtable_instance;
 
 void Rect_Ctor(Rect* self, float w, float h)
 {
+    CS2SX_TRACE("Rect..ctor", "Program.cs");
     Shape_Ctor((Shape*)self, "Rect");
+    CS2SX_LINE(27);
     self->f_W = w;
+    CS2SX_LINE(28);
     self->f_H = h;
 }
 
@@ -75,6 +83,8 @@ Rect* Rect_New(float w, float h)
 
 float Rect_Area(Rect* self)
 {
+    CS2SX_TRACE("Rect.Area", "Program.cs");
+    CS2SX_LINE(31);
     return self->f_W * self->f_H;
 }
 
@@ -108,7 +118,9 @@ static Shape_vtable Square_vtable_instance;
 
 void Square_Ctor(Square* self, float side)
 {
+    CS2SX_TRACE("Square..ctor", "Program.cs");
     Rect_Ctor((Rect*)self, side, side);
+    CS2SX_LINE(38);
     CS2SX_STR_STORE(self->base.base.f_Name, "Square");
 }
 
@@ -126,6 +138,8 @@ Square* Square_New(float side)
 
 const char* Square_Describe(Square* self)
 {
+    CS2SX_TRACE("Square.Describe", "Program.cs");
+    CS2SX_LINE(43);
     char* _sb0 = _cs2sx_next_buf();
     snprintf(_sb0, CS2SX_STRBUF_SIZE, "[%s]", Shape_Describe(((Shape*)self)));
     return _sb0;
@@ -161,7 +175,9 @@ static Shape_vtable Circle_vtable_instance;
 
 void Circle_Ctor(Circle* self, float r)
 {
+    CS2SX_TRACE("Circle..ctor", "Program.cs");
     Shape_Ctor((Shape*)self, "Circle");
+    CS2SX_LINE(53);
     self->f_r = r;
 }
 
@@ -179,6 +195,8 @@ Circle* Circle_New(float r)
 
 float Circle_Area(Circle* self)
 {
+    CS2SX_TRACE("Circle.Area", "Program.cs");
+    CS2SX_LINE(56);
     return 3.14159f * self->f_r * self->f_r;
 }
 
@@ -216,15 +234,23 @@ void ClassesInheritanceApp_Init(ClassesInheritanceApp* self)
 
 void ClassesInheritanceApp_OnInit(ClassesInheritanceApp* self)
 {
+    CS2SX_TRACE("ClassesInheritanceApp.OnInit", "Program.cs");
+    CS2SX_LINE(63);
     Shape* a = (Shape*)(Rect_New(2, 3));
+    CS2SX_LINE(64);
     Shape* b = (Shape*)(Circle_New(1));
+    CS2SX_LINE(65);
     Shape* c = (Shape*)(Square_New(4));
+    CS2SX_LINE(66);
     const char* _ps_0 = a->vtable->Describe(a);
     printf("%s\n", _ps_0 ? _ps_0 : "");
+    CS2SX_LINE(67);
     const char* _ps_1 = b->vtable->Describe(b);
     printf("%s\n", _ps_1 ? _ps_1 : "");
+    CS2SX_LINE(68);
     const char* _ps_2 = c->vtable->Describe(c);
     printf("%s\n", _ps_2 ? _ps_2 : "");
+    CS2SX_LINE(69);
     char* _sb0 = _cs2sx_next_buf();
     snprintf(_sb0, CS2SX_STRBUF_SIZE, "created: %d", Shape_Created);
     const char* _ps_3 = _sb0;
