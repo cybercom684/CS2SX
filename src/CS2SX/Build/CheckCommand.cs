@@ -1,4 +1,4 @@
-// ============================================================================
+﻿// ============================================================================
 // CS2SX — Build/CheckCommand.cs  (FIXED)
 //
 // Fixes:
@@ -49,8 +49,8 @@ public sealed class CheckCommand
 
         // Same generic-method specialisation as the build (into a temp folder).
         var checkDir = Path.Combine(Path.GetTempPath(), "cs2sx-check-" + Environment.ProcessId);
-        var files = GenericMethodMonomorphizer.Rewrite(
-            SyntaxLowering.Rewrite(reader.SourceFiles.ToList(), checkDir), checkDir);
+        var files = GenericStructMonomorphizer.Rewrite(GenericMethodMonomorphizer.Rewrite(
+            SyntaxLowering.Rewrite(reader.SourceFiles.ToList(), checkDir), checkDir), checkDir);
 
         // FIX: Gleiche Analyse wie BuildPipeline
         var apiSourceDir = RuntimeExporter.ExportApiSourcesToTemp();

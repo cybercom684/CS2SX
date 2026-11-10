@@ -1051,6 +1051,20 @@ public sealed class ExpressionWriter : IExpressionWriter
         return null;
     }
 
+    /// A collection initializer element of a class type stored as an interface
+    /// (`new List&lt;IFace&gt; { new Impl() }`) becomes `Impl_as_IFace(...)`.
+    private string WrapAsInterfaceElement(ExpressionSyntax item, string code)
+    {
+        if (_ctx.SemanticModel == null) return code;
+        var ti = _ctx.SemanticModel.GetTypeInfo(item);
+        if (ti.ConvertedType is not { TypeKind: TypeKind.Interface } iface
+            || ti.Type is not { TypeKind: TypeKind.Class } cls) return code;
+        var ifaceName = TranspilerContext.FormatTypeSymbol(iface);
+        var clsName = TranspilerContext.FormatTypeSymbol(cls);
+        if (!TypeRegistry.IsRegisteredInterface(ifaceName) || TypeRegistry.IsRegisteredInterface(clsName)) return code;
+        return clsName + "_as_" + ifaceName + "(" + code + ")";
+    }
+
     private string? TryWrapAsInterface(string exprRaw, string exprCode, string targetIfaceName)
     {
         if (!_ctx.InterfaceTypes.Contains(targetIfaceName)) return null;
@@ -2522,7 +2536,7 @@ public sealed class ExpressionWriter : IExpressionWriter
                 _ctx.Out.WriteLine(_ctx.Tab + "List_" + cInner + "* " + tmp + " = " + listCreate + ";");
                 foreach (var item in initializer.Expressions)
                 {
-                    var itemVal = Write(item);
+                    var itemVal = WrapAsInterfaceElement(item, Write(item));
                     // CS2SX_LIST_DEFINE_PTR stores T* — tuple compound literals MUST be heap-allocated.
                     // Using &(compound_literal) gives a pointer with automatic storage that becomes
                     // dangling when the enclosing function returns, corrupting the list later.

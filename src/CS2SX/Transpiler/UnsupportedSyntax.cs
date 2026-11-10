@@ -19,8 +19,20 @@ internal static class UnsupportedSyntax
         }
     }
 
+    /// True inside an instance member — its C function has a parameter named `self`.
+    private static bool InInstanceMember(SyntaxNode node) =>
+        node.Ancestors().OfType<BaseMethodDeclarationSyntax>().FirstOrDefault() is { } m
+        && !m.Modifiers.Any(x => x.IsKind(SyntaxKind.StaticKeyword));
+
+    private const string SelfName =
+        "Der Name self ist in Instanzmethoden vergeben (so heißt this im erzeugten C) — die Variable umbenennen.";
+
     private static string? Check(SyntaxNode node, SemanticModel? model) => node switch
     {
+        VariableDeclaratorSyntax { Identifier.Text: "self", Parent.Parent: LocalDeclarationStatementSyntax } v
+            when InInstanceMember(v) => SelfName,
+        ParameterSyntax { Identifier.Text: "self" } p when InInstanceMember(p) => SelfName,
+
         ForEachStatementSyntax { Expression: RangeExpressionSyntax } =>
             "foreach über einen Range wird nur mit Start und Ende ohne ^ unterstützt (foreach (var i in 0..10)) — sonst eine for-Schleife verwenden.",
 
@@ -35,12 +47,12 @@ internal static class UnsupportedSyntax
             "Dieser with-Ausdruck wird nicht unterstützt — with geht bei Records mit Positionsparametern auf einer einfachen Variable/einem Feld und nur mit diesen Parametern; sonst eine Kopie mit new anlegen: new Punkt(10, p.Y).",
 
         // Plain generic methods are specialised beforehand (GenericMethodMonomorphizer);
-        // what reaches this point is virtual/abstract, in an interface or a generic type.
+        // what reaches this point is in a generic class or interface.
         MethodDeclarationSyntax { TypeParameterList: not null } m =>
-            $"Diese generische Methode ({m.Identifier.Text}<…>) wird nicht unterstützt — generische Methoden dürfen nicht virtual/abstract/override sein und nicht in Interfaces oder generischen Klassen stehen.",
+            $"Diese generische Methode ({m.Identifier.Text}<…>) wird nicht unterstützt — generische Methoden in generischen Klassen/Interfaces gehen nicht; die Methode in eine nicht-generische Klasse verschieben.",
 
         StructDeclarationSyntax { TypeParameterList: not null } s =>
-            $"Generische Structs ({s.Identifier.Text}<…>) werden nicht unterstützt — eine generische Klasse verwenden.",
+            $"Dieser generische Struct ({s.Identifier.Text}<…>) wird nicht unterstützt — generische Structs innerhalb generischer Typen gehen nicht.",
 
         LocalFunctionStatementSyntax f =>
             $"Die lokale Funktion {f.Identifier.Text} verwendet lokale Variablen oder Parameter der umgebenden Methode (oder ist generisch) — das wird nicht unterstützt; die Werte als Parameter übergeben oder eine private Methode schreiben.",

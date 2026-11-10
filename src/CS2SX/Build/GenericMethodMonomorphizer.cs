@@ -67,11 +67,16 @@ public static class GenericMethodMonomorphizer
         }
         if (decls.Count == 0) return files.ToList();
 
+        // Virtual dispatch: a base method, its overrides and the interface methods they
+        // implement form one group — specialised together under one name, so a call
+        // through the base or the interface reaches the right override.
+        var group = BuildGroups(decls);
+
         var edits = files.ToDictionary(f => f, _ => new List<Edit>());
         var specs = new Dictionary<string, Spec>(StringComparer.Ordinal);
         var queue = new Queue<Spec>();
 
-        Spec SpecFor(GenericDecl d, IReadOnlyList<string> args)
+        Spec SpecOne(GenericDecl d, IReadOnlyList<string> args)
         {
             var name = d.Symbol.Name + "_" + string.Join("_", args.Select(Suffix));
             var key = d.File + "|" + d.Syntax.SpanStart + "|" + name;
@@ -82,6 +87,14 @@ public static class GenericMethodMonomorphizer
                 queue.Enqueue(s);
             }
             return s;
+        }
+
+        Spec SpecFor(GenericDecl d, IReadOnlyList<string> args)
+        {
+            foreach (var member in group[d.Symbol])
+                if (!SymbolEqualityComparer.Default.Equals(member.Symbol, d.Symbol))
+                    SpecOne(member, args);
+            return SpecOne(d, args);
         }
 
         // 1. Call sites outside generic method bodies: concrete type arguments.
@@ -106,7 +119,7 @@ public static class GenericMethodMonomorphizer
         {
             var spec = queue.Dequeue();
             var text = Specialise(spec, decls, SpecFor);
-            var type = (TypeDeclarationSyntax)spec.Decl.Syntax.Parent!;
+            var type = (TypeDeclarationSyntax)spec.Decl.Syntax.Parent!;   // class, struct or interface
             var at = (spec.Decl.File, type.CloseBraceToken.SpanStart);
             if (!inserts.TryGetValue(at, out var sb)) inserts[at] = sb = new StringBuilder();
             sb.Append("\n    // specialisation of ").Append(spec.Decl.Symbol.Name).Append('<')
@@ -236,11 +249,46 @@ public static class GenericMethodMonomorphizer
         _ => null,
     };
 
+    /// Generic methods of non-generic classes, structs and interfaces — including
+    /// virtual/abstract/override ones (see BuildGroups). Interface and abstract
+    /// methods have no body.
     private static bool IsSupported(MethodDeclarationSyntax m) =>
-        m.Parent is ClassDeclarationSyntax { TypeParameterList: null } or StructDeclarationSyntax { TypeParameterList: null }
-        && (m.Body != null || m.ExpressionBody != null)
-        && !m.Modifiers.Any(x => x.IsKind(SyntaxKind.VirtualKeyword) || x.IsKind(SyntaxKind.AbstractKeyword)
-                               || x.IsKind(SyntaxKind.OverrideKeyword));
+        m.Parent is ClassDeclarationSyntax { TypeParameterList: null }
+                 or StructDeclarationSyntax { TypeParameterList: null }
+                 or InterfaceDeclarationSyntax { TypeParameterList: null }
+        && (m.Body != null || m.ExpressionBody != null
+            || m.Parent is InterfaceDeclarationSyntax
+            || m.Modifiers.Any(x => x.IsKind(SyntaxKind.AbstractKeyword)));
+
+    /// For every declaration: all declarations that must be specialised with it —
+    /// the override chain (base ↔ overrides) and interface methods ↔ implementations.
+    private static Dictionary<IMethodSymbol, List<GenericDecl>> BuildGroups(
+        Dictionary<IMethodSymbol, GenericDecl> decls)
+    {
+        var parent = decls.Keys.ToDictionary(k => k, k => k, (IEqualityComparer<IMethodSymbol>)SymbolEqualityComparer.Default);
+        IMethodSymbol Find(IMethodSymbol x) { while (!SymbolEqualityComparer.Default.Equals(parent[x], x)) x = parent[x]; return x; }
+        void Union(IMethodSymbol a, IMethodSymbol b) { var ra = Find(a); var rb = Find(b); if (!SymbolEqualityComparer.Default.Equals(ra, rb)) parent[ra] = rb; }
+
+        foreach (var d in decls.Keys)
+        {
+            if (d.OverriddenMethod?.OriginalDefinition is IMethodSymbol baseM && parent.ContainsKey(baseM))
+                Union(d, baseM);
+            if (d.ContainingType is not { } owner) continue;
+            foreach (var iface in owner.AllInterfaces)
+                foreach (var im in iface.GetMembers().OfType<IMethodSymbol>())
+                {
+                    var imDef = im.OriginalDefinition;
+                    if (!parent.ContainsKey(imDef)) continue;
+                    if (owner.FindImplementationForInterfaceMember(im) is IMethodSymbol impl
+                        && SymbolEqualityComparer.Default.Equals(impl.OriginalDefinition, d))
+                        Union(d, imDef);
+                }
+        }
+
+        var members = decls.Keys.GroupBy(Find, (IEqualityComparer<IMethodSymbol>)SymbolEqualityComparer.Default)
+            .ToDictionary(g => g.Key, g => g.Select(k => decls[k]).ToList(), (IEqualityComparer<IMethodSymbol>)SymbolEqualityComparer.Default);
+        return decls.Keys.ToDictionary(k => k, k => members[Find(k)], (IEqualityComparer<IMethodSymbol>)SymbolEqualityComparer.Default);
+    }
 
     private static bool ContainsTypeParameter(ITypeSymbol t) => t switch
     {

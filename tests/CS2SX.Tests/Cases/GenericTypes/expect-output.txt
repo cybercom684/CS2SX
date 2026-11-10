@@ -1,0 +1,6 @@
+fmt 7 x
+fmt [7] [x]
+pick 1 2 b
+echo 5 6
+pair 34 rl 4
+slot hp=30

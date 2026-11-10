@@ -11,6 +11,6 @@ Program.cs(42): GetType() (Reflection) wird nur bei Exceptions unterstützt
 Program.cs(45): Sprungmarken (again:)
 Program.cs(47): goto wird nicht unterstützt
 Program.cs(9): Der delegate-Typ Op wird nicht unterstützt
-Program.cs(11): Generische Structs (Box<…>)
-Program.cs(15): Diese generische Methode (Pick<…>) wird nicht unterstützt
+Program.cs(11): Dieser generische Struct (Box<…>) wird nicht unterstützt
+Program.cs(11): Diese generische Methode (Pick<…>) wird nicht unterstützt
 Program.cs(17): yield return wird nicht unterstützt

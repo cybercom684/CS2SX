@@ -8,11 +8,11 @@ public record Punkt(int X, int Y);
 
 public delegate int Op(ref int a);
 
-public struct Box<T> { public T V; }
+public class Holder<T> { public struct Box<U> { public U V; } public U Pick<U>(U a) => a; }
 
 public class Diagnostics_UnsupportedApp : SwitchApp
 {
-    public virtual T Pick<T>(T a, T b) => a;
+    private int _count;
 
     private static IEnumerable<int> Gen() { yield return 1; }
     private static Punkt Make() => new Punkt(0, 0);
