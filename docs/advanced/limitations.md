@@ -112,25 +112,37 @@ Intern wird eine Variable, die erfasst **und** irgendwo verändert wird, zu eine
 
 ---
 
-## Kein Async/Await
+## Async/Await: im Main-Thread, über mehrere Frames
 
-`async`/`await` wird synchron ausgegeben. Alles läuft im Main-Thread.
+`async`-Methoden funktionieren, laufen aber nicht in eigenen Threads. Ein `await` auf einen Task, der noch nicht fertig ist, unterbricht die Methode; sie läuft in einem späteren Frame weiter, vor `OnFrame`. Lokale Variablen, Parameter und Strings bleiben über das `await` hinweg erhalten.
 
 ```csharp
-// FALSCH — await täuscht Asynchronität vor, die nicht existiert
-await Task.Delay(1000);
-
-// RICHTIG — Zeit messen
-private readonly Stopwatch _uhr = Stopwatch.StartNew();
-public override void OnFrame()
+private async Task Intro()
 {
-    if (_uhr.ElapsedMilliseconds >= 1000)
-    {
-        _uhr.Restart();
-        // verzögerte Aktion
-    }
+    _text = "3";
+    await Task.Delay(1000);      // die App läuft weiter, OnFrame wird jeden Frame aufgerufen
+    _text = "Los!";
+    int punkte = await LadePunkte();
 }
+
+public override void OnInit() { Intro(); }
 ```
+
+Unterstützt: `async Task`, `async Task<T>`, `async void`, `await` auf `Task`/`Task<T>`, `Task.Delay(ms)`, `Task.Yield()` (weiter im nächsten Frame), `Task.CompletedTask`, `Task.FromResult`, `Task.WhenAll`, `Task.Run` (führt sofort aus), `IsCompleted`, `IsFaulted`, `Result`, `Wait()`. Eine Exception in einer `async Task`-Methode landet im Task und wird beim `await` oder bei `Result`/`Wait()` weitergeworfen.
+
+Der Build lehnt mit Zeile und Hinweis ab:
+
+| Konstrukt | Stattdessen |
+|---|---|
+| `await` in `try`/`catch`/`finally`, `using`, `lock` | `await` davor oder dahinter; oder den Task behalten und `IsFaulted` prüfen |
+| `await` in einer Schleifenbedingung oder im `for`-Kopf | Ergebnis im Rumpf in eine Variable schreiben |
+| `await` rechts von `&&`, `\|\|`, `??`, in `?:` oder einem `switch`-Ausdruck | vorher in eine Variable schreiben |
+| `foreach` mit `await` im Rumpf über etwas anderes als `List<T>`/Array | `for`-Schleife |
+| `out var`, Muster-Variablen (`is Foo f`) und `using var` vor einem `await` im selben Block | normal deklarieren (`int n;`) |
+| `async`-Lambdas, lokale `async`-Funktionen, `await foreach`, `base.` in `async`-Methoden | `async`-Methode der Klasse |
+| `async` in Structs und generischen Klassen | normale Klasse |
+
+`Result` und `Wait()` blockieren nicht: Ist der Task noch nicht fertig, werfen sie eine `InvalidOperationException`. Rechenintensive Arbeit blockiert weiterhin den Frame, `await` verteilt nur Wartezeit.
 
 ---
 

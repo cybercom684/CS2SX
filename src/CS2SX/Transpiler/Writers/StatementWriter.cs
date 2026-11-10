@@ -1724,6 +1724,10 @@ public sealed class StatementWriter
         else
         {
             ex = "(Exception*)(" + _expr.Write(throwStmt.Expression) + ")";
+            // An exception kept in a field stays the field's: the throw takes its own
+            // reference (the handler that catches it frees one).
+            if (_ctx.SemanticModel?.GetSymbolInfo(throwStmt.Expression).Symbol is IFieldSymbol or IPropertySymbol)
+                ex = "Exception_Retain(" + ex + ")";
         }
         _ctx.WriteLineWithMapping("CS2SX_Throw(" + ex + ");", line, throwStmt.ToString().Trim());
     }

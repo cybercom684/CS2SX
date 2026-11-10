@@ -51,7 +51,25 @@ public sealed class ExpressionWriter : IExpressionWriter
         if (node is not ExpressionSyntax expr) return code;
         code = ApplyUserConversion(expr, code);
         code = ApplyEscapeRetain(expr, code);
+        code = ApplyArgumentUpcast(expr, code);
         return ApplyNullableConversion(expr, code);
+    }
+
+    /// A derived object passed for a base-class parameter: the C pointer types
+    /// differ, so the argument is cast.
+    private string ApplyArgumentUpcast(ExpressionSyntax expr, string code)
+    {
+        if (_ctx.SemanticModel == null || code.Length == 0
+            || expr.Parent is not ArgumentSyntax { RefKindKeyword.RawKind: 0, Parent: ArgumentListSyntax }) return code;
+        try
+        {
+            if (_ctx.SemanticModel.GetTypeInfo(expr) is { Type: { TypeKind: TypeKind.Class } from, ConvertedType: { TypeKind: TypeKind.Class } to }
+                && !SymbolEqualityComparer.Default.Equals(from, to)
+                && Arc.Root(from) != null && Arc.Root(to) != null)
+                return "(" + to.Name + "*)" + code;
+        }
+        catch { }
+        return code;
     }
 
     /// A reference-counted object that is kept by something that does not count —
@@ -80,9 +98,14 @@ public sealed class ExpressionWriter : IExpressionWriter
                                 && _ctx.SemanticModel.GetSymbolInfo(left).Symbol is IFieldSymbol or IPropertySymbol
                                 && _ctx.SemanticModel.GetSymbolInfo(left).Symbol!.ContainingType?.TypeKind == TypeKind.Struct;
             if (!(arrayElement || boxed || tupleElement || structMember)) return code;
-            return collPrefix != null
-                ? (Arc.IsFresh(expr) ? code : collPrefix + "_Retain(" + code + ")")
-                : Arc.RetainIfShared(expr, code, _ctx);
+            if (collPrefix != null)
+                return Arc.IsFresh(expr) ? code : collPrefix + "_Retain(" + code + ")";
+            var retained = Arc.RetainIfShared(expr, code, _ctx);
+            // new Base[] { derived } — the element has the base's C type.
+            if (arrayElement && ti.ConvertedType is { TypeKind: TypeKind.Class } conv
+                && !SymbolEqualityComparer.Default.Equals(conv, ti.Type) && Arc.Root(conv) != null)
+                retained = "(" + conv.Name + "*)" + retained;
+            return retained;
         }
         catch { return code; }
     }
@@ -1051,6 +1074,22 @@ public sealed class ExpressionWriter : IExpressionWriter
         return null;
     }
 
+    /// Name of the member in `obj.Member` as the C struct has it: fields of user
+    /// classes lose their leading underscores (`other._x` → f_x, like `_x` alone).
+    private string MemberCName(MemberAccessExpressionSyntax mem)
+    {
+        var name = mem.Name.Identifier.Text;
+        if (!name.StartsWith('_') || _ctx.SemanticModel == null) return name;
+        try
+        {
+            if (_ctx.SemanticModel.GetSymbolInfo(mem).Symbol is IFieldSymbol { IsStatic: false } f
+                && f.ContainingType is { TypeKind: TypeKind.Class } owner && TranspilerContext.IsUserCode(owner))
+                return name.TrimStart('_');
+        }
+        catch { }
+        return name;
+    }
+
     /// A collection initializer element of a class type stored as an interface
     /// (`new List&lt;IFace&gt; { new Impl() }`) becomes `Impl_as_IFace(...)`.
     private string WrapAsInterfaceElement(ExpressionSyntax item, string code)
@@ -1594,7 +1633,7 @@ public sealed class ExpressionWriter : IExpressionWriter
         }
 
         var obj = NullCheck.Wrap(mem.Expression, Write(mem.Expression), _ctx);
-        var prop = mem.Name.Identifier.Text;
+        var prop = MemberCName(mem);
         var objRaw = mem.Expression.ToString();
         var objKey = objRaw.TrimStart('_');
 
@@ -1972,7 +2011,7 @@ public sealed class ExpressionWriter : IExpressionWriter
             return mem.Name.Identifier.Text;
 
         var obj = NullCheck.Wrap(mem.Expression, Write(mem.Expression), _ctx);
-        var prop = mem.Name.Identifier.Text;
+        var prop = MemberCName(mem);
 
         // Stopwatch.Elapsed.TotalMilliseconds / TotalSeconds / TotalMinutes
         if (prop is "TotalMilliseconds" or "TotalSeconds" or "TotalMinutes")

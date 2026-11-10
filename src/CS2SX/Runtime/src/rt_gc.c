@@ -225,6 +225,20 @@ int CS2SX_GcCollect(void)
     return freed;
 }
 
+// ── async/await ─────────────────────────────────────────────────────────────
+// The task classes are C# (appended to the app by AsyncLowering); an app without
+// async has no CS2SX_Task_Tick, and nothing happens here.
+__attribute__((weak)) void CS2SX_Task_Tick(s64 nowMs);
+
+void CS2SX_AsyncFrame(void)
+{
+    static u64 s_start;
+    if (!CS2SX_Task_Tick) return;
+    u64 now = armGetSystemTick();
+    if (!s_start) s_start = now;
+    CS2SX_Task_Tick((s64)(armTicksToNs(now - s_start) / 1000000ULL));
+}
+
 void CS2SX_GcFrame(void)
 {
     // Looking costs time proportional to what the suspects reach, so not every

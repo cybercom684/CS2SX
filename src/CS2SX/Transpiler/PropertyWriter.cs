@@ -79,12 +79,22 @@ public static class PropertyWriter
         var name = prop.Identifier.Text;
         var ptr = NeedsPtr(csType) ? "*" : "";
         // Static property (static class or static modifier) → no self parameter
+        // (Not ctx.IsStaticMethod: that is whatever member was written before.)
         bool isStaticProp = prop.Modifiers.Any(m => m.IsKind(SyntaxKind.StaticKeyword))
-                         || ctx.IsStaticMethod;
+                         || prop.Parent is ClassDeclarationSyntax owner
+                            && owner.Modifiers.Any(m => m.IsKind(SyntaxKind.StaticKeyword));
         var self = isStaticProp ? "" : className + "* self";
 
         ctx.CurrentClass = className;
-        if (isStaticProp) ctx.IsStaticMethod = true;
+        bool wasStatic = ctx.IsStaticMethod;
+        ctx.IsStaticMethod = isStaticProp;
+        try { WriteAccessors(prop, className, ctx, expr, stmt, csType, cType, name, ptr, self); }
+        finally { ctx.IsStaticMethod = wasStatic; }
+    }
+
+    private static void WriteAccessors(PropertyDeclarationSyntax prop, string className, TranspilerContext ctx,
+        ExpressionWriter expr, StatementWriter stmt, string csType, string cType, string name, string ptr, string self)
+    {
 
         // FIX: Expression-body Property → Getter generieren
         // public int Speed => _speed * 2;

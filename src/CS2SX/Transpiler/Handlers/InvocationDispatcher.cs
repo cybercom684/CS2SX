@@ -143,8 +143,20 @@ public sealed class InvocationDispatcher
         if (delegateCall != null) return delegateCall;
 
         // GC: memory is reference-counted; GetTotalMemory reports the heap in use,
-        // Collect has nothing to do (releases happen at the next frame anyway).
+        // Collect looks for cycles now (it runs every few frames anyway).
         if (calleeStr is "GC.GetTotalMemory") return "CS2SX_HeapUsed()";
+        // async state machines (Build/AsyncLowering): resuming jumps to the label
+        // after the suspension it stopped at. Jumping into loops and blocks is fine
+        // in C; every C# local of the method is a field of the state machine.
+        if (calleeStr is "CS2SX_Async.Begin" && args.Count == 1 && int.TryParse(args[0], out var resumePoints))
+        {
+            var sb = new System.Text.StringBuilder("switch (self->f_cs2sx_state) {");
+            for (int k = 1; k <= resumePoints; k++) sb.Append($" case {k}: goto _cs2sx_resume_{k};");
+            return sb.Append(" default: break; }").ToString();
+        }
+        if (calleeStr is "CS2SX_Async.Suspend" && args.Count == 1)
+            return $"self->f_cs2sx_state = {args[0]}; return; _cs2sx_resume_{args[0]}: (void)0";
+
         if (calleeStr is "GC.Collect") return "((void)CS2SX_GcCollect())";
         if (calleeStr is "GC.WaitForPendingFinalizers") return "((void)0)";
 

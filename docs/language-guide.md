@@ -479,13 +479,11 @@ if (File.Exists("/switch/MeineApp/save.txt"))
 
 | Feature | Alternative |
 |---------|-------------|
-| `async`/`await` | Synchrone Logik — kein echtes Multithreading auf Switch Homebrew |
+| Threads hinter `async`/`await` | `async`/`await` läuft im Main-Thread über mehrere Frames, siehe [Grenzen](advanced/limitations.md#asyncawait-im-main-thread-über-mehrere-frames) |
 | Reflection | Nicht verfügbar (kein .NET Runtime) |
 | `dynamic` | Nicht verfügbar |
-| Eigene `delegate`-Typen (`delegate void Handler(int x);`) | `Action<…>` / `Func<…>` verwenden |
 | `event` mit eigenen `add`/`remove`-Accessoren | Feld-artiges `event` |
 | `IQueryable` / LINQ-Query-Syntax | Method-Syntax LINQ verwenden |
-| `record with { }` Expressions | Manuell kopieren |
-| Ranges `arr[1..3]` in foreach | Manuell mit Index-Schleife |
+| Ranges auf Arrays (`arr[1..3]`) | Manuell mit Index-Schleife |
 
 Ausführlichere Infos: [Grenzen und Workarounds](advanced/limitations.md)

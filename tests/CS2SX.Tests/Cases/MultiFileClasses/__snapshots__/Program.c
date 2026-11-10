@@ -18,9 +18,9 @@ void MultiFileClassesApp_OnInit(MultiFileClassesApp* self)
 {
     CS2SX_TRACE("MultiFileClassesApp.OnInit", "Program.cs");
     CS2SX_LINE(16);
-    List_Shape_Add(self->f_shapes, (Shape*)(Square_New(2.0f)));
+    List_Shape_Add(self->f_shapes, (Shape*)((Shape*)Square_New(2.0f)));
     CS2SX_LINE(17);
-    List_Shape_Add(self->f_shapes, (Shape*)(Square_New(3.0f)));
+    List_Shape_Add(self->f_shapes, (Shape*)((Shape*)Square_New(3.0f)));
     CS2SX_LINE(18);
     CS2SX_Stopwatch_Start(self->f_timer);
     CS2SX_LINE(19);

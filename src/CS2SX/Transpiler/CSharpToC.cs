@@ -505,6 +505,18 @@ public sealed class CSharpToC : CSharpSyntaxWalker
         }
     }
 
+    /// True for a type derived from SwitchApp.
+    private bool IsAppType(TypeSyntax type)
+    {
+        try
+        {
+            for (var t = _ctx.SemanticModel?.GetTypeInfo(type).Type; t != null; t = t.BaseType)
+                if (t.Name == "SwitchApp") return true;
+        }
+        catch { }
+        return false;
+    }
+
     /// The user destructor body (C# finalizer) followed by releasing the class's own
     /// heap fields.
     private void WriteFieldCleanup(ClassDeclarationSyntax node, string name)
@@ -529,6 +541,10 @@ public sealed class CSharpToC : CSharpSyntaxWalker
             if (field.Modifiers.Any(m => m.IsKind(SyntaxKind.StaticKeyword) || m.IsKind(SyntaxKind.ConstKeyword))) continue;
 
             var csType = ResolveFieldType(field);
+
+            // The app object belongs to the runtime: a field pointing at it (a state
+            // machine's `this`, a back reference of a helper class) never frees it.
+            if (IsAppType(field.Declaration.Type)) continue;
 
             // String fields own a marked copy (CS2SX_STR_STORE).
             if (csType.TrimEnd('?') == "string")

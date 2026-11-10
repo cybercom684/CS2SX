@@ -360,7 +360,7 @@ void RefCountingApp_OnFrame(RefCountingApp* self)
             CS2SX_LINE(84);
             printf(" (4)\n");
             CS2SX_LINE(85);
-            List_Shape_Add(self->f_shapes, (Shape*)(Circle_New()));
+            List_Shape_Add(self->f_shapes, (Shape*)((Shape*)Circle_New()));
             CS2SX_LINE(86);
             List_Shape_Clear(self->f_shapes);
             CS2SX_LINE(87);

@@ -181,11 +181,16 @@ int  CS2SX_GcCollect(void);
 /// Called once per frame: collects when there are suspects, at most every few frames.
 void CS2SX_GcFrame(void);
 
+/// async/await: continues the tasks that are due (CS2SX_Task.Tick of the app, when
+/// it uses async at all).
+void CS2SX_AsyncFrame(void);
+
 static inline void cs2sx_frame_begin(void)
 {
     _cs2sx_arena_pos = 0;
     CS2SX_DrainReleases();
     CS2SX_GcFrame();
+    CS2SX_AsyncFrame();
 }
 
 char* _cs2sx_next_buf(void);

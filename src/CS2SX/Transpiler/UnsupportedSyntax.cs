@@ -17,6 +17,10 @@ internal static class UnsupportedSyntax
             var message = Check(node, model);
             if (message != null) error(node, message);
         }
+        // async methods that could not be turned into state machines (AsyncLowering).
+        if (model != null)
+            foreach (var (node, message) in CS2SX.Build.AsyncLowering.Problems(root, model))
+                error(node, message);
     }
 
     /// True inside an instance member — its C function has a parameter named `self`.

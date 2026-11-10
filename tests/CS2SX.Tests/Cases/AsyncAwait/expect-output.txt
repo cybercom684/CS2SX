@@ -1,0 +1,13 @@
+init
+seq start
+started False 1
+seq hi sw item10
+seq waited
+seq end 5 40
+fire
+sum 62 calls 5
+outer True True
+caught boom
+all True True
+stable True True
+done
