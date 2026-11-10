@@ -15,6 +15,7 @@ struct Shape
     Shape_vtable* vtable;
     int _rc;
     void (*_dtor)(void* self);   // _Dispose of the dynamic type
+    void (*_gc)(void* self, CS2SX_GcVisit visit);   // _Gc of the dynamic type
 };
 
 #define Shape_MaxSides (12)
@@ -24,12 +25,15 @@ void Shape_Ctor(Shape* self);
 /* abstract: float Shape_Area(Shape* self, Painter* p, float factor) */
 
 void Shape_Dispose(Shape* self);
+void Shape_Gc(void* self, CS2SX_GcVisit visit);
+extern const CS2SX_GcKind Shape_GcKind;
 void Shape_Free(Shape* self);
 Shape* Shape_Retain(Shape* self);
 struct Painter
 {
     int _rc;
     void (*_dtor)(void* self);   // _Dispose of the dynamic type
+    void (*_gc)(void* self, CS2SX_GcVisit visit);   // _Gc of the dynamic type
     int f_Calls;
 };
 
@@ -37,6 +41,8 @@ Painter* Painter_New(void);
 void Painter_Ctor(Painter* self);
 
 void Painter_Dispose(Painter* self);
+void Painter_Gc(void* self, CS2SX_GcVisit visit);
+extern const CS2SX_GcKind Painter_GcKind;
 void Painter_Free(Painter* self);
 Painter* Painter_Retain(Painter* self);
 

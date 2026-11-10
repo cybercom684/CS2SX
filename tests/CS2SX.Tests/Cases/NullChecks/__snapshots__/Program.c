@@ -18,6 +18,7 @@ Node* Node_New(void)
     if (!self) return NULL;
     self->_rc = 1;
     self->_dtor = (void (*)(void*))Node_Dispose;
+    self->_gc = Node_Gc;
     self->vtable = &Node_vtable_instance;
     Node_Ctor(self);
     CS2SX_ReleaseLater(self, (CS2SX_FreeFn)Node_Free);
@@ -38,6 +39,16 @@ const char* Node_Kind(Node* self)
     return "node";
 }
 
+void Node_Gc(void* _self, CS2SX_GcVisit visit)
+{
+    Node* self = (Node*)_self; (void)self;
+    if (visit) visit(self->f_Next, &Node_GcKind);
+    else if (self->f_Next) { void* _o = self->f_Next; self->f_Next = NULL; ((void (*)(void*))Node_Free)(_o); }
+}
+
+static void Node_GcDyn(void* self, CS2SX_GcVisit visit) { ((Node*)self)->_gc(self, visit); }
+const CS2SX_GcKind Node_GcKind = { offsetof(Node, _rc), Node_GcDyn, (CS2SX_FreeFn)Node_Free };
+
 void Node_Dispose(Node* self)
 {
     if (self->f_Next) { Node_Free(self->f_Next); self->f_Next = NULL; }
@@ -48,7 +59,8 @@ void Node_Free(Node* self)
 {
     if (!self) return;
     Node* _o = (Node*)self;
-    if (--_o->_rc > 0) return;
+    if (--_o->_rc > 0) { CS2SX_GcSuspect(_o, &Node_GcKind); return; }
+    CS2SX_GcForget(_o);
     _o->_dtor(_o);
     free(_o);
 }
@@ -70,6 +82,7 @@ Square* Square_New(void)
     if (!self) return NULL;
     self->_rc = 1;
     self->_dtor = (void (*)(void*))Square_Dispose;
+    self->_gc = Square_Gc;
     Square_Ctor(self);
     CS2SX_ReleaseLater(self, (CS2SX_FreeFn)Square_Free);
     return self;
@@ -82,6 +95,14 @@ int Square_Area(Square* self)
     return 4;
 }
 
+void Square_Gc(void* _self, CS2SX_GcVisit visit)
+{
+    Square* self = (Square*)_self; (void)self;
+}
+
+static void Square_GcDyn(void* self, CS2SX_GcVisit visit) { ((Square*)self)->_gc(self, visit); }
+const CS2SX_GcKind Square_GcKind = { offsetof(Square, _rc), Square_GcDyn, (CS2SX_FreeFn)Square_Free };
+
 void Square_Dispose(Square* self)
 {
 }
@@ -90,7 +111,8 @@ void Square_Free(Square* self)
 {
     if (!self) return;
     Square* _o = (Square*)self;
-    if (--_o->_rc > 0) return;
+    if (--_o->_rc > 0) { CS2SX_GcSuspect(_o, &Square_GcKind); return; }
+    CS2SX_GcForget(_o);
     _o->_dtor(_o);
     free(_o);
 }

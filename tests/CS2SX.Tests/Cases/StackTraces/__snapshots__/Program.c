@@ -13,6 +13,7 @@ Game* Game_New(void)
     if (!self) return NULL;
     self->_rc = 1;
     self->_dtor = (void (*)(void*))Game_Dispose;
+    self->_gc = Game_Gc;
     Game_Ctor(self);
     CS2SX_ReleaseLater(self, (CS2SX_FreeFn)Game_Free);
     return self;
@@ -37,6 +38,14 @@ void Game_Step(Game* self, int i)
     printf("%s\n", _ps_0 ? _ps_0 : "");
 }
 
+void Game_Gc(void* _self, CS2SX_GcVisit visit)
+{
+    Game* self = (Game*)_self; (void)self;
+}
+
+static void Game_GcDyn(void* self, CS2SX_GcVisit visit) { ((Game*)self)->_gc(self, visit); }
+const CS2SX_GcKind Game_GcKind = { offsetof(Game, _rc), Game_GcDyn, (CS2SX_FreeFn)Game_Free };
+
 void Game_Dispose(Game* self)
 {
     CS2SX_ArrFree(self->f_Data); self->f_Data = NULL;
@@ -46,7 +55,8 @@ void Game_Free(Game* self)
 {
     if (!self) return;
     Game* _o = (Game*)self;
-    if (--_o->_rc > 0) return;
+    if (--_o->_rc > 0) { CS2SX_GcSuspect(_o, &Game_GcKind); return; }
+    CS2SX_GcForget(_o);
     _o->_dtor(_o);
     free(_o);
 }

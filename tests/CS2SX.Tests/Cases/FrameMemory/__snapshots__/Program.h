@@ -10,6 +10,7 @@ struct Counter
 {
     int _rc;
     void (*_dtor)(void* self);   // _Dispose of the dynamic type
+    void (*_gc)(void* self, CS2SX_GcVisit visit);   // _Gc of the dynamic type
 };
 
 extern int Counter_Freed;
@@ -17,12 +18,15 @@ Counter* Counter_New(void);
 void Counter_Ctor(Counter* self);
 
 void Counter_Dispose(Counter* self);
+void Counter_Gc(void* self, CS2SX_GcVisit visit);
+extern const CS2SX_GcKind Counter_GcKind;
 void Counter_Free(Counter* self);
 Counter* Counter_Retain(Counter* self);
 struct Item
 {
     int _rc;
     void (*_dtor)(void* self);   // _Dispose of the dynamic type
+    void (*_gc)(void* self, CS2SX_GcVisit visit);   // _Gc of the dynamic type
     int f_V;
 };
 
@@ -30,12 +34,15 @@ Item* Item_New(int v);
 void Item_Ctor(Item* self, int v);
 
 void Item_Dispose(Item* self);
+void Item_Gc(void* self, CS2SX_GcVisit visit);
+extern const CS2SX_GcKind Item_GcKind;
 void Item_Free(Item* self);
 Item* Item_Retain(Item* self);
 struct Wrapped
 {
     int _rc;
     void (*_dtor)(void* self);   // _Dispose of the dynamic type
+    void (*_gc)(void* self, CS2SX_GcVisit visit);   // _Gc of the dynamic type
     /* implements IHas */
     int f_V;
 };
@@ -45,6 +52,8 @@ void Wrapped_Ctor(Wrapped* self, int v);
 int Wrapped_Get(Wrapped* self);
 
 void Wrapped_Dispose(Wrapped* self);
+void Wrapped_Gc(void* self, CS2SX_GcVisit visit);
+extern const CS2SX_GcKind Wrapped_GcKind;
 void Wrapped_Free(Wrapped* self);
 Wrapped* Wrapped_Retain(Wrapped* self);
 extern IHas_vtable Wrapped_IHas_vtable_instance;

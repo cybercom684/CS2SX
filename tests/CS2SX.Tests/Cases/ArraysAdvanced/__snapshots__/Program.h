@@ -8,6 +8,7 @@ struct Board
 {
     int _rc;
     void (*_dtor)(void* self);   // _Dispose of the dynamic type
+    void (*_gc)(void* self, CS2SX_GcVisit visit);   // _Gc of the dynamic type
     int* f_Cells;
 };
 
@@ -18,6 +19,8 @@ int Board_Count(int* values);
 int* Board_Doubled(Board* self);
 
 void Board_Dispose(Board* self);
+void Board_Gc(void* self, CS2SX_GcVisit visit);
+extern const CS2SX_GcKind Board_GcKind;
 void Board_Free(Board* self);
 Board* Board_Retain(Board* self);
 struct ArraysAdvancedApp

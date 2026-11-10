@@ -415,7 +415,7 @@ string s = Max("Apfel", "Birne");   // → Max_str
 
 Generics werden zur Compilezeit expandiert, ähnlich wie C++ Templates: Für jeden verwendeten Typ entsteht eine eigene Kopie der Klasse bzw. Methode. Das gilt auch für generische Methoden, die andere generische Methoden aufrufen, und für generische Erweiterungsmethoden.
 
-Nicht unterstützt sind generische Methoden, die `virtual`/`abstract`/`override` sind oder in Interfaces bzw. generischen Klassen stehen, sowie generische Structs (`struct Box<T>`). Der Build meldet sie mit Zeile und Hinweis.
+Generische Methoden dürfen auch `virtual`/`abstract`/`override` sein oder in einem Interface stehen, und generische Structs (`struct Pair<T>`) funktionieren ebenso. Nicht unterstützt sind generische Methoden und generische Structs innerhalb generischer Klassen/Interfaces. Der Build meldet sie mit Zeile und Hinweis.
 
 ---
 

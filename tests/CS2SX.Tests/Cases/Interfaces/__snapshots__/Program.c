@@ -14,6 +14,7 @@ Bullet* Bullet_New(void)
     if (!self) return NULL;
     self->_rc = 1;
     self->_dtor = (void (*)(void*))Bullet_Dispose;
+    self->_gc = Bullet_Gc;
     Bullet_Ctor(self);
     CS2SX_ReleaseLater(self, (CS2SX_FreeFn)Bullet_Free);
     return self;
@@ -33,6 +34,14 @@ int Bullet_IsAlive(Bullet* self)
     return self->f_Y > 0;
 }
 
+void Bullet_Gc(void* _self, CS2SX_GcVisit visit)
+{
+    Bullet* self = (Bullet*)_self; (void)self;
+}
+
+static void Bullet_GcDyn(void* self, CS2SX_GcVisit visit) { ((Bullet*)self)->_gc(self, visit); }
+const CS2SX_GcKind Bullet_GcKind = { offsetof(Bullet, _rc), Bullet_GcDyn, (CS2SX_FreeFn)Bullet_Free };
+
 void Bullet_Dispose(Bullet* self)
 {
 }
@@ -41,7 +50,8 @@ void Bullet_Free(Bullet* self)
 {
     if (!self) return;
     Bullet* _o = (Bullet*)self;
-    if (--_o->_rc > 0) return;
+    if (--_o->_rc > 0) { CS2SX_GcSuspect(_o, &Bullet_GcKind); return; }
+    CS2SX_GcForget(_o);
     _o->_dtor(_o);
     free(_o);
 }
@@ -71,6 +81,7 @@ Timer* Timer_New(void)
     if (!self) return NULL;
     self->_rc = 1;
     self->_dtor = (void (*)(void*))Timer_Dispose;
+    self->_gc = Timer_Gc;
     Timer_Ctor(self);
     CS2SX_ReleaseLater(self, (CS2SX_FreeFn)Timer_Free);
     return self;
@@ -90,6 +101,14 @@ int Timer_IsAlive(Timer* self)
     return self->f_Left > 0;
 }
 
+void Timer_Gc(void* _self, CS2SX_GcVisit visit)
+{
+    Timer* self = (Timer*)_self; (void)self;
+}
+
+static void Timer_GcDyn(void* self, CS2SX_GcVisit visit) { ((Timer*)self)->_gc(self, visit); }
+const CS2SX_GcKind Timer_GcKind = { offsetof(Timer, _rc), Timer_GcDyn, (CS2SX_FreeFn)Timer_Free };
+
 void Timer_Dispose(Timer* self)
 {
 }
@@ -98,7 +117,8 @@ void Timer_Free(Timer* self)
 {
     if (!self) return;
     Timer* _o = (Timer*)self;
-    if (--_o->_rc > 0) return;
+    if (--_o->_rc > 0) { CS2SX_GcSuspect(_o, &Timer_GcKind); return; }
+    CS2SX_GcForget(_o);
     _o->_dtor(_o);
     free(_o);
 }

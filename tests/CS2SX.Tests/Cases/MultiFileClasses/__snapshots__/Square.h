@@ -18,6 +18,7 @@ void Square_Ctor(Square* self, float side);
 float Square_Area(Square* self, Painter* p, float factor);
 
 void Square_Dispose(Square* self);
+void Square_Gc(void* self, CS2SX_GcVisit visit);
 void Square_Free(Square* self);
 Square* Square_Retain(Square* self);
 

@@ -9,6 +9,7 @@ struct Counter
 {
     int _rc;
     void (*_dtor)(void* self);   // _Dispose of the dynamic type
+    void (*_gc)(void* self, CS2SX_GcVisit visit);   // _Gc of the dynamic type
 };
 
 extern int Counter_Disposed;
@@ -16,12 +17,15 @@ Counter* Counter_New(void);
 void Counter_Ctor(Counter* self);
 
 void Counter_Dispose(Counter* self);
+void Counter_Gc(void* self, CS2SX_GcVisit visit);
+extern const CS2SX_GcKind Counter_GcKind;
 void Counter_Free(Counter* self);
 Counter* Counter_Retain(Counter* self);
 struct Node
 {
     int _rc;
     void (*_dtor)(void* self);   // _Dispose of the dynamic type
+    void (*_gc)(void* self, CS2SX_GcVisit visit);   // _Gc of the dynamic type
     int f_V;
 };
 
@@ -29,18 +33,23 @@ Node* Node_New(int v);
 void Node_Ctor(Node* self, int v);
 
 void Node_Dispose(Node* self);
+void Node_Gc(void* self, CS2SX_GcVisit visit);
+extern const CS2SX_GcKind Node_GcKind;
 void Node_Free(Node* self);
 Node* Node_Retain(Node* self);
 struct Shape
 {
     int _rc;
     void (*_dtor)(void* self);   // _Dispose of the dynamic type
+    void (*_gc)(void* self, CS2SX_GcVisit visit);   // _Gc of the dynamic type
 };
 
 Shape* Shape_New(void);
 void Shape_Ctor(Shape* self);
 
 void Shape_Dispose(Shape* self);
+void Shape_Gc(void* self, CS2SX_GcVisit visit);
+extern const CS2SX_GcKind Shape_GcKind;
 void Shape_Free(Shape* self);
 Shape* Shape_Retain(Shape* self);
 struct Circle
@@ -53,12 +62,14 @@ Circle* Circle_New(void);
 void Circle_Ctor(Circle* self);
 
 void Circle_Dispose(Circle* self);
+void Circle_Gc(void* self, CS2SX_GcVisit visit);
 void Circle_Free(Circle* self);
 Circle* Circle_Retain(Circle* self);
 struct Holder
 {
     int _rc;
     void (*_dtor)(void* self);   // _Dispose of the dynamic type
+    void (*_gc)(void* self, CS2SX_GcVisit visit);   // _Gc of the dynamic type
     Node* f_Kept;
 };
 
@@ -66,6 +77,8 @@ Holder* Holder_New(void);
 void Holder_Ctor(Holder* self);
 
 void Holder_Dispose(Holder* self);
+void Holder_Gc(void* self, CS2SX_GcVisit visit);
+extern const CS2SX_GcKind Holder_GcKind;
 void Holder_Free(Holder* self);
 Holder* Holder_Retain(Holder* self);
 struct Pair

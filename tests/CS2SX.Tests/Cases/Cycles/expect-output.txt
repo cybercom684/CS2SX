@@ -1,0 +1,6 @@
+built 5 7
+kept 5 4 root
+dropped 0 4
+collect 4
+stable True True True
+done

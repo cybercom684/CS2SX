@@ -15,10 +15,19 @@ Counter* Counter_New(void)
     if (!self) return NULL;
     self->_rc = 1;
     self->_dtor = (void (*)(void*))Counter_Dispose;
+    self->_gc = Counter_Gc;
     Counter_Ctor(self);
     CS2SX_ReleaseLater(self, (CS2SX_FreeFn)Counter_Free);
     return self;
 }
+
+void Counter_Gc(void* _self, CS2SX_GcVisit visit)
+{
+    Counter* self = (Counter*)_self; (void)self;
+}
+
+static void Counter_GcDyn(void* self, CS2SX_GcVisit visit) { ((Counter*)self)->_gc(self, visit); }
+const CS2SX_GcKind Counter_GcKind = { offsetof(Counter, _rc), Counter_GcDyn, (CS2SX_FreeFn)Counter_Free };
 
 void Counter_Dispose(Counter* self)
 {
@@ -28,7 +37,8 @@ void Counter_Free(Counter* self)
 {
     if (!self) return;
     Counter* _o = (Counter*)self;
-    if (--_o->_rc > 0) return;
+    if (--_o->_rc > 0) { CS2SX_GcSuspect(_o, &Counter_GcKind); return; }
+    CS2SX_GcForget(_o);
     _o->_dtor(_o);
     free(_o);
 }
@@ -52,10 +62,19 @@ Item* Item_New(int v)
     if (!self) return NULL;
     self->_rc = 1;
     self->_dtor = (void (*)(void*))Item_Dispose;
+    self->_gc = Item_Gc;
     Item_Ctor(self, v);
     CS2SX_ReleaseLater(self, (CS2SX_FreeFn)Item_Free);
     return self;
 }
+
+void Item_Gc(void* _self, CS2SX_GcVisit visit)
+{
+    Item* self = (Item*)_self; (void)self;
+}
+
+static void Item_GcDyn(void* self, CS2SX_GcVisit visit) { ((Item*)self)->_gc(self, visit); }
+const CS2SX_GcKind Item_GcKind = { offsetof(Item, _rc), Item_GcDyn, (CS2SX_FreeFn)Item_Free };
 
 void Item_Dispose(Item* self)
 {
@@ -67,7 +86,8 @@ void Item_Free(Item* self)
 {
     if (!self) return;
     Item* _o = (Item*)self;
-    if (--_o->_rc > 0) return;
+    if (--_o->_rc > 0) { CS2SX_GcSuspect(_o, &Item_GcKind); return; }
+    CS2SX_GcForget(_o);
     _o->_dtor(_o);
     free(_o);
 }
@@ -91,6 +111,7 @@ Wrapped* Wrapped_New(int v)
     if (!self) return NULL;
     self->_rc = 1;
     self->_dtor = (void (*)(void*))Wrapped_Dispose;
+    self->_gc = Wrapped_Gc;
     Wrapped_Ctor(self, v);
     CS2SX_ReleaseLater(self, (CS2SX_FreeFn)Wrapped_Free);
     return self;
@@ -103,6 +124,14 @@ int Wrapped_Get(Wrapped* self)
     return self->f_V;
 }
 
+void Wrapped_Gc(void* _self, CS2SX_GcVisit visit)
+{
+    Wrapped* self = (Wrapped*)_self; (void)self;
+}
+
+static void Wrapped_GcDyn(void* self, CS2SX_GcVisit visit) { ((Wrapped*)self)->_gc(self, visit); }
+const CS2SX_GcKind Wrapped_GcKind = { offsetof(Wrapped, _rc), Wrapped_GcDyn, (CS2SX_FreeFn)Wrapped_Free };
+
 void Wrapped_Dispose(Wrapped* self)
 {
     CS2SX_LINE(26);
@@ -113,7 +142,8 @@ void Wrapped_Free(Wrapped* self)
 {
     if (!self) return;
     Wrapped* _o = (Wrapped*)self;
-    if (--_o->_rc > 0) return;
+    if (--_o->_rc > 0) { CS2SX_GcSuspect(_o, &Wrapped_GcKind); return; }
+    CS2SX_GcForget(_o);
     _o->_dtor(_o);
     free(_o);
 }

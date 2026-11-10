@@ -402,9 +402,35 @@ public sealed class CSharpToC : CSharpSyntaxWalker
         if (_mode == TranspileMode.HeaderOnly)
         {
             _ctx.Out.WriteLine($"void {name}_Dispose({name}* self);");
+            _ctx.Out.WriteLine($"void {name}_Gc(void* self, CS2SX_GcVisit visit);");
+            if (!hasBase)
+                _ctx.Out.WriteLine($"extern const CS2SX_GcKind {name}_GcKind;");
             _ctx.Out.WriteLine($"void {name}_Free({name}* self);");
             _ctx.Out.WriteLine($"{name}* {name}_Retain({name}* self);");
             return;
+        }
+
+        // Cycle collection (CS2SX_GcKind): visit the objects and lists of objects
+        // this class's fields hold, or — visit == NULL — give them up.
+        _ctx.Out.WriteLine($"void {name}_Gc(void* _self, CS2SX_GcVisit visit)");
+        _ctx.Out.WriteLine("{");
+        _ctx.Indent();
+        _ctx.WriteLine($"{name}* self = ({name}*)_self; (void)self;");
+        foreach (var (expr, kind, release) in TracedFields(node))
+        {
+            _ctx.WriteLine($"if (visit) visit({expr}, &{kind});");
+            _ctx.WriteLine($"else if ({expr}) {{ void* _o = {expr}; {expr} = NULL; {release}(_o); }}");
+        }
+        if (hasBase)
+            _ctx.WriteLine($"{baseType}_Gc(_self, visit);");
+        _ctx.Dedent();
+        _ctx.Out.WriteLine("}");
+        _ctx.Out.WriteLine();
+        if (!hasBase)
+        {
+            _ctx.Out.WriteLine($"static void {name}_GcDyn(void* self, CS2SX_GcVisit visit) {{ (({name}*)self)->_gc(self, visit); }}");
+            _ctx.Out.WriteLine($"const CS2SX_GcKind {name}_GcKind = {{ offsetof({name}, _rc), {name}_GcDyn, (CS2SX_FreeFn){name}_Free }};");
+            _ctx.Out.WriteLine();
         }
 
         _ctx.Out.WriteLine($"void {name}_Dispose({name}* self)");
@@ -421,7 +447,8 @@ public sealed class CSharpToC : CSharpSyntaxWalker
         _ctx.Out.WriteLine("{");
         _ctx.Out.WriteLine("    if (!self) return;");
         _ctx.Out.WriteLine($"    {root}* _o = ({root}*)self;");
-        _ctx.Out.WriteLine("    if (--_o->_rc > 0) return;");
+        _ctx.Out.WriteLine($"    if (--_o->_rc > 0) {{ CS2SX_GcSuspect(_o, &{root}_GcKind); return; }}");
+        _ctx.Out.WriteLine("    CS2SX_GcForget(_o);");
         _ctx.Out.WriteLine("    _o->_dtor(_o);");
         _ctx.Out.WriteLine("    free(_o);");
         _ctx.Out.WriteLine("}");
@@ -433,6 +460,49 @@ public sealed class CSharpToC : CSharpSyntaxWalker
         _ctx.Out.WriteLine("    return self;");
         _ctx.Out.WriteLine("}");
         _ctx.Out.WriteLine();
+    }
+
+    /// The fields and auto-properties of a class that the cycle collector follows:
+    /// reference-counted objects and lists of them. Each holds exactly one reference
+    /// (the same ones WriteFieldCleanup releases). Yields the C expression, the
+    /// CS2SX_GcKind of the target and the function that releases it.
+    private IEnumerable<(string expr, string kind, string release)> TracedFields(ClassDeclarationSyntax node)
+    {
+        (string kind, string release)? Target(string csType)
+        {
+            csType = csType.Trim().TrimEnd('?');
+            if (TypeRegistry.IsList(csType))
+            {
+                var inner = (TypeRegistry.GetListInnerType(csType) ?? "").TrimEnd('?');
+                if (TypeRegistry.ArcRoot(inner) == null) return null;
+                var list = "List_" + TypeRegistry.MapType(inner).TrimEnd('*').Trim();
+                return (list + "_GcKind", "((void (*)(void*))" + list + "_Free)");
+            }
+            if (csType.EndsWith("[]") || NullableHandler.IsNullable(csType)) return null;
+            return TypeRegistry.ArcRoot(csType) is { } root
+                ? (root + "_GcKind", "((void (*)(void*))" + root + "_Free)")
+                : null;
+        }
+
+        foreach (var field in node.Members.OfType<FieldDeclarationSyntax>())
+        {
+            if (field.Modifiers.Any(m => m.IsKind(SyntaxKind.StaticKeyword) || m.IsKind(SyntaxKind.ConstKeyword))) continue;
+            if (Target(ResolveFieldType(field)) is not { } t) continue;
+            foreach (var v in field.Declaration.Variables)
+            {
+                var fieldName = v.Identifier.Text.TrimStart('_');
+                var prefix = TypeRegistry.HasNoPrefix(fieldName) ? "" : "f_";
+                yield return ($"self->{prefix}{fieldName}", t.kind, t.release);
+            }
+        }
+        foreach (var prop in node.Members.OfType<PropertyDeclarationSyntax>())
+        {
+            if (prop.Modifiers.Any(m => m.IsKind(SyntaxKind.StaticKeyword))) continue;
+            if (!PropertyWriter.IsAutoProperty(prop)) continue;
+            if (Target(ResolvePropertyType(prop)) is not { } t) continue;
+            var pfx = TypeRegistry.HasNoPrefix(prop.Identifier.Text) ? "" : "f_";
+            yield return ($"self->{pfx}{prop.Identifier.Text}", t.kind, t.release);
+        }
     }
 
     /// The user destructor body (C# finalizer) followed by releasing the class's own
@@ -759,7 +829,10 @@ public sealed class CSharpToC : CSharpSyntaxWalker
                 _ctx.WriteLine(name + "_vtable* vtable;");
             _ctx.WriteLine("int _rc;");
             if (Arc.UsesDispose(DeclaredSymbol(node)))
+            {
                 _ctx.WriteLine("void (*_dtor)(void* self);   // _Dispose of the dynamic type");
+                _ctx.WriteLine("void (*_gc)(void* self, CS2SX_GcVisit visit);   // _Gc of the dynamic type");
+            }
         }
         else
         {
@@ -1893,6 +1966,12 @@ public sealed class CSharpToC : CSharpSyntaxWalker
             _ctx.Out.WriteLine($"    return self;");
             _ctx.Out.WriteLine("}");
             _ctx.Out.WriteLine();
+            // Records are leaves for the cycle collector (lists of records refer to this).
+            if (TypeRegistry.ArcRoot(name) != null)
+            {
+                _ctx.Out.WriteLine($"const CS2SX_GcKind {name}_GcKind = {{ offsetof({name}, _rc), CS2SX_GcLeaf, (CS2SX_FreeFn){name}_Free }};");
+                _ctx.Out.WriteLine();
+            }
 
             // Method bodies
             RegisterClassOverloads(node, name);

@@ -14,10 +14,19 @@ Label2* Label2_New(void)
     if (!self) return NULL;
     self->_rc = 1;
     self->_dtor = (void (*)(void*))Label2_Dispose;
+    self->_gc = Label2_Gc;
     Label2_Ctor(self);
     CS2SX_ReleaseLater(self, (CS2SX_FreeFn)Label2_Free);
     return self;
 }
+
+void Label2_Gc(void* _self, CS2SX_GcVisit visit)
+{
+    Label2* self = (Label2*)_self; (void)self;
+}
+
+static void Label2_GcDyn(void* self, CS2SX_GcVisit visit) { ((Label2*)self)->_gc(self, visit); }
+const CS2SX_GcKind Label2_GcKind = { offsetof(Label2, _rc), Label2_GcDyn, (CS2SX_FreeFn)Label2_Free };
 
 void Label2_Dispose(Label2* self)
 {
@@ -29,7 +38,8 @@ void Label2_Free(Label2* self)
 {
     if (!self) return;
     Label2* _o = (Label2*)self;
-    if (--_o->_rc > 0) return;
+    if (--_o->_rc > 0) { CS2SX_GcSuspect(_o, &Label2_GcKind); return; }
+    CS2SX_GcForget(_o);
     _o->_dtor(_o);
     free(_o);
 }

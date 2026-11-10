@@ -19,6 +19,7 @@ struct Bag
 {
     int _rc;
     void (*_dtor)(void* self);   // _Dispose of the dynamic type
+    void (*_gc)(void* self, CS2SX_GcVisit visit);   // _Gc of the dynamic type
     List_int* f_Values;
     StringBuilder* f_Log;
     Dict_str_int* f_Counts;
@@ -28,6 +29,8 @@ Bag* Bag_New(void);
 void Bag_Ctor(Bag* self);
 
 void Bag_Dispose(Bag* self);
+void Bag_Gc(void* self, CS2SX_GcVisit visit);
+extern const CS2SX_GcKind Bag_GcKind;
 void Bag_Free(Bag* self);
 Bag* Bag_Retain(Bag* self);
 struct CollectionMemoryApp

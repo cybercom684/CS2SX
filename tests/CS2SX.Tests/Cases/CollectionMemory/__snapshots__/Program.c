@@ -26,6 +26,8 @@ Inventory* Inventory_Retain(Inventory* self)
     return self;
 }
 
+const CS2SX_GcKind Inventory_GcKind = { offsetof(Inventory, _rc), CS2SX_GcLeaf, (CS2SX_FreeFn)Inventory_Free };
+
 void Bag_Ctor(Bag* self)
 {
     CS2SX_TRACE("Bag..ctor", "Program.cs");
@@ -40,10 +42,19 @@ Bag* Bag_New(void)
     if (!self) return NULL;
     self->_rc = 1;
     self->_dtor = (void (*)(void*))Bag_Dispose;
+    self->_gc = Bag_Gc;
     Bag_Ctor(self);
     CS2SX_ReleaseLater(self, (CS2SX_FreeFn)Bag_Free);
     return self;
 }
+
+void Bag_Gc(void* _self, CS2SX_GcVisit visit)
+{
+    Bag* self = (Bag*)_self; (void)self;
+}
+
+static void Bag_GcDyn(void* self, CS2SX_GcVisit visit) { ((Bag*)self)->_gc(self, visit); }
+const CS2SX_GcKind Bag_GcKind = { offsetof(Bag, _rc), Bag_GcDyn, (CS2SX_FreeFn)Bag_Free };
 
 void Bag_Dispose(Bag* self)
 {
@@ -54,7 +65,8 @@ void Bag_Free(Bag* self)
 {
     if (!self) return;
     Bag* _o = (Bag*)self;
-    if (--_o->_rc > 0) return;
+    if (--_o->_rc > 0) { CS2SX_GcSuspect(_o, &Bag_GcKind); return; }
+    CS2SX_GcForget(_o);
     _o->_dtor(_o);
     free(_o);
 }

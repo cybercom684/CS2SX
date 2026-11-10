@@ -18,6 +18,7 @@ struct Node
 {
     int _rc;
     void (*_dtor)(void* self);   // _Dispose of the dynamic type
+    void (*_gc)(void* self, CS2SX_GcVisit visit);   // _Gc of the dynamic type
     int f_V;
 };
 
@@ -25,6 +26,8 @@ Node* Node_New(int v);
 void Node_Ctor(Node* self, int v);
 
 void Node_Dispose(Node* self);
+void Node_Gc(void* self, CS2SX_GcVisit visit);
+extern const CS2SX_GcKind Node_GcKind;
 void Node_Free(Node* self);
 Node* Node_Retain(Node* self);
 // C# value-type struct: Pair

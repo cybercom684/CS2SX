@@ -9,6 +9,7 @@ struct Point
 {
     int _rc;
     void (*_dtor)(void* self);   // _Dispose of the dynamic type
+    void (*_gc)(void* self, CS2SX_GcVisit visit);   // _Gc of the dynamic type
     int f_X;
     int f_Y;
     const char* f_Tag;
@@ -24,6 +25,8 @@ Point* Point_New_3(int x, int y, const char* tag);
 void Point_Ctor_3(Point* self, int x, int y, const char* tag);
 
 void Point_Dispose(Point* self);
+void Point_Gc(void* self, CS2SX_GcVisit visit);
+extern const CS2SX_GcKind Point_GcKind;
 void Point_Free(Point* self);
 Point* Point_Retain(Point* self);
 struct Point3
@@ -38,6 +41,7 @@ Point3* Point3_New_1(int v);
 void Point3_Ctor_1(Point3* self, int v);
 
 void Point3_Dispose(Point3* self);
+void Point3_Gc(void* self, CS2SX_GcVisit visit);
 void Point3_Free(Point3* self);
 Point3* Point3_Retain(Point3* self);
 struct ParseError
@@ -55,6 +59,7 @@ struct Counter
 {
     int _rc;
     void (*_dtor)(void* self);   // _Dispose of the dynamic type
+    void (*_gc)(void* self, CS2SX_GcVisit visit);   // _Gc of the dynamic type
     Action_int_t f_Changed;
     int value;
 };
@@ -64,6 +69,8 @@ void Counter_Ctor(Counter* self);
 void Counter_Add(Counter* self, int n);
 
 void Counter_Dispose(Counter* self);
+void Counter_Gc(void* self, CS2SX_GcVisit visit);
+extern const CS2SX_GcKind Counter_GcKind;
 void Counter_Free(Counter* self);
 Counter* Counter_Retain(Counter* self);
 struct LanguagePhase4App

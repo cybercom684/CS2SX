@@ -12,10 +12,19 @@ Settings* Settings_New(void)
     if (!self) return NULL;
     self->_rc = 1;
     self->_dtor = (void (*)(void*))Settings_Dispose;
+    self->_gc = Settings_Gc;
     Settings_Ctor(self);
     CS2SX_ReleaseLater(self, (CS2SX_FreeFn)Settings_Free);
     return self;
 }
+
+void Settings_Gc(void* _self, CS2SX_GcVisit visit)
+{
+    Settings* self = (Settings*)_self; (void)self;
+}
+
+static void Settings_GcDyn(void* self, CS2SX_GcVisit visit) { ((Settings*)self)->_gc(self, visit); }
+const CS2SX_GcKind Settings_GcKind = { offsetof(Settings, _rc), Settings_GcDyn, (CS2SX_FreeFn)Settings_Free };
 
 void Settings_Dispose(Settings* self)
 {
@@ -25,7 +34,8 @@ void Settings_Free(Settings* self)
 {
     if (!self) return;
     Settings* _o = (Settings*)self;
-    if (--_o->_rc > 0) return;
+    if (--_o->_rc > 0) { CS2SX_GcSuspect(_o, &Settings_GcKind); return; }
+    CS2SX_GcForget(_o);
     _o->_dtor(_o);
     free(_o);
 }
@@ -49,6 +59,7 @@ Player* Player_New_1(const char* name)
     if (!self) return NULL;
     self->_rc = 1;
     self->_dtor = (void (*)(void*))Player_Dispose;
+    self->_gc = Player_Gc;
     Player_Ctor_1(self, name);
     CS2SX_ReleaseLater(self, (CS2SX_FreeFn)Player_Free);
     return self;
@@ -68,6 +79,7 @@ Player* Player_New_2(const char* name, int level)
     if (!self) return NULL;
     self->_rc = 1;
     self->_dtor = (void (*)(void*))Player_Dispose;
+    self->_gc = Player_Gc;
     Player_Ctor_2(self, name, level);
     CS2SX_ReleaseLater(self, (CS2SX_FreeFn)Player_Free);
     return self;
@@ -77,6 +89,16 @@ void Player_Free(Player* self)
 {
     CS2SX_TRACE("Player.Free", "Program.cs");
 }
+
+void Player_Gc(void* _self, CS2SX_GcVisit visit)
+{
+    Player* self = (Player*)_self; (void)self;
+    if (visit) visit(self->f_Settings, &Settings_GcKind);
+    else if (self->f_Settings) { void* _o = self->f_Settings; self->f_Settings = NULL; ((void (*)(void*))Settings_Free)(_o); }
+}
+
+static void Player_GcDyn(void* self, CS2SX_GcVisit visit) { ((Player*)self)->_gc(self, visit); }
+const CS2SX_GcKind Player_GcKind = { offsetof(Player, _rc), Player_GcDyn, (CS2SX_FreeFn)Player_Free };
 
 void Player_Dispose(Player* self)
 {
@@ -88,7 +110,8 @@ void Player_Free(Player* self)
 {
     if (!self) return;
     Player* _o = (Player*)self;
-    if (--_o->_rc > 0) return;
+    if (--_o->_rc > 0) { CS2SX_GcSuspect(_o, &Player_GcKind); return; }
+    CS2SX_GcForget(_o);
     _o->_dtor(_o);
     free(_o);
 }

@@ -20,6 +20,7 @@ struct Outer
 {
     int _rc;
     void (*_dtor)(void* self);   // _Dispose of the dynamic type
+    void (*_gc)(void* self, CS2SX_GcVisit visit);   // _Gc of the dynamic type
 };
 
 Outer* Outer_New(void);
@@ -27,12 +28,15 @@ void Outer_Ctor(Outer* self);
 Inner* Outer_Make(Outer* self);
 
 void Outer_Dispose(Outer* self);
+void Outer_Gc(void* self, CS2SX_GcVisit visit);
+extern const CS2SX_GcKind Outer_GcKind;
 void Outer_Free(Outer* self);
 Outer* Outer_Retain(Outer* self);
 struct Inner
 {
     int _rc;
     void (*_dtor)(void* self);   // _Dispose of the dynamic type
+    void (*_gc)(void* self, CS2SX_GcVisit visit);   // _Gc of the dynamic type
     int f_V;
 };
 
@@ -41,12 +45,15 @@ void Inner_Ctor(Inner* self);
 int Inner_Twice(Inner* self);
 
 void Inner_Dispose(Inner* self);
+void Inner_Gc(void* self, CS2SX_GcVisit visit);
+extern const CS2SX_GcKind Inner_GcKind;
 void Inner_Free(Inner* self);
 Inner* Inner_Retain(Inner* self);
 struct Registry
 {
     int _rc;
     void (*_dtor)(void* self);   // _Dispose of the dynamic type
+    void (*_gc)(void* self, CS2SX_GcVisit visit);   // _Gc of the dynamic type
 };
 
 extern List_int* Registry_Items;
@@ -56,12 +63,15 @@ Registry* Registry_New(void);
 void Registry_Ctor(Registry* self);
 
 void Registry_Dispose(Registry* self);
+void Registry_Gc(void* self, CS2SX_GcVisit visit);
+extern const CS2SX_GcKind Registry_GcKind;
 void Registry_Free(Registry* self);
 Registry* Registry_Retain(Registry* self);
 struct Link
 {
     int _rc;
     void (*_dtor)(void* self);   // _Dispose of the dynamic type
+    void (*_gc)(void* self, CS2SX_GcVisit visit);   // _Gc of the dynamic type
     Link* f_Next;
     int f_Value;
 };
@@ -70,6 +80,8 @@ Link* Link_New(void);
 void Link_Ctor(Link* self);
 
 void Link_Dispose(Link* self);
+void Link_Gc(void* self, CS2SX_GcVisit visit);
+extern const CS2SX_GcKind Link_GcKind;
 void Link_Free(Link* self);
 Link* Link_Retain(Link* self);
 struct LanguageFixesApp

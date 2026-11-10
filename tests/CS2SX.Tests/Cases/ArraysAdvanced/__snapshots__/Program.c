@@ -14,6 +14,7 @@ Board* Board_New(int n)
     if (!self) return NULL;
     self->_rc = 1;
     self->_dtor = (void (*)(void*))Board_Dispose;
+    self->_gc = Board_Gc;
     Board_Ctor(self, n);
     CS2SX_ReleaseLater(self, (CS2SX_FreeFn)Board_Free);
     return self;
@@ -56,6 +57,14 @@ int* Board_Doubled(Board* self)
     return result;
 }
 
+void Board_Gc(void* _self, CS2SX_GcVisit visit)
+{
+    Board* self = (Board*)_self; (void)self;
+}
+
+static void Board_GcDyn(void* self, CS2SX_GcVisit visit) { ((Board*)self)->_gc(self, visit); }
+const CS2SX_GcKind Board_GcKind = { offsetof(Board, _rc), Board_GcDyn, (CS2SX_FreeFn)Board_Free };
+
 void Board_Dispose(Board* self)
 {
     CS2SX_ArrFree(self->f_Cells); self->f_Cells = NULL;
@@ -65,7 +74,8 @@ void Board_Free(Board* self)
 {
     if (!self) return;
     Board* _o = (Board*)self;
-    if (--_o->_rc > 0) return;
+    if (--_o->_rc > 0) { CS2SX_GcSuspect(_o, &Board_GcKind); return; }
+    CS2SX_GcForget(_o);
     _o->_dtor(_o);
     free(_o);
 }

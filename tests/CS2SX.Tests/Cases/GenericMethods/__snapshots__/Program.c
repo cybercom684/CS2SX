@@ -87,10 +87,19 @@ Node* Node_New(int v)
     if (!self) return NULL;
     self->_rc = 1;
     self->_dtor = (void (*)(void*))Node_Dispose;
+    self->_gc = Node_Gc;
     Node_Ctor(self, v);
     CS2SX_ReleaseLater(self, (CS2SX_FreeFn)Node_Free);
     return self;
 }
+
+void Node_Gc(void* _self, CS2SX_GcVisit visit)
+{
+    Node* self = (Node*)_self; (void)self;
+}
+
+static void Node_GcDyn(void* self, CS2SX_GcVisit visit) { ((Node*)self)->_gc(self, visit); }
+const CS2SX_GcKind Node_GcKind = { offsetof(Node, _rc), Node_GcDyn, (CS2SX_FreeFn)Node_Free };
 
 void Node_Dispose(Node* self)
 {
@@ -100,7 +109,8 @@ void Node_Free(Node* self)
 {
     if (!self) return;
     Node* _o = (Node*)self;
-    if (--_o->_rc > 0) return;
+    if (--_o->_rc > 0) { CS2SX_GcSuspect(_o, &Node_GcKind); return; }
+    CS2SX_GcForget(_o);
     _o->_dtor(_o);
     free(_o);
 }

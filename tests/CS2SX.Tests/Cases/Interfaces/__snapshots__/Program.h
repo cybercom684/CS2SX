@@ -10,6 +10,7 @@ struct Bullet
 {
     int _rc;
     void (*_dtor)(void* self);   // _Dispose of the dynamic type
+    void (*_gc)(void* self, CS2SX_GcVisit visit);   // _Gc of the dynamic type
     /* implements IUpdatable */
     float f_Y;
 };
@@ -20,6 +21,8 @@ void Bullet_Update(Bullet* self, float dt);
 int Bullet_IsAlive(Bullet* self);
 
 void Bullet_Dispose(Bullet* self);
+void Bullet_Gc(void* self, CS2SX_GcVisit visit);
+extern const CS2SX_GcKind Bullet_GcKind;
 void Bullet_Free(Bullet* self);
 Bullet* Bullet_Retain(Bullet* self);
 extern IUpdatable_vtable Bullet_IUpdatable_vtable_instance;
@@ -36,6 +39,7 @@ struct Timer
 {
     int _rc;
     void (*_dtor)(void* self);   // _Dispose of the dynamic type
+    void (*_gc)(void* self, CS2SX_GcVisit visit);   // _Gc of the dynamic type
     /* implements IUpdatable */
     float f_Left;
 };
@@ -46,6 +50,8 @@ void Timer_Update(Timer* self, float dt);
 int Timer_IsAlive(Timer* self);
 
 void Timer_Dispose(Timer* self);
+void Timer_Gc(void* self, CS2SX_GcVisit visit);
+extern const CS2SX_GcKind Timer_GcKind;
 void Timer_Free(Timer* self);
 Timer* Timer_Retain(Timer* self);
 extern IUpdatable_vtable Timer_IUpdatable_vtable_instance;

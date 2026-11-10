@@ -12,7 +12,8 @@ Für diese Konstrukte gibt es keine Übersetzung nach C. `cs2sx build` und `cs2s
 |---|---|
 | Ranges auf Arrays (`arr[1..3]`), `^` in `foreach`-Ranges, Ranges auf komplexen Ausdrücken | Schleife, `Substring`/`GetRange` auf einer Variable |
 | `with` auf Nicht-Records, auf komplexen Ausdrücken oder für Nicht-Positionsparameter | `new Punkt(1, p.Y)` |
-| generische Methoden, die `virtual`/`abstract`/`override` sind oder in Interfaces bzw. generischen Klassen stehen; generische Structs | nicht-virtuelle generische Methode, generische Klasse |
+| generische Methoden und generische Structs innerhalb generischer Klassen/Interfaces | in eine nicht-generische Klasse verschieben |
+| lokale Variablen/Parameter namens `self` in Instanzmethoden | umbenennen (`self` heißt `this` im erzeugten C) |
 | lokale Funktionen, die lokale Variablen/Parameter der umgebenden Methode benutzen, generische lokale Funktionen | Werte als Parameter übergeben, private Methode |
 | LINQ-Abfragesyntax `from x in … select x` | `list.Where(…).Select(…)` |
 | Collection-Ausdrücke mit `..spread` oder für andere Typen als Array/List/HashSet | `new List<int>(…)` |
@@ -23,7 +24,7 @@ Für diese Konstrukte gibt es keine Übersetzung nach C. `cs2sx build` und `cs2s
 | `stackalloc`, `Span<T>`, `unsafe`, Zeiger | normale Arrays |
 | `GetType()` (außer bei Exceptions) | `is`/`switch` auf den Typ |
 
-Unterstützt (CS2SX schreibt es vor dem Übersetzen um): lokale Funktionen ohne Zugriff auf lokale Variablen der Methode, `[1, 2, 3]` für Arrays/List/HashSet, `with` bei Records, `foreach (var i in 0..10)`, `s[1..3]`/`s[^1]`/`list[2..]`, eigene `delegate`-Typen.
+Unterstützt (CS2SX schreibt es vor dem Übersetzen um): lokale Funktionen ohne Zugriff auf lokale Variablen der Methode, `[1, 2, 3]` für Arrays/List/HashSet, `with` bei Records, `foreach (var i in 0..10)`, `s[1..3]`/`s[^1]`/`list[2..]`, eigene `delegate`-Typen, generische Methoden (auch `virtual`/`abstract`/`override` und in Interfaces) und generische Structs (`struct Pair<T>`).
 
 ---
 
@@ -42,12 +43,14 @@ Das transpilierte Programm hat keine .NET-Laufzeit und damit keinen Garbage Coll
 
 - **Zerstörung ist virtuell:** Ein `Circle` in einer `List<Shape>` räumt auch seine eigenen Felder auf. Ein C#-Finalizer (`~Circle()`) läuft dabei mit.
 
+- **Zyklen werden gefunden:** Objekte, die sich gegenseitig halten (`kind.Parent = this; Children.Add(kind);`, ein Ring, ein Objekt, das auf sich selbst zeigt), werden freigegeben, sobald von außen nichts mehr auf sie zeigt. Die Suche läuft etwa alle 16 Frames und nur, wenn Referenzen abgegeben wurden. Sie folgt Feldern und Auto-Properties mit Objekten sowie `List<Klasse>`.
+
 **Nicht freigegeben werden:**
 
-- Objekte, die sich gegenseitig referenzieren (Zyklen, z. B. `a.Next = b; b.Prev = a;`). Bei solchen Strukturen die Verweise vor dem Wegwerfen auf `null` setzen.
+- Zyklen, die über ein `Dictionary`, `Stack`, `Queue`, `HashSet`, Array, eine generische Klasse oder ein Lambda laufen. Dort einen der Verweise vor dem Wegwerfen auf `null` setzen.
 - Objekte, die über ein Struct, ein Tupel, ein Interface-/`object`-Wert, oder einen Methoden-Delegate (`+= obj.Methode`) gehalten wurden. Diese Stellen geben ihre Referenz nicht zurück.
 
-`GC.GetTotalMemory(false)` liefert den belegten Heap in Bytes, praktisch, um ein Speicherleck zu finden. `GC.Collect()` hat nichts zu tun.
+`GC.GetTotalMemory(false)` liefert den belegten Heap in Bytes, praktisch, um ein Speicherleck zu finden. `GC.Collect()` sucht sofort nach Zyklen; nötig ist der Aufruf nicht.
 
 ---
 

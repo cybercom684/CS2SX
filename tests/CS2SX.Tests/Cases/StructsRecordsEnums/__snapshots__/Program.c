@@ -47,6 +47,8 @@ Score* Score_Retain(Score* self)
     return self;
 }
 
+const CS2SX_GcKind Score_GcKind = { offsetof(Score, _rc), CS2SX_GcLeaf, (CS2SX_FreeFn)Score_Free };
+
 void StructsRecordsEnumsApp_Init(StructsRecordsEnumsApp* self)
 {
     if (!self) return;

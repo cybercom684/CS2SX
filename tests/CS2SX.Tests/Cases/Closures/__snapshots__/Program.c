@@ -209,10 +209,19 @@ __Ref_int* __Ref_int_New(int v)
     if (!self) return NULL;
     self->_rc = 1;
     self->_dtor = (void (*)(void*))__Ref_int_Dispose;
+    self->_gc = __Ref_int_Gc;
     __Ref_int_Ctor(self, v);
     CS2SX_ReleaseLater(self, (CS2SX_FreeFn)__Ref_int_Free);
     return self;
 }
+
+void __Ref_int_Gc(void* _self, CS2SX_GcVisit visit)
+{
+    __Ref_int* self = (__Ref_int*)_self; (void)self;
+}
+
+static void __Ref_int_GcDyn(void* self, CS2SX_GcVisit visit) { ((__Ref_int*)self)->_gc(self, visit); }
+const CS2SX_GcKind __Ref_int_GcKind = { offsetof(__Ref_int, _rc), __Ref_int_GcDyn, (CS2SX_FreeFn)__Ref_int_Free };
 
 void __Ref_int_Dispose(__Ref_int* self)
 {
@@ -222,7 +231,8 @@ void __Ref_int_Free(__Ref_int* self)
 {
     if (!self) return;
     __Ref_int* _o = (__Ref_int*)self;
-    if (--_o->_rc > 0) return;
+    if (--_o->_rc > 0) { CS2SX_GcSuspect(_o, &__Ref_int_GcKind); return; }
+    CS2SX_GcForget(_o);
     _o->_dtor(_o);
     free(_o);
 }

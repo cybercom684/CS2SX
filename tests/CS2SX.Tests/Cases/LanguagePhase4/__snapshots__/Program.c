@@ -14,6 +14,7 @@ Point* Point_New_0(void)
     if (!self) return NULL;
     self->_rc = 1;
     self->_dtor = (void (*)(void*))Point_Dispose;
+    self->_gc = Point_Gc;
     Point_Ctor_0(self);
     CS2SX_ReleaseLater(self, (CS2SX_FreeFn)Point_Free);
     return self;
@@ -31,6 +32,7 @@ Point* Point_New_1(int v)
     if (!self) return NULL;
     self->_rc = 1;
     self->_dtor = (void (*)(void*))Point_Dispose;
+    self->_gc = Point_Gc;
     Point_Ctor_1(self, v);
     CS2SX_ReleaseLater(self, (CS2SX_FreeFn)Point_Free);
     return self;
@@ -48,6 +50,7 @@ Point* Point_New_2(int x, int y)
     if (!self) return NULL;
     self->_rc = 1;
     self->_dtor = (void (*)(void*))Point_Dispose;
+    self->_gc = Point_Gc;
     Point_Ctor_2(self, x, y);
     CS2SX_ReleaseLater(self, (CS2SX_FreeFn)Point_Free);
     return self;
@@ -70,10 +73,19 @@ Point* Point_New_3(int x, int y, const char* tag)
     if (!self) return NULL;
     self->_rc = 1;
     self->_dtor = (void (*)(void*))Point_Dispose;
+    self->_gc = Point_Gc;
     Point_Ctor_3(self, x, y, tag);
     CS2SX_ReleaseLater(self, (CS2SX_FreeFn)Point_Free);
     return self;
 }
+
+void Point_Gc(void* _self, CS2SX_GcVisit visit)
+{
+    Point* self = (Point*)_self; (void)self;
+}
+
+static void Point_GcDyn(void* self, CS2SX_GcVisit visit) { ((Point*)self)->_gc(self, visit); }
+const CS2SX_GcKind Point_GcKind = { offsetof(Point, _rc), Point_GcDyn, (CS2SX_FreeFn)Point_Free };
 
 void Point_Dispose(Point* self)
 {
@@ -84,7 +96,8 @@ void Point_Free(Point* self)
 {
     if (!self) return;
     Point* _o = (Point*)self;
-    if (--_o->_rc > 0) return;
+    if (--_o->_rc > 0) { CS2SX_GcSuspect(_o, &Point_GcKind); return; }
+    CS2SX_GcForget(_o);
     _o->_dtor(_o);
     free(_o);
 }
@@ -109,6 +122,7 @@ Point3* Point3_New_3(int x, int y, int z)
     if (!self) return NULL;
     self->base._rc = 1;
     self->base._dtor = (void (*)(void*))Point3_Dispose;
+    self->base._gc = Point3_Gc;
     Point3_Ctor_3(self, x, y, z);
     CS2SX_ReleaseLater(self, (CS2SX_FreeFn)Point3_Free);
     return self;
@@ -126,9 +140,16 @@ Point3* Point3_New_1(int v)
     if (!self) return NULL;
     self->base._rc = 1;
     self->base._dtor = (void (*)(void*))Point3_Dispose;
+    self->base._gc = Point3_Gc;
     Point3_Ctor_1(self, v);
     CS2SX_ReleaseLater(self, (CS2SX_FreeFn)Point3_Free);
     return self;
+}
+
+void Point3_Gc(void* _self, CS2SX_GcVisit visit)
+{
+    Point3* self = (Point3*)_self; (void)self;
+    Point_Gc(_self, visit);
 }
 
 void Point3_Dispose(Point3* self)
@@ -140,7 +161,8 @@ void Point3_Free(Point3* self)
 {
     if (!self) return;
     Point* _o = (Point*)self;
-    if (--_o->_rc > 0) return;
+    if (--_o->_rc > 0) { CS2SX_GcSuspect(_o, &Point_GcKind); return; }
+    CS2SX_GcForget(_o);
     _o->_dtor(_o);
     free(_o);
 }
@@ -188,6 +210,7 @@ Counter* Counter_New(void)
     if (!self) return NULL;
     self->_rc = 1;
     self->_dtor = (void (*)(void*))Counter_Dispose;
+    self->_gc = Counter_Gc;
     Counter_Ctor(self);
     CS2SX_ReleaseLater(self, (CS2SX_FreeFn)Counter_Free);
     return self;
@@ -202,6 +225,14 @@ void Counter_Add(Counter* self, int n)
     (self->f_Changed != NULL ? Action_int_Invoke(self->f_Changed, self->value) : (void)0);
 }
 
+void Counter_Gc(void* _self, CS2SX_GcVisit visit)
+{
+    Counter* self = (Counter*)_self; (void)self;
+}
+
+static void Counter_GcDyn(void* self, CS2SX_GcVisit visit) { ((Counter*)self)->_gc(self, visit); }
+const CS2SX_GcKind Counter_GcKind = { offsetof(Counter, _rc), Counter_GcDyn, (CS2SX_FreeFn)Counter_Free };
+
 void Counter_Dispose(Counter* self)
 {
 }
@@ -210,7 +241,8 @@ void Counter_Free(Counter* self)
 {
     if (!self) return;
     Counter* _o = (Counter*)self;
-    if (--_o->_rc > 0) return;
+    if (--_o->_rc > 0) { CS2SX_GcSuspect(_o, &Counter_GcKind); return; }
+    CS2SX_GcForget(_o);
     _o->_dtor(_o);
     free(_o);
 }

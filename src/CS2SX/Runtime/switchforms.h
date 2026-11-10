@@ -99,7 +99,8 @@ void CS2SX_StrDrop(const char* s);
 /// field's previous reference at the next frame (CS2SX_ReleaseLater). lv is
 /// evaluated once; the expression's value is v.
 #define CS2SX_ARC_STORE(Root, lv, v) ({ __typeof__(&(lv)) _cs2sx_p = &(lv); \
-    __typeof__(*_cs2sx_p) _cs2sx_n = (v); __typeof__(*_cs2sx_p) _cs2sx_o = *_cs2sx_p; \
+    __typeof__(*_cs2sx_p) _cs2sx_n = (__typeof__(*_cs2sx_p))(v); /* (derived → base) */ \
+    __typeof__(*_cs2sx_p) _cs2sx_o = *_cs2sx_p; \
     *_cs2sx_p = _cs2sx_n; CS2SX_ReleaseLater(_cs2sx_o, (CS2SX_FreeFn)Root##_Free); _cs2sx_n; })
 
 /// Frees a heap array created by CS2SX_ArrNew/CS2SX_ArrFromInit (NULL-safe).
@@ -153,10 +154,38 @@ typedef void (*CS2SX_FreeFn)(void* obj);
 void CS2SX_ReleaseLater(void* obj, CS2SX_FreeFn free_fn);
 void CS2SX_DrainReleases(void);
 
+// ── Cycle collection ─────────────────────────────────────────────────────────
+// Reference counting alone never frees objects that point at each other
+// (parent ↔ child). An object whose count drops without reaching zero is a
+// suspect (CS2SX_GcSuspect); CS2SX_GcCollect follows the references of all
+// suspects, subtracts the references that come from inside that graph, and
+// whatever ends up with none from outside is garbage: its references are cut
+// and plain reference counting frees the rest.
+// Followed: fields and auto-properties holding objects, and lists of objects.
+// Every other holder (dictionary, array, closure, …) counts as "outside".
+struct CS2SX_GcKind;
+typedef void (*CS2SX_GcVisit)(void* child, const struct CS2SX_GcKind* kind);
+typedef struct CS2SX_GcKind
+{
+    size_t rc_offset;                               // of the int reference count
+    void (*gc)(void* self, CS2SX_GcVisit visit);    // visit children; visit == NULL: cut them
+    CS2SX_FreeFn release;                           // gives up one reference
+} CS2SX_GcKind;
+
+/// gc function of a kind that holds nothing the collector follows.
+void CS2SX_GcLeaf(void* self, CS2SX_GcVisit visit);
+void CS2SX_GcSuspect(void* obj, const CS2SX_GcKind* kind);
+void CS2SX_GcForget(void* obj);
+/// Collects cycles now (GC.Collect()). Returns the number of objects cut loose.
+int  CS2SX_GcCollect(void);
+/// Called once per frame: collects when there are suspects, at most every few frames.
+void CS2SX_GcFrame(void);
+
 static inline void cs2sx_frame_begin(void)
 {
     _cs2sx_arena_pos = 0;
     CS2SX_DrainReleases();
+    CS2SX_GcFrame();
 }
 
 char* _cs2sx_next_buf(void);
@@ -647,6 +676,12 @@ Root* Root##_Retain(Root* self);                                                
 void  Root##_Free(Root* self);                                                                      \
 typedef struct { T** data; int count; int capacity; int _rc; } List_##T;                                     \
 static inline void List_##T##_Free(List_##T* l);                                        \
+extern const CS2SX_GcKind Root##_GcKind;                                                            \
+static void List_##T##_Gc(void* self, CS2SX_GcVisit visit) {                                        \
+    List_##T* l = (List_##T*)self;                                                                  \
+    if (visit) for (int _i = 0; _i < l->count; _i++) visit(l->data[_i], &Root##_GcKind); }          \
+__attribute__((unused)) static const CS2SX_GcKind List_##T##_GcKind =                               \
+    { offsetof(List_##T, _rc), List_##T##_Gc, (CS2SX_FreeFn)List_##T##_Free };                      \
 static inline List_##T* List_##T##_Retain(List_##T* l) { if (l) l->_rc++; return l; }        \
 static inline List_##T* List_##T##_New(void) {                                                      \
     List_##T* l = (List_##T*)malloc(sizeof(List_##T));                                              \
@@ -661,7 +696,7 @@ static inline void List_##T##_AddNew(List_##T* l, T* val) {                     
     l->data[l->count++] = val; }                                                                    \
 static inline void List_##T##_Add(List_##T* l, T* val) {                                           \
     if (!l) CS2SX_ThrowNullRef();                                                                   \
-    Root##_Retain((Root*)val); List_##T##_AddNew(l, val); }                                         \
+    Root##_Retain((Root*)val); List_##T##_AddNew(l, val); }                                       \
 static inline T*   List_##T##_Get(List_##T* l, int i) {                                            \
     CS2SX_ListCheck(l ? l->count : -1, i); return l->data[i]; }                                     \
 static inline void List_##T##_Set(List_##T* l, int i, T* val) {                                    \
@@ -682,7 +717,9 @@ static inline void List_##T##_Clear(List_##T* l) {                              
     int _n = l->count; l->count = 0;                                                                \
     for (int _i = 0; _i < _n; _i++) CS2SX_ReleaseLater(l->data[_i], (CS2SX_FreeFn)Root##_Free); }                             \
 static inline void List_##T##_Free(List_##T* l) {                                                  \
-    if (!l || --l->_rc > 0) return; List_##T##_Clear(l); free(l->data); free(l); }                                  \
+    if (!l) return;                                                                                 \
+    if (--l->_rc > 0) { CS2SX_GcSuspect(l, &List_##T##_GcKind); return; }                           \
+    CS2SX_GcForget(l); List_##T##_Clear(l); free(l->data); free(l); }                               \
 static inline int  List_##T##_Contains(List_##T* l, T* val) {                                      \
     if (!l) CS2SX_ThrowNullRef();                                                                   \
     for (int _i = 0; _i < l->count; _i++) { if (l->data[_i] == val) return 1; } return 0; }       \

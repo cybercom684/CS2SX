@@ -8,6 +8,7 @@ struct Settings
 {
     int _rc;
     void (*_dtor)(void* self);   // _Dispose of the dynamic type
+    void (*_gc)(void* self, CS2SX_GcVisit visit);   // _Gc of the dynamic type
     int f_Volume;
 };
 
@@ -15,12 +16,15 @@ Settings* Settings_New(void);
 void Settings_Ctor(Settings* self);
 
 void Settings_Dispose(Settings* self);
+void Settings_Gc(void* self, CS2SX_GcVisit visit);
+extern const CS2SX_GcKind Settings_GcKind;
 void Settings_Free(Settings* self);
 Settings* Settings_Retain(Settings* self);
 struct Player
 {
     int _rc;
     void (*_dtor)(void* self);   // _Dispose of the dynamic type
+    void (*_gc)(void* self, CS2SX_GcVisit visit);   // _Gc of the dynamic type
     const char* f_Name;
     int f_Level;
     Settings* f_Settings;
@@ -33,6 +37,8 @@ void Player_Ctor_2(Player* self, const char* name, int level);
 void Player_Free(Player* self);
 
 void Player_Dispose(Player* self);
+void Player_Gc(void* self, CS2SX_GcVisit visit);
+extern const CS2SX_GcKind Player_GcKind;
 void Player_Free(Player* self);
 Player* Player_Retain(Player* self);
 struct Diagnostics_FootgunsApp

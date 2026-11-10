@@ -15,6 +15,7 @@ struct Shape
     Shape_vtable* vtable;
     int _rc;
     void (*_dtor)(void* self);   // _Dispose of the dynamic type
+    void (*_gc)(void* self, CS2SX_GcVisit visit);   // _Gc of the dynamic type
     const char* f_Name;
 };
 
@@ -25,6 +26,8 @@ void Shape_Ctor(Shape* self, const char* name);
 const char* Shape_Describe(Shape* self);
 
 void Shape_Dispose(Shape* self);
+void Shape_Gc(void* self, CS2SX_GcVisit visit);
+extern const CS2SX_GcKind Shape_GcKind;
 void Shape_Free(Shape* self);
 Shape* Shape_Retain(Shape* self);
 struct Rect
@@ -39,6 +42,7 @@ void Rect_Ctor(Rect* self, float w, float h);
 float Rect_Area(Rect* self);
 
 void Rect_Dispose(Rect* self);
+void Rect_Gc(void* self, CS2SX_GcVisit visit);
 void Rect_Free(Rect* self);
 Rect* Rect_Retain(Rect* self);
 struct Square
@@ -51,6 +55,7 @@ void Square_Ctor(Square* self, float side);
 const char* Square_Describe(Square* self);
 
 void Square_Dispose(Square* self);
+void Square_Gc(void* self, CS2SX_GcVisit visit);
 void Square_Free(Square* self);
 Square* Square_Retain(Square* self);
 struct Circle
@@ -64,6 +69,7 @@ void Circle_Ctor(Circle* self, float r);
 float Circle_Area(Circle* self);
 
 void Circle_Dispose(Circle* self);
+void Circle_Gc(void* self, CS2SX_GcVisit visit);
 void Circle_Free(Circle* self);
 Circle* Circle_Retain(Circle* self);
 struct ClassesInheritanceApp

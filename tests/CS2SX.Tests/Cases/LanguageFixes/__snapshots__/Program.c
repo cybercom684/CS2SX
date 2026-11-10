@@ -28,6 +28,7 @@ Outer* Outer_New(void)
     if (!self) return NULL;
     self->_rc = 1;
     self->_dtor = (void (*)(void*))Outer_Dispose;
+    self->_gc = Outer_Gc;
     Outer_Ctor(self);
     CS2SX_ReleaseLater(self, (CS2SX_FreeFn)Outer_Free);
     return self;
@@ -40,6 +41,14 @@ Inner* Outer_Make(Outer* self)
     return Inner_New();
 }
 
+void Outer_Gc(void* _self, CS2SX_GcVisit visit)
+{
+    Outer* self = (Outer*)_self; (void)self;
+}
+
+static void Outer_GcDyn(void* self, CS2SX_GcVisit visit) { ((Outer*)self)->_gc(self, visit); }
+const CS2SX_GcKind Outer_GcKind = { offsetof(Outer, _rc), Outer_GcDyn, (CS2SX_FreeFn)Outer_Free };
+
 void Outer_Dispose(Outer* self)
 {
 }
@@ -48,7 +57,8 @@ void Outer_Free(Outer* self)
 {
     if (!self) return;
     Outer* _o = (Outer*)self;
-    if (--_o->_rc > 0) return;
+    if (--_o->_rc > 0) { CS2SX_GcSuspect(_o, &Outer_GcKind); return; }
+    CS2SX_GcForget(_o);
     _o->_dtor(_o);
     free(_o);
 }
@@ -71,6 +81,7 @@ Inner* Inner_New(void)
     if (!self) return NULL;
     self->_rc = 1;
     self->_dtor = (void (*)(void*))Inner_Dispose;
+    self->_gc = Inner_Gc;
     Inner_Ctor(self);
     CS2SX_ReleaseLater(self, (CS2SX_FreeFn)Inner_Free);
     return self;
@@ -83,6 +94,14 @@ int Inner_Twice(Inner* self)
     return self->f_V * 2;
 }
 
+void Inner_Gc(void* _self, CS2SX_GcVisit visit)
+{
+    Inner* self = (Inner*)_self; (void)self;
+}
+
+static void Inner_GcDyn(void* self, CS2SX_GcVisit visit) { ((Inner*)self)->_gc(self, visit); }
+const CS2SX_GcKind Inner_GcKind = { offsetof(Inner, _rc), Inner_GcDyn, (CS2SX_FreeFn)Inner_Free };
+
 void Inner_Dispose(Inner* self)
 {
 }
@@ -91,7 +110,8 @@ void Inner_Free(Inner* self)
 {
     if (!self) return;
     Inner* _o = (Inner*)self;
-    if (--_o->_rc > 0) return;
+    if (--_o->_rc > 0) { CS2SX_GcSuspect(_o, &Inner_GcKind); return; }
+    CS2SX_GcForget(_o);
     _o->_dtor(_o);
     free(_o);
 }
@@ -124,10 +144,19 @@ Registry* Registry_New(void)
     if (!self) return NULL;
     self->_rc = 1;
     self->_dtor = (void (*)(void*))Registry_Dispose;
+    self->_gc = Registry_Gc;
     Registry_Ctor(self);
     CS2SX_ReleaseLater(self, (CS2SX_FreeFn)Registry_Free);
     return self;
 }
+
+void Registry_Gc(void* _self, CS2SX_GcVisit visit)
+{
+    Registry* self = (Registry*)_self; (void)self;
+}
+
+static void Registry_GcDyn(void* self, CS2SX_GcVisit visit) { ((Registry*)self)->_gc(self, visit); }
+const CS2SX_GcKind Registry_GcKind = { offsetof(Registry, _rc), Registry_GcDyn, (CS2SX_FreeFn)Registry_Free };
 
 void Registry_Dispose(Registry* self)
 {
@@ -137,7 +166,8 @@ void Registry_Free(Registry* self)
 {
     if (!self) return;
     Registry* _o = (Registry*)self;
-    if (--_o->_rc > 0) return;
+    if (--_o->_rc > 0) { CS2SX_GcSuspect(_o, &Registry_GcKind); return; }
+    CS2SX_GcForget(_o);
     _o->_dtor(_o);
     free(_o);
 }
@@ -160,10 +190,21 @@ Link* Link_New(void)
     if (!self) return NULL;
     self->_rc = 1;
     self->_dtor = (void (*)(void*))Link_Dispose;
+    self->_gc = Link_Gc;
     Link_Ctor(self);
     CS2SX_ReleaseLater(self, (CS2SX_FreeFn)Link_Free);
     return self;
 }
+
+void Link_Gc(void* _self, CS2SX_GcVisit visit)
+{
+    Link* self = (Link*)_self; (void)self;
+    if (visit) visit(self->f_Next, &Link_GcKind);
+    else if (self->f_Next) { void* _o = self->f_Next; self->f_Next = NULL; ((void (*)(void*))Link_Free)(_o); }
+}
+
+static void Link_GcDyn(void* self, CS2SX_GcVisit visit) { ((Link*)self)->_gc(self, visit); }
+const CS2SX_GcKind Link_GcKind = { offsetof(Link, _rc), Link_GcDyn, (CS2SX_FreeFn)Link_Free };
 
 void Link_Dispose(Link* self)
 {
@@ -174,7 +215,8 @@ void Link_Free(Link* self)
 {
     if (!self) return;
     Link* _o = (Link*)self;
-    if (--_o->_rc > 0) return;
+    if (--_o->_rc > 0) { CS2SX_GcSuspect(_o, &Link_GcKind); return; }
+    CS2SX_GcForget(_o);
     _o->_dtor(_o);
     free(_o);
 }

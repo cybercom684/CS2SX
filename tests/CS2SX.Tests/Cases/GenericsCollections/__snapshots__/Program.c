@@ -17,10 +17,19 @@ Item* Item_New(const char* name, int count)
     if (!self) return NULL;
     self->_rc = 1;
     self->_dtor = (void (*)(void*))Item_Dispose;
+    self->_gc = Item_Gc;
     Item_Ctor(self, name, count);
     CS2SX_ReleaseLater(self, (CS2SX_FreeFn)Item_Free);
     return self;
 }
+
+void Item_Gc(void* _self, CS2SX_GcVisit visit)
+{
+    Item* self = (Item*)_self; (void)self;
+}
+
+static void Item_GcDyn(void* self, CS2SX_GcVisit visit) { ((Item*)self)->_gc(self, visit); }
+const CS2SX_GcKind Item_GcKind = { offsetof(Item, _rc), Item_GcDyn, (CS2SX_FreeFn)Item_Free };
 
 void Item_Dispose(Item* self)
 {
@@ -31,7 +40,8 @@ void Item_Free(Item* self)
 {
     if (!self) return;
     Item* _o = (Item*)self;
-    if (--_o->_rc > 0) return;
+    if (--_o->_rc > 0) { CS2SX_GcSuspect(_o, &Item_GcKind); return; }
+    CS2SX_GcForget(_o);
     _o->_dtor(_o);
     free(_o);
 }
