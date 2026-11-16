@@ -53,6 +53,7 @@ void MultiFileClassesApp_OnFrame(MultiFileClassesApp* self)
 void MultiFileClassesApp_Free(MultiFileClassesApp* self)
 {
     if (!self) return;
+    if (self->f_shapes) { List_Shape_Free(self->f_shapes); self->f_shapes = NULL; }
     if (self->f_painter) { Painter_Free(self->f_painter); self->f_painter = NULL; }
     free(self);
 }

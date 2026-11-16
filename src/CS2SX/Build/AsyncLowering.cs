@@ -169,6 +169,11 @@ public static class AsyncLowering
         _ => false,
     };
 
+    /// Task.WhenAny(a, b, …) over plain tasks: the params form or the two-task overload.
+    private static bool IsPlainWhenAny(IMethodSymbol m) =>
+        m.TypeArguments.Length == 0
+        && (m.Parameters is [{ IsParams: true }] || m.Parameters.All(p => IsTaskLike(p.Type)));
+
     private static string Suffix(string t) =>
         t == "string" ? "str" : Regex.Replace(t.Replace("[]", "Arr"), @"[^A-Za-z0-9]+", "_").Trim('_');
 
@@ -197,6 +202,14 @@ public static class AsyncLowering
             // Task.WhenAll(list) — not the params form
             else if (called is { Name: "WhenAll", Parameters: [{ IsParams: false }] })
                 e.Replace(span.Parent!.SpanStart, span.Parent.Span.Length, "CS2SX_Task.WhenAllList");
+            // Task.WhenAny(a, b) → the task of the first one that finishes
+            else if (called is { Name: "WhenAny" } && IsPlainWhenAny(called))
+            {
+                TypeText(called.ReturnType, taskTypes);   // the task-of-task class is needed
+                e.Replace(span.Parent!.SpanStart, span.Parent.Span.Length, "CS2SX_WhenAny.Of");
+            }
+            else if (called is { Name: "Delay", Parameters: [{ Type.Name: "TimeSpan" }] })
+                e.Replace(span.Parent!.SpanStart, span.Parent.Span.Length, "CS2SX_Task.DelaySpan");
             else
                 e.Replace(span.SpanStart, span.Span.Length, TypeText(type, taskTypes));
             any = true;
@@ -281,6 +294,10 @@ public static class AsyncLowering
                 why = "await wird nur auf Task, Task<T> und Task.Yield() unterstützt.";
             else if (IsWhenAll(operand, model) && a.Parent is not ExpressionStatementSyntax)
                 why = "Das Ergebnis von await Task.WhenAll(…) wird nicht unterstützt — die Tasks danach einzeln mit await oder .Result auslesen.";
+            else if (operand is InvocationExpressionSyntax any
+                     && model.GetSymbolInfo(any).Symbol is IMethodSymbol { Name: "WhenAny" } anyM && IsTaskLike(anyM.ContainingType)
+                     && !IsPlainWhenAny(anyM))
+                why = "Task.WhenAny wird nur mit einzeln aufgezählten Task-Werten unterstützt (Task.WhenAny(a, b)), nicht mit Task<T> oder einer Liste.";
 
             SyntaxNode child = a;
             foreach (var up in a.Ancestors().TakeWhile(x => x != m))
@@ -288,10 +305,9 @@ public static class AsyncLowering
                 if (why != null) break;
                 why = up switch
                 {
-                    TryStatementSyntax => "await in try/catch/finally wird nicht unterstützt — das await vor oder hinter den try-Block ziehen, oder den Block in eine eigene async-Methode auslagern und deren Task prüfen.",
+                    CatchClauseSyntax or FinallyClauseSyntax => "await in catch/finally wird nicht unterstützt (im try-Block geht es) — das Ergebnis in einer Variable merken und das await hinter den try-Block ziehen.",
                     UsingStatementSyntax or LockStatementSyntax => "await in using/lock wird nicht unterstützt.",
-                    WhileStatementSyntax w when w.Condition == child => "await in einer Schleifenbedingung wird nicht unterstützt — vor der Schleife und am Ende des Rumpfs in eine Variable schreiben.",
-                    DoStatementSyntax d when d.Condition == child => "await in einer Schleifenbedingung wird nicht unterstützt — am Ende des Rumpfs in eine Variable schreiben.",
+                    DoStatementSyntax d when d.Condition == child => "await in der Bedingung von do-while wird nicht unterstützt — am Ende des Rumpfs in eine Variable schreiben.",
                     ForStatementSyntax f when f.Statement != child => "await im Kopf einer for-Schleife wird nicht unterstützt.",
                     BinaryExpressionSyntax b when b.Right == child && (b.IsKind(SyntaxKind.LogicalAndExpression)
                         || b.IsKind(SyntaxKind.LogicalOrExpression) || b.IsKind(SyntaxKind.CoalesceExpression))
@@ -457,6 +473,7 @@ public static class AsyncLowering
         // await → suspend in front of the statement, the result in its place.
         int points = 0;
         var opened = new HashSet<StatementSyntax>();
+        var conditionHoists = new Dictionary<WhileStatementSyntax, string>();
         foreach (var a in Awaits(body, m).OrderBy(a => a.Span.End))
         {
             int k = ++points;
@@ -469,13 +486,32 @@ public static class AsyncLowering
             bool value = a.Parent is not ExpressionStatementSyntax && holderType != "CS2SX_Task"
                          && !(a.Parent is ArrowExpressionClauseSyntax && !hasResult);
 
+            // Inside try blocks: resuming enters each try again (a label in front of
+            // it, a jump at the start of its block) so its exception frame exists.
+            var tries = a.Ancestors().TakeWhile(x => x != m).OfType<TryStatementSyntax>()
+                .Where(t => t.Block.Span.Contains(a.Span)).Reverse().ToList();
+            for (int level = 1; level <= tries.Count; level++)
+            {
+                var t = tries[level - 1];
+                if (opened.Add(t))
+                {
+                    e.Insert(t.SpanStart, "{ ", PrioAwaitOpen);
+                    e.Insert(t.Span.End, " }", PrioAwaitClose);
+                }
+                e.Insert(t.SpanStart, $"CS2SX_Async.Label({k}, {level - 1}); ", PrioAwaitOpen);
+                e.Insert(t.Block.OpenBraceToken.Span.End, $" CS2SX_Async.Jump({k}, {level});", PrioLoopOpen);
+            }
+            var suspend = tries.Count == 0 ? $"CS2SX_Async.Suspend({k})" : $"CS2SX_Async.Suspend({k}, {tries.Count})";
+
             var hoist = $"{holder} = {e.Render(source, operand.SpanStart, operand.Span.End, all: false)}; "
-                      + $"if (!{holder}.IsCompleted) {{ {holder}.Then(this); CS2SX_Async.Suspend({k}); }} ";
+                      + $"if (!{holder}.IsCompleted) {{ {holder}.Then(this); {suspend}; }} ";
             e.Replace(a.SpanStart, a.Span.Length, value ? holder + ".Result" : holder + ".Check()");
 
             var stmt = a.Ancestors().TakeWhile(x => x != m).OfType<StatementSyntax>().FirstOrDefault();
             if (stmt == null)   // expression-bodied method
                 e.Insert(body is ArrowExpressionClauseSyntax arrow ? arrow.Expression.SpanStart : body.SpanStart, hoist, PrioAwaitOpen);
+            else if (stmt is WhileStatementSyntax loop && loop.Condition.Span.Contains(a.Span))
+                conditionHoists[loop] = conditionHoists.GetValueOrDefault(loop) + hoist;
             else
             {
                 if (opened.Add(stmt))
@@ -485,6 +521,15 @@ public static class AsyncLowering
                 }
                 e.Insert(stmt.SpanStart, hoist, PrioAwaitOpen);
             }
+        }
+
+        // while (await X) body → while (true) { wait; if (!(X)) break; body }
+        foreach (var (loop, hoists) in conditionHoists)
+        {
+            var cond = e.Render(source, loop.Condition.SpanStart, loop.Condition.Span.End, all: false);
+            e.Replace(loop.WhileKeyword.SpanStart, loop.CloseParenToken.Span.End - loop.WhileKeyword.SpanStart,
+                $"while (true) {{ {hoists}if (!({cond})) break;");
+            e.Insert(loop.Span.End, " }", PrioLoopClose);
         }
 
         // foreach with an await in its body → index loop over fields.
@@ -564,12 +609,13 @@ public static class AsyncLowering
     {
         var sb = new StringBuilder(@"// async support (CS2SX): tasks run on the main thread, one step per frame.
 public abstract class CS2SX_Step { public abstract void cs2sx_resume(); }
-public static class CS2SX_Async { public static void Begin(int points) { } public static void Suspend(int point) { } }
+public static class CS2SX_Async { public static void Begin(int points) { } public static void Suspend(int point) { } public static void Suspend(int point, int depth) { } public static void Label(int point, int level) { } public static void Jump(int point, int level) { } }
 public class CS2SX_Task
 {
     public bool IsCompleted;
     public Exception? Fault;
     public long Due;
+    public bool Observed;
     private List<CS2SX_Step>? waiting;
     private static List<CS2SX_Task> timers = new List<CS2SX_Task>();
     private static long clock;
@@ -578,8 +624,16 @@ public class CS2SX_Task
     public bool IsCompletedSuccessfully => IsCompleted && Fault == null;
     public static CS2SX_Task CompletedTask { get { var t = new CS2SX_Task(); t.IsCompleted = true; return t; } }
 
+    // A failed task nobody ever looked at: say so, instead of losing the error.
+    ~CS2SX_Task()
+    {
+        if (Fault != null && !Observed)
+            Console.WriteLine(""Unobserved task exception: "" + Fault.Message + ""\n"" + Fault.StackTrace);
+    }
+
     public void Then(CS2SX_Step step)
     {
+        Observed = true;
         if (waiting == null) waiting = new List<CS2SX_Step>();
         waiting.Add(step);
     }
@@ -595,6 +649,7 @@ public class CS2SX_Task
     public void Fail(Exception e) { Fault = e; Finish(); }
     public void Check()
     {
+        Observed = true;
         if (!IsCompleted) throw new InvalidOperationException(""Der Task ist noch nicht fertig (await verwenden)."");
         if (Fault != null) throw Fault;
     }
@@ -608,6 +663,7 @@ public class CS2SX_Task
         timers.Add(t);
         return t;
     }
+    public static CS2SX_Task DelaySpan(TimeSpan time) { return Delay((int)time.TotalMilliseconds); }
     public static CS2SX_Task Yield()
     {
         var t = new CS2SX_Task();
@@ -664,7 +720,7 @@ public sealed class CS2SX_WhenAll : CS2SX_Step
         for (int i = 0; i < Tasks.Count; i++)
         {
             var failed = Tasks[i].Fault;
-            if (failed != null) { Done.Fail(failed); return; }
+            if (failed != null) { Tasks[i].Observed = true; Done.Fail(failed); return; }
         }
         Done.Finish();
     }
@@ -686,6 +742,32 @@ public sealed class CS2SX_WhenAll : CS2SX_Step
         return t;
     }}
 }}
+");
+            // Task.WhenAny: the task of tasks.
+            if (name == "CS2SX_Task_CS2SX_Task")
+                sb.Append(@"public sealed class CS2SX_WhenAny : CS2SX_Step
+{
+    public List<CS2SX_Task> Tasks = new List<CS2SX_Task>();
+    public CS2SX_Task_CS2SX_Task Done = new CS2SX_Task_CS2SX_Task();
+    public static CS2SX_Task_CS2SX_Task Of(params CS2SX_Task[] tasks)
+    {
+        var any = new CS2SX_WhenAny();
+        for (int i = 0; i < tasks.Length; i++) any.Tasks.Add(tasks[i]);
+        any.cs2sx_resume();
+        if (!any.Done.IsCompleted)
+            for (int i = 0; i < any.Tasks.Count; i++) any.Tasks[i].Then(any);
+        return any.Done;
+    }
+    public override void cs2sx_resume()
+    {
+        if (Done.IsCompleted) return;
+        for (int i = 0; i < Tasks.Count; i++)
+        {
+            var t = Tasks[i];
+            if (t.IsCompleted) { Done.SetResult(t); return; }
+        }
+    }
+}
 ");
         }
         return sb.ToString();

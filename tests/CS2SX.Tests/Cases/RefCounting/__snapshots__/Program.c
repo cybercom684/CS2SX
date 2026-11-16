@@ -392,6 +392,8 @@ void RefCountingApp_OnFrame(RefCountingApp* self)
 void RefCountingApp_Free(RefCountingApp* self)
 {
     if (!self) return;
+    if (self->f_nodes) { List_Node_Free(self->f_nodes); self->f_nodes = NULL; }
+    if (self->f_shapes) { List_Shape_Free(self->f_shapes); self->f_shapes = NULL; }
     if (self->f_kept) { Node_Free(self->f_kept); self->f_kept = NULL; }
     if (self->f_holder) { Holder_Free(self->f_holder); self->f_holder = NULL; }
     if (self->f_pair) { Pair_Free(self->f_pair); self->f_pair = NULL; }

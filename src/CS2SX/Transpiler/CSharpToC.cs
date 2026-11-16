@@ -479,6 +479,17 @@ public sealed class CSharpToC : CSharpSyntaxWalker
                 return (list + "_GcKind", "((void (*)(void*))" + list + "_Free)");
             }
             if (csType.EndsWith("[]") || NullableHandler.IsNullable(csType)) return null;
+            // Dictionary values and Stack/Queue/HashSet elements (CS2SX_GC_ELEMENTS in _generics.h).
+            string? elem = null;
+            if (TypeRegistry.IsDictionary(csType) && TypeRegistry.GetDictionaryTypes(csType) is { } kv)
+                elem = TypeRegistry.IsUserStruct(kv.key) ? null : kv.val;
+            else if (TypeRegistry.IsStack(csType) || TypeRegistry.IsQueue(csType) || TypeRegistry.IsHashSet(csType))
+                elem = csType[(csType.IndexOf('<') + 1)..csType.LastIndexOf('>')];
+            if (elem != null)
+                return TypeRegistry.ArcRoot(elem.Trim().TrimEnd('?')) != null && Arc.CollectionPrefix(csType) is { } coll
+                    ? (coll + "_GcKind", "((void (*)(void*))" + coll + "_Free)")
+                    : null;
+            if (TypeRegistry.IsDictionary(csType)) return null;
             return TypeRegistry.ArcRoot(csType) is { } root
                 ? (root + "_GcKind", "((void (*)(void*))" + root + "_Free)")
                 : null;
@@ -524,6 +535,8 @@ public sealed class CSharpToC : CSharpSyntaxWalker
         // Benutzerdefinierter Destruktor-Body (falls vorhanden) VOR dem automatischen Cleanup ausführen.
         // C#-Konvention: Finalizer läuft zuerst, danach GC → hier: user-code, dann field-cleanup.
         var customDtor = node.Members.OfType<DestructorDeclarationSyntax>().FirstOrDefault();
+        // A finalizer is an instance member (IsStaticMethod is whatever was written before).
+        if (customDtor != null) _ctx.IsStaticMethod = false;
         if (customDtor?.Body != null)
         {
             _ctx.CurrentClass = name;
@@ -585,6 +598,20 @@ public sealed class CSharpToC : CSharpSyntaxWalker
 
             // Interface types are value structs — no heap allocation, nothing to free.
             if (TypeRegistry.IsRegisteredInterface(csType)) continue;
+
+            // Collections (List, Dictionary, Stack, Queue, HashSet, StringBuilder): the
+            // field holds one reference, taken by its initializer or CS2SX_COLL_STORE.
+            if (Arc.CollectionPrefix(csType) is { } collection)
+            {
+                foreach (var v in field.Declaration.Variables)
+                {
+                    var fieldName = v.Identifier.Text.TrimStart('_');
+                    var prefix = TypeRegistry.HasNoPrefix(fieldName) ? "" : "f_";
+                    var fieldExpr = $"self->{prefix}{fieldName}";
+                    _ctx.WriteLine($"if ({fieldExpr}) {{ {collection}_Free({fieldExpr}); {fieldExpr} = NULL; }}");
+                }
+                continue;
+            }
 
             var needsFree = TypeRegistry.NeedsPointerSuffix(csType)
                          && !TypeRegistry.IsTuple(csType)   // value struct

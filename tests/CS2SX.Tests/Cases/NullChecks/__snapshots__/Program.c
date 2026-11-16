@@ -371,7 +371,7 @@ static void _lambda_10(void* _env)
     struct _cap_10* _c = (struct _cap_10*)_env;
     Node* missing = _c->missing;
     CS2SX_LINE(50);
-    const char* t = (CS2SX_RETAIN(Node, missing) != NULL ? ({ char* _sb1 = _cs2sx_next_buf(); snprintf(_sb1, CS2SX_STRBUF_SIZE, "Name: %s", CS2SX_NN(missing)->f_Name); _sb1; }) : "-");
+    const char* t = (missing != NULL ? ({ char* _sb1 = _cs2sx_next_buf(); snprintf(_sb1, CS2SX_STRBUF_SIZE, "Name: %s", CS2SX_NN(missing)->f_Name); _sb1; }) : "-");
 }
 
 static void _envdtor_10(void* _e)

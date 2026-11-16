@@ -66,6 +66,9 @@ public sealed class GenericExpander
                 sb.AppendLine($"#define CS2SX_{name}_DEFINED");
                 sb.AppendLine($"CS2SX_DICT_DEFINE_EX({k.name}, {k.cType}, {e.name}, {e.cType}, {k.keep}, {k.drop}, {e.keep}, {e.drop}, "
                             + (isStrKey ? "CS2SX_EQ_STR, CS2SX_KEYCHECK_STR)" : "CS2SX_EQ, CS2SX_NOCHECK)"));
+                // Cycle collection follows the values (see Arc.TracedCollection).
+                if (TypeRegistry.ArcRoot(elem) is { } valRoot)
+                    sb.AppendLine($"CS2SX_GC_ELEMENTS({name}, {valRoot}, c->vals[_i])");
                 sb.AppendLine("#endif");
             }
             else
@@ -75,6 +78,9 @@ public sealed class GenericExpander
                 sb.AppendLine($"#ifndef CS2SX_{prefix}_{e.name}_DEFINED");
                 sb.AppendLine($"#define CS2SX_{prefix}_{e.name}_DEFINED");
                 sb.AppendLine($"CS2SX_{macro}_DEFINE_EX({e.name}, {e.cType}, {e.keep}, {e.drop})");
+                if (TypeRegistry.ArcRoot(elem) is { } elemRoot)
+                    sb.AppendLine($"CS2SX_GC_ELEMENTS({prefix}_{e.name}, {elemRoot}, "
+                                + (kind == "Queue" ? "c->data[(c->head + _i) % c->capacity])" : "c->data[_i])"));
                 sb.AppendLine("#endif");
             }
         }

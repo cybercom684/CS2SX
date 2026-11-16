@@ -104,6 +104,7 @@ public static class PropertyWriter
             ctx.Out.WriteLine($"{cType}{ptr} {className}_get_{name}({self})");
             ctx.Out.WriteLine("{");
             ctx.Indent();
+            WriteTrace(prop.ExpressionBody.Expression, className, "get_" + name, ctx);
             var val = expr.Write(prop.ExpressionBody.Expression);
             ctx.WriteLine($"return {val};");
             ctx.Dedent();
@@ -121,6 +122,7 @@ public static class PropertyWriter
             ctx.Out.WriteLine($"{cType}{ptr} {className}_get_{name}({self})");
             ctx.Out.WriteLine("{");
             ctx.Indent();
+            WriteTrace((SyntaxNode?)getter.Body ?? getter.ExpressionBody?.Expression, className, "get_" + name, ctx);
             WriteAccessorBody(getter, ctx, expr, stmt, isVoid: false);
             ctx.Dedent();
             ctx.Out.WriteLine("}");
@@ -137,12 +139,29 @@ public static class PropertyWriter
             ctx.Out.WriteLine("{");
             ctx.Indent();
             ctx.LocalTypes["value"] = csType;
+            WriteTrace((SyntaxNode?)setter.Body ?? setter.ExpressionBody?.Expression, className, "set_" + name, ctx);
             WriteAccessorBody(setter, ctx, expr, stmt, isVoid: true);
             ctx.Dedent();
             ctx.Out.WriteLine("}");
             ctx.Out.WriteLine();
             FlushPropertyPreludes(ctx, preSigPos);
         }
+    }
+
+    /// The accessor's own stack-trace frame (CS2SX_TRACE) — its statements record
+    /// their lines there instead of in the caller's. A plain expression that
+    /// cannot throw (`=> _x * 2`) needs none.
+    private static void WriteTrace(SyntaxNode? body, string className, string member, TranspilerContext ctx)
+    {
+        if (body == null) return;
+        bool simple = body is ExpressionSyntax
+            && !body.DescendantNodesAndSelf().Any(n => n is InvocationExpressionSyntax or ElementAccessExpressionSyntax
+                or ThrowExpressionSyntax or ObjectCreationExpressionSyntax or MemberAccessExpressionSyntax
+                or BinaryExpressionSyntax { RawKind: (int)SyntaxKind.DivideExpression or (int)SyntaxKind.ModuloExpression });
+        if (simple) return;
+        ctx.WriteLine($"CS2SX_TRACE(\"{className}.{member}\", \"{ctx.CurrentFile}\");");
+        if (body is ExpressionSyntax)
+            ctx.WriteLine($"CS2SX_LINE({body.GetLocation().GetLineSpan().StartLinePosition.Line + 1});");
     }
 
     private static void FlushPropertyPreludes(TranspilerContext ctx, int preSigPos)

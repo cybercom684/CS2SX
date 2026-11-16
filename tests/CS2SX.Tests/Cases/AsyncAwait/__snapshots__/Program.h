@@ -28,7 +28,10 @@ extern const CS2SX_GcKind CS2SX_Step_GcKind;
 void CS2SX_Step_Free(CS2SX_Step* self);
 CS2SX_Step* CS2SX_Step_Retain(CS2SX_Step* self);
 void CS2SX_Async_Begin(int points);
-void CS2SX_Async_Suspend(int point);
+void CS2SX_Async_Suspend_1(int point);
+void CS2SX_Async_Suspend_2(int point, int depth);
+void CS2SX_Async_Label(int point, int level);
+void CS2SX_Async_Jump(int point, int level);
 
 struct CS2SX_Task
 {
@@ -38,6 +41,7 @@ struct CS2SX_Task
     int f_IsCompleted;
     Exception* f_Fault;
     long long f_Due;
+    int f_Observed;
     List_CS2SX_Step* f_waiting;
 };
 
@@ -51,6 +55,7 @@ void CS2SX_Task_Fail(CS2SX_Task* self, Exception* e);
 void CS2SX_Task_Check(CS2SX_Task* self);
 void CS2SX_Task_Wait(CS2SX_Task* self);
 CS2SX_Task* CS2SX_Task_Delay(int milliseconds);
+CS2SX_Task* CS2SX_Task_DelaySpan(CS2SX_TimeSpan time);
 CS2SX_Task* CS2SX_Task_Yield();
 CS2SX_Task* CS2SX_Task_Run(Action_t work);
 CS2SX_Task* CS2SX_Task_WhenAll(CS2SX_Task** tasks);

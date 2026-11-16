@@ -1,0 +1,11 @@
+try 4
+finally 4
+ok 8!
+try -1
+finally -1
+caught negative input
+nested 1202
+drain 3 11
+any True False
+Unobserved task exception: nobody waits for this
+   at Lost_Async.cs2sx_run (Program.cs:89)

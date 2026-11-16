@@ -302,6 +302,10 @@ void FrameMemoryApp_OnFrame(FrameMemoryApp* self)
 void FrameMemoryApp_Free(FrameMemoryApp* self)
 {
     if (!self) return;
+    if (self->f_dict) { Dict_str_Item_Free(self->f_dict); self->f_dict = NULL; }
+    if (self->f_stack) { Stack_Item_Free(self->f_stack); self->f_stack = NULL; }
+    if (self->f_queue) { Queue_Item_Free(self->f_queue); self->f_queue = NULL; }
+    if (self->f_set) { HashSet_Item_Free(self->f_set); self->f_set = NULL; }
     for (int _ai = 0; _ai < CS2SX_ArrLen(self->f_arr); _ai++) Item_Free((Item*)self->f_arr[_ai]);
     CS2SX_ArrFree(self->f_arr); self->f_arr = NULL;
     if (self->f_box) { Box_Item_Free(self->f_box); self->f_box = NULL; }

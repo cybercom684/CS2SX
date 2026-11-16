@@ -181,6 +181,16 @@ int  CS2SX_GcCollect(void);
 /// Called once per frame: collects when there are suspects, at most every few frames.
 void CS2SX_GcFrame(void);
 
+/// The CS2SX_GcKind of a collection Coll (Stack_T, Queue_T, HashSet_T, Dict_K_V)
+/// whose elements are objects of the hierarchy Root; ELEM is element _i of c.
+#define CS2SX_GC_ELEMENTS(Coll, Root, ELEM)                                                         \
+extern const CS2SX_GcKind Root##_GcKind;                                                            \
+static void Coll##_Gc(void* self, CS2SX_GcVisit visit) {                                            \
+    Coll* c = (Coll*)self;                                                                          \
+    if (visit) for (int _i = 0; _i < c->count; _i++) visit((void*)(ELEM), &Root##_GcKind); }        \
+__attribute__((unused)) static const CS2SX_GcKind Coll##_GcKind =                                   \
+    { offsetof(Coll, _rc), Coll##_Gc, (CS2SX_FreeFn)Coll##_Free };
+
 /// async/await: continues the tasks that are due (CS2SX_Task.Tick of the app, when
 /// it uses async at all).
 void CS2SX_AsyncFrame(void);

@@ -151,11 +151,23 @@ public sealed class InvocationDispatcher
         if (calleeStr is "CS2SX_Async.Begin" && args.Count == 1 && int.TryParse(args[0], out var resumePoints))
         {
             var sb = new System.Text.StringBuilder("switch (self->f_cs2sx_state) {");
-            for (int k = 1; k <= resumePoints; k++) sb.Append($" case {k}: goto _cs2sx_resume_{k};");
+            for (int k = 1; k <= resumePoints; k++) sb.Append($" case {k}: goto _cs2sx_r{k}_0;");
             return sb.Append(" default: break; }").ToString();
         }
-        if (calleeStr is "CS2SX_Async.Suspend" && args.Count == 1)
-            return $"self->f_cs2sx_state = {args[0]}; return; _cs2sx_resume_{args[0]}: (void)0";
+        // Suspend(k) — outside any try. Suspend(k, depth) — inside `depth` try blocks:
+        // leaving pops their exception frames (without running finally); resuming
+        // enters each try again (Label in front of it, Jump at its start), so the
+        // frames exist again when the code behind the await runs.
+        if (calleeStr is "CS2SX_Async.Suspend" && args.Count is 1 or 2)
+        {
+            var depth = args.Count == 2 ? args[1] : "0";
+            var pops = string.Concat(Enumerable.Reverse(_ctx.TryRegions).Where(r => r.Frame != null).Select(r => $"CS2SX_ExPop(&{r.Frame}); "));
+            return $"self->f_cs2sx_state = {args[0]}; {pops}return; _cs2sx_r{args[0]}_{depth}: self->f_cs2sx_state = 0";
+        }
+        if (calleeStr is "CS2SX_Async.Label" && args.Count == 2)
+            return $"_cs2sx_r{args[0]}_{args[1]}: (void)0";
+        if (calleeStr is "CS2SX_Async.Jump" && args.Count == 2)
+            return $"if (self->f_cs2sx_state == {args[0]}) goto _cs2sx_r{args[0]}_{args[1]}";
 
         if (calleeStr is "GC.Collect") return "((void)CS2SX_GcCollect())";
         if (calleeStr is "GC.WaitForPendingFinalizers") return "((void)0)";

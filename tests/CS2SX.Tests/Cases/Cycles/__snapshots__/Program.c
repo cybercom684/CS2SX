@@ -56,6 +56,7 @@ void TreeNode_Dispose(TreeNode* self)
     TreeNode_Alive--;
     CS2SX_StrDrop(self->f_Name); self->f_Name = NULL;
     if (self->f_Parent) { TreeNode_Free(self->f_Parent); self->f_Parent = NULL; }
+    if (self->f_Children) { List_TreeNode_Free(self->f_Children); self->f_Children = NULL; }
 }
 
 void TreeNode_Free(TreeNode* self)

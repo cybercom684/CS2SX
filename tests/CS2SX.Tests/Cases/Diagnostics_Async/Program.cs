@@ -11,13 +11,13 @@ public class Diagnostics_AsyncApp : SwitchApp
 
     private async Task InTry()
     {
-        try { await Task.Delay(1); }
-        catch (Exception) { }
+        try { Console.WriteLine("x"); }
+        catch (Exception) { await Task.Delay(1); }
     }
 
     private async Task InCondition()
     {
-        while (await Ready()) { }
+        do { } while (await Ready());
     }
 
     private async Task ShortCircuit(bool on)

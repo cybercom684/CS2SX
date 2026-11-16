@@ -55,6 +55,30 @@ public sealed class ExpressionWriter : IExpressionWriter
         return ApplyNullableConversion(expr, code);
     }
 
+    /// True where an expression's value ends up in a variable, field, return value,
+    /// collection or a parameter of a method of the project.
+    private bool IsStoringContext(ExpressionSyntax expr)
+    {
+        SyntaxNode node = expr;
+        while (node.Parent is ParenthesizedExpressionSyntax or CastExpressionSyntax) node = node.Parent;
+        switch (node.Parent)
+        {
+            case EqualsValueClauseSyntax or ReturnStatementSyntax or ArrowExpressionClauseSyntax or InitializerExpressionSyntax:
+                return true;
+            case AssignmentExpressionSyntax asg:
+                return asg.Right == node;
+            case ArgumentSyntax { Parent.Parent: var call } when call != null:
+                try
+                {
+                    return _ctx.SemanticModel?.GetSymbolInfo(call).Symbol is IMethodSymbol m
+                           && TranspilerContext.IsUserCode(m.ContainingType);
+                }
+                catch { return false; }
+            default:
+                return false;
+        }
+    }
+
     /// A derived object passed for a base-class parameter: the C pointer types
     /// differ, so the argument is cast.
     private string ApplyArgumentUpcast(ExpressionSyntax expr, string code)
@@ -86,7 +110,10 @@ public sealed class ExpressionWriter : IExpressionWriter
             bool arrayElement = expr.Parent is InitializerExpressionSyntax init
                                 && init.IsKind(SyntaxKind.ArrayInitializerExpression);
             // (A collection seen as IEnumerable<T> is the same C pointer — no wrapper.)
-            bool boxed = collPrefix == null
+            // Only where the value is kept: `a == b`, "x" + a, $"{a}" and arguments of
+            // framework methods (Console.WriteLine(a), Equals) convert to object too,
+            // but hold nothing.
+            bool boxed = collPrefix == null && IsStoringContext(expr)
                          && (ti.ConvertedType is { TypeKind: TypeKind.Interface }
                              || ti.ConvertedType?.SpecialType == SpecialType.System_Object);
             // (node, 1) — a tuple element (not a deconstruction target)

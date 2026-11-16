@@ -152,9 +152,9 @@ void InterfacesApp_OnInit(InterfacesApp* self)
     CS2SX_LINE(30);
     b->f_Y = 50;
     CS2SX_LINE(31);
-    List_IUpdatable_Add(self->f_things, Bullet_as_IUpdatable(CS2SX_RETAIN(Bullet, b)));
+    List_IUpdatable_Add(self->f_things, Bullet_as_IUpdatable(b));
     CS2SX_LINE(32);
-    List_IUpdatable_Add(self->f_things, Timer_as_IUpdatable(CS2SX_RETAIN(Timer, Timer_New())));
+    List_IUpdatable_Add(self->f_things, Timer_as_IUpdatable(Timer_New()));
 }
 
 void InterfacesApp_OnFrame(InterfacesApp* self)
@@ -185,5 +185,6 @@ void InterfacesApp_OnFrame(InterfacesApp* self)
 void InterfacesApp_Free(InterfacesApp* self)
 {
     if (!self) return;
+    if (self->f_things) { List_IUpdatable_Free(self->f_things); self->f_things = NULL; }
     free(self);
 }

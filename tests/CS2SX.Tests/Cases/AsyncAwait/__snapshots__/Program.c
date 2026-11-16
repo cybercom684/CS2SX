@@ -57,9 +57,24 @@ void CS2SX_Async_Begin(int points)
     CS2SX_TRACE("CS2SX_Async.Begin", "Program.cs");
 }
 
-void CS2SX_Async_Suspend(int point)
+void CS2SX_Async_Suspend_1(int point)
 {
     CS2SX_TRACE("CS2SX_Async.Suspend", "Program.cs");
+}
+
+void CS2SX_Async_Suspend_2(int point, int depth)
+{
+    CS2SX_TRACE("CS2SX_Async.Suspend", "Program.cs");
+}
+
+void CS2SX_Async_Label(int point, int level)
+{
+    CS2SX_TRACE("CS2SX_Async.Label", "Program.cs");
+}
+
+void CS2SX_Async_Jump(int point, int level)
+{
+    CS2SX_TRACE("CS2SX_Async.Jump", "Program.cs");
 }
 
 List_CS2SX_Task* CS2SX_Task_timers;
@@ -88,6 +103,8 @@ CS2SX_Task* CS2SX_Task_New(void)
 void CS2SX_Task_Then(CS2SX_Task* self, CS2SX_Step* step)
 {
     CS2SX_TRACE("CS2SX_Task.Then", "Program.cs");
+    CS2SX_LINE(8);
+    self->f_Observed = 1;
     CS2SX_LINE(8);
     if (self->f_waiting == NULL)
     {
@@ -140,6 +157,8 @@ void CS2SX_Task_Check(CS2SX_Task* self)
 {
     CS2SX_TRACE("CS2SX_Task.Check", "Program.cs");
     CS2SX_LINE(8);
+    self->f_Observed = 1;
+    CS2SX_LINE(8);
     if (!self->f_IsCompleted)
     {
         CS2SX_LINE(8);
@@ -179,6 +198,13 @@ CS2SX_Task* CS2SX_Task_Delay(int milliseconds)
     List_CS2SX_Task_Add(CS2SX_Task_timers, t);
     CS2SX_LINE(8);
     return t;
+}
+
+CS2SX_Task* CS2SX_Task_DelaySpan(CS2SX_TimeSpan time)
+{
+    CS2SX_TRACE("CS2SX_Task.DelaySpan", "Program.cs");
+    CS2SX_LINE(8);
+    return CS2SX_Task_Delay(((int)CS2SX_TimeSpan_TotalMs(time)));
 }
 
 CS2SX_Task* CS2SX_Task_Yield()
@@ -301,7 +327,17 @@ const CS2SX_GcKind CS2SX_Task_GcKind = { offsetof(CS2SX_Task, _rc), CS2SX_Task_G
 
 void CS2SX_Task_Dispose(CS2SX_Task* self)
 {
+    CS2SX_LINE(8);
+    if (self->f_Fault != NULL && !self->f_Observed)
+    {
+        CS2SX_LINE(8);
+        char* _sb0 = _cs2sx_next_buf();
+        snprintf(_sb0, CS2SX_STRBUF_SIZE, "Unobserved task exception: %s\n%s", ((Exception*)(self->f_Fault))->f_Message, (((Exception*)(self->f_Fault))->f_StackTrace ? ((Exception*)(self->f_Fault))->f_StackTrace : ""));
+        const char* _ps_1 = _sb0;
+        printf("%s\n", _ps_1 ? _ps_1 : "");
+    }
     if (self->f_Fault) { Exception_Free(self->f_Fault); self->f_Fault = NULL; }
+    if (self->f_waiting) { List_CS2SX_Step_Free(self->f_waiting); self->f_waiting = NULL; }
 }
 
 void CS2SX_Task_Free(CS2SX_Task* self)
@@ -332,6 +368,7 @@ int CS2SX_Task_get_IsCompletedSuccessfully(CS2SX_Task* self)
 
 CS2SX_Task* CS2SX_Task_get_CompletedTask()
 {
+    CS2SX_TRACE("CS2SX_Task.get_CompletedTask", "Program.cs");
     CS2SX_LINE(8);
     CS2SX_Task* t = CS2SX_Task_New();
     CS2SX_LINE(8);
@@ -391,6 +428,8 @@ void CS2SX_WhenAll_cs2sx_resume(CS2SX_WhenAll* self)
         if (failed != NULL)
         {
             CS2SX_LINE(8);
+            CS2SX_NN(List_CS2SX_Task_Get(self->f_Tasks, i))->f_Observed = 1;
+            CS2SX_LINE(8);
             CS2SX_Task_Fail(CS2SX_NN(self->f_Done), failed);
             CS2SX_LINE(8);
             return;
@@ -412,6 +451,7 @@ void CS2SX_WhenAll_Gc(void* _self, CS2SX_GcVisit visit)
 
 void CS2SX_WhenAll_Dispose(CS2SX_WhenAll* self)
 {
+    if (self->f_Tasks) { List_CS2SX_Task_Free(self->f_Tasks); self->f_Tasks = NULL; }
     if (self->f_Done) { CS2SX_Task_Free(self->f_Done); self->f_Done = NULL; }
     CS2SX_Step_Dispose((CS2SX_Step*)self);
 }
@@ -536,6 +576,7 @@ CS2SX_Task_int* CS2SX_Task_int_Retain(CS2SX_Task_int* self)
 
 int CS2SX_Task_int_get_Result(CS2SX_Task_int* self)
 {
+    CS2SX_TRACE("CS2SX_Task_int.get_Result", "Program.cs");
     CS2SX_LINE(8);
     CS2SX_Task_Check((CS2SX_Task*)self);
     CS2SX_LINE(8);
@@ -642,6 +683,7 @@ CS2SX_Task_str* CS2SX_Task_str_Retain(CS2SX_Task_str* self)
 
 const char* CS2SX_Task_str_get_Result(CS2SX_Task_str* self)
 {
+    CS2SX_TRACE("CS2SX_Task_str.get_Result", "Program.cs");
     CS2SX_LINE(8);
     CS2SX_Task_Check((CS2SX_Task*)self);
     CS2SX_LINE(8);
@@ -783,7 +825,7 @@ void Fetch_Async_cs2sx_run(Fetch_Async* self)
 {
     CS2SX_TRACE("Fetch_Async.cs2sx_run", "Program.cs");
     CS2SX_LINE(14);
-    switch (self->f_cs2sx_state) { case 1: goto _cs2sx_resume_1; default: break; };
+    switch (self->f_cs2sx_state) { case 1: goto _cs2sx_r1_0; default: break; };
     CS2SX_LINE(15);
     CS2SX_NN(self->f_cs2sx_this)->f_calls++;
     {
@@ -795,7 +837,7 @@ void Fetch_Async_cs2sx_run(Fetch_Async* self)
             CS2SX_LINE(16);
             CS2SX_Task_Then(CS2SX_NN(self->f_cs2sx_a1), (CS2SX_Step*)(CS2SX_Step*)self);
             CS2SX_LINE(16);
-            self->f_cs2sx_state = 1; return; _cs2sx_resume_1: (void)0;
+            self->f_cs2sx_state = 1; return; _cs2sx_r1_0: self->f_cs2sx_state = 0;
         }
         CS2SX_LINE(16);
         CS2SX_Task_Check(CS2SX_NN(self->f_cs2sx_a1));
@@ -902,7 +944,7 @@ void Name_Async_cs2sx_run(Name_Async* self)
 {
     CS2SX_TRACE("Name_Async.cs2sx_run", "Program.cs");
     CS2SX_LINE(21);
-    switch (self->f_cs2sx_state) { case 1: goto _cs2sx_resume_1; default: break; };
+    switch (self->f_cs2sx_state) { case 1: goto _cs2sx_r1_0; default: break; };
     {
         CS2SX_LINE(22);
         CS2SX_ARC_STORE(CS2SX_Task, self->f_cs2sx_a1, CS2SX_RETAIN(CS2SX_Task, Loader_Fetch(CS2SX_NN(self->f_cs2sx_this), self->f_id)));
@@ -912,7 +954,7 @@ void Name_Async_cs2sx_run(Name_Async* self)
             CS2SX_LINE(22);
             CS2SX_Task_Then((CS2SX_Task*)CS2SX_NN(self->f_cs2sx_a1), (CS2SX_Step*)self);
             CS2SX_LINE(22);
-            self->f_cs2sx_state = 1; return; _cs2sx_resume_1: (void)0;
+            self->f_cs2sx_state = 1; return; _cs2sx_r1_0: self->f_cs2sx_state = 0;
         }
         CS2SX_LINE(22);
         self->f_v = CS2SX_Task_int_get_Result(CS2SX_NN(self->f_cs2sx_a1));
@@ -1277,7 +1319,7 @@ void Greet_Async_cs2sx_run(Greet_Async* self)
 {
     CS2SX_TRACE("Greet_Async.cs2sx_run", "Program.cs");
     CS2SX_LINE(41);
-    switch (self->f_cs2sx_state) { case 1: goto _cs2sx_resume_1; default: break; };
+    switch (self->f_cs2sx_state) { case 1: goto _cs2sx_r1_0; default: break; };
     {
         CS2SX_LINE(42);
         CS2SX_ARC_STORE(CS2SX_Task, self->f_cs2sx_a1, CS2SX_RETAIN(CS2SX_Task, CS2SX_Task_Yield()));
@@ -1287,7 +1329,7 @@ void Greet_Async_cs2sx_run(Greet_Async* self)
             CS2SX_LINE(42);
             CS2SX_Task_Then(CS2SX_NN(self->f_cs2sx_a1), (CS2SX_Step*)(CS2SX_Step*)self);
             CS2SX_LINE(42);
-            self->f_cs2sx_state = 1; return; _cs2sx_resume_1: (void)0;
+            self->f_cs2sx_state = 1; return; _cs2sx_r1_0: self->f_cs2sx_state = 0;
         }
         CS2SX_LINE(42);
         CS2SX_Task_Check(CS2SX_NN(self->f_cs2sx_a1));
@@ -1398,7 +1440,7 @@ void Twice_Async_cs2sx_run(Twice_Async* self)
 {
     CS2SX_TRACE("Twice_Async.cs2sx_run", "Program.cs");
     CS2SX_LINE(46);
-    switch (self->f_cs2sx_state) { case 1: goto _cs2sx_resume_1; default: break; };
+    switch (self->f_cs2sx_state) { case 1: goto _cs2sx_r1_0; default: break; };
     CS2SX_LINE(46);
     CS2SX_ARC_STORE(CS2SX_Task, self->f_cs2sx_a1, CS2SX_RETAIN(CS2SX_Task, Loader_Fetch(CS2SX_NN(CS2SX_NN(self->f_cs2sx_this)->f_loader), self->x)));
     CS2SX_LINE(46);
@@ -1407,7 +1449,7 @@ void Twice_Async_cs2sx_run(Twice_Async* self)
         CS2SX_LINE(46);
         CS2SX_Task_Then((CS2SX_Task*)CS2SX_NN(self->f_cs2sx_a1), (CS2SX_Step*)self);
         CS2SX_LINE(46);
-        self->f_cs2sx_state = 1; return; _cs2sx_resume_1: (void)0;
+        self->f_cs2sx_state = 1; return; _cs2sx_r1_0: self->f_cs2sx_state = 0;
     }
     CS2SX_LINE(46);
     CS2SX_Task_int_SetResult(CS2SX_NN(self->f_cs2sx_task), CS2SX_Task_int_get_Result(CS2SX_NN(self->f_cs2sx_a1)) * 2);
@@ -1504,7 +1546,7 @@ void Sum_Async_cs2sx_run(Sum_Async* self)
 {
     CS2SX_TRACE("Sum_Async.cs2sx_run", "Program.cs");
     CS2SX_LINE(49);
-    switch (self->f_cs2sx_state) { case 1: goto _cs2sx_resume_1; case 2: goto _cs2sx_resume_2; default: break; };
+    switch (self->f_cs2sx_state) { case 1: goto _cs2sx_r1_0; case 2: goto _cs2sx_r2_0; default: break; };
     CS2SX_LINE(50);
     self->f_total = 0;
     {
@@ -1524,7 +1566,7 @@ void Sum_Async_cs2sx_run(Sum_Async* self)
                     CS2SX_LINE(53);
                     CS2SX_Task_Then((CS2SX_Task*)CS2SX_NN(self->f_cs2sx_a1), (CS2SX_Step*)self);
                     CS2SX_LINE(53);
-                    self->f_cs2sx_state = 1; return; _cs2sx_resume_1: (void)0;
+                    self->f_cs2sx_state = 1; return; _cs2sx_r1_0: self->f_cs2sx_state = 0;
                 }
                 CS2SX_LINE(53);
                 self->f_total += CS2SX_Task_int_get_Result(CS2SX_NN(self->f_cs2sx_a1));
@@ -1543,7 +1585,7 @@ void Sum_Async_cs2sx_run(Sum_Async* self)
                 CS2SX_LINE(57);
                 CS2SX_Task_Then(CS2SX_NN(self->f_cs2sx_a2), (CS2SX_Step*)(CS2SX_Step*)self);
                 CS2SX_LINE(57);
-                self->f_cs2sx_state = 2; return; _cs2sx_resume_2: (void)0;
+                self->f_cs2sx_state = 2; return; _cs2sx_r2_0: self->f_cs2sx_state = 0;
             }
             CS2SX_LINE(57);
             CS2SX_Task_Check(CS2SX_NN(self->f_cs2sx_a2));
@@ -1576,8 +1618,10 @@ void Sum_Async_Gc(void* _self, CS2SX_GcVisit visit)
 void Sum_Async_Dispose(Sum_Async* self)
 {
     if (self->f_cs2sx_task) { CS2SX_Task_int_Free(self->f_cs2sx_task); self->f_cs2sx_task = NULL; }
+    if (self->f_ids) { List_int_Free(self->f_ids); self->f_ids = NULL; }
     if (self->f_cs2sx_a1) { CS2SX_Task_int_Free(self->f_cs2sx_a1); self->f_cs2sx_a1 = NULL; }
     if (self->f_cs2sx_a2) { CS2SX_Task_Free(self->f_cs2sx_a2); self->f_cs2sx_a2 = NULL; }
+    if (self->f_cs2sx_c1) { List_int_Free(self->f_cs2sx_c1); self->f_cs2sx_c1 = NULL; }
     CS2SX_Step_Dispose((CS2SX_Step*)self);
 }
 
@@ -1653,7 +1697,7 @@ void Sequence_Async_cs2sx_run(Sequence_Async* self)
 {
     CS2SX_TRACE("Sequence_Async.cs2sx_run", "Program.cs");
     CS2SX_LINE(64);
-    switch (self->f_cs2sx_state) { case 1: goto _cs2sx_resume_1; case 2: goto _cs2sx_resume_2; case 3: goto _cs2sx_resume_3; case 4: goto _cs2sx_resume_4; case 5: goto _cs2sx_resume_5; default: break; };
+    switch (self->f_cs2sx_state) { case 1: goto _cs2sx_r1_0; case 2: goto _cs2sx_r2_0; case 3: goto _cs2sx_r3_0; case 4: goto _cs2sx_r4_0; case 5: goto _cs2sx_r5_0; default: break; };
     CS2SX_LINE(65);
     printf("seq start\n");
     {
@@ -1665,7 +1709,7 @@ void Sequence_Async_cs2sx_run(Sequence_Async* self)
             CS2SX_LINE(66);
             CS2SX_Task_Then((CS2SX_Task*)CS2SX_NN(self->f_cs2sx_a1), (CS2SX_Step*)self);
             CS2SX_LINE(66);
-            self->f_cs2sx_state = 1; return; _cs2sx_resume_1: (void)0;
+            self->f_cs2sx_state = 1; return; _cs2sx_r1_0: self->f_cs2sx_state = 0;
         }
         CS2SX_LINE(66);
         CS2SX_STR_STORE(self->f_greeting, CS2SX_Task_str_get_Result(CS2SX_NN(self->f_cs2sx_a1)));
@@ -1679,7 +1723,7 @@ void Sequence_Async_cs2sx_run(Sequence_Async* self)
             CS2SX_LINE(67);
             CS2SX_Task_Then((CS2SX_Task*)CS2SX_NN(self->f_cs2sx_a2), (CS2SX_Step*)self);
             CS2SX_LINE(67);
-            self->f_cs2sx_state = 2; return; _cs2sx_resume_2: (void)0;
+            self->f_cs2sx_state = 2; return; _cs2sx_r2_0: self->f_cs2sx_state = 0;
         }
         CS2SX_LINE(67);
         CS2SX_STR_STORE(self->f_a, CS2SX_Task_str_get_Result(CS2SX_NN(self->f_cs2sx_a2)));
@@ -1701,7 +1745,7 @@ void Sequence_Async_cs2sx_run(Sequence_Async* self)
                 CS2SX_LINE(71);
                 CS2SX_Task_Then(CS2SX_NN(self->f_cs2sx_a3), (CS2SX_Step*)(CS2SX_Step*)self);
                 CS2SX_LINE(71);
-                self->f_cs2sx_state = 3; return; _cs2sx_resume_3: (void)0;
+                self->f_cs2sx_state = 3; return; _cs2sx_r3_0: self->f_cs2sx_state = 0;
             }
             CS2SX_LINE(71);
             CS2SX_Task_Check(CS2SX_NN(self->f_cs2sx_a3));
@@ -1720,7 +1764,7 @@ void Sequence_Async_cs2sx_run(Sequence_Async* self)
             CS2SX_LINE(75);
             CS2SX_Task_Then((CS2SX_Task*)CS2SX_NN(self->f_cs2sx_a4), (CS2SX_Step*)self);
             CS2SX_LINE(75);
-            self->f_cs2sx_state = 4; return; _cs2sx_resume_4: (void)0;
+            self->f_cs2sx_state = 4; return; _cs2sx_r4_0: self->f_cs2sx_state = 0;
         }
         CS2SX_LINE(75);
         self->f_five = CS2SX_Task_int_get_Result(CS2SX_NN(self->f_cs2sx_a4));
@@ -1734,7 +1778,7 @@ void Sequence_Async_cs2sx_run(Sequence_Async* self)
             CS2SX_LINE(76);
             CS2SX_Task_Then((CS2SX_Task*)CS2SX_NN(self->f_cs2sx_a5), (CS2SX_Step*)self);
             CS2SX_LINE(76);
-            self->f_cs2sx_state = 5; return; _cs2sx_resume_5: (void)0;
+            self->f_cs2sx_state = 5; return; _cs2sx_r5_0: self->f_cs2sx_state = 0;
         }
         CS2SX_LINE(76);
         char* _sb1 = _cs2sx_next_buf();
@@ -1853,7 +1897,7 @@ void Fails_Async_cs2sx_run(Fails_Async* self)
 {
     CS2SX_TRACE("Fails_Async.cs2sx_run", "Program.cs");
     CS2SX_LINE(80);
-    switch (self->f_cs2sx_state) { case 1: goto _cs2sx_resume_1; default: break; };
+    switch (self->f_cs2sx_state) { case 1: goto _cs2sx_r1_0; default: break; };
     {
         CS2SX_LINE(81);
         CS2SX_ARC_STORE(CS2SX_Task, self->f_cs2sx_a1, CS2SX_RETAIN(CS2SX_Task, CS2SX_Task_Delay(10)));
@@ -1863,7 +1907,7 @@ void Fails_Async_cs2sx_run(Fails_Async* self)
             CS2SX_LINE(81);
             CS2SX_Task_Then(CS2SX_NN(self->f_cs2sx_a1), (CS2SX_Step*)(CS2SX_Step*)self);
             CS2SX_LINE(81);
-            self->f_cs2sx_state = 1; return; _cs2sx_resume_1: (void)0;
+            self->f_cs2sx_state = 1; return; _cs2sx_r1_0: self->f_cs2sx_state = 0;
         }
         CS2SX_LINE(81);
         CS2SX_Task_Check(CS2SX_NN(self->f_cs2sx_a1));
@@ -1963,7 +2007,7 @@ void Outer_Async_cs2sx_run(Outer_Async* self)
 {
     CS2SX_TRACE("Outer_Async.cs2sx_run", "Program.cs");
     CS2SX_LINE(86);
-    switch (self->f_cs2sx_state) { case 1: goto _cs2sx_resume_1; default: break; };
+    switch (self->f_cs2sx_state) { case 1: goto _cs2sx_r1_0; default: break; };
     {
         CS2SX_LINE(87);
         CS2SX_ARC_STORE(CS2SX_Task, self->f_cs2sx_a1, CS2SX_RETAIN(CS2SX_Task, AsyncAwaitApp_Fails(CS2SX_NN(self->f_cs2sx_this))));
@@ -1973,7 +2017,7 @@ void Outer_Async_cs2sx_run(Outer_Async* self)
             CS2SX_LINE(87);
             CS2SX_Task_Then(CS2SX_NN(self->f_cs2sx_a1), (CS2SX_Step*)(CS2SX_Step*)self);
             CS2SX_LINE(87);
-            self->f_cs2sx_state = 1; return; _cs2sx_resume_1: (void)0;
+            self->f_cs2sx_state = 1; return; _cs2sx_r1_0: self->f_cs2sx_state = 0;
         }
         CS2SX_LINE(87);
         CS2SX_Task_Check(CS2SX_NN(self->f_cs2sx_a1));
@@ -2054,7 +2098,7 @@ void Fire_Async_cs2sx_run(Fire_Async* self)
 {
     CS2SX_TRACE("Fire_Async.cs2sx_run", "Program.cs");
     CS2SX_LINE(92);
-    switch (self->f_cs2sx_state) { case 1: goto _cs2sx_resume_1; case 2: goto _cs2sx_resume_2; default: break; };
+    switch (self->f_cs2sx_state) { case 1: goto _cs2sx_r1_0; case 2: goto _cs2sx_r2_0; default: break; };
     {
         CS2SX_LINE(93);
         CS2SX_ARC_STORE(CS2SX_Task, self->f_cs2sx_a1, CS2SX_RETAIN(CS2SX_Task, CS2SX_Task_Delay(50)));
@@ -2064,7 +2108,7 @@ void Fire_Async_cs2sx_run(Fire_Async* self)
             CS2SX_LINE(93);
             CS2SX_Task_Then(CS2SX_NN(self->f_cs2sx_a1), (CS2SX_Step*)(CS2SX_Step*)self);
             CS2SX_LINE(93);
-            self->f_cs2sx_state = 1; return; _cs2sx_resume_1: (void)0;
+            self->f_cs2sx_state = 1; return; _cs2sx_r1_0: self->f_cs2sx_state = 0;
         }
         CS2SX_LINE(93);
         CS2SX_Task_Check(CS2SX_NN(self->f_cs2sx_a1));
@@ -2078,7 +2122,7 @@ void Fire_Async_cs2sx_run(Fire_Async* self)
             CS2SX_LINE(94);
             CS2SX_Task_Then(CS2SX_NN(self->f_cs2sx_a2), (CS2SX_Step*)(CS2SX_Step*)self);
             CS2SX_LINE(94);
-            self->f_cs2sx_state = 2; return; _cs2sx_resume_2: (void)0;
+            self->f_cs2sx_state = 2; return; _cs2sx_r2_0: self->f_cs2sx_state = 0;
         }
         CS2SX_LINE(94);
         CS2SX_Task_Check(CS2SX_NN(self->f_cs2sx_a2));
@@ -2183,7 +2227,7 @@ void Pulse_Async_cs2sx_run(Pulse_Async* self)
 {
     CS2SX_TRACE("Pulse_Async.cs2sx_run", "Program.cs");
     CS2SX_LINE(100);
-    switch (self->f_cs2sx_state) { case 1: goto _cs2sx_resume_1; default: break; };
+    switch (self->f_cs2sx_state) { case 1: goto _cs2sx_r1_0; default: break; };
     {
         CS2SX_LINE(101);
         CS2SX_ARC_STORE(CS2SX_Task, self->f_cs2sx_a1, CS2SX_RETAIN(CS2SX_Task, CS2SX_Task_Yield()));
@@ -2193,7 +2237,7 @@ void Pulse_Async_cs2sx_run(Pulse_Async* self)
             CS2SX_LINE(101);
             CS2SX_Task_Then(CS2SX_NN(self->f_cs2sx_a1), (CS2SX_Step*)(CS2SX_Step*)self);
             CS2SX_LINE(101);
-            self->f_cs2sx_state = 1; return; _cs2sx_resume_1: (void)0;
+            self->f_cs2sx_state = 1; return; _cs2sx_r1_0: self->f_cs2sx_state = 0;
         }
         CS2SX_LINE(101);
         CS2SX_Task_Check(CS2SX_NN(self->f_cs2sx_a1));

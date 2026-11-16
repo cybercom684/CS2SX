@@ -1,0 +1,5 @@
+built 12
+kept 5 True 111
+dropped 0
+stable True True
+done

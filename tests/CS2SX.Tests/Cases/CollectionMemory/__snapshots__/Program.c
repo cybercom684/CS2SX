@@ -58,6 +58,8 @@ const CS2SX_GcKind Bag_GcKind = { offsetof(Bag, _rc), Bag_GcDyn, (CS2SX_FreeFn)B
 
 void Bag_Dispose(Bag* self)
 {
+    if (self->f_Values) { List_int_Free(self->f_Values); self->f_Values = NULL; }
+    if (self->f_Log) { StringBuilder_Free(self->f_Log); self->f_Log = NULL; }
     if (self->f_Counts) { Dict_str_int_Free(self->f_Counts); self->f_Counts = NULL; }
 }
 
@@ -228,6 +230,7 @@ void CollectionMemoryApp_OnFrame(CollectionMemoryApp* self)
 void CollectionMemoryApp_Free(CollectionMemoryApp* self)
 {
     if (!self) return;
+    if (self->f_scores) { List_int_Free(self->f_scores); self->f_scores = NULL; }
     if (self->f_bag) { Bag_Free(self->f_bag); self->f_bag = NULL; }
     if (self->f_inv) { Inventory_Free(self->f_inv); self->f_inv = NULL; }
     for (int _ai = 0; _ai < CS2SX_ArrLen(self->f_grid); _ai++) List_int_Free(self->f_grid[_ai]);

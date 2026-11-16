@@ -43,11 +43,11 @@ Das transpilierte Programm hat keine .NET-Laufzeit und damit keinen Garbage Coll
 
 - **Zerstörung ist virtuell:** Ein `Circle` in einer `List<Shape>` räumt auch seine eigenen Felder auf. Ein C#-Finalizer (`~Circle()`) läuft dabei mit.
 
-- **Zyklen werden gefunden:** Objekte, die sich gegenseitig halten (`kind.Parent = this; Children.Add(kind);`, ein Ring, ein Objekt, das auf sich selbst zeigt), werden freigegeben, sobald von außen nichts mehr auf sie zeigt. Die Suche läuft etwa alle 16 Frames und nur, wenn Referenzen abgegeben wurden. Sie folgt Feldern und Auto-Properties mit Objekten sowie `List<Klasse>`.
+- **Zyklen werden gefunden:** Objekte, die sich gegenseitig halten (`kind.Parent = this; Children.Add(kind);`, ein Ring, ein Objekt, das auf sich selbst zeigt), werden freigegeben, sobald von außen nichts mehr auf sie zeigt. Die Suche läuft etwa alle 16 Frames und nur, wenn Referenzen abgegeben wurden. Sie folgt Feldern und Auto-Properties mit Objekten sowie `List`, `Dictionary` (Werte), `Stack`, `Queue` und `HashSet` mit Objekten.
 
 **Nicht freigegeben werden:**
 
-- Zyklen, die über ein `Dictionary`, `Stack`, `Queue`, `HashSet`, Array, eine generische Klasse oder ein Lambda laufen. Dort einen der Verweise vor dem Wegwerfen auf `null` setzen.
+- Zyklen, die über ein Array, eine generische Klasse oder ein Lambda laufen. Dort einen der Verweise vor dem Wegwerfen auf `null` setzen.
 - Objekte, die über ein Struct, ein Tupel, ein Interface-/`object`-Wert, oder einen Methoden-Delegate (`+= obj.Methode`) gehalten wurden. Diese Stellen geben ihre Referenz nicht zurück.
 
 `GC.GetTotalMemory(false)` liefert den belegten Heap in Bytes, praktisch, um ein Speicherleck zu finden. `GC.Collect()` sucht sofort nach Zyklen; nötig ist der Aufruf nicht.
@@ -128,14 +128,17 @@ private async Task Intro()
 public override void OnInit() { Intro(); }
 ```
 
-Unterstützt: `async Task`, `async Task<T>`, `async void`, `await` auf `Task`/`Task<T>`, `Task.Delay(ms)`, `Task.Yield()` (weiter im nächsten Frame), `Task.CompletedTask`, `Task.FromResult`, `Task.WhenAll`, `Task.Run` (führt sofort aus), `IsCompleted`, `IsFaulted`, `Result`, `Wait()`. Eine Exception in einer `async Task`-Methode landet im Task und wird beim `await` oder bei `Result`/`Wait()` weitergeworfen.
+Unterstützt: `async Task`, `async Task<T>`, `async void`, `await` auf `Task`/`Task<T>`, `Task.Delay(ms)`, `Task.Yield()` (weiter im nächsten Frame), `Task.Delay(TimeSpan)`, `Task.CompletedTask`, `Task.FromResult`, `Task.WhenAll`, `Task.WhenAny(a, b)`, `Task.Run` (führt sofort aus), `IsCompleted`, `IsFaulted`, `Result`, `Wait()`. `await` geht auch im `try`-Block und in der Bedingung einer `while`-Schleife.
+
+Eine Exception in einer `async Task`-Methode landet im Task und wird beim `await` oder bei `Result`/`Wait()` weitergeworfen; ein `catch` um das `await` fängt sie. Schaut niemand auf einen fehlgeschlagenen Task, erscheint beim Freigeben `Unobserved task exception: …` mit Aufrufkette im Log.
 
 Der Build lehnt mit Zeile und Hinweis ab:
 
 | Konstrukt | Stattdessen |
 |---|---|
-| `await` in `try`/`catch`/`finally`, `using`, `lock` | `await` davor oder dahinter; oder den Task behalten und `IsFaulted` prüfen |
-| `await` in einer Schleifenbedingung oder im `for`-Kopf | Ergebnis im Rumpf in eine Variable schreiben |
+| `await` in `catch`/`finally`, `using`, `lock` | im `try`-Block geht es; sonst das Ergebnis merken und das `await` dahinter ziehen |
+| `await` in der Bedingung von `do-while` oder im `for`-Kopf | Ergebnis im Rumpf in eine Variable schreiben, oder `while` |
+| Ergebnis von `await Task.WhenAll(…)`, `Task.WhenAny` mit `Task<T>` oder einer Liste | Tasks einzeln mit `await`/`.Result` auslesen |
 | `await` rechts von `&&`, `\|\|`, `??`, in `?:` oder einem `switch`-Ausdruck | vorher in eine Variable schreiben |
 | `foreach` mit `await` im Rumpf über etwas anderes als `List<T>`/Array | `for`-Schleife |
 | `out var`, Muster-Variablen (`is Foo f`) und `using var` vor einem `await` im selben Block | normal deklarieren (`int n;`) |
