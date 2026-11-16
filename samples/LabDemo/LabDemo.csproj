@@ -7,7 +7,7 @@
 
   <ItemGroup>
     <!-- Switch API + `dotnet build` -> LabDemo.nro (needs the cs2sx tool on PATH). -->
-    <PackageReference Include="CS2SX.Switch" Version="0.5.2" />
+    <PackageReference Include="CS2SX.Switch" Version="0.6.0" />
   </ItemGroup>
 
 </Project>
