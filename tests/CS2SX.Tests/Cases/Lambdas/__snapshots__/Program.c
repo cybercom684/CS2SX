@@ -59,7 +59,7 @@ static void _lambda_4(void* _env, int v)
     CS2SX_TRACE("LambdasApp.<lambda>", "Program.cs");
     (void)_env;
     char* _sb1 = _cs2sx_next_buf();
-    snprintf(_sb1, CS2SX_STRBUF_SIZE, "got %d", v);
+    _sb1 = CS2SX_Format(_sb1, "got %d", v);
     const char* _ps_1 = _sb1;
     printf("%s\n", _ps_1 ? _ps_1 : "");
 }
@@ -75,7 +75,7 @@ void LambdasApp_OnInit(LambdasApp* self)
     Func_int_int_t isBig = (&_dg_1);
     CS2SX_LINE(12);
     char* _sb0 = _cs2sx_next_buf();
-    snprintf(_sb0, CS2SX_STRBUF_SIZE, "%d %s", Func_int_int_int_Invoke(add, 2, 3), CS2SX_BoolStr(Func_int_int_Invoke(isBig, 150)));
+    _sb0 = CS2SX_Format(_sb0, "%d %s", Func_int_int_int_Invoke(add, 2, 3), CS2SX_BoolStr(Func_int_int_Invoke(isBig, 150)));
     const char* _ps_0 = _sb0;
     printf("%s\n", _ps_0 ? _ps_0 : "");
     CS2SX_LINE(14);

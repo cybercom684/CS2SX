@@ -255,7 +255,7 @@ void CyclesApp_OnFrame(CyclesApp* self)
             CS2SX_ARC_STORE(Link, CS2SX_NN(boss->f_Minion)->f_Next, CS2SX_RETAIN(Link, boss));
             CS2SX_LINE(91);
             char* _sb0 = _cs2sx_next_buf();
-            snprintf(_sb0, CS2SX_STRBUF_SIZE, "built %d %d", TreeNode_Alive, Link_Alive);
+            _sb0 = CS2SX_Format(_sb0, "built %d %d", TreeNode_Alive, Link_Alive);
             const char* _ps_0 = _sb0;
             printf("%s\n", _ps_0 ? _ps_0 : "");
             CS2SX_LINE(92);
@@ -263,7 +263,7 @@ void CyclesApp_OnFrame(CyclesApp* self)
         case 20:
             CS2SX_LINE(95);
             char* _sb1 = _cs2sx_next_buf();
-            snprintf(_sb1, CS2SX_STRBUF_SIZE, "kept %d %d %s", TreeNode_Alive, Link_Alive, CS2SX_NN(CS2SX_NN(CS2SX_NN(List_TreeNode_Get(CS2SX_NN(List_TreeNode_Get(CS2SX_NN(self->f_tree)->f_Children, 0))->f_Children, 1))->f_Parent)->f_Parent)->f_Name);
+            _sb1 = CS2SX_Format(_sb1, "kept %d %d %s", TreeNode_Alive, Link_Alive, CS2SX_NN(CS2SX_NN(CS2SX_NN(List_TreeNode_Get(CS2SX_NN(List_TreeNode_Get(CS2SX_NN(self->f_tree)->f_Children, 0))->f_Children, 1))->f_Parent)->f_Parent)->f_Name);
             const char* _ps_1 = _sb1;
             printf("%s\n", _ps_1 ? _ps_1 : "");
             CS2SX_LINE(97);
@@ -277,7 +277,7 @@ void CyclesApp_OnFrame(CyclesApp* self)
         case 40:
             CS2SX_LINE(102);
             char* _sb2 = _cs2sx_next_buf();
-            snprintf(_sb2, CS2SX_STRBUF_SIZE, "dropped %d %d", TreeNode_Alive, Link_Alive);
+            _sb2 = CS2SX_Format(_sb2, "dropped %d %d", TreeNode_Alive, Link_Alive);
             const char* _ps_2 = _sb2;
             printf("%s\n", _ps_2 ? _ps_2 : "");
             CS2SX_LINE(103);
@@ -286,7 +286,7 @@ void CyclesApp_OnFrame(CyclesApp* self)
             ((void)CS2SX_GcCollect());
             CS2SX_LINE(105);
             char* _sb3 = _cs2sx_next_buf();
-            snprintf(_sb3, CS2SX_STRBUF_SIZE, "collect %d", Link_Alive);
+            _sb3 = CS2SX_Format(_sb3, "collect %d", Link_Alive);
             const char* _ps_3 = _sb3;
             printf("%s\n", _ps_3 ? _ps_3 : "");
             CS2SX_LINE(106);
@@ -301,7 +301,7 @@ void CyclesApp_OnFrame(CyclesApp* self)
             long long grown = CS2SX_HeapUsed() - self->f_base;
             CS2SX_LINE(112);
             char* _sb4 = _cs2sx_next_buf();
-            snprintf(_sb4, CS2SX_STRBUF_SIZE, "stable %s %s %s", CS2SX_BoolStr((grown < 4096)), CS2SX_BoolStr((TreeNode_Alive < 200)), CS2SX_BoolStr((Link_Alive < 200)));
+            _sb4 = CS2SX_Format(_sb4, "stable %s %s %s", CS2SX_BoolStr((grown < 4096)), CS2SX_BoolStr((TreeNode_Alive < 200)), CS2SX_BoolStr((Link_Alive < 200)));
             const char* _ps_4 = _sb4;
             printf("%s\n", _ps_4 ? _ps_4 : "");
             CS2SX_LINE(113);

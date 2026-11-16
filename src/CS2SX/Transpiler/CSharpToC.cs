@@ -1,4 +1,4 @@
-﻿// Datei: Transpiler/CSharpToC.cs
+// Datei: Transpiler/CSharpToC.cs
 //
 // FIX: VisitMethodDeclaration() ruft _ctx.FlushLambdaPreludes() auf,
 //      BEVOR die Methodensignatur in den Output geschrieben wird.
@@ -1527,16 +1527,37 @@ public sealed class CSharpToC : CSharpSyntaxWalker
         foreach (var g in node.Members.OfType<MethodDeclarationSyntax>()
                      .GroupBy(m => m.Identifier.Text)
                      .Where(g => g.Count() > 1))
+        {
             set.Add(g.Key);
+            foreach (var key in SameArityKeys(g)) set.Add(key);
+        }
         _ctx.OverloadedMethods[className] = set;
     }
 
+    /// "Name/N" for every parameter count that several overloads of one name share:
+    /// those are told apart by their parameter types (see BuildCMethodName).
+    internal static IEnumerable<string> SameArityKeys(IEnumerable<MethodDeclarationSyntax> overloads) =>
+        overloads.GroupBy(m => m.ParameterList.Parameters.Count).Where(c => c.Count() > 1)
+            .Select(c => c.First().Identifier.Text + "/" + c.Key);
+
     // Returns "ClassName_MethodName" for unique methods, "ClassName_MethodName_N" for overloads.
+    // Overloads with the same number of parameters add the parameter types:
+    // "ClassName_MethodName_1_int", "ClassName_MethodName_1_str" (needs the symbol).
     internal static string BuildCMethodName(string className, string methodName, int userParamCount,
-        Dictionary<string, HashSet<string>> overloadedMethods)
+        Dictionary<string, HashSet<string>> overloadedMethods, IMethodSymbol? symbol = null)
     {
         if (overloadedMethods.TryGetValue(className, out var set) && set.Contains(methodName))
-            return $"{className}_{methodName}_{userParamCount}";
+        {
+            var name = $"{className}_{methodName}_{userParamCount}";
+            if (symbol != null && set.Contains(methodName + "/" + userParamCount))
+                foreach (var p in (symbol.ReducedFrom ?? symbol).OriginalDefinition.Parameters)
+                {
+                    var type = p.Type.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat);
+                    name += "_" + (type == "string" ? "str"
+                        : System.Text.RegularExpressions.Regex.Replace(type.Replace("[]", "Arr"), "[^A-Za-z0-9]+", "_").Trim('_'));
+                }
+            return name;
+        }
         return $"{className}_{methodName}";
     }
 
@@ -1554,7 +1575,8 @@ public sealed class CSharpToC : CSharpSyntaxWalker
 
         var returnType = ResolveMethodReturnType(method);
         int userParamCount = method.ParameterList.Parameters.Count;
-        var name = BuildCMethodName(className, method.Identifier.Text, userParamCount, _ctx.OverloadedMethods);
+        var name = BuildCMethodName(className, method.Identifier.Text, userParamCount, _ctx.OverloadedMethods,
+            _ctx.SemanticModel?.GetDeclaredSymbol(method));
 
         var parameters = new List<string>();
         if (!isStatic && !isExtension) parameters.Add(className + "* self");
@@ -1690,7 +1712,8 @@ public sealed class CSharpToC : CSharpSyntaxWalker
         int userParamCount = node.ParameterList.Parameters.Count;
         var name = string.IsNullOrEmpty(_ctx.CurrentClass)
             ? node.Identifier.Text
-            : BuildCMethodName(_ctx.CurrentClass, node.Identifier.Text, userParamCount, _ctx.OverloadedMethods);
+            : BuildCMethodName(_ctx.CurrentClass, node.Identifier.Text, userParamCount, _ctx.OverloadedMethods,
+                _ctx.SemanticModel?.GetDeclaredSymbol(node));
 
         var parameters = new List<string>();
         if (!string.IsNullOrEmpty(_ctx.CurrentClass) && !isStatic && !isExtension)

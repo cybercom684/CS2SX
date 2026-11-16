@@ -348,7 +348,7 @@ void RuntimeExceptionsApp_OnInit(RuntimeExceptionsApp* self)
     CS2SX_TRACE("RuntimeExceptionsApp.OnInit", "Program.cs");
     CS2SX_LINE(18);
     char* _sb0 = _cs2sx_next_buf();
-    snprintf(_sb0, CS2SX_STRBUF_SIZE, "parse %d %s %s", CS2SX_Int_Parse(" 42 "), Double_ToString(CS2SX_Double_Parse("2.5")), CS2SX_BoolStr(CS2SX_Bool_Parse("True")));
+    _sb0 = CS2SX_Format(_sb0, "parse %d %s %s", CS2SX_Int_Parse(" 42 "), Double_ToString(CS2SX_Double_Parse("2.5")), CS2SX_BoolStr(CS2SX_Bool_Parse("True")));
     const char* _ps_2 = _sb0;
     printf("%s\n", _ps_2 ? _ps_2 : "");
     CS2SX_LINE(19);
@@ -375,7 +375,7 @@ void RuntimeExceptionsApp_OnInit(RuntimeExceptionsApp* self)
     int ok = CS2SX_Int_TryParse("12x", &v);
     CS2SX_LINE(27);
     char* _sb1 = _cs2sx_next_buf();
-    snprintf(_sb1, CS2SX_STRBUF_SIZE, "try %s %d", CS2SX_BoolStr(ok), v);
+    _sb1 = CS2SX_Format(_sb1, "try %s %d", CS2SX_BoolStr(ok), v);
     const char* _ps_9 = _sb1;
     printf("%s\n", _ps_9 ? _ps_9 : "");
     CS2SX_LINE(30);
@@ -410,7 +410,7 @@ void RuntimeExceptionsApp_OnInit(RuntimeExceptionsApp* self)
     ({ __auto_type _cs2sx_c = dict; __auto_type _cs2sx_k = "a"; Dict_str_int_Set(_cs2sx_c, _cs2sx_k, Dict_str_int_Get(_cs2sx_c, _cs2sx_k) + (2)); });
     CS2SX_LINE(37);
     char* _sb2 = _cs2sx_next_buf();
-    snprintf(_sb2, CS2SX_STRBUF_SIZE, "dict %d", Dict_str_int_Get(dict, "a"));
+    _sb2 = CS2SX_Format(_sb2, "dict %d", Dict_str_int_Get(dict, "a"));
     const char* _ps_14 = _sb2;
     printf("%s\n", _ps_14 ? _ps_14 : "");
     CS2SX_LINE(38);
@@ -486,9 +486,9 @@ void RuntimeExceptionsApp_OnInit(RuntimeExceptionsApp* self)
     printf("fmt %s %s %s %s %s %s\n", Double_ToString(0.1), Double_ToString(1e21), Float_ToString(1.5f), CS2SX_BoolStr(1), Double_ToString(1000000.0), Double_ToString(0.00001));
     CS2SX_LINE(63);
     char* _sb3 = _cs2sx_next_buf();
-    snprintf(_sb3, CS2SX_STRBUF_SIZE, "%s-%s-%s", "b", "a", "b");
+    _sb3 = CS2SX_Format(_sb3, "%s-%s-%s", "b", "a", "b");
     char* _sb4 = _cs2sx_next_buf();
-    snprintf(_sb4, CS2SX_STRBUF_SIZE, "%s %s", _sb3, Double_ToString(2.25));
+    _sb4 = CS2SX_Format(_sb4, "%s %s", _sb3, Double_ToString(2.25));
     const char* _ps_29 = _sb4;
     printf("%s\n", _ps_29 ? _ps_29 : "");
     CS2SX_LINE(64);

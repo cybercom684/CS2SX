@@ -33,7 +33,7 @@ void Game_Step(Game* self, int i)
     int v = Game_Read(self, i);
     CS2SX_LINE(8);
     char* _sb0 = _cs2sx_next_buf();
-    snprintf(_sb0, CS2SX_STRBUF_SIZE, "v %d", v);
+    _sb0 = CS2SX_Format(_sb0, "v %d", v);
     const char* _ps_0 = _sb0;
     printf("%s\n", _ps_0 ? _ps_0 : "");
 }

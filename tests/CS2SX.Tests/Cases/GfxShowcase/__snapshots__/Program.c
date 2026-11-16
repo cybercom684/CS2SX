@@ -175,7 +175,7 @@ void GfxShowcaseApp_OnFrame(GfxShowcaseApp* self)
     Graphics_FillRoundedRect(bx, 640, 80, 40, 12, COLOR_CYAN);
     CS2SX_LINE(91);
     char* _sb0 = _cs2sx_next_buf();
-    snprintf(_sb0, CS2SX_STRBUF_SIZE, "frame %d", self->f_frame);
+    _sb0 = CS2SX_Format(_sb0, "frame %d", self->f_frame);
     Graphics_DrawText(20, 696, _sb0, COLOR_GRAY, 1);
 }
 

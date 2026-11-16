@@ -332,7 +332,7 @@ void CS2SX_Task_Dispose(CS2SX_Task* self)
     {
         CS2SX_LINE(9);
         char* _sb0 = _cs2sx_next_buf();
-        snprintf(_sb0, CS2SX_STRBUF_SIZE, "Unobserved task exception: %s\n%s", ((Exception*)(self->f_Fault))->f_Message, (((Exception*)(self->f_Fault))->f_StackTrace ? ((Exception*)(self->f_Fault))->f_StackTrace : ""));
+        _sb0 = CS2SX_Format(_sb0, "Unobserved task exception: %s\n%s", ((Exception*)(self->f_Fault))->f_Message, (((Exception*)(self->f_Fault))->f_StackTrace ? ((Exception*)(self->f_Fault))->f_StackTrace : ""));
         const char* _ps_1 = _sb0;
         printf("%s\n", _ps_1 ? _ps_1 : "");
     }
@@ -1531,7 +1531,7 @@ void Guarded_Async_cs2sx_run(Guarded_Async* self)
                 if (self->f_cs2sx_state == 2) goto _cs2sx_r2_1;
                 CS2SX_LINE(40);
                 char* _sb0 = _cs2sx_next_buf();
-                snprintf(_sb0, CS2SX_STRBUF_SIZE, "try %d", self->f_n);
+                _sb0 = CS2SX_Format(_sb0, "try %d", self->f_n);
                 const char* _ps_2 = _sb0;
                 printf("%s\n", _ps_2 ? _ps_2 : "");
                 {
@@ -1550,7 +1550,7 @@ void Guarded_Async_cs2sx_run(Guarded_Async* self)
                 }
                 CS2SX_LINE(42);
                 char* _sb1 = _cs2sx_next_buf();
-                snprintf(_sb1, CS2SX_STRBUF_SIZE, "ok %d", self->f_v);
+                _sb1 = CS2SX_Format(_sb1, "ok %d", self->f_v);
                 CS2SX_STR_STORE(self->f_result, _sb1);
                 {
                     CS2SX_LINE(43);
@@ -1568,7 +1568,7 @@ void Guarded_Async_cs2sx_run(Guarded_Async* self)
                 }
                 CS2SX_LINE(44);
                 char* _sb2 = _cs2sx_next_buf();
-                snprintf(_sb2, CS2SX_STRBUF_SIZE, "%s%s", self->f_result ? self->f_result : "", "!" ? "!" : "");
+                _sb2 = CS2SX_Format(_sb2, "%s%s", self->f_result ? self->f_result : "", "!" ? "!" : "");
                 CS2SX_STR_STORE(self->f_result, _sb2);
                 CS2SX_ExPop(&_exf_1);
             }
@@ -1584,7 +1584,7 @@ void Guarded_Async_cs2sx_run(Guarded_Async* self)
                         ArgumentException* e = (ArgumentException*)_exf_1_ex;
                         CS2SX_LINE(48);
                         char* _sb3 = _cs2sx_next_buf();
-                        snprintf(_sb3, CS2SX_STRBUF_SIZE, "caught %s", ((Exception*)(e))->f_Message);
+                        _sb3 = CS2SX_Format(_sb3, "caught %s", ((Exception*)(e))->f_Message);
                         CS2SX_STR_STORE(self->f_result, _sb3);
                     }
                     else _exf_1_pending = _exf_1_ex;
@@ -1595,7 +1595,7 @@ void Guarded_Async_cs2sx_run(Guarded_Async* self)
             {
                 CS2SX_LINE(52);
                 char* _sb4 = _cs2sx_next_buf();
-                snprintf(_sb4, CS2SX_STRBUF_SIZE, "finally %d", self->f_n);
+                _sb4 = CS2SX_Format(_sb4, "finally %d", self->f_n);
                 const char* _ps_3 = _sb4;
                 printf("%s\n", _ps_3 ? _ps_3 : "");
             }
@@ -2163,7 +2163,7 @@ void Script_Async_cs2sx_run(Script_Async* self)
         }
         CS2SX_LINE(96);
         char* _sb0 = _cs2sx_next_buf();
-        snprintf(_sb0, CS2SX_STRBUF_SIZE, "nested %d", CS2SX_Task_int_get_Result(CS2SX_NN(self->f_cs2sx_a3)));
+        _sb0 = CS2SX_Format(_sb0, "nested %d", CS2SX_Task_int_get_Result(CS2SX_NN(self->f_cs2sx_a3)));
         const char* _ps_3 = _sb0;
         printf("%s\n", _ps_3 ? _ps_3 : "");
     }
@@ -2180,7 +2180,7 @@ void Script_Async_cs2sx_run(Script_Async* self)
         }
         CS2SX_LINE(97);
         char* _sb1 = _cs2sx_next_buf();
-        snprintf(_sb1, CS2SX_STRBUF_SIZE, "drain %d %d", CS2SX_Task_int_get_Result(CS2SX_NN(self->f_cs2sx_a4)), Source_get_Total(CS2SX_NN(CS2SX_NN(self->f_cs2sx_this)->f_source)));
+        _sb1 = CS2SX_Format(_sb1, "drain %d %d", CS2SX_Task_int_get_Result(CS2SX_NN(self->f_cs2sx_a4)), Source_get_Total(CS2SX_NN(CS2SX_NN(self->f_cs2sx_this)->f_source)));
         const char* _ps_4 = _sb1;
         printf("%s\n", _ps_4 ? _ps_4 : "");
     }
@@ -2205,7 +2205,7 @@ void Script_Async_cs2sx_run(Script_Async* self)
     }
     CS2SX_LINE(102);
     char* _sb2 = _cs2sx_next_buf();
-    snprintf(_sb2, CS2SX_STRBUF_SIZE, "any %s %s", CS2SX_BoolStr((self->f_first == self->f_fast)), CS2SX_BoolStr(CS2SX_NN(self->f_slow)->f_IsCompleted));
+    _sb2 = CS2SX_Format(_sb2, "any %s %s", CS2SX_BoolStr((self->f_first == self->f_fast)), CS2SX_BoolStr(CS2SX_NN(self->f_slow)->f_IsCompleted));
     const char* _ps_6 = _sb2;
     printf("%s\n", _ps_6 ? _ps_6 : "");
     CS2SX_LINE(104);

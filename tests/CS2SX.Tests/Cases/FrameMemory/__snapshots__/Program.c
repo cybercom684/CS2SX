@@ -228,7 +228,7 @@ void FrameMemoryApp_OnFrame(FrameMemoryApp* self)
             FrameMemoryApp_Garbage();
             CS2SX_LINE(72);
             char* _sb0 = _cs2sx_next_buf();
-            snprintf(_sb0, CS2SX_STRBUF_SIZE, "k%d", self->f_frame);
+            _sb0 = CS2SX_Format(_sb0, "k%d", self->f_frame);
             Dict_str_Item_Set(self->f_dict, _sb0, Item_New(10));
             CS2SX_LINE(73);
             Stack_Item_Push(self->f_stack, Item_New(11));
@@ -256,7 +256,7 @@ void FrameMemoryApp_OnFrame(FrameMemoryApp* self)
         case 2:
             CS2SX_LINE(84);
             char* _sb1 = _cs2sx_next_buf();
-            snprintf(_sb1, CS2SX_STRBUF_SIZE, "garbage %d", Counter_Freed);
+            _sb1 = CS2SX_Format(_sb1, "garbage %d", Counter_Freed);
             const char* _ps_0 = _sb1;
             printf("%s\n", _ps_0 ? _ps_0 : "");
             CS2SX_LINE(85);
@@ -264,7 +264,7 @@ void FrameMemoryApp_OnFrame(FrameMemoryApp* self)
         case 3:
             CS2SX_LINE(87);
             char* _sb2 = _cs2sx_next_buf();
-            snprintf(_sb2, CS2SX_STRBUF_SIZE, "kept %d %d %d %d %d %d %d %d %d %d %d", CS2SX_NN(Dict_str_Item_Get(self->f_dict, "k1"))->f_V, CS2SX_NN(Stack_Item_Peek(self->f_stack))->f_V, CS2SX_NN(Queue_Item_Peek(self->f_queue))->f_V, CS2SX_NN(self->f_set)->count, CS2SX_NN(CS2SX_AT(self->f_arr, 0))->f_V, CS2SX_NN(CS2SX_NN(self->f_box)->f_Value)->f_V, CS2SX_NN(self->f_pair.A)->f_V, ({ __auto_type _cs2sx_r = CS2SX_NN(self->f_iface); _cs2sx_r->vtable->Get(_cs2sx_r->obj); }), Func_int_Invoke(self->f_fn), CS2SX_NN(self->f_field)->f_V, Counter_Freed);
+            _sb2 = CS2SX_Format(_sb2, "kept %d %d %d %d %d %d %d %d %d %d %d", CS2SX_NN(Dict_str_Item_Get(self->f_dict, "k1"))->f_V, CS2SX_NN(Stack_Item_Peek(self->f_stack))->f_V, CS2SX_NN(Queue_Item_Peek(self->f_queue))->f_V, CS2SX_NN(self->f_set)->count, CS2SX_NN(CS2SX_AT(self->f_arr, 0))->f_V, CS2SX_NN(CS2SX_NN(self->f_box)->f_Value)->f_V, CS2SX_NN(self->f_pair.A)->f_V, ({ __auto_type _cs2sx_r = CS2SX_NN(self->f_iface); _cs2sx_r->vtable->Get(_cs2sx_r->obj); }), Func_int_Invoke(self->f_fn), CS2SX_NN(self->f_field)->f_V, Counter_Freed);
             const char* _ps_1 = _sb2;
             printf("%s\n", _ps_1 ? _ps_1 : "");
             CS2SX_LINE(91);
@@ -283,7 +283,7 @@ void FrameMemoryApp_OnFrame(FrameMemoryApp* self)
             CS2SX_ARC_STORE(Item, self->f_field, NULL);
             CS2SX_LINE(98);
             char* _sb3 = _cs2sx_next_buf();
-            snprintf(_sb3, CS2SX_STRBUF_SIZE, "same frame %d %d %d", CS2SX_NN(popped)->f_V, CS2SX_NN(dequeued)->f_V, Counter_Freed);
+            _sb3 = CS2SX_Format(_sb3, "same frame %d %d %d", CS2SX_NN(popped)->f_V, CS2SX_NN(dequeued)->f_V, Counter_Freed);
             const char* _ps_2 = _sb3;
             printf("%s\n", _ps_2 ? _ps_2 : "");
             CS2SX_LINE(99);
@@ -291,7 +291,7 @@ void FrameMemoryApp_OnFrame(FrameMemoryApp* self)
         case 4:
             CS2SX_LINE(101);
             char* _sb4 = _cs2sx_next_buf();
-            snprintf(_sb4, CS2SX_STRBUF_SIZE, "released %d", Counter_Freed);
+            _sb4 = CS2SX_Format(_sb4, "released %d", Counter_Freed);
             const char* _ps_3 = _sb4;
             printf("%s\n", _ps_3 ? _ps_3 : "");
             CS2SX_LINE(102);

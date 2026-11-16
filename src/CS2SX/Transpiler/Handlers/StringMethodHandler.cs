@@ -461,7 +461,7 @@ public sealed class StringMethodHandler : InvocationHandlerBase
         var (fmt, fmtArgs) = BuildFormatString(template, formatArgs, codes, ctx);
         var buf = ctx.NextStringBuf();
         ctx.Out.WriteLine(ctx.Tab
-            + "snprintf(" + buf + ", CS2SX_STRBUF_SIZE, \"" + fmt + "\""
+            + buf + " = CS2SX_Format(" + buf + ", \"" + fmt + "\""
             + (fmtArgs.Count > 0 ? ", " + string.Join(", ", fmtArgs) : "") + ");");
         return buf;
     }

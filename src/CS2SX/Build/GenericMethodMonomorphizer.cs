@@ -253,7 +253,7 @@ public static class GenericMethodMonomorphizer
     /// virtual/abstract/override ones (see BuildGroups). Interface and abstract
     /// methods have no body.
     private static bool IsSupported(MethodDeclarationSyntax m) =>
-        m.Parent is ClassDeclarationSyntax { TypeParameterList: null }
+        m.Parent is ClassDeclarationSyntax   // (also generic classes: the class is expanded later)
                  or StructDeclarationSyntax { TypeParameterList: null }
                  or InterfaceDeclarationSyntax { TypeParameterList: null }
         && (m.Body != null || m.ExpressionBody != null
@@ -292,7 +292,8 @@ public static class GenericMethodMonomorphizer
 
     private static bool ContainsTypeParameter(ITypeSymbol t) => t switch
     {
-        ITypeParameterSymbol => true,
+        // A type parameter of the enclosing generic class is just a name there.
+        ITypeParameterSymbol tp => tp.TypeParameterKind == TypeParameterKind.Method,
         IArrayTypeSymbol a => ContainsTypeParameter(a.ElementType),
         INamedTypeSymbol n => n.TypeArguments.Any(ContainsTypeParameter),
         _ => false,

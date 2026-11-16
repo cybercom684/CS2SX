@@ -55,6 +55,12 @@ public sealed class ExpressionWriter : IExpressionWriter
         return ApplyNullableConversion(expr, code);
     }
 
+    private IMethodSymbol? InvokedMethod(InvocationExpressionSyntax inv)
+    {
+        try { return _ctx.SemanticModel?.GetSymbolInfo(inv).Symbol as IMethodSymbol; }
+        catch { return null; }
+    }
+
     /// True where an expression's value ends up in a variable, field, return value,
     /// collection or a parameter of a method of the project.
     private bool IsStoringContext(ExpressionSyntax expr)
@@ -940,7 +946,7 @@ public sealed class ExpressionWriter : IExpressionWriter
             if (op == "+=")
             {
                 var buf = _ctx.NextStringBuf();
-                _ctx.Out.WriteLine(_ctx.Tab + "snprintf(" + buf + ", CS2SX_STRBUF_SIZE, \"%s%s\", "
+                _ctx.Out.WriteLine(_ctx.Tab + buf + " = CS2SX_Format(" + buf + ", \"%s%s\", "
                     + target + " ? " + target + " : \"\", " + right + " ? " + right + " : \"\");");
                 value = buf;
             }
@@ -983,7 +989,7 @@ public sealed class ExpressionWriter : IExpressionWriter
             var leftStr = Write(assign.Left);
             var buf = _ctx.NextStringBuf();
             _ctx.Out.WriteLine(_ctx.Tab
-                + "snprintf(" + buf + ", CS2SX_STRBUF_SIZE, \"%s%s\", "
+                + buf + " = CS2SX_Format(" + buf + ", \"%s%s\", "
                 + leftStr + " ? " + leftStr + " : \"\", "
                 + right + " ? " + right + " : \"\");");
             return leftStr + " = " + buf;
@@ -1297,7 +1303,7 @@ public sealed class ExpressionWriter : IExpressionWriter
             var allArgs = new List<string> { "((" + baseType + "*)self)" };
             allArgs.AddRange(callArgs);
             var cName = CSharpToC.BuildCMethodName(baseType, methodName,
-                inv.ArgumentList.Arguments.Count, _ctx.OverloadedMethods);
+                inv.ArgumentList.Arguments.Count, _ctx.OverloadedMethods, InvokedMethod(inv));
             return cName + "(" + string.Join(", ", allArgs) + ")";
         }
 
@@ -1486,7 +1492,7 @@ public sealed class ExpressionWriter : IExpressionWriter
         var allArgs = new List<string> { recv };
         allArgs.AddRange(callArgs);
         var cName = CSharpToC.BuildCMethodName(methodOwner, methodName,
-            inv.ArgumentList.Arguments.Count, _ctx.OverloadedMethods);
+            inv.ArgumentList.Arguments.Count, _ctx.OverloadedMethods, InvokedMethod(inv));
         return cName + "(" + string.Join(", ", allArgs) + ")";
     }
 

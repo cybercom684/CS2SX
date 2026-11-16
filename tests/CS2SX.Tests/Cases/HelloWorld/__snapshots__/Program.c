@@ -27,7 +27,7 @@ void HelloWorldApp_OnFrame(HelloWorldApp* self)
     {
         CS2SX_LINE(15);
         char* _sb0 = _cs2sx_next_buf();
-        snprintf(_sb0, CS2SX_STRBUF_SIZE, "seconds: %d", (self->f_frames / 60));
+        _sb0 = CS2SX_Format(_sb0, "seconds: %d", (self->f_frames / 60));
         const char* _ps_0 = _sb0;
         printf("%s\n", _ps_0 ? _ps_0 : "");
     }

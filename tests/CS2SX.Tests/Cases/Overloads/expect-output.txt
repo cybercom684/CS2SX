@@ -1,0 +1,13 @@
+int 7
+float 1.5
+string x
+shape shape
+array 3
+list 2
+two 5
+mixed 2b
+none
+int 1, string s, none 12
+8 abab
+9 2.25
+zz

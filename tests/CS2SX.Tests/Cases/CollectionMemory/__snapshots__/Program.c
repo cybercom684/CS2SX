@@ -157,7 +157,7 @@ void CollectionMemoryApp_OnFrame(CollectionMemoryApp* self)
     Dict_str_int* tmp = Dict_str_int_New();
     CS2SX_LINE(37);
     char* _sb0 = _cs2sx_next_buf();
-    snprintf(_sb0, CS2SX_STRBUF_SIZE, "a%d", self->f_frame);
+    _sb0 = CS2SX_Format(_sb0, "a%d", self->f_frame);
     Dict_str_int_Set(tmp, _sb0, CS2SX_NN(top)->count);
     CS2SX_LINE(39);
     switch (self->f_frame)
@@ -195,7 +195,7 @@ void CollectionMemoryApp_OnFrame(CollectionMemoryApp* self)
         case 3:
             CS2SX_LINE(52);
             char* _sb1 = _cs2sx_next_buf();
-            snprintf(_sb1, CS2SX_STRBUF_SIZE, "kept %d %s %d %d %d %d %s %d", CS2SX_NN(CS2SX_NN(self->f_inv)->f_Items)->count, List_str_Get(CS2SX_NN(self->f_inv)->f_Items, 1), Func_int_Invoke(self->f_counter), List_int_Get(CS2SX_AT(self->f_grid, 0), 0), CS2SX_NN(CS2SX_NN(self->f_bag)->f_Values)->count, Dict_str_int_Get(CS2SX_NN(self->f_bag)->f_Counts, "k"), StringBuilder_ToString(CS2SX_NN(self->f_bag)->f_Log), CS2SX_NN(top)->count);
+            _sb1 = CS2SX_Format(_sb1, "kept %d %s %d %d %d %d %s %d", CS2SX_NN(CS2SX_NN(self->f_inv)->f_Items)->count, List_str_Get(CS2SX_NN(self->f_inv)->f_Items, 1), Func_int_Invoke(self->f_counter), List_int_Get(CS2SX_AT(self->f_grid, 0), 0), CS2SX_NN(CS2SX_NN(self->f_bag)->f_Values)->count, Dict_str_int_Get(CS2SX_NN(self->f_bag)->f_Counts, "k"), StringBuilder_ToString(CS2SX_NN(self->f_bag)->f_Log), CS2SX_NN(top)->count);
             const char* _ps_12 = _sb1;
             printf("%s\n", _ps_12 ? _ps_12 : "");
             CS2SX_LINE(55);
@@ -210,7 +210,7 @@ void CollectionMemoryApp_OnFrame(CollectionMemoryApp* self)
             long long grown = CS2SX_HeapUsed() - self->f_base;
             CS2SX_LINE(61);
             char* _sb2 = _cs2sx_next_buf();
-            snprintf(_sb2, CS2SX_STRBUF_SIZE, "stable %s", CS2SX_BoolStr((grown < 4096)));
+            _sb2 = CS2SX_Format(_sb2, "stable %s", CS2SX_BoolStr((grown < 4096)));
             const char* _ps_13 = _sb2;
             printf("%s\n", _ps_13 ? _ps_13 : "");
             CS2SX_LINE(62);

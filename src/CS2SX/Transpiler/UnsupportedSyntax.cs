@@ -51,9 +51,9 @@ internal static class UnsupportedSyntax
             "Dieser with-Ausdruck wird nicht unterstützt — with geht bei Records mit Positionsparametern auf einer einfachen Variable/einem Feld und nur mit diesen Parametern; sonst eine Kopie mit new anlegen: new Punkt(10, p.Y).",
 
         // Plain generic methods are specialised beforehand (GenericMethodMonomorphizer);
-        // what reaches this point is in a generic class or interface.
+        // what reaches this point is in a generic struct or interface.
         MethodDeclarationSyntax { TypeParameterList: not null } m =>
-            $"Diese generische Methode ({m.Identifier.Text}<…>) wird nicht unterstützt — generische Methoden in generischen Klassen/Interfaces gehen nicht; die Methode in eine nicht-generische Klasse verschieben.",
+            $"Diese generische Methode ({m.Identifier.Text}<…>) wird nicht unterstützt — generische Methoden in generischen Structs/Interfaces gehen nicht; die Methode in eine Klasse verschieben.",
 
         StructDeclarationSyntax { TypeParameterList: not null } s =>
             $"Dieser generische Struct ({s.Identifier.Text}<…>) wird nicht unterstützt — generische Structs innerhalb generischer Typen gehen nicht.",

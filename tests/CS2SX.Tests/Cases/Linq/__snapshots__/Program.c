@@ -160,7 +160,7 @@ void LinqApp_OnInit(LinqApp* self)
     List_int* sorted = _tol_13;
     CS2SX_LINE(20);
     char* _sb0 = _cs2sx_next_buf();
-    snprintf(_sb0, CS2SX_STRBUF_SIZE, "%d %d %d", CS2SX_NN(evens)->count, List_int_Get(doubled, 0), List_int_Get(sorted, 0));
+    _sb0 = CS2SX_Format(_sb0, "%d %d %d", CS2SX_NN(evens)->count, List_int_Get(doubled, 0), List_int_Get(sorted, 0));
     const char* _ps_15 = _sb0;
     printf("%s\n", _ps_15 ? _ps_15 : "");
     CS2SX_LINE(21);
@@ -174,7 +174,7 @@ void LinqApp_OnInit(LinqApp* self)
     for (int _i_20 = 1; _i_20 < values->count; _i_20++)
       if (List_int_Get(values, _i_20) < _minv_21) _minv_21 = List_int_Get(values, _i_20);
     char* _sb1 = _cs2sx_next_buf();
-    snprintf(_sb1, CS2SX_STRBUF_SIZE, "%d %d %d", _sum_17, (values->count > 0 ? _maxv_19 : (CS2SX_ThrowNoElements(), _maxv_19)), (values->count > 0 ? _minv_21 : (CS2SX_ThrowNoElements(), _minv_21)));
+    _sb1 = CS2SX_Format(_sb1, "%d %d %d", _sum_17, (values->count > 0 ? _maxv_19 : (CS2SX_ThrowNoElements(), _maxv_19)), (values->count > 0 ? _minv_21 : (CS2SX_ThrowNoElements(), _minv_21)));
     const char* _ps_22 = _sb1;
     printf("%s\n", _ps_22 ? _ps_22 : "");
     CS2SX_LINE(22);
@@ -185,7 +185,7 @@ void LinqApp_OnInit(LinqApp* self)
     for (int _i_25 = 0; _i_25 < values->count; _i_25++)
       if (!_lambda_4(List_int_Get(values, _i_25))) { _all_26 = 0; break; }
     char* _sb2 = _cs2sx_next_buf();
-    snprintf(_sb2, CS2SX_STRBUF_SIZE, "%s %s", CS2SX_BoolStr(_any_24), CS2SX_BoolStr(_all_26));
+    _sb2 = CS2SX_Format(_sb2, "%s %s", CS2SX_BoolStr(_any_24), CS2SX_BoolStr(_all_26));
     const char* _ps_27 = _sb2;
     printf("%s\n", _ps_27 ? _ps_27 : "");
     CS2SX_LINE(23);
@@ -199,7 +199,7 @@ void LinqApp_OnInit(LinqApp* self)
     for (int _i_31 = 0; _i_31 < values->count; _i_31++)
       if (_lambda_6(List_int_Get(values, _i_31))) _cnt_32++;
     char* _sb3 = _cs2sx_next_buf();
-    snprintf(_sb3, CS2SX_STRBUF_SIZE, "%d %d", (_found_30 ? _first_29 : (CS2SX_ThrowInvalidOp("Sequence contains no matching element"), _first_29)), _cnt_32);
+    _sb3 = CS2SX_Format(_sb3, "%d %d", (_found_30 ? _first_29 : (CS2SX_ThrowInvalidOp("Sequence contains no matching element"), _first_29)), _cnt_32);
     const char* _ps_33 = _sb3;
     printf("%s\n", _ps_33 ? _ps_33 : "");
     CS2SX_LINE(25);

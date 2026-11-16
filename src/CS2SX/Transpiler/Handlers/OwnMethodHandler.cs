@@ -1,4 +1,4 @@
-﻿// ============================================================================
+// ============================================================================
 // Transpiler/Handlers/OwnMethodHandler.cs
 //
 // PHASE 1 FIX: Konflikt zwischen StaticClassHandler und OwnMethodHandler
@@ -103,7 +103,7 @@ public sealed class OwnMethodHandler : InvocationHandlerBase
                     var isStatic = method.IsStatic;
                     var callArgs = BuildArgsWithRefOut(inv, method, args, ctx, writeExpr);
                     var cName = CSharpToC.BuildCMethodName(ctx.CurrentClass, calleeStr,
-                        method.Parameters.Length, ctx.OverloadedMethods);
+                        method.Parameters.Length, ctx.OverloadedMethods, method);
 
                     if (isStatic)
                         result = $"{cName}({string.Join(", ", callArgs)})";
@@ -123,7 +123,7 @@ public sealed class OwnMethodHandler : InvocationHandlerBase
                     var callArgs = BuildArgsWithRefOut(inv, inheritedMethod, args, ctx, writeExpr);
                     var selfExpr = $"({baseType}*)self";
                     var cName = CSharpToC.BuildCMethodName(baseType, calleeStr,
-                        inheritedMethod.Parameters.Length, ctx.OverloadedMethods);
+                        inheritedMethod.Parameters.Length, ctx.OverloadedMethods, inheritedMethod);
                     result = callArgs.Count > 0
                         ? $"{cName}({selfExpr}, {string.Join(", ", callArgs)})"
                         : $"{cName}({selfExpr})";

@@ -204,6 +204,9 @@ static inline void cs2sx_frame_begin(void)
 }
 
 char* _cs2sx_next_buf(void);
+/// snprintf into buf without the 1023-character limit: returns buf, or a larger
+/// block (valid until the next frame) when the text does not fit.
+char* CS2SX_Format(char* buf, const char* fmt, ...) __attribute__((format(printf, 2, 3)));
 
 // FIX: Heap-String für lange Lebensdauer (Liste von Strings etc.)
 // Caller ist verantwortlich für free(), wird aber in der Praxis durch

@@ -296,7 +296,7 @@ const char* LanguagePhase4App_Classify(const char* s)
             CS2SX_LINE(62);
             {
                 char* _sb0 = _cs2sx_next_buf();
-                snprintf(_sb0, CS2SX_STRBUF_SIZE, "ok %d", LanguagePhase4App_Parse(s));
+                _sb0 = CS2SX_Format(_sb0, "ok %d", LanguagePhase4App_Parse(s));
                 __auto_type _ret_1 = _sb0;
                 CS2SX_ExPop(&_exf_0);
                 return _ret_1;
@@ -311,7 +311,7 @@ const char* LanguagePhase4App_Classify(const char* s)
                 ParseError* pe = (ParseError*)_exf_0_ex;
                 CS2SX_LINE(66);
                 char* _sb1 = _cs2sx_next_buf();
-                snprintf(_sb1, CS2SX_STRBUF_SIZE, "parse@%d %s", CS2SX_NN(pe)->f_Position, ((Exception*)(pe))->f_Message);
+                _sb1 = CS2SX_Format(_sb1, "parse@%d %s", CS2SX_NN(pe)->f_Position, ((Exception*)(pe))->f_Message);
                 return _sb1;
             }
             else if (CS2SX_Exc_Is(_exf_0_ex, &CS2SX_TI_ArgumentException))
@@ -319,7 +319,7 @@ const char* LanguagePhase4App_Classify(const char* s)
                 ArgumentException* ae = (ArgumentException*)_exf_0_ex;
                 CS2SX_LINE(70);
                 char* _sb2 = _cs2sx_next_buf();
-                snprintf(_sb2, CS2SX_STRBUF_SIZE, "arg %s", ((Exception*)(ae))->f_Message);
+                _sb2 = CS2SX_Format(_sb2, "arg %s", ((Exception*)(ae))->f_Message);
                 return _sb2;
             }
             else if (1)
@@ -327,7 +327,7 @@ const char* LanguagePhase4App_Classify(const char* s)
                 Exception* e = (Exception*)_exf_0_ex;
                 CS2SX_LINE(74);
                 char* _sb3 = _cs2sx_next_buf();
-                snprintf(_sb3, CS2SX_STRBUF_SIZE, "other %s", ((Exception*)(e))->f_Message);
+                _sb3 = CS2SX_Format(_sb3, "other %s", ((Exception*)(e))->f_Message);
                 return _sb3;
             }
         }
@@ -374,7 +374,7 @@ const char* LanguagePhase4App_Rethrow()
                 Exception* e = (Exception*)_exf_2_ex;
                 CS2SX_LINE(85);
                 char* _sb4 = _cs2sx_next_buf();
-                snprintf(_sb4, CS2SX_STRBUF_SIZE, "rethrown %s", ((Exception*)(e))->f_Message);
+                _sb4 = CS2SX_Format(_sb4, "rethrown %s", ((Exception*)(e))->f_Message);
                 return _sb4;
             }
         }
@@ -390,7 +390,7 @@ void LanguagePhase4App_OnChangedA(LanguagePhase4App* self, int v)
     self->f_sum += v;
     CS2SX_LINE(89);
     char* _sb5 = _cs2sx_next_buf();
-    snprintf(_sb5, CS2SX_STRBUF_SIZE, "A %d", v);
+    _sb5 = CS2SX_Format(_sb5, "A %d", v);
     const char* _ps_4 = _sb5;
     printf("%s\n", _ps_4 ? _ps_4 : "");
 }
@@ -402,7 +402,7 @@ void LanguagePhase4App_OnChangedB(LanguagePhase4App* self, int v)
     self->f_sum += 100;
     CS2SX_LINE(90);
     char* _sb6 = _cs2sx_next_buf();
-    snprintf(_sb6, CS2SX_STRBUF_SIZE, "B %d", v);
+    _sb6 = CS2SX_Format(_sb6, "B %d", v);
     const char* _ps_5 = _sb6;
     printf("%s\n", _ps_5 ? _ps_5 : "");
 }
@@ -412,7 +412,7 @@ static void _lambda_0(void* _env, const char* s)
     CS2SX_TRACE("LanguagePhase4App.<lambda>", "Program.cs");
     (void)_env;
     char* _sb11 = _cs2sx_next_buf();
-    snprintf(_sb11, CS2SX_STRBUF_SIZE, "1:%s", s);
+    _sb11 = CS2SX_Format(_sb11, "1:%s", s);
     const char* _ps_15 = _sb11;
     printf("%s\n", _ps_15 ? _ps_15 : "");
 }
@@ -424,7 +424,7 @@ static void _lambda_1(void* _env, const char* s)
     CS2SX_TRACE("LanguagePhase4App.<lambda>", "Program.cs");
     (void)_env;
     char* _sb12 = _cs2sx_next_buf();
-    snprintf(_sb12, CS2SX_STRBUF_SIZE, "2:%s", s);
+    _sb12 = CS2SX_Format(_sb12, "2:%s", s);
     const char* _ps_16 = _sb12;
     printf("%s\n", _ps_16 ? _ps_16 : "");
 }
@@ -456,17 +456,17 @@ void LanguagePhase4App_OnInit(LanguagePhase4App* self)
     Point3* p3 = Point3_New_1(7);
     CS2SX_LINE(98);
     char* _sb7 = _cs2sx_next_buf();
-    snprintf(_sb7, CS2SX_STRBUF_SIZE, "%d %d %s", p0->f_X, p0->f_Y, p0->f_Tag);
+    _sb7 = CS2SX_Format(_sb7, "%d %d %s", p0->f_X, p0->f_Y, p0->f_Tag);
     const char* _ps_6 = _sb7;
     printf("%s\n", _ps_6 ? _ps_6 : "");
     CS2SX_LINE(99);
     char* _sb8 = _cs2sx_next_buf();
-    snprintf(_sb8, CS2SX_STRBUF_SIZE, "%d %d %s", p1->f_X, p1->f_Y, p1->f_Tag);
+    _sb8 = CS2SX_Format(_sb8, "%d %d %s", p1->f_X, p1->f_Y, p1->f_Tag);
     const char* _ps_7 = _sb8;
     printf("%s\n", _ps_7 ? _ps_7 : "");
     CS2SX_LINE(100);
     char* _sb9 = _cs2sx_next_buf();
-    snprintf(_sb9, CS2SX_STRBUF_SIZE, "%d %d %d %s", p3->base.f_X, p3->base.f_Y, p3->f_Z, p3->base.f_Tag);
+    _sb9 = CS2SX_Format(_sb9, "%d %d %d %s", p3->base.f_X, p3->base.f_Y, p3->f_Z, p3->base.f_Tag);
     const char* _ps_8 = _sb9;
     printf("%s\n", _ps_8 ? _ps_8 : "");
     CS2SX_LINE(103);
@@ -498,7 +498,7 @@ void LanguagePhase4App_OnInit(LanguagePhase4App* self)
     Counter_Add(c, 2);
     CS2SX_LINE(116);
     char* _sb10 = _cs2sx_next_buf();
-    snprintf(_sb10, CS2SX_STRBUF_SIZE, "sum %d", self->f_sum);
+    _sb10 = CS2SX_Format(_sb10, "sum %d", self->f_sum);
     const char* _ps_14 = _sb10;
     printf("%s\n", _ps_14 ? _ps_14 : "");
     CS2SX_LINE(118);
@@ -516,7 +516,7 @@ void LanguagePhase4App_OnInit(LanguagePhase4App* self)
     {
         CS2SX_LINE(125);
         char* _sb13 = _cs2sx_next_buf();
-        snprintf(_sb13, CS2SX_STRBUF_SIZE, "enums %d%d", ((int)Mode_Slow), ((int)Level_High));
+        _sb13 = CS2SX_Format(_sb13, "enums %d%d", ((int)Mode_Slow), ((int)Level_High));
         const char* _ps_17 = _sb13;
         printf("%s\n", _ps_17 ? _ps_17 : "");
     }
@@ -539,14 +539,14 @@ void LanguagePhase4App_OnInit(LanguagePhase4App* self)
     {
         Func_int_t f = List_Func_int_t_Get(fs, _i_f);
         char* _sb14 = _cs2sx_next_buf();
-        snprintf(_sb14, CS2SX_STRBUF_SIZE, "%d,", Func_int_Invoke(f));
+        _sb14 = CS2SX_Format(_sb14, "%d,", Func_int_Invoke(f));
         char* _sb15 = _cs2sx_next_buf();
-        snprintf(_sb15, CS2SX_STRBUF_SIZE, "%s%s", r ? r : "", _sb14 ? _sb14 : "");
+        _sb15 = CS2SX_Format(_sb15, "%s%s", r ? r : "", _sb14 ? _sb14 : "");
         r = _sb15;
     }
     CS2SX_LINE(136);
     char* _sb16 = _cs2sx_next_buf();
-    snprintf(_sb16, CS2SX_STRBUF_SIZE, "closures %s", r);
+    _sb16 = CS2SX_Format(_sb16, "closures %s", r);
     const char* _ps_18 = _sb16;
     printf("%s\n", _ps_18 ? _ps_18 : "");
 }

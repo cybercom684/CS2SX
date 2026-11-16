@@ -87,7 +87,7 @@ public sealed class StringBuilderHandler : InvocationHandlerBase
             if (formatArgs.Count > 0)
             {
                 ctx.Out.WriteLine(ctx.Tab
-                    + $"snprintf({buf}, CS2SX_STRBUF_SIZE, \"{fmt}\"" + (fmtArgs.Count > 0 ? ", " + string.Join(", ", fmtArgs) : "") + ");");
+                    + $"{buf} = CS2SX_Format({buf}, \"{fmt}\"" + (fmtArgs.Count > 0 ? ", " + string.Join(", ", fmtArgs) : "") + ");");
             }
             return "StringBuilder_AppendStr(" + sbExpr + ", " + buf + ")";
         }

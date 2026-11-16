@@ -123,6 +123,38 @@ char* _cs2sx_next_buf(void)
     return _cs2sx_arena + pos;
 }
 
+// Concatenation and interpolation ("a" + b, $"{x}"): formats into buf (a
+// _cs2sx_next_buf buffer); a longer result gets a block of its own size — from
+// the frame arena, or from the heap until the next frame when it is very long.
+char* CS2SX_Format(char* buf, const char* fmt, ...)
+{
+    va_list args, again;
+    va_start(args, fmt);
+    va_copy(again, args);
+    int n = vsnprintf(buf, CS2SX_STRBUF_SIZE, fmt, args);
+    va_end(args);
+    if (n >= CS2SX_STRBUF_SIZE)
+    {
+        size_t size = (size_t)n + 1;
+        char* big = NULL;
+        if (size <= CS2SX_ARENA_SIZE / 8)
+        {
+            size_t pos = (_cs2sx_arena_pos + 7u) & ~(size_t)7u;
+            if (pos + size > CS2SX_ARENA_SIZE) pos = 0;
+            _cs2sx_arena_pos = pos + size;
+            big = _cs2sx_arena + pos;
+        }
+        else
+        {
+            big = (char*)malloc(size);
+            CS2SX_ReleaseLater(big, free);
+        }
+        if (big) { vsnprintf(big, size, fmt, again); buf = big; }
+    }
+    va_end(again);
+    return buf;
+}
+
 // ── Owned strings of fields ─────────────────────────────────────────────────
 // A string field holds its own heap copy, marked by a header in front of the
 // characters, so overwriting the field can free the old value — and leave alone

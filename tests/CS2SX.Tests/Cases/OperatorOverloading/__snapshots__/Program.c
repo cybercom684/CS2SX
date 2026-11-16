@@ -55,7 +55,7 @@ void OperatorOverloadingApp_OnFrame(OperatorOverloadingApp* self)
     Vec2 d = Vec2_op_sub(self->f_pos, Vec2_New(1, 1));
     CS2SX_LINE(24);
     char* _sb0 = _cs2sx_next_buf();
-    snprintf(_sb0, CS2SX_STRBUF_SIZE, "%s,%s dot=%s", Float_ToString(self->f_pos.X), Float_ToString(self->f_pos.Y), Float_ToString(Vec2_Dot(&d, self->f_vel)));
+    _sb0 = CS2SX_Format(_sb0, "%s,%s dot=%s", Float_ToString(self->f_pos.X), Float_ToString(self->f_pos.Y), Float_ToString(Vec2_Dot(&d, self->f_vel)));
     const char* _ps_0 = _sb0;
     printf("%s\n", _ps_0 ? _ps_0 : "");
 }

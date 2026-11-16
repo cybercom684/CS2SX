@@ -1,4 +1,4 @@
-﻿using CS2SX.Core;
+using CS2SX.Core;
 using CS2SX.Transpiler.Writers;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
@@ -70,7 +70,7 @@ public static class StringConcatFixer
 
         var buf = ctx.NextStringBuf();
         ctx.Out.WriteLine(ctx.Tab
-            + "snprintf(" + buf + ", CS2SX_STRBUF_SIZE, \""
+            + buf + " = CS2SX_Format(" + buf + ", \""
             + fmt + "\", " + string.Join(", ", args) + ");");
         return buf;
     }

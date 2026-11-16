@@ -34,7 +34,7 @@ const char* Shape_Describe(Shape* self)
     CS2SX_TRACE("Shape.Describe", "Program.cs");
     CS2SX_LINE(16);
     char* _sb0 = _cs2sx_next_buf();
-    snprintf(_sb0, CS2SX_STRBUF_SIZE, "%s with area %s", self->f_Name, Float_ToString(self->vtable->Area(self)));
+    _sb0 = CS2SX_Format(_sb0, "%s with area %s", self->f_Name, Float_ToString(self->vtable->Area(self)));
     return _sb0;
 }
 
@@ -160,7 +160,7 @@ const char* Square_Describe(Square* self)
     CS2SX_TRACE("Square.Describe", "Program.cs");
     CS2SX_LINE(43);
     char* _sb0 = _cs2sx_next_buf();
-    snprintf(_sb0, CS2SX_STRBUF_SIZE, "[%s]", Shape_Describe(((Shape*)self)));
+    _sb0 = CS2SX_Format(_sb0, "[%s]", Shape_Describe(((Shape*)self)));
     return _sb0;
 }
 
@@ -286,7 +286,7 @@ void ClassesInheritanceApp_OnInit(ClassesInheritanceApp* self)
     printf("%s\n", _ps_2 ? _ps_2 : "");
     CS2SX_LINE(69);
     char* _sb0 = _cs2sx_next_buf();
-    snprintf(_sb0, CS2SX_STRBUF_SIZE, "created: %d", Shape_Created);
+    _sb0 = CS2SX_Format(_sb0, "created: %d", Shape_Created);
     const char* _ps_3 = _sb0;
     printf("%s\n", _ps_3 ? _ps_3 : "");
 }

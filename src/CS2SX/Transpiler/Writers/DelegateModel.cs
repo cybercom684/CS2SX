@@ -78,7 +78,7 @@ internal static class DelegateModel
     {
         var owner = method.ContainingType?.Name ?? ctx.CurrentClass;
         var cName = CSharpToC.BuildCMethodName(owner, method.Name, method.Parameters.Length,
-            ctx.OverloadedMethods);
+            ctx.OverloadedMethods, method);
 
         if (!method.IsStatic && !method.IsExtensionMethod)
         {

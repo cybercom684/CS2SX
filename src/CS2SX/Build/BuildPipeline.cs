@@ -1,4 +1,4 @@
-﻿// Datei: Build/BuildPipeline.cs
+// Datei: Build/BuildPipeline.cs
 //
 // FIXES in dieser Version:
 //   FIX-1: catch-Block nutzt renderer.MarkFirstRunningAsFailed() statt einer
@@ -897,7 +897,10 @@ public sealed class BuildPipeline
                     foreach (var g in cls.Members.OfType<MethodDeclarationSyntax>()
                                  .GroupBy(m => m.Identifier.Text)
                                  .Where(g => g.Count() > 1))
+                    {
                         set.Add(g.Key);
+                        foreach (var key in CS2SX.Transpiler.CSharpToC.SameArityKeys(g)) set.Add(key);
+                    }
                     if (set.Count > 0)
                         result[className] = set;
                 }
@@ -1017,17 +1020,41 @@ public sealed class BuildPipeline
         //   Func<int, bool> → typedef CS2SX_Delegate* Func_int_int_t;
         //                     static inline int Func_int_int_Invoke(Func_int_int_t d, int a0)
         var emittedDelegateTypedefs = new HashSet<string>(StringComparer.Ordinal) { "Action_t" };
-        foreach (var csFile in sourceFiles)
-        {
-            var source = System.IO.File.ReadAllText(csFile);
-            var tree = Microsoft.CodeAnalysis.CSharp.CSharpSyntaxTree.ParseText(source);
-            foreach (var typeNode in tree.GetRoot()
-                .DescendantNodes()
+        var delegateTrees = sourceFiles
+            .Select(f => Microsoft.CodeAnalysis.CSharp.CSharpSyntaxTree.ParseText(System.IO.File.ReadAllText(f)).GetRoot())
+            .ToList();
+        // Type arguments every generic class is used with (Box<int> → Box: ["int"]):
+        // a delegate type inside the class that mentions T exists once per use.
+        var genericUses = delegateTrees
+            .SelectMany(r => r.DescendantNodes().OfType<Microsoft.CodeAnalysis.CSharp.Syntax.GenericNameSyntax>())
+            .GroupBy(g => g.Identifier.Text)
+            .ToDictionary(g => g.Key, g => g.Select(u => u.TypeArgumentList.Arguments.Select(a => a.ToString().Trim()).ToList()).ToList());
+        var delegateTypeTexts = new List<(string text, bool isFunc)>();
+        foreach (var root in delegateTrees)
+            foreach (var typeNode in root.DescendantNodes()
                 .OfType<Microsoft.CodeAnalysis.CSharp.Syntax.GenericNameSyntax>()
                 .Where(g => g.Identifier.Text is "Action" or "Func"))
             {
-                var csType = typeNode.ToString().Trim();
-                var isFunc = typeNode.Identifier.Text == "Func";
+                var text = typeNode.ToString().Trim();
+                var isFuncNode = typeNode.Identifier.Text == "Func";
+                var owner = typeNode.Ancestors().OfType<TypeDeclarationSyntax>().FirstOrDefault(d => d.TypeParameterList != null);
+                var typeParams = owner?.TypeParameterList!.Parameters.Select(tp => tp.Identifier.Text).ToList() ?? new List<string>();
+                bool mentionsParam = typeParams.Any(tp => System.Text.RegularExpressions.Regex.IsMatch(text,
+                    $@"\b{System.Text.RegularExpressions.Regex.Escape(tp)}\b"));
+                if (!mentionsParam) { delegateTypeTexts.Add((text, isFuncNode)); continue; }
+                if (!genericUses.TryGetValue(owner!.Identifier.Text, out var uses)) continue;
+                foreach (var use in uses.Where(u => u.Count == typeParams.Count))
+                {
+                    var concrete = text;
+                    for (int i = 0; i < typeParams.Count; i++)
+                        concrete = System.Text.RegularExpressions.Regex.Replace(concrete,
+                            $@"\b{System.Text.RegularExpressions.Regex.Escape(typeParams[i])}\b", use[i]);
+                    delegateTypeTexts.Add((concrete, isFuncNode));
+                }
+            }
+        {
+            foreach (var (csType, isFunc) in delegateTypeTexts)
+            {
                 var prefixLen = isFunc ? 5 : 7; // "Func<" / "Action<"
                 if (!csType.EndsWith(">")) continue;
 

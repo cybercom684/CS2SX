@@ -12,7 +12,7 @@ Für diese Konstrukte gibt es keine Übersetzung nach C. `cs2sx build` und `cs2s
 |---|---|
 | Ranges auf Arrays (`arr[1..3]`), `^` in `foreach`-Ranges, Ranges auf komplexen Ausdrücken | Schleife, `Substring`/`GetRange` auf einer Variable |
 | `with` auf Nicht-Records, auf komplexen Ausdrücken oder für Nicht-Positionsparameter | `new Punkt(1, p.Y)` |
-| generische Methoden und generische Structs innerhalb generischer Klassen/Interfaces | in eine nicht-generische Klasse verschieben |
+| generische Methoden in generischen Structs/Interfaces, generische Structs innerhalb generischer Typen | in eine Klasse verschieben (dort gehen generische Methoden, auch in `Box<T>`) |
 | lokale Variablen/Parameter namens `self` in Instanzmethoden | umbenennen (`self` heißt `this` im erzeugten C) |
 | lokale Funktionen, die lokale Variablen/Parameter der umgebenden Methode benutzen, generische lokale Funktionen | Werte als Parameter übergeben, private Methode |
 | LINQ-Abfragesyntax `from x in … select x` | `list.Where(…).Select(…)` |
@@ -49,6 +49,7 @@ Das transpilierte Programm hat keine .NET-Laufzeit und damit keinen Garbage Coll
 
 - Zyklen, die über ein Array, eine generische Klasse oder ein Lambda laufen. Dort einen der Verweise vor dem Wegwerfen auf `null` setzen.
 - Objekte, die über ein Struct, ein Tupel, ein Interface-/`object`-Wert, oder einen Methoden-Delegate (`+= obj.Methode`) gehalten wurden. Diese Stellen geben ihre Referenz nicht zurück.
+- Delegates selbst: Ein Lambda, das Variablen erfasst (`() => zaehler++`), und jede Umwandlung einer Methode in einen Delegate legen ein kleines Objekt an, das nicht wieder freigegeben wird, samt allem, was es erfasst. Solche Lambdas deshalb einmal anlegen (in `OnInit` oder einem Feld), nicht in jedem Frame. Lambdas direkt in LINQ-, `List.ForEach`- und `Sort`-Aufrufen sind nicht betroffen.
 
 `GC.GetTotalMemory(false)` liefert den belegten Heap in Bytes, praktisch, um ein Speicherleck zu finden. `GC.Collect()` sucht sofort nach Zyklen; nötig ist der Aufruf nicht.
 
@@ -70,11 +71,11 @@ Auch `e.StackTrace` liefert diese Kette.
 
 ## Strings: Länge und Lebensdauer
 
-Strings aus Verkettung, Interpolation oder `ToString()` entstehen in einem Ring aus 512 Puffern zu je 1 KB.
+Strings aus Verkettung, Interpolation oder `ToString()` entstehen in einem Zwischenspeicher, der zu jedem Frame geleert wird.
 
-- **Länge:** Ein so erzeugter String ist auf **1023 Zeichen** begrenzt, längere werden abgeschnitten. Für lange Texte `StringBuilder` verwenden.
-- **Felder:** Beim Zuweisen an ein Feld wird der String auf den Heap kopiert und bleibt gültig.
-- **Lokale Variablen und Rückgabewerte:** Diese zeigen in den Ring. Sie bleiben für etwa 512 weitere String-Operationen gültig, also für den Rest des Frames, aber nicht dauerhaft.
+- **Länge:** Verkettung (`a + b`, `+=`), Interpolation (`$"…"`) und `string.Format` sind nicht begrenzt. String-Methoden wie `Substring`, `Replace`, `ToUpper` oder `Trim` liefern höchstens **1023 Zeichen**, längere Ergebnisse werden abgeschnitten.
+- **Felder und Sammlungen:** Beim Zuweisen an ein Feld oder eine Auto-Property und beim Einfügen in `List<string>`, `Dictionary` oder ein `string[]`-Feld wird der String kopiert und bleibt gültig.
+- **Lokale Variablen und Rückgabewerte:** Diese zeigen in den Zwischenspeicher. Sie bleiben für den Rest des Frames gültig, aber nicht dauerhaft. In `async`-Methoden sind lokale Variablen Felder und überleben das `await`.
 
 ```csharp
 private string _status = "";
@@ -88,7 +89,7 @@ public override void OnFrame()
 }
 ```
 
-Problematisch ist nur, einen lokalen String in einer Sammlung oder einem Objekt aufzubewahren, ohne ihn einem `string`-Feld zuzuweisen, z. B. in einer `List<string>`, die über viele Frames wächst. Dann den String über ein Feld oder `StringBuilder` führen.
+Sehr viele oder sehr lange Strings in einem einzigen Frame (zusammen über 512 KB) überschreiben die ältesten davon. Für große Texte, die schrittweise entstehen, `StringBuilder` verwenden.
 
 ---
 

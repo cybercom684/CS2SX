@@ -8,7 +8,7 @@ public record Punkt(int X, int Y);
 
 public delegate int Op(ref int a);
 
-public class Holder<T> { public struct Box<U> { public U V; } public U Pick<U>(U a) => a; }
+public class Holder<T> { public struct Box<U> { public U V; } } public interface IPick<T> { U Pick<U>(U a); }
 
 public class Diagnostics_UnsupportedApp : SwitchApp
 {

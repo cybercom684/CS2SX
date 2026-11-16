@@ -18,7 +18,7 @@ void SwitchApisApp_OnInit(SwitchApisApp* self)
     int r = CS2SX_Ftp_Start(5000);
     CS2SX_LINE(9);
     char* _sb0 = _cs2sx_next_buf();
-    snprintf(_sb0, CS2SX_STRBUF_SIZE, "FTP %s:%d r=%d running=%s", CS2SX_Ftp_GetIP(), CS2SX_Ftp_GetPort(), r, CS2SX_BoolStr(CS2SX_Ftp_IsRunning()));
+    _sb0 = CS2SX_Format(_sb0, "FTP %s:%d r=%d running=%s", CS2SX_Ftp_GetIP(), CS2SX_Ftp_GetPort(), r, CS2SX_BoolStr(CS2SX_Ftp_IsRunning()));
     const char* _ps_0 = _sb0;
     printf("%s\n", _ps_0 ? _ps_0 : "");
     CS2SX_LINE(10);
@@ -26,7 +26,7 @@ void SwitchApisApp_OnInit(SwitchApisApp* self)
     {
         CS2SX_LINE(11);
         char* _sb1 = _cs2sx_next_buf();
-        snprintf(_sb1, CS2SX_STRBUF_SIZE, "%s %lld %d %s", CS2SX_Nsp_TitleId(), CS2SX_Nsp_TotalSize(), CS2SX_Nsp_FileCount(), CS2SX_Nsp_FileName(0));
+        _sb1 = CS2SX_Format(_sb1, "%s %lld %d %s", CS2SX_Nsp_TitleId(), CS2SX_Nsp_TotalSize(), CS2SX_Nsp_FileCount(), CS2SX_Nsp_FileName(0));
         const char* _ps_1 = _sb1;
         printf("%s\n", _ps_1 ? _ps_1 : "");
     }
@@ -35,7 +35,7 @@ void SwitchApisApp_OnInit(SwitchApisApp* self)
     {
         CS2SX_LINE(13);
         char* _sb2 = _cs2sx_next_buf();
-        snprintf(_sb2, CS2SX_STRBUF_SIZE, "%d %s %lld", CS2SX_Usb_Count(), CS2SX_Usb_Name(0), CS2SX_Usb_Capacity(0));
+        _sb2 = CS2SX_Format(_sb2, "%d %s %lld", CS2SX_Usb_Count(), CS2SX_Usb_Name(0), CS2SX_Usb_Capacity(0));
         const char* _ps_2 = _sb2;
         printf("%s\n", _ps_2 ? _ps_2 : "");
     }
@@ -84,7 +84,7 @@ void SwitchApisApp_OnFrame(SwitchApisApp* self)
     Graphics_DrawCircle(640, 360, 50, COLOR_CYAN);
     CS2SX_LINE(28);
     char* _sb3 = _cs2sx_next_buf();
-    snprintf(_sb3, CS2SX_STRBUF_SIZE, "x=%d", self->x);
+    _sb3 = CS2SX_Format(_sb3, "x=%d", self->x);
     Graphics_DrawText(20, 20, _sb3, COLOR_WHITE, 2);
     CS2SX_LINE(29);
     Graphics_EndFrame();

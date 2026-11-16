@@ -233,7 +233,7 @@ public sealed class InvocationDispatcher
                 || _ctx.SemanticModel.GetSymbolInfo(ma.Expression).Symbol is not INamedTypeSymbol
                 || inv.ArgumentList.Arguments.Any(a => !a.RefKindKeyword.IsKind(SyntaxKind.None)))
                 return null;
-            var cName = CSharpToC.BuildCMethodName(owner.Name, m.Name, m.Parameters.Length, _ctx.OverloadedMethods);
+            var cName = CSharpToC.BuildCMethodName(owner.Name, m.Name, m.Parameters.Length, _ctx.OverloadedMethods, m);
             return cName + "(" + string.Join(", ", args) + ")";
         }
         catch { return null; }

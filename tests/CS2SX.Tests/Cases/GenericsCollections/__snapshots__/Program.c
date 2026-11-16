@@ -73,7 +73,7 @@ void GenericsCollectionsApp_OnInit(GenericsCollectionsApp* self)
     List_int_RemoveValue(numbers, 4);
     CS2SX_LINE(24);
     char* _sb0 = _cs2sx_next_buf();
-    snprintf(_sb0, CS2SX_STRBUF_SIZE, "count: %d first: %d", numbers->count, List_int_Get(numbers, 0));
+    _sb0 = CS2SX_Format(_sb0, "count: %d first: %d", numbers->count, List_int_Get(numbers, 0));
     const char* _ps_0 = _sb0;
     printf("%s\n", _ps_0 ? _ps_0 : "");
     CS2SX_LINE(26);
@@ -105,7 +105,7 @@ void GenericsCollectionsApp_OnInit(GenericsCollectionsApp* self)
         const char* kv_Key = stock->keys[_i_kv];
         int kv_Value = stock->vals[_i_kv];
         char* _sb1 = _cs2sx_next_buf();
-        snprintf(_sb1, CS2SX_STRBUF_SIZE, "%s=%d", kv_Key, kv_Value);
+        _sb1 = CS2SX_Format(_sb1, "%s=%d", kv_Key, kv_Value);
         const char* _ps_3 = _sb1;
         printf("%s\n", _ps_3 ? _ps_3 : "");
     }
@@ -122,7 +122,7 @@ void GenericsCollectionsApp_OnInit(GenericsCollectionsApp* self)
     Box_int* box = Box_int_New(42);
     CS2SX_LINE(43);
     char* _sb2 = _cs2sx_next_buf();
-    snprintf(_sb2, CS2SX_STRBUF_SIZE, "box: %d", Box_int_Get(box));
+    _sb2 = CS2SX_Format(_sb2, "box: %d", Box_int_Get(box));
     const char* _ps_5 = _sb2;
     printf("%s\n", _ps_5 ? _ps_5 : "");
 }

@@ -371,7 +371,7 @@ static void _lambda_10(void* _env)
     struct _cap_10* _c = (struct _cap_10*)_env;
     Node* missing = _c->missing;
     CS2SX_LINE(50);
-    const char* t = (missing != NULL ? ({ char* _sb1 = _cs2sx_next_buf(); snprintf(_sb1, CS2SX_STRBUF_SIZE, "Name: %s", CS2SX_NN(missing)->f_Name); _sb1; }) : "-");
+    const char* t = (missing != NULL ? ({ char* _sb1 = _cs2sx_next_buf(); _sb1 = CS2SX_Format(_sb1, "Name: %s", CS2SX_NN(missing)->f_Name); _sb1; }) : "-");
 }
 
 static void _envdtor_10(void* _e)
@@ -456,7 +456,7 @@ void NullChecksApp_OnInit(NullChecksApp* self)
     IShape* real = Square_as_IShape(CS2SX_RETAIN(Square, Square_New()));
     CS2SX_LINE(46);
     char* _sb0 = _cs2sx_next_buf();
-    snprintf(_sb0, CS2SX_STRBUF_SIZE, "ok %d %s %d %s", Node_Get(n), n->vtable->Kind(n), ({ __auto_type _cs2sx_r = real; _cs2sx_r->vtable->Area(_cs2sx_r->obj); }), (((missing != NULL ? missing->f_Name : NULL) ?: "none")));
+    _sb0 = CS2SX_Format(_sb0, "ok %d %s %d %s", Node_Get(n), n->vtable->Kind(n), ({ __auto_type _cs2sx_r = real; _cs2sx_r->vtable->Area(_cs2sx_r->obj); }), (((missing != NULL ? missing->f_Name : NULL) ?: "none")));
     const char* _ps_13 = _sb0;
     printf("%s\n", _ps_13 ? _ps_13 : "");
     CS2SX_LINE(50);

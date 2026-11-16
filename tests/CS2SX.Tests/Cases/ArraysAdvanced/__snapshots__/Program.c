@@ -107,7 +107,7 @@ void ArraysAdvancedApp_OnInit(ArraysAdvancedApp* self)
     int* twice = Board_Doubled(b);
     CS2SX_LINE(34);
     char* _sb0 = _cs2sx_next_buf();
-    snprintf(_sb0, CS2SX_STRBUF_SIZE, "%d %d", Board_Sum(twice), CS2SX_ArrLen(CS2SX_NN(twice)));
+    _sb0 = CS2SX_Format(_sb0, "%d %d", Board_Sum(twice), CS2SX_ArrLen(CS2SX_NN(twice)));
     const char* _ps_0 = _sb0;
     printf("%s\n", _ps_0 ? _ps_0 : "");
     CS2SX_LINE(36);
@@ -115,7 +115,7 @@ void ArraysAdvancedApp_OnInit(ArraysAdvancedApp* self)
     CS2SX_LINE(37);
     CS2SX_ARR_LOCAL(int, _pa_1, 2, 7, 8);
     char* _sb1 = _cs2sx_next_buf();
-    snprintf(_sb1, CS2SX_STRBUF_SIZE, "%d %d", Board_Count(nums), Board_Count(_pa_1));
+    _sb1 = CS2SX_Format(_sb1, "%d %d", Board_Count(nums), Board_Count(_pa_1));
     const char* _ps_2 = _sb1;
     printf("%s\n", _ps_2 ? _ps_2 : "");
     CS2SX_LINE(39);
@@ -126,7 +126,7 @@ void ArraysAdvancedApp_OnInit(ArraysAdvancedApp* self)
     CS2SX_AT(grow, 3) = 9;
     CS2SX_LINE(42);
     char* _sb2 = _cs2sx_next_buf();
-    snprintf(_sb2, CS2SX_STRBUF_SIZE, "%d %d", CS2SX_ArrLen(CS2SX_NN(grow)), CS2SX_AT(grow, 3));
+    _sb2 = CS2SX_Format(_sb2, "%d %d", CS2SX_ArrLen(CS2SX_NN(grow)), CS2SX_AT(grow, 3));
     const char* _ps_3 = _sb2;
     printf("%s\n", _ps_3 ? _ps_3 : "");
     CS2SX_LINE(44);
@@ -147,7 +147,7 @@ void ArraysAdvancedApp_OnInit(ArraysAdvancedApp* self)
     const char** parts = CS2SX_StrArr_FromList(String_Split("a;b", ";"));
     CS2SX_LINE(52);
     char* _sb3 = _cs2sx_next_buf();
-    snprintf(_sb3, CS2SX_STRBUF_SIZE, "%s %d", String_JoinArr("+", parts), CS2SX_ArrLen(CS2SX_NN(parts)));
+    _sb3 = CS2SX_Format(_sb3, "%s %d", String_JoinArr("+", parts), CS2SX_ArrLen(CS2SX_NN(parts)));
     const char* _ps_6 = _sb3;
     printf("%s\n", _ps_6 ? _ps_6 : "");
 }

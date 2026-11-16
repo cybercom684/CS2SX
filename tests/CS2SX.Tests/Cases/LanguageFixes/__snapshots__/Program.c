@@ -279,7 +279,7 @@ void LanguageFixesApp_OnInit(LanguageFixesApp* self)
     CS2SX_TRACE("LanguageFixesApp.OnInit", "Program.cs");
     CS2SX_LINE(57);
     char* _sb0 = _cs2sx_next_buf();
-    snprintf(_sb0, CS2SX_STRBUF_SIZE, "static %d", LanguageFixesApp_AddThree(1));
+    _sb0 = CS2SX_Format(_sb0, "static %d", LanguageFixesApp_AddThree(1));
     const char* _ps_0 = _sb0;
     printf("%s\n", _ps_0 ? _ps_0 : "");
     CS2SX_LINE(60);
@@ -288,7 +288,7 @@ void LanguageFixesApp_OnInit(LanguageFixesApp* self)
     const char* word = _tup_1.item2;
     CS2SX_LINE(61);
     char* _sb1 = _cs2sx_next_buf();
-    snprintf(_sb1, CS2SX_STRBUF_SIZE, "tuple %d %s", n, word);
+    _sb1 = CS2SX_Format(_sb1, "tuple %d %s", n, word);
     const char* _ps_2 = _sb1;
     printf("%s\n", _ps_2 ? _ps_2 : "");
     CS2SX_LINE(62);
@@ -308,7 +308,7 @@ void LanguageFixesApp_OnInit(LanguageFixesApp* self)
     self->f_b = _tup_6.item2;
     CS2SX_LINE(64);
     char* _sb2 = _cs2sx_next_buf();
-    snprintf(_sb2, CS2SX_STRBUF_SIZE, "range %d %d %d", lo, self->f_a, self->f_b);
+    _sb2 = CS2SX_Format(_sb2, "range %d %d %d", lo, self->f_a, self->f_b);
     const char* _ps_7 = _sb2;
     printf("%s\n", _ps_7 ? _ps_7 : "");
     CS2SX_LINE(67);
@@ -317,14 +317,14 @@ void LanguageFixesApp_OnInit(LanguageFixesApp* self)
     Dict_str_int_Set(Registry_Names, "x", 1);
     CS2SX_LINE(69);
     char* _sb3 = _cs2sx_next_buf();
-    snprintf(_sb3, CS2SX_STRBUF_SIZE, "statics %d %d %d", CS2SX_NN(Registry_Items)->count, CS2SX_NN(Registry_Names)->count, Registry_Count);
+    _sb3 = CS2SX_Format(_sb3, "statics %d %d %d", CS2SX_NN(Registry_Items)->count, CS2SX_NN(Registry_Names)->count, Registry_Count);
     const char* _ps_8 = _sb3;
     printf("%s\n", _ps_8 ? _ps_8 : "");
     CS2SX_LINE(72);
     Access rights = Access_Read | Access_Exec;
     CS2SX_LINE(73);
     char* _sb4 = _cs2sx_next_buf();
-    snprintf(_sb4, CS2SX_STRBUF_SIZE, "flags %s %s", CS2SX_BoolStr((((rights) & (Access_Exec)) == (Access_Exec))), CS2SX_BoolStr((((rights) & (Access_Write)) == (Access_Write))));
+    _sb4 = CS2SX_Format(_sb4, "flags %s %s", CS2SX_BoolStr((((rights) & (Access_Exec)) == (Access_Exec))), CS2SX_BoolStr((((rights) & (Access_Write)) == (Access_Write))));
     const char* _ps_9 = _sb4;
     printf("%s\n", _ps_9 ? _ps_9 : "");
     CS2SX_LINE(76);
@@ -333,7 +333,7 @@ void LanguageFixesApp_OnInit(LanguageFixesApp* self)
     Inner* made = Outer_Make(Outer_New());
     CS2SX_LINE(78);
     char* _sb5 = _cs2sx_next_buf();
-    snprintf(_sb5, CS2SX_STRBUF_SIZE, "nested %d %d", inner->f_V, Inner_Twice((Inner*)CS2SX_NN(made)));
+    _sb5 = CS2SX_Format(_sb5, "nested %d %d", inner->f_V, Inner_Twice((Inner*)CS2SX_NN(made)));
     const char* _ps_10 = _sb5;
     printf("%s\n", _ps_10 ? _ps_10 : "");
     CS2SX_LINE(81);
@@ -344,7 +344,7 @@ void LanguageFixesApp_OnInit(LanguageFixesApp* self)
     Meters back = Meters_explicit_Meters(5);
     CS2SX_LINE(84);
     char* _sb6 = _cs2sx_next_buf();
-    snprintf(_sb6, CS2SX_STRBUF_SIZE, "convert %d %d", asInt, back.Value);
+    _sb6 = CS2SX_Format(_sb6, "convert %d %d", asInt, back.Value);
     const char* _ps_11 = _sb6;
     printf("%s\n", _ps_11 ? _ps_11 : "");
     CS2SX_LINE(87);
@@ -359,7 +359,7 @@ void LanguageFixesApp_OnInit(LanguageFixesApp* self)
     int other = ({ __auto_type _nc_14 = (head->f_Next != NULL ? ((Nullable_int){ head->f_Next->f_Value, 1 }) : ((Nullable_int){0})); ((_nc_14).has ? (_nc_14).value : (-1)); });
     CS2SX_LINE(91);
     char* _sb7 = _cs2sx_next_buf();
-    snprintf(_sb7, CS2SX_STRBUF_SIZE, "nullcond %d %d", some, other);
+    _sb7 = CS2SX_Format(_sb7, "nullcond %d %d", some, other);
     const char* _ps_15 = _sb7;
     printf("%s\n", _ps_15 ? _ps_15 : "");
 }

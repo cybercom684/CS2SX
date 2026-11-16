@@ -43,11 +43,11 @@ void FontTextApp_OnFrame(FontTextApp* self)
         int size = sizes[_i_size];
         CS2SX_LINE(29);
         char* _sb0 = _cs2sx_next_buf();
-        snprintf(_sb0, CS2SX_STRBUF_SIZE, "%d px - The quick brown fox jumps", size);
+        _sb0 = CS2SX_Format(_sb0, "%d px - The quick brown fox jumps", size);
         char* _sb1 = _cs2sx_next_buf();
-        snprintf(_sb1, CS2SX_STRBUF_SIZE, "%d px - The quick brown fox jumps", size);
+        _sb1 = CS2SX_Format(_sb1, "%d px - The quick brown fox jumps", size);
         char* _sb2 = _cs2sx_next_buf();
-        snprintf(_sb2, CS2SX_STRBUF_SIZE, "%d px - The quick brown fox jumps", size);
+        _sb2 = CS2SX_Format(_sb2, "%d px - The quick brown fox jumps", size);
         Font_Draw(CS2SX_NN(self->f_font), 20, y, _sb2, COLOR_WHITE, size);
         CS2SX_LINE(30);
         y += Font_LineHeight(CS2SX_NN(self->f_font), size);
@@ -70,19 +70,19 @@ void FontTextApp_OnFrame(FontTextApp* self)
     y += Font_LineHeight(CS2SX_NN(self->f_font), 24) * 3 + 8;
     CS2SX_LINE(45);
     char* _sb3 = _cs2sx_next_buf();
-    snprintf(_sb3, CS2SX_STRBUF_SIZE, "Frame %d  AV To Wa", self->f_frame);
+    _sb3 = CS2SX_Format(_sb3, "Frame %d  AV To Wa", self->f_frame);
     char* _sb4 = _cs2sx_next_buf();
-    snprintf(_sb4, CS2SX_STRBUF_SIZE, "Frame %d  AV To Wa", self->f_frame);
+    _sb4 = CS2SX_Format(_sb4, "Frame %d  AV To Wa", self->f_frame);
     char* _sb5 = _cs2sx_next_buf();
-    snprintf(_sb5, CS2SX_STRBUF_SIZE, "Frame %d  AV To Wa", self->f_frame);
+    _sb5 = CS2SX_Format(_sb5, "Frame %d  AV To Wa", self->f_frame);
     Font_Draw(CS2SX_NN(self->f_font), 20, y, _sb5, COLOR_LIME, 36);
     CS2SX_LINE(46);
     char* _sb6 = _cs2sx_next_buf();
-    snprintf(_sb6, CS2SX_STRBUF_SIZE, "w=%d", w);
+    _sb6 = CS2SX_Format(_sb6, "w=%d", w);
     char* _sb7 = _cs2sx_next_buf();
-    snprintf(_sb7, CS2SX_STRBUF_SIZE, "w=%d", w);
+    _sb7 = CS2SX_Format(_sb7, "w=%d", w);
     char* _sb8 = _cs2sx_next_buf();
-    snprintf(_sb8, CS2SX_STRBUF_SIZE, "w=%d", w);
+    _sb8 = CS2SX_Format(_sb8, "w=%d", w);
     Font_Draw(CS2SX_NN(self->f_font), 1000, 680, _sb8, COLOR_GRAY, 16);
 }
 

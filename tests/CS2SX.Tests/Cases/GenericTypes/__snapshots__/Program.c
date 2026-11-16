@@ -25,7 +25,7 @@ const char* Plain_Format_int(Plain* self, int value)
     CS2SX_TRACE("Plain.Format_int", "Program.cs");
     CS2SX_LINE(22);
     char* _sb0 = _cs2sx_next_buf();
-    snprintf(_sb0, CS2SX_STRBUF_SIZE, "%d", value);
+    _sb0 = CS2SX_Format(_sb0, "%d", value);
     return _sb0;
 }
 
@@ -34,7 +34,7 @@ const char* Plain_Format_str(Plain* self, const char* value)
     CS2SX_TRACE("Plain.Format_str", "Program.cs");
     CS2SX_LINE(25);
     char* _sb1 = _cs2sx_next_buf();
-    snprintf(_sb1, CS2SX_STRBUF_SIZE, "%s", value);
+    _sb1 = CS2SX_Format(_sb1, "%s", value);
     return _sb1;
 }
 
@@ -95,7 +95,7 @@ const char* Bracket_Format_int(Bracket* self, int value)
     CS2SX_TRACE("Bracket.Format_int", "Program.cs");
     CS2SX_LINE(33);
     char* _sb0 = _cs2sx_next_buf();
-    snprintf(_sb0, CS2SX_STRBUF_SIZE, "[%d]", value);
+    _sb0 = CS2SX_Format(_sb0, "[%d]", value);
     return _sb0;
 }
 
@@ -104,7 +104,7 @@ const char* Bracket_Format_str(Bracket* self, const char* value)
     CS2SX_TRACE("Bracket.Format_str", "Program.cs");
     CS2SX_LINE(36);
     char* _sb1 = _cs2sx_next_buf();
-    snprintf(_sb1, CS2SX_STRBUF_SIZE, "[%s]", value);
+    _sb1 = CS2SX_Format(_sb1, "[%s]", value);
     return _sb1;
 }
 
@@ -415,7 +415,7 @@ void GenericTypesApp_OnInit(GenericTypesApp* self)
     {
         IFormatter* f = List_IFormatter_Get(formatters, _i_f);
         char* _sb0 = _cs2sx_next_buf();
-        snprintf(_sb0, CS2SX_STRBUF_SIZE, "fmt %s %s", ({ __auto_type _cs2sx_r = CS2SX_NN(f); _cs2sx_r->vtable->Format_int(_cs2sx_r->obj, 7); }), ({ __auto_type _cs2sx_r = CS2SX_NN(f); _cs2sx_r->vtable->Format_str(_cs2sx_r->obj, "x"); }));
+        _sb0 = CS2SX_Format(_sb0, "fmt %s %s", ({ __auto_type _cs2sx_r = CS2SX_NN(f); _cs2sx_r->vtable->Format_int(_cs2sx_r->obj, 7); }), ({ __auto_type _cs2sx_r = CS2SX_NN(f); _cs2sx_r->vtable->Format_str(_cs2sx_r->obj, "x"); }));
         const char* _ps_1 = _sb0;
         printf("%s\n", _ps_1 ? _ps_1 : "");
     }
@@ -425,12 +425,12 @@ void GenericTypesApp_OnInit(GenericTypesApp* self)
     Picker* p2 = (Picker*)(SecondPicker_New());
     CS2SX_LINE(129);
     char* _sb1 = _cs2sx_next_buf();
-    snprintf(_sb1, CS2SX_STRBUF_SIZE, "pick %d %d %s", p1->vtable->Pick_int(p1, 1, 2), p2->vtable->Pick_int(p2, 1, 2), p2->vtable->Pick_str(p2, "a", "b"));
+    _sb1 = CS2SX_Format(_sb1, "pick %d %d %s", p1->vtable->Pick_int(p1, 1, 2), p2->vtable->Pick_int(p2, 1, 2), p2->vtable->Pick_str(p2, "a", "b"));
     const char* _ps_2 = _sb1;
     printf("%s\n", _ps_2 ? _ps_2 : "");
     CS2SX_LINE(130);
     char* _sb2 = _cs2sx_next_buf();
-    snprintf(_sb2, CS2SX_STRBUF_SIZE, "echo %d %d", p1->vtable->Echo_int(p1, 5), p2->vtable->Echo_int(p2, 6));
+    _sb2 = CS2SX_Format(_sb2, "echo %d %d", p1->vtable->Echo_int(p1, 5), p2->vtable->Echo_int(p2, 6));
     const char* _ps_3 = _sb2;
     printf("%s\n", _ps_3 ? _ps_3 : "");
     CS2SX_LINE(132);
@@ -439,14 +439,14 @@ void GenericTypesApp_OnInit(GenericTypesApp* self)
     Pair_str ps = ({ Pair_str _sv_4 = Pair_str_New("l", "r"); Pair_str_Swapped(&_sv_4); });
     CS2SX_LINE(134);
     char* _sb3 = _cs2sx_next_buf();
-    snprintf(_sb3, CS2SX_STRBUF_SIZE, "pair %d%d %s%s %d", pi.A, pi.B, ps.A, ps.B, Pair_int_Swapped(&pi).A);
+    _sb3 = CS2SX_Format(_sb3, "pair %d%d %s%s %d", pi.A, pi.B, ps.A, ps.B, Pair_int_Swapped(&pi).A);
     const char* _ps_5 = _sb3;
     printf("%s\n", _ps_5 ? _ps_5 : "");
     CS2SX_LINE(136);
     Slot_str_int slot = (Slot_str_int){ .Key = "hp", .Value = 30 };
     CS2SX_LINE(137);
     char* _sb4 = _cs2sx_next_buf();
-    snprintf(_sb4, CS2SX_STRBUF_SIZE, "slot %s=%d", slot.Key, slot.Value);
+    _sb4 = CS2SX_Format(_sb4, "slot %s=%d", slot.Key, slot.Value);
     const char* _ps_6 = _sb4;
     printf("%s\n", _ps_6 ? _ps_6 : "");
 }

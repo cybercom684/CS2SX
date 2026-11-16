@@ -130,7 +130,7 @@ void CyclesCollectionsApp_OnFrame(CyclesCollectionsApp* self)
             CyclesCollectionsApp_Build();
             CS2SX_LINE(54);
             char* _sb0 = _cs2sx_next_buf();
-            snprintf(_sb0, CS2SX_STRBUF_SIZE, "built %d", Hub_Alive);
+            _sb0 = CS2SX_Format(_sb0, "built %d", Hub_Alive);
             const char* _ps_0 = _sb0;
             printf("%s\n", _ps_0 ? _ps_0 : "");
             CS2SX_LINE(55);
@@ -138,7 +138,7 @@ void CyclesCollectionsApp_OnFrame(CyclesCollectionsApp* self)
         case 40:
             CS2SX_LINE(58);
             char* _sb1 = _cs2sx_next_buf();
-            snprintf(_sb1, CS2SX_STRBUF_SIZE, "kept %d %s %d%d%d", Hub_Alive, CS2SX_BoolStr((CS2SX_NN(Dict_str_Hub_Get(CS2SX_NN(self->f_kept)->f_ByName, "c"))->f_Owner == self->f_kept)), CS2SX_NN(CS2SX_NN(self->f_kept)->f_History)->count, CS2SX_NN(CS2SX_NN(self->f_kept)->f_Pending)->count, CS2SX_NN(CS2SX_NN(self->f_kept)->f_Seen)->count);
+            _sb1 = CS2SX_Format(_sb1, "kept %d %s %d%d%d", Hub_Alive, CS2SX_BoolStr((CS2SX_NN(Dict_str_Hub_Get(CS2SX_NN(self->f_kept)->f_ByName, "c"))->f_Owner == self->f_kept)), CS2SX_NN(CS2SX_NN(self->f_kept)->f_History)->count, CS2SX_NN(CS2SX_NN(self->f_kept)->f_Pending)->count, CS2SX_NN(CS2SX_NN(self->f_kept)->f_Seen)->count);
             const char* _ps_1 = _sb1;
             printf("%s\n", _ps_1 ? _ps_1 : "");
             CS2SX_LINE(60);
@@ -148,7 +148,7 @@ void CyclesCollectionsApp_OnFrame(CyclesCollectionsApp* self)
         case 60:
             CS2SX_LINE(63);
             char* _sb2 = _cs2sx_next_buf();
-            snprintf(_sb2, CS2SX_STRBUF_SIZE, "dropped %d", Hub_Alive);
+            _sb2 = CS2SX_Format(_sb2, "dropped %d", Hub_Alive);
             const char* _ps_2 = _sb2;
             printf("%s\n", _ps_2 ? _ps_2 : "");
             CS2SX_LINE(64);
@@ -163,7 +163,7 @@ void CyclesCollectionsApp_OnFrame(CyclesCollectionsApp* self)
             long long grown = CS2SX_HeapUsed() - self->f_base;
             CS2SX_LINE(70);
             char* _sb3 = _cs2sx_next_buf();
-            snprintf(_sb3, CS2SX_STRBUF_SIZE, "stable %s %s", CS2SX_BoolStr((grown < 8192)), CS2SX_BoolStr((Hub_Alive < 300)));
+            _sb3 = CS2SX_Format(_sb3, "stable %s %s", CS2SX_BoolStr((grown < 8192)), CS2SX_BoolStr((Hub_Alive < 300)));
             const char* _ps_3 = _sb3;
             printf("%s\n", _ps_3 ? _ps_3 : "");
             CS2SX_LINE(71);

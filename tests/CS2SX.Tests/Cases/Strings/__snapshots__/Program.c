@@ -20,7 +20,7 @@ void StringsApp_OnInit(StringsApp* self)
     printf("Hello %s, score=%d, ratio=%s\n", name, score, Float_ToString(ratio));
     CS2SX_LINE(12);
     char* _sb0 = _cs2sx_next_buf();
-    snprintf(_sb0, CS2SX_STRBUF_SIZE, "%s %s %d", String_ToUpper(name), String_ToLower(name), strlen(name));
+    _sb0 = CS2SX_Format(_sb0, "%s %s %d", String_ToUpper(name), String_ToLower(name), strlen(name));
     const char* _ps_0 = _sb0;
     printf("%s\n", _ps_0 ? _ps_0 : "");
     CS2SX_LINE(13);
@@ -43,7 +43,7 @@ void StringsApp_OnInit(StringsApp* self)
     const char** parts = CS2SX_StrArr_FromList(String_Split("a,b,c", ","));
     CS2SX_LINE(21);
     char* _sb1 = _cs2sx_next_buf();
-    snprintf(_sb1, CS2SX_STRBUF_SIZE, "%d parts, last=%s", CS2SX_ArrLen(CS2SX_NN(parts)), CS2SX_AT(parts, 2));
+    _sb1 = CS2SX_Format(_sb1, "%d parts, last=%s", CS2SX_ArrLen(CS2SX_NN(parts)), CS2SX_AT(parts, 2));
     const char* _ps_5 = _sb1;
     printf("%s\n", _ps_5 ? _ps_5 : "");
     CS2SX_LINE(22);
@@ -56,7 +56,7 @@ void StringsApp_OnInit(StringsApp* self)
     int parsed = CS2SX_Int_Parse("77");
     CS2SX_LINE(26);
     char* _sb2 = _cs2sx_next_buf();
-    snprintf(_sb2, CS2SX_STRBUF_SIZE, "%s %s", Int_ToString((int)parsed), Int_ToString((int)score));
+    _sb2 = CS2SX_Format(_sb2, "%s %s", Int_ToString((int)parsed), Int_ToString((int)score));
     const char* _ps_8 = _sb2;
     printf("%s\n", _ps_8 ? _ps_8 : "");
     CS2SX_LINE(28);

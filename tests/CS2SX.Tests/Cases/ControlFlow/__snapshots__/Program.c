@@ -67,7 +67,7 @@ void ControlFlowApp_OnInit(ControlFlowApp* self)
     int flag = sum > 10 && !(k == 0) || value < 0;
     CS2SX_LINE(28);
     char* _sb0 = _cs2sx_next_buf();
-    snprintf(_sb0, CS2SX_STRBUF_SIZE, "%d %d %d %d %s %s", sum, n, k, value, shown, CS2SX_BoolStr(flag));
+    _sb0 = CS2SX_Format(_sb0, "%d %d %d %d %s %s", sum, n, k, value, shown, CS2SX_BoolStr(flag));
     const char* _ps_0 = _sb0;
     printf("%s\n", _ps_0 ? _ps_0 : "");
     CS2SX_LINE(30);

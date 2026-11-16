@@ -332,7 +332,7 @@ void CS2SX_Task_Dispose(CS2SX_Task* self)
     {
         CS2SX_LINE(8);
         char* _sb0 = _cs2sx_next_buf();
-        snprintf(_sb0, CS2SX_STRBUF_SIZE, "Unobserved task exception: %s\n%s", ((Exception*)(self->f_Fault))->f_Message, (((Exception*)(self->f_Fault))->f_StackTrace ? ((Exception*)(self->f_Fault))->f_StackTrace : ""));
+        _sb0 = CS2SX_Format(_sb0, "Unobserved task exception: %s\n%s", ((Exception*)(self->f_Fault))->f_Message, (((Exception*)(self->f_Fault))->f_StackTrace ? ((Exception*)(self->f_Fault))->f_StackTrace : ""));
         const char* _ps_1 = _sb0;
         printf("%s\n", _ps_1 ? _ps_1 : "");
     }
@@ -962,11 +962,11 @@ void Name_Async_cs2sx_run(Name_Async* self)
     {
         CS2SX_LINE(23);
         char* _sb0 = _cs2sx_next_buf();
-        snprintf(_sb0, CS2SX_STRBUF_SIZE, "item%d", self->f_v);
+        _sb0 = CS2SX_Format(_sb0, "item%d", self->f_v);
         char* _sb1 = _cs2sx_next_buf();
-        snprintf(_sb1, CS2SX_STRBUF_SIZE, "item%d", self->f_v);
+        _sb1 = CS2SX_Format(_sb1, "item%d", self->f_v);
         char* _sb2 = _cs2sx_next_buf();
-        snprintf(_sb2, CS2SX_STRBUF_SIZE, "item%d", self->f_v);
+        _sb2 = CS2SX_Format(_sb2, "item%d", self->f_v);
         CS2SX_Task_str_SetResult(CS2SX_NN(self->f_cs2sx_task), _sb2);
         CS2SX_LINE(23);
         return;
@@ -1170,7 +1170,7 @@ void AsyncAwaitApp_OnInit(AsyncAwaitApp* self)
     AsyncAwaitApp_Fire(self);
     CS2SX_LINE(113);
     char* _sb0 = _cs2sx_next_buf();
-    snprintf(_sb0, CS2SX_STRBUF_SIZE, "started %s %d", CS2SX_BoolStr(CS2SX_NN(self->f_sum)->base.f_IsCompleted), Loader_get_Calls(CS2SX_NN(self->f_loader)));
+    _sb0 = CS2SX_Format(_sb0, "started %s %d", CS2SX_BoolStr(CS2SX_NN(self->f_sum)->base.f_IsCompleted), Loader_get_Calls(CS2SX_NN(self->f_loader)));
     const char* _ps_2 = _sb0;
     printf("%s\n", _ps_2 ? _ps_2 : "");
 }
@@ -1191,12 +1191,12 @@ void AsyncAwaitApp_OnFrame(AsyncAwaitApp* self)
         self->f_reported = 1;
         CS2SX_LINE(127);
         char* _sb1 = _cs2sx_next_buf();
-        snprintf(_sb1, CS2SX_STRBUF_SIZE, "sum %d calls %d", CS2SX_Task_int_get_Result(CS2SX_NN(self->f_sum)), Loader_get_Calls(CS2SX_NN(self->f_loader)));
+        _sb1 = CS2SX_Format(_sb1, "sum %d calls %d", CS2SX_Task_int_get_Result(CS2SX_NN(self->f_sum)), Loader_get_Calls(CS2SX_NN(self->f_loader)));
         const char* _ps_3 = _sb1;
         printf("%s\n", _ps_3 ? _ps_3 : "");
         CS2SX_LINE(128);
         char* _sb2 = _cs2sx_next_buf();
-        snprintf(_sb2, CS2SX_STRBUF_SIZE, "outer %s %s", CS2SX_BoolStr(CS2SX_NN(self->f_outer)->f_IsCompleted), CS2SX_BoolStr(CS2SX_Task_get_IsFaulted(CS2SX_NN(self->f_outer))));
+        _sb2 = CS2SX_Format(_sb2, "outer %s %s", CS2SX_BoolStr(CS2SX_NN(self->f_outer)->f_IsCompleted), CS2SX_BoolStr(CS2SX_Task_get_IsFaulted(CS2SX_NN(self->f_outer))));
         const char* _ps_4 = _sb2;
         printf("%s\n", _ps_4 ? _ps_4 : "");
         CS2SX_LINE(129);
@@ -1217,7 +1217,7 @@ void AsyncAwaitApp_OnFrame(AsyncAwaitApp* self)
                     InvalidOperationException* e = (InvalidOperationException*)_exf_5_ex;
                     CS2SX_LINE(130);
                     char* _sb3 = _cs2sx_next_buf();
-                    snprintf(_sb3, CS2SX_STRBUF_SIZE, "caught %s", ((Exception*)(e))->f_Message);
+                    _sb3 = CS2SX_Format(_sb3, "caught %s", ((Exception*)(e))->f_Message);
                     const char* _ps_6 = _sb3;
                     printf("%s\n", _ps_6 ? _ps_6 : "");
                 }
@@ -1226,7 +1226,7 @@ void AsyncAwaitApp_OnFrame(AsyncAwaitApp* self)
         }
         CS2SX_LINE(131);
         char* _sb4 = _cs2sx_next_buf();
-        snprintf(_sb4, CS2SX_STRBUF_SIZE, "all %s %s", CS2SX_BoolStr(CS2SX_NN(self->f_all)->f_IsCompleted), CS2SX_BoolStr(CS2SX_Task_get_IsCompletedSuccessfully(CS2SX_NN(self->f_seq))));
+        _sb4 = CS2SX_Format(_sb4, "all %s %s", CS2SX_BoolStr(CS2SX_NN(self->f_all)->f_IsCompleted), CS2SX_BoolStr(CS2SX_Task_get_IsCompletedSuccessfully(CS2SX_NN(self->f_seq))));
         const char* _ps_7 = _sb4;
         printf("%s\n", _ps_7 ? _ps_7 : "");
         CS2SX_LINE(132);
@@ -1249,7 +1249,7 @@ void AsyncAwaitApp_OnFrame(AsyncAwaitApp* self)
         long long grown = CS2SX_HeapUsed() - self->f_base;
         CS2SX_LINE(142);
         char* _sb5 = _cs2sx_next_buf();
-        snprintf(_sb5, CS2SX_STRBUF_SIZE, "stable %s %s", CS2SX_BoolStr((grown < 8192)), CS2SX_BoolStr((self->f_pulses > 250)));
+        _sb5 = CS2SX_Format(_sb5, "stable %s %s", CS2SX_BoolStr((grown < 8192)), CS2SX_BoolStr((self->f_pulses > 250)));
         const char* _ps_8 = _sb5;
         printf("%s\n", _ps_8 ? _ps_8 : "");
         CS2SX_LINE(143);
@@ -1337,11 +1337,11 @@ void Greet_Async_cs2sx_run(Greet_Async* self)
     {
         CS2SX_LINE(43);
         char* _sb0 = _cs2sx_next_buf();
-        snprintf(_sb0, CS2SX_STRBUF_SIZE, "hi %s", self->f_who);
+        _sb0 = CS2SX_Format(_sb0, "hi %s", self->f_who);
         char* _sb1 = _cs2sx_next_buf();
-        snprintf(_sb1, CS2SX_STRBUF_SIZE, "hi %s", self->f_who);
+        _sb1 = CS2SX_Format(_sb1, "hi %s", self->f_who);
         char* _sb2 = _cs2sx_next_buf();
-        snprintf(_sb2, CS2SX_STRBUF_SIZE, "hi %s", self->f_who);
+        _sb2 = CS2SX_Format(_sb2, "hi %s", self->f_who);
         CS2SX_Task_str_SetResult(CS2SX_NN(self->f_cs2sx_task), _sb2);
         CS2SX_LINE(43);
         return;
@@ -1730,7 +1730,7 @@ void Sequence_Async_cs2sx_run(Sequence_Async* self)
     }
     CS2SX_LINE(68);
     char* _sb0 = _cs2sx_next_buf();
-    snprintf(_sb0, CS2SX_STRBUF_SIZE, "seq %s %s", self->f_greeting, self->f_a);
+    _sb0 = CS2SX_Format(_sb0, "seq %s %s", self->f_greeting, self->f_a);
     const char* _ps_1 = _sb0;
     printf("%s\n", _ps_1 ? _ps_1 : "");
     CS2SX_LINE(69);
@@ -1782,7 +1782,7 @@ void Sequence_Async_cs2sx_run(Sequence_Async* self)
         }
         CS2SX_LINE(76);
         char* _sb1 = _cs2sx_next_buf();
-        snprintf(_sb1, CS2SX_STRBUF_SIZE, "seq end %d %d", self->f_five, CS2SX_Task_int_get_Result(CS2SX_NN(self->f_cs2sx_a5)));
+        _sb1 = CS2SX_Format(_sb1, "seq end %d %d", self->f_five, CS2SX_Task_int_get_Result(CS2SX_NN(self->f_cs2sx_a5)));
         const char* _ps_2 = _sb1;
         printf("%s\n", _ps_2 ? _ps_2 : "");
     }

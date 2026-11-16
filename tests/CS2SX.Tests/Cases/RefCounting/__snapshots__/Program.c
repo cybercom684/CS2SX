@@ -294,7 +294,7 @@ void RefCountingApp_OnInit(RefCountingApp* self)
     List_Node_Remove(self->f_nodes, 0);
     CS2SX_LINE(54);
     char* _sb0 = _cs2sx_next_buf();
-    snprintf(_sb0, CS2SX_STRBUF_SIZE, "0 same-frame %d %d", Counter_Disposed, CS2SX_NN(borrowed)->f_V);
+    _sb0 = CS2SX_Format(_sb0, "0 same-frame %d %d", Counter_Disposed, CS2SX_NN(borrowed)->f_V);
     const char* _ps_0 = _sb0;
     printf("%s\n", _ps_0 ? _ps_0 : "");
 }
@@ -312,7 +312,7 @@ void RefCountingApp_OnFrame(RefCountingApp* self)
     }
     CS2SX_LINE(61);
     char* _sb1 = _cs2sx_next_buf();
-    snprintf(_sb1, CS2SX_STRBUF_SIZE, "%d %d", self->f_frame, Counter_Disposed);
+    _sb1 = CS2SX_Format(_sb1, "%d %d", self->f_frame, Counter_Disposed);
     const char* _ps_1 = _sb1;
     printf("%s", _ps_1 ? _ps_1 : "");
     CS2SX_LINE(63);
@@ -332,7 +332,7 @@ void RefCountingApp_OnFrame(RefCountingApp* self)
         case 2:
             CS2SX_LINE(72);
             char* _sb2 = _cs2sx_next_buf();
-            snprintf(_sb2, CS2SX_STRBUF_SIZE, " (2) kept %d", CS2SX_NN(self->f_kept)->f_V);
+            _sb2 = CS2SX_Format(_sb2, " (2) kept %d", CS2SX_NN(self->f_kept)->f_V);
             const char* _ps_2 = _sb2;
             printf("%s\n", _ps_2 ? _ps_2 : "");
             CS2SX_LINE(73);
@@ -349,7 +349,7 @@ void RefCountingApp_OnFrame(RefCountingApp* self)
         case 4:
             CS2SX_LINE(80);
             char* _sb3 = _cs2sx_next_buf();
-            snprintf(_sb3, CS2SX_STRBUF_SIZE, " (3) kept %d", CS2SX_NN(self->f_kept)->f_V);
+            _sb3 = CS2SX_Format(_sb3, " (3) kept %d", CS2SX_NN(self->f_kept)->f_V);
             const char* _ps_3 = _sb3;
             printf("%s\n", _ps_3 ? _ps_3 : "");
             CS2SX_LINE(81);
@@ -381,7 +381,7 @@ void RefCountingApp_OnFrame(RefCountingApp* self)
         case 7:
             CS2SX_LINE(95);
             char* _sb4 = _cs2sx_next_buf();
-            snprintf(_sb4, CS2SX_STRBUF_SIZE, " (115) pair %d", CS2SX_NN(CS2SX_NN(self->f_pair)->f_First)->f_V);
+            _sb4 = CS2SX_Format(_sb4, " (115) pair %d", CS2SX_NN(CS2SX_NN(self->f_pair)->f_First)->f_V);
             const char* _ps_5 = _sb4;
             printf("%s\n", _ps_5 ? _ps_5 : "");
             CS2SX_LINE(96);
