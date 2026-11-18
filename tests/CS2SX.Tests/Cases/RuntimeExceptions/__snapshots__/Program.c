@@ -111,7 +111,13 @@ static void _lambda_6(void* _env)
 static void _envdtor_6(void* _e)
 {
     struct _cap_6* _c = (struct _cap_6*)_e;
-    CS2SX_ReleaseLater(_c->list, (CS2SX_FreeFn)List_int_Free);
+    CS2SX_ReleaseLater((void*)_c->list, (CS2SX_FreeFn)List_int_Free);
+}
+
+static void _envgc_6(void* _e, CS2SX_GcVisit visit)
+{
+    struct _cap_6* _c = (struct _cap_6*)_e;
+    (void)_c; (void)visit;
 }
 
 struct _cap_7
@@ -131,7 +137,13 @@ static void _lambda_7(void* _env)
 static void _envdtor_7(void* _e)
 {
     struct _cap_7* _c = (struct _cap_7*)_e;
-    CS2SX_ReleaseLater(_c->list, (CS2SX_FreeFn)List_int_Free);
+    CS2SX_ReleaseLater((void*)_c->list, (CS2SX_FreeFn)List_int_Free);
+}
+
+static void _envgc_7(void* _e, CS2SX_GcVisit visit)
+{
+    struct _cap_7* _c = (struct _cap_7*)_e;
+    (void)_c; (void)visit;
 }
 
 struct _cap_8
@@ -151,7 +163,13 @@ static void _lambda_8(void* _env)
 static void _envdtor_8(void* _e)
 {
     struct _cap_8* _c = (struct _cap_8*)_e;
-    CS2SX_ReleaseLater(_c->list, (CS2SX_FreeFn)List_int_Free);
+    CS2SX_ReleaseLater((void*)_c->list, (CS2SX_FreeFn)List_int_Free);
+}
+
+static void _envgc_8(void* _e, CS2SX_GcVisit visit)
+{
+    struct _cap_8* _c = (struct _cap_8*)_e;
+    (void)_c; (void)visit;
 }
 
 struct _cap_9
@@ -172,7 +190,13 @@ static void _lambda_9(void* _env)
 static void _envdtor_9(void* _e)
 {
     struct _cap_9* _c = (struct _cap_9*)_e;
-    CS2SX_ReleaseLater(_c->dict, (CS2SX_FreeFn)Dict_str_int_Free);
+    CS2SX_ReleaseLater((void*)_c->dict, (CS2SX_FreeFn)Dict_str_int_Free);
+}
+
+static void _envgc_9(void* _e, CS2SX_GcVisit visit)
+{
+    struct _cap_9* _c = (struct _cap_9*)_e;
+    (void)_c; (void)visit;
 }
 
 struct _cap_10
@@ -192,7 +216,13 @@ static void _lambda_10(void* _env)
 static void _envdtor_10(void* _e)
 {
     struct _cap_10* _c = (struct _cap_10*)_e;
-    CS2SX_ReleaseLater(_c->dict, (CS2SX_FreeFn)Dict_str_int_Free);
+    CS2SX_ReleaseLater((void*)_c->dict, (CS2SX_FreeFn)Dict_str_int_Free);
+}
+
+static void _envgc_10(void* _e, CS2SX_GcVisit visit)
+{
+    struct _cap_10* _c = (struct _cap_10*)_e;
+    (void)_c; (void)visit;
 }
 
 struct _cap_11
@@ -212,7 +242,13 @@ static void _lambda_11(void* _env)
 static void _envdtor_11(void* _e)
 {
     struct _cap_11* _c = (struct _cap_11*)_e;
-    CS2SX_ReleaseLater(_c->stack, (CS2SX_FreeFn)Stack_int_Free);
+    CS2SX_ReleaseLater((void*)_c->stack, (CS2SX_FreeFn)Stack_int_Free);
+}
+
+static void _envgc_11(void* _e, CS2SX_GcVisit visit)
+{
+    struct _cap_11* _c = (struct _cap_11*)_e;
+    (void)_c; (void)visit;
 }
 
 struct _cap_12
@@ -232,7 +268,13 @@ static void _lambda_12(void* _env)
 static void _envdtor_12(void* _e)
 {
     struct _cap_12* _c = (struct _cap_12*)_e;
-    CS2SX_ReleaseLater(_c->queue, (CS2SX_FreeFn)Queue_int_Free);
+    CS2SX_ReleaseLater((void*)_c->queue, (CS2SX_FreeFn)Queue_int_Free);
+}
+
+static void _envgc_12(void* _e, CS2SX_GcVisit visit)
+{
+    struct _cap_12* _c = (struct _cap_12*)_e;
+    (void)_c; (void)visit;
 }
 
 struct _cap_13
@@ -283,7 +325,13 @@ static void _lambda_15(void* _env)
 static void _envdtor_15(void* _e)
 {
     struct _cap_15* _c = (struct _cap_15*)_e;
-    CS2SX_ReleaseLater(_c->empty, (CS2SX_FreeFn)List_int_Free);
+    CS2SX_ReleaseLater((void*)_c->empty, (CS2SX_FreeFn)List_int_Free);
+}
+
+static void _envgc_15(void* _e, CS2SX_GcVisit visit)
+{
+    struct _cap_15* _c = (struct _cap_15*)_e;
+    (void)_c; (void)visit;
 }
 
 struct _cap_16
@@ -307,7 +355,13 @@ static void _lambda_16(void* _env)
 static void _envdtor_16(void* _e)
 {
     struct _cap_16* _c = (struct _cap_16*)_e;
-    CS2SX_ReleaseLater(_c->empty, (CS2SX_FreeFn)List_int_Free);
+    CS2SX_ReleaseLater((void*)_c->empty, (CS2SX_FreeFn)List_int_Free);
+}
+
+static void _envgc_16(void* _e, CS2SX_GcVisit visit)
+{
+    struct _cap_16* _c = (struct _cap_16*)_e;
+    (void)_c; (void)visit;
 }
 
 struct _cap_17
@@ -386,20 +440,23 @@ void RuntimeExceptionsApp_OnInit(RuntimeExceptionsApp* self)
     List_int* list = _list_10;
     CS2SX_LINE(31);
     struct _cap_6* _env_6 = CS2SX_ENV_NEW(struct _cap_6);
-    _env_6->list = List_int_Retain(list);
+    _env_6->list = list; ((void* (*)(void*))List_int_Retain)((void*)_env_6->list);
     _env_6->_hdr._dtor = _envdtor_6;
+    _env_6->_hdr._gc = _envgc_6;
     const char* _ps_11 = RuntimeExceptionsApp_Try(CS2SX_Delegate_New((void*)_lambda_6, _env_6, 1));
     printf("%s\n", _ps_11 ? _ps_11 : "");
     CS2SX_LINE(32);
     struct _cap_7* _env_7 = CS2SX_ENV_NEW(struct _cap_7);
-    _env_7->list = List_int_Retain(list);
+    _env_7->list = list; ((void* (*)(void*))List_int_Retain)((void*)_env_7->list);
     _env_7->_hdr._dtor = _envdtor_7;
+    _env_7->_hdr._gc = _envgc_7;
     const char* _ps_12 = RuntimeExceptionsApp_Try(CS2SX_Delegate_New((void*)_lambda_7, _env_7, 1));
     printf("%s\n", _ps_12 ? _ps_12 : "");
     CS2SX_LINE(33);
     struct _cap_8* _env_8 = CS2SX_ENV_NEW(struct _cap_8);
-    _env_8->list = List_int_Retain(list);
+    _env_8->list = list; ((void* (*)(void*))List_int_Retain)((void*)_env_8->list);
     _env_8->_hdr._dtor = _envdtor_8;
+    _env_8->_hdr._gc = _envgc_8;
     const char* _ps_13 = RuntimeExceptionsApp_Try(CS2SX_Delegate_New((void*)_lambda_8, _env_8, 1));
     printf("%s\n", _ps_13 ? _ps_13 : "");
     CS2SX_LINE(34);
@@ -415,30 +472,34 @@ void RuntimeExceptionsApp_OnInit(RuntimeExceptionsApp* self)
     printf("%s\n", _ps_14 ? _ps_14 : "");
     CS2SX_LINE(38);
     struct _cap_9* _env_9 = CS2SX_ENV_NEW(struct _cap_9);
-    _env_9->dict = Dict_str_int_Retain(dict);
+    _env_9->dict = dict; ((void* (*)(void*))Dict_str_int_Retain)((void*)_env_9->dict);
     _env_9->_hdr._dtor = _envdtor_9;
+    _env_9->_hdr._gc = _envgc_9;
     const char* _ps_15 = RuntimeExceptionsApp_Try(CS2SX_Delegate_New((void*)_lambda_9, _env_9, 1));
     printf("%s\n", _ps_15 ? _ps_15 : "");
     CS2SX_LINE(39);
     struct _cap_10* _env_10 = CS2SX_ENV_NEW(struct _cap_10);
-    _env_10->dict = Dict_str_int_Retain(dict);
+    _env_10->dict = dict; ((void* (*)(void*))Dict_str_int_Retain)((void*)_env_10->dict);
     _env_10->_hdr._dtor = _envdtor_10;
+    _env_10->_hdr._gc = _envgc_10;
     const char* _ps_16 = RuntimeExceptionsApp_Try(CS2SX_Delegate_New((void*)_lambda_10, _env_10, 1));
     printf("%s\n", _ps_16 ? _ps_16 : "");
     CS2SX_LINE(40);
     Stack_int* stack = Stack_int_New();
     CS2SX_LINE(41);
     struct _cap_11* _env_11 = CS2SX_ENV_NEW(struct _cap_11);
-    _env_11->stack = Stack_int_Retain(stack);
+    _env_11->stack = stack; ((void* (*)(void*))Stack_int_Retain)((void*)_env_11->stack);
     _env_11->_hdr._dtor = _envdtor_11;
+    _env_11->_hdr._gc = _envgc_11;
     const char* _ps_17 = RuntimeExceptionsApp_Try(CS2SX_Delegate_New((void*)_lambda_11, _env_11, 1));
     printf("%s\n", _ps_17 ? _ps_17 : "");
     CS2SX_LINE(42);
     Queue_int* queue = Queue_int_New();
     CS2SX_LINE(43);
     struct _cap_12* _env_12 = CS2SX_ENV_NEW(struct _cap_12);
-    _env_12->queue = Queue_int_Retain(queue);
+    _env_12->queue = queue; ((void* (*)(void*))Queue_int_Retain)((void*)_env_12->queue);
     _env_12->_hdr._dtor = _envdtor_12;
+    _env_12->_hdr._gc = _envgc_12;
     const char* _ps_18 = RuntimeExceptionsApp_Try(CS2SX_Delegate_New((void*)_lambda_12, _env_12, 1));
     printf("%s\n", _ps_18 ? _ps_18 : "");
     CS2SX_LINE(46);
@@ -459,14 +520,16 @@ void RuntimeExceptionsApp_OnInit(RuntimeExceptionsApp* self)
     List_int* empty = List_int_New();
     CS2SX_LINE(53);
     struct _cap_15* _env_15 = CS2SX_ENV_NEW(struct _cap_15);
-    _env_15->empty = List_int_Retain(empty);
+    _env_15->empty = empty; ((void* (*)(void*))List_int_Retain)((void*)_env_15->empty);
     _env_15->_hdr._dtor = _envdtor_15;
+    _env_15->_hdr._gc = _envgc_15;
     const char* _ps_22 = RuntimeExceptionsApp_Try(CS2SX_Delegate_New((void*)_lambda_15, _env_15, 1));
     printf("%s\n", _ps_22 ? _ps_22 : "");
     CS2SX_LINE(54);
     struct _cap_16* _env_16 = CS2SX_ENV_NEW(struct _cap_16);
-    _env_16->empty = List_int_Retain(empty);
+    _env_16->empty = empty; ((void* (*)(void*))List_int_Retain)((void*)_env_16->empty);
     _env_16->_hdr._dtor = _envdtor_16;
+    _env_16->_hdr._gc = _envgc_16;
     const char* _ps_25 = RuntimeExceptionsApp_Try(CS2SX_Delegate_New((void*)_lambda_16, _env_16, 1));
     printf("%s\n", _ps_25 ? _ps_25 : "");
     CS2SX_LINE(57);

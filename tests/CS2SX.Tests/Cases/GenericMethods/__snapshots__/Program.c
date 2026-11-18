@@ -86,12 +86,15 @@ Node* Node_New(int v)
     Node* self = (Node*)calloc(1, sizeof(Node));
     if (!self) return NULL;
     self->_rc = 1;
-    self->_dtor = (void (*)(void*))Node_Dispose;
+    self->_dtor = (void (*)(void*))Node__Destroy;
     self->_gc = Node_Gc;
+    self->_class = &Node_ClassInfo;
     Node_Ctor(self, v);
     CS2SX_ReleaseLater(self, (CS2SX_FreeFn)Node_Free);
     return self;
 }
+
+const CS2SX_ClassInfo Node_ClassInfo = { "Node", NULL };
 
 void Node_Gc(void* _self, CS2SX_GcVisit visit)
 {
@@ -101,7 +104,7 @@ void Node_Gc(void* _self, CS2SX_GcVisit visit)
 static void Node_GcDyn(void* self, CS2SX_GcVisit visit) { ((Node*)self)->_gc(self, visit); }
 const CS2SX_GcKind Node_GcKind = { offsetof(Node, _rc), Node_GcDyn, (CS2SX_FreeFn)Node_Free };
 
-void Node_Dispose(Node* self)
+void Node__Destroy(Node* self)
 {
 }
 

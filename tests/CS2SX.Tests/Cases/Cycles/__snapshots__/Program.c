@@ -18,8 +18,9 @@ TreeNode* TreeNode_New(const char* name)
     TreeNode* self = (TreeNode*)calloc(1, sizeof(TreeNode));
     if (!self) return NULL;
     self->_rc = 1;
-    self->_dtor = (void (*)(void*))TreeNode_Dispose;
+    self->_dtor = (void (*)(void*))TreeNode__Destroy;
     self->_gc = TreeNode_Gc;
+    self->_class = &TreeNode_ClassInfo;
     TreeNode_Ctor(self, name);
     CS2SX_ReleaseLater(self, (CS2SX_FreeFn)TreeNode_Free);
     return self;
@@ -38,19 +39,21 @@ TreeNode* TreeNode_Add(TreeNode* self, const char* name)
     return c;
 }
 
+const CS2SX_ClassInfo TreeNode_ClassInfo = { "TreeNode", NULL };
+
 void TreeNode_Gc(void* _self, CS2SX_GcVisit visit)
 {
     TreeNode* self = (TreeNode*)_self; (void)self;
-    if (visit) visit(self->f_Parent, &TreeNode_GcKind);
-    else if (self->f_Parent) { void* _o = self->f_Parent; self->f_Parent = NULL; ((void (*)(void*))TreeNode_Free)(_o); }
-    if (visit) visit(self->f_Children, &List_TreeNode_GcKind);
-    else if (self->f_Children) { void* _o = self->f_Children; self->f_Children = NULL; ((void (*)(void*))List_TreeNode_Free)(_o); }
+    if (visit) visit((void*)self->f_Parent, &TreeNode_GcKind);
+    else if (self->f_Parent) { void* _o = (void*)self->f_Parent; self->f_Parent = NULL; ((void (*)(void*))TreeNode_Free)(_o); }
+    if (visit) visit((void*)self->f_Children, &List_TreeNode_GcKind);
+    else if (self->f_Children) { void* _o = (void*)self->f_Children; self->f_Children = NULL; ((void (*)(void*))List_TreeNode_Free)(_o); }
 }
 
 static void TreeNode_GcDyn(void* self, CS2SX_GcVisit visit) { ((TreeNode*)self)->_gc(self, visit); }
 const CS2SX_GcKind TreeNode_GcKind = { offsetof(TreeNode, _rc), TreeNode_GcDyn, (CS2SX_FreeFn)TreeNode_Free };
 
-void TreeNode_Dispose(TreeNode* self)
+void TreeNode__Destroy(TreeNode* self)
 {
     CS2SX_LINE(15);
     TreeNode_Alive--;
@@ -88,24 +91,27 @@ Link* Link_New(void)
     Link* self = (Link*)calloc(1, sizeof(Link));
     if (!self) return NULL;
     self->_rc = 1;
-    self->_dtor = (void (*)(void*))Link_Dispose;
+    self->_dtor = (void (*)(void*))Link__Destroy;
     self->_gc = Link_Gc;
+    self->_class = &Link_ClassInfo;
     Link_Ctor(self);
     CS2SX_ReleaseLater(self, (CS2SX_FreeFn)Link_Free);
     return self;
 }
 
+const CS2SX_ClassInfo Link_ClassInfo = { "Link", NULL };
+
 void Link_Gc(void* _self, CS2SX_GcVisit visit)
 {
     Link* self = (Link*)_self; (void)self;
-    if (visit) visit(self->f_Next, &Link_GcKind);
-    else if (self->f_Next) { void* _o = self->f_Next; self->f_Next = NULL; ((void (*)(void*))Link_Free)(_o); }
+    if (visit) visit((void*)self->f_Next, &Link_GcKind);
+    else if (self->f_Next) { void* _o = (void*)self->f_Next; self->f_Next = NULL; ((void (*)(void*))Link_Free)(_o); }
 }
 
 static void Link_GcDyn(void* self, CS2SX_GcVisit visit) { ((Link*)self)->_gc(self, visit); }
 const CS2SX_GcKind Link_GcKind = { offsetof(Link, _rc), Link_GcDyn, (CS2SX_FreeFn)Link_Free };
 
-void Link_Dispose(Link* self)
+void Link__Destroy(Link* self)
 {
     CS2SX_LINE(31);
     Link_Alive--;
@@ -139,25 +145,28 @@ Boss* Boss_New(void)
     Boss* self = (Boss*)calloc(1, sizeof(Boss));
     if (!self) return NULL;
     self->base._rc = 1;
-    self->base._dtor = (void (*)(void*))Boss_Dispose;
+    self->base._dtor = (void (*)(void*))Boss__Destroy;
     self->base._gc = Boss_Gc;
+    self->base._class = &Boss_ClassInfo;
     Boss_Ctor(self);
     CS2SX_ReleaseLater(self, (CS2SX_FreeFn)Boss_Free);
     return self;
 }
 
+const CS2SX_ClassInfo Boss_ClassInfo = { "Boss", &Link_ClassInfo };
+
 void Boss_Gc(void* _self, CS2SX_GcVisit visit)
 {
     Boss* self = (Boss*)_self; (void)self;
-    if (visit) visit(self->f_Minion, &Link_GcKind);
-    else if (self->f_Minion) { void* _o = self->f_Minion; self->f_Minion = NULL; ((void (*)(void*))Link_Free)(_o); }
+    if (visit) visit((void*)self->f_Minion, &Link_GcKind);
+    else if (self->f_Minion) { void* _o = (void*)self->f_Minion; self->f_Minion = NULL; ((void (*)(void*))Link_Free)(_o); }
     Link_Gc(_self, visit);
 }
 
-void Boss_Dispose(Boss* self)
+void Boss__Destroy(Boss* self)
 {
     if (self->f_Minion) { Link_Free(self->f_Minion); self->f_Minion = NULL; }
-    Link_Dispose((Link*)self);
+    Link__Destroy((Link*)self);
 }
 
 void Boss_Free(Boss* self)

@@ -8,8 +8,9 @@
 struct Enemy
 {
     int _rc;
-    void (*_dtor)(void* self);   // _Dispose of the dynamic type
+    void (*_dtor)(void* self);   // __Destroy of the dynamic type
     void (*_gc)(void* self, CS2SX_GcVisit visit);   // _Gc of the dynamic type
+    const CS2SX_ClassInfo* _class;   // run-time type (x is T)
     const char* f_Name;
     int f_Hp;
 };
@@ -17,7 +18,8 @@ struct Enemy
 Enemy* Enemy_New(const char* name, int hp);
 void Enemy_Ctor(Enemy* self, const char* name, int hp);
 
-void Enemy_Dispose(Enemy* self);
+void Enemy__Destroy(Enemy* self);
+extern const CS2SX_ClassInfo Enemy_ClassInfo;
 void Enemy_Gc(void* self, CS2SX_GcVisit visit);
 extern const CS2SX_GcKind Enemy_GcKind;
 void Enemy_Free(Enemy* self);

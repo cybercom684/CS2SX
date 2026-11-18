@@ -1,4 +1,4 @@
-﻿// ============================================================================
+// ============================================================================
 // CS2SX — Transpiler/InterfaceExpander.cs
 //
 // Expandiert C# Interfaces zu C vtable-Structs.
@@ -68,13 +68,39 @@ public sealed class InterfaceExpander
             }
             catch { }
         }
+
+        // Classes that get an interface from a base class (class Square : Shape, where
+        // Shape : IShape): Square_as_IShape uses Shape's vtable instance, whose entries
+        // dispatch virtually.
+        foreach (var cls in _classBase.Keys)
+        {
+            var seen = new HashSet<string>();
+            for (var b = _classBase.GetValueOrDefault(cls); b != null && seen.Add(b); b = _classBase.GetValueOrDefault(b))
+            {
+                if (!ClassInterfaces.TryGetValue(b, out var baseIfaces)) continue;
+                foreach (var iface in baseIfaces)
+                {
+                    if (ClassInterfaces.TryGetValue(cls, out var own) && own.Contains(iface)) continue;
+                    if (!InheritedInterfaces.TryGetValue(cls, out var list)) InheritedInterfaces[cls] = list = new();
+                    if (list.All(x => x.iface != iface)) list.Add((iface, b));
+                }
+            }
+        }
     }
+
+    private readonly Dictionary<string, string> _classBase = new(StringComparer.Ordinal);
+
+    /// Interfaces a class has through a base class: (interface, the base that implements it).
+    public Dictionary<string, List<(string iface, string implementer)>> InheritedInterfaces { get; } = new(StringComparer.Ordinal);
 
     private void AnalyzeFile(Microsoft.CodeAnalysis.SyntaxTree tree)
     {
         foreach (var cls in tree.GetRoot().DescendantNodes().OfType<ClassDeclarationSyntax>())
         {
             if (cls.BaseList == null) continue;
+            var firstBase = cls.BaseList.Types[0].Type.ToString().Trim();
+            if (!_collector.Interfaces.ContainsKey(firstBase))
+                _classBase[cls.Identifier.Text] = firstBase;
 
             var implementedInterfaces = new List<string>();
             foreach (var baseType in cls.BaseList.Types)
@@ -186,7 +212,14 @@ public sealed class InterfaceExpander
         sb.AppendLine("{");
         sb.AppendLine($"    {ifaceName}_vtable* vtable;");
         sb.AppendLine($"    void* obj;");
+        // Same layout as CS2SX_IfaceHdr: the value is reference-counted and owns obj.
+        sb.AppendLine($"    int _rc;");
+        sb.AppendLine($"    CS2SX_FreeFn _release;");
+        sb.AppendLine($"    const struct CS2SX_GcKind* _kind;");
+        sb.AppendLine($"    const CS2SX_ClassInfo* _cls;");
         sb.AppendLine($"}} {ifaceName};");
+        sb.AppendLine($"static inline {ifaceName}* {ifaceName}_Retain({ifaceName}* i) {{ return ({ifaceName}*)CS2SX_Iface_Retain(i); }}");
+        sb.AppendLine($"static inline void {ifaceName}_Free({ifaceName}* i) {{ CS2SX_Iface_Free(i); }}");
         sb.AppendLine();
 
         // Interface-Aufruf-Makros (komfortabler Aufruf ohne ->vtable->)
@@ -327,7 +360,31 @@ public sealed class InterfaceExpander
                                && m.Identifier.Text == mName
                                && m.ExplicitInterfaceSpecifier.Name.ToString().TrimEnd() == ifaceName));
 
-                if (implemented)
+                var implMethod = cls.Members.OfType<MethodDeclarationSyntax>().FirstOrDefault(m => m.Identifier.Text == mName);
+                bool isVirtual = implMethod != null && implMethod.ExplicitInterfaceSpecifier == null
+                    && implMethod.Modifiers.Any(x => x.IsKind(SyntaxKind.VirtualKeyword) || x.IsKind(SyntaxKind.AbstractKeyword) || x.IsKind(SyntaxKind.OverrideKeyword));
+                if (implemented && isVirtual)
+                {
+                    // Virtual / abstract: the entry calls through the object's class vtable,
+                    // so an interface value of a derived class runs the override.
+                    var ifm = iface.Members.OfType<MethodDeclarationSyntax>().First(m => m.Identifier.Text == mName);
+                    var retCs = ifm.ReturnType.ToString().Trim();
+                    var ret = TypeRegistry.MapType(retCs);
+                    if (!ret.EndsWith("*") && TypeRegistry.NeedsPointerSuffix(retCs)) ret += "*";
+                    var ps = ifm.ParameterList.Parameters.Select(p =>
+                    {
+                        var pt = TypeRegistry.MapType(p.Type?.ToString().Trim() ?? "int");
+                        if (!pt.EndsWith("*") && TypeRegistry.NeedsPointerSuffix(p.Type?.ToString().Trim() ?? "int")) pt += "*";
+                        return pt + " " + p.Identifier.Text;
+                    }).ToList();
+                    var root = TypeRegistry.ArcRoot(className) ?? className;
+                    var thunk = $"_cs2sx_{className}_{ifaceName}_{mName}_virt";
+                    var callArgs = string.Concat(ifm.ParameterList.Parameters.Select(p => ", " + p.Identifier.Text));
+                    sb.Insert(0, $"static {ret} {thunk}({string.Join(", ", new[] { "void* self" }.Concat(ps))}) " +
+                        $"{{ {(ret == "void" ? "" : "return ")}(({root}*)self)->vtable->{mName}(({root}*)self{callArgs}); }}" + Environment.NewLine);
+                    sb.AppendLine($"    .{mName} = {thunk},");
+                }
+                else if (implemented)
                 {
                     // Cast to the vtable's void*-based function pointer type to avoid
                     // "incompatible pointer type" errors (impl uses ClassName*, vtable uses void*).
@@ -379,24 +436,36 @@ public sealed class InterfaceExpander
     public string ExpandClassVTableDeclarations(string className)
     {
         if (!ClassInterfaces.TryGetValue(className, out var interfaces))
+            interfaces = new List<string>();
+        if (interfaces.Count == 0 && !InheritedInterfaces.ContainsKey(className))
             return "";
 
         var sb = new System.Text.StringBuilder();
-        foreach (var ifaceName in interfaces)
+        var pairs = interfaces.Select(i => (iface: i, implementer: className)).ToList();
+        if (InheritedInterfaces.TryGetValue(className, out var inherited)) pairs.AddRange(inherited);
+        foreach (var (ifaceName, implementer) in pairs)
         {
             if (!_collector.Interfaces.ContainsKey(ifaceName)) continue;
-            var instanceName = $"{className}_{ifaceName}_vtable_instance";
+            var instanceName = $"{implementer}_{ifaceName}_vtable_instance";
             // vtable instance forward declaration
             sb.AppendLine($"extern {ifaceName}_vtable {instanceName};");
             // _as_IFace helper: heap-allocate a new IFace struct each call so multiple pushes
             // onto the Navigator stack don't share the same struct (which would cause wrong obj).
+            // The value belongs to the current frame and keeps the object alive
+            // (reference-counted classes): CS2SX_Iface_Wrap.
+            var root = TypeRegistry.ArcRoot(className);
+            if (root != null)
+            {
+                sb.AppendLine($"{root}* {root}_Retain({root}* self);");
+                sb.AppendLine($"void {root}_Free({root}* self);");
+                sb.AppendLine($"extern const CS2SX_GcKind {root}_GcKind;");
+                sb.AppendLine($"extern const CS2SX_ClassInfo {className}_ClassInfo;");
+            }
             sb.AppendLine($"static inline {ifaceName}* {className}_as_{ifaceName}({className}* self)");
             sb.AppendLine("{");
-            sb.AppendLine($"    {ifaceName}* _iface = ({ifaceName}*)malloc(sizeof({ifaceName}));");
-            sb.AppendLine($"    if (!_iface) return NULL;");
-            sb.AppendLine($"    _iface->vtable = &{instanceName};");
-            sb.AppendLine($"    _iface->obj = self;");
-            sb.AppendLine($"    return _iface;");
+            sb.AppendLine(root != null
+                ? $"    return ({ifaceName}*)CS2SX_Iface_Wrap(sizeof({ifaceName}), &{instanceName}, self, (void* (*)(void*)){root}_Retain, (CS2SX_FreeFn){root}_Free, &{root}_GcKind, &{className}_ClassInfo);"
+                : $"    return ({ifaceName}*)CS2SX_Iface_Wrap(sizeof({ifaceName}), &{instanceName}, self, NULL, NULL, NULL, NULL);");
             sb.AppendLine("}");
         }
         return sb.ToString();
@@ -436,14 +505,14 @@ public sealed class InterfaceExpander
             sb.AppendLine($"static inline void Stack_{ifaceName}_Push(Stack_{ifaceName}_ptr* s, {ifaceName}* val) {{");
             sb.AppendLine($"    if (!s) return;");
             sb.AppendLine($"    if (s->count >= s->capacity) {{ s->capacity *= 2; s->data = ({ifaceName}**)realloc(s->data, s->capacity * sizeof({ifaceName}*)); }}");
-            sb.AppendLine($"    s->data[s->count++] = val; }}");
+            sb.AppendLine($"    s->data[s->count++] = ({ifaceName}*)CS2SX_Iface_Retain(val); }}");
             sb.AppendLine($"static inline {ifaceName}* Stack_{ifaceName}_Pop(Stack_{ifaceName}_ptr* s) {{");
             sb.AppendLine($"    if (!s || s->count == 0) return NULL;");
-            sb.AppendLine($"    return s->data[--s->count]; }}");
+            sb.AppendLine($"    {ifaceName}* _v = s->data[--s->count]; CS2SX_Iface_Drop(_v); return _v; }}");
             sb.AppendLine($"static inline {ifaceName}* Stack_{ifaceName}_Peek(Stack_{ifaceName}_ptr* s) {{");
             sb.AppendLine($"    if (!s || s->count == 0) return NULL;");
             sb.AppendLine($"    return s->data[s->count - 1]; }}");
-            sb.AppendLine($"static inline void Stack_{ifaceName}_Free(Stack_{ifaceName}_ptr* s) {{ if (!s || --s->_rc > 0) return; free(s->data); free(s); }}");
+            sb.AppendLine($"static inline void Stack_{ifaceName}_Free(Stack_{ifaceName}_ptr* s) {{ if (!s || --s->_rc > 0) return; for (int _i = 0; _i < s->count; _i++) CS2SX_Iface_Drop(s->data[_i]); free(s->data); free(s); }}");
             sb.AppendLine($"#endif");
         }
         var content = sb.ToString();

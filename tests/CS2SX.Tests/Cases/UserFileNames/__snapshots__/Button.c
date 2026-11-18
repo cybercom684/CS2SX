@@ -15,12 +15,15 @@ MenuEntry* MenuEntry_New(const char* title)
     MenuEntry* self = (MenuEntry*)calloc(1, sizeof(MenuEntry));
     if (!self) return NULL;
     self->_rc = 1;
-    self->_dtor = (void (*)(void*))MenuEntry_Dispose;
+    self->_dtor = (void (*)(void*))MenuEntry__Destroy;
     self->_gc = MenuEntry_Gc;
+    self->_class = &MenuEntry_ClassInfo;
     MenuEntry_Ctor(self, title);
     CS2SX_ReleaseLater(self, (CS2SX_FreeFn)MenuEntry_Free);
     return self;
 }
+
+const CS2SX_ClassInfo MenuEntry_ClassInfo = { "MenuEntry", NULL };
 
 void MenuEntry_Gc(void* _self, CS2SX_GcVisit visit)
 {
@@ -30,7 +33,7 @@ void MenuEntry_Gc(void* _self, CS2SX_GcVisit visit)
 static void MenuEntry_GcDyn(void* self, CS2SX_GcVisit visit) { ((MenuEntry*)self)->_gc(self, visit); }
 const CS2SX_GcKind MenuEntry_GcKind = { offsetof(MenuEntry, _rc), MenuEntry_GcDyn, (CS2SX_FreeFn)MenuEntry_Free };
 
-void MenuEntry_Dispose(MenuEntry* self)
+void MenuEntry__Destroy(MenuEntry* self)
 {
     CS2SX_StrDrop(self->f_Title); self->f_Title = NULL;
 }

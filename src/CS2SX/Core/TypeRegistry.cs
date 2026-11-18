@@ -723,6 +723,7 @@ public static class TypeRegistry
         && !IsDelegate(csType)
         && !IsUserDefinedEnum(csType)
         && !IsUserStruct(csType)
+        && !IsTuple(csType)          // tuples are value structs (_Tuple2_int_str)
         && csType != "string"
         && !csType.EndsWith("[]");
 

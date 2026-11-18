@@ -13,8 +13,9 @@ Point* Point_New_0(void)
     Point* self = (Point*)calloc(1, sizeof(Point));
     if (!self) return NULL;
     self->_rc = 1;
-    self->_dtor = (void (*)(void*))Point_Dispose;
+    self->_dtor = (void (*)(void*))Point__Destroy;
     self->_gc = Point_Gc;
+    self->_class = &Point_ClassInfo;
     Point_Ctor_0(self);
     CS2SX_ReleaseLater(self, (CS2SX_FreeFn)Point_Free);
     return self;
@@ -31,8 +32,9 @@ Point* Point_New_1(int v)
     Point* self = (Point*)calloc(1, sizeof(Point));
     if (!self) return NULL;
     self->_rc = 1;
-    self->_dtor = (void (*)(void*))Point_Dispose;
+    self->_dtor = (void (*)(void*))Point__Destroy;
     self->_gc = Point_Gc;
+    self->_class = &Point_ClassInfo;
     Point_Ctor_1(self, v);
     CS2SX_ReleaseLater(self, (CS2SX_FreeFn)Point_Free);
     return self;
@@ -49,8 +51,9 @@ Point* Point_New_2(int x, int y)
     Point* self = (Point*)calloc(1, sizeof(Point));
     if (!self) return NULL;
     self->_rc = 1;
-    self->_dtor = (void (*)(void*))Point_Dispose;
+    self->_dtor = (void (*)(void*))Point__Destroy;
     self->_gc = Point_Gc;
+    self->_class = &Point_ClassInfo;
     Point_Ctor_2(self, x, y);
     CS2SX_ReleaseLater(self, (CS2SX_FreeFn)Point_Free);
     return self;
@@ -72,12 +75,15 @@ Point* Point_New_3(int x, int y, const char* tag)
     Point* self = (Point*)calloc(1, sizeof(Point));
     if (!self) return NULL;
     self->_rc = 1;
-    self->_dtor = (void (*)(void*))Point_Dispose;
+    self->_dtor = (void (*)(void*))Point__Destroy;
     self->_gc = Point_Gc;
+    self->_class = &Point_ClassInfo;
     Point_Ctor_3(self, x, y, tag);
     CS2SX_ReleaseLater(self, (CS2SX_FreeFn)Point_Free);
     return self;
 }
+
+const CS2SX_ClassInfo Point_ClassInfo = { "Point", NULL };
 
 void Point_Gc(void* _self, CS2SX_GcVisit visit)
 {
@@ -87,7 +93,7 @@ void Point_Gc(void* _self, CS2SX_GcVisit visit)
 static void Point_GcDyn(void* self, CS2SX_GcVisit visit) { ((Point*)self)->_gc(self, visit); }
 const CS2SX_GcKind Point_GcKind = { offsetof(Point, _rc), Point_GcDyn, (CS2SX_FreeFn)Point_Free };
 
-void Point_Dispose(Point* self)
+void Point__Destroy(Point* self)
 {
     CS2SX_StrDrop(self->f_Tag); self->f_Tag = NULL;
 }
@@ -121,8 +127,9 @@ Point3* Point3_New_3(int x, int y, int z)
     Point3* self = (Point3*)calloc(1, sizeof(Point3));
     if (!self) return NULL;
     self->base._rc = 1;
-    self->base._dtor = (void (*)(void*))Point3_Dispose;
+    self->base._dtor = (void (*)(void*))Point3__Destroy;
     self->base._gc = Point3_Gc;
+    self->base._class = &Point3_ClassInfo;
     Point3_Ctor_3(self, x, y, z);
     CS2SX_ReleaseLater(self, (CS2SX_FreeFn)Point3_Free);
     return self;
@@ -139,12 +146,15 @@ Point3* Point3_New_1(int v)
     Point3* self = (Point3*)calloc(1, sizeof(Point3));
     if (!self) return NULL;
     self->base._rc = 1;
-    self->base._dtor = (void (*)(void*))Point3_Dispose;
+    self->base._dtor = (void (*)(void*))Point3__Destroy;
     self->base._gc = Point3_Gc;
+    self->base._class = &Point3_ClassInfo;
     Point3_Ctor_1(self, v);
     CS2SX_ReleaseLater(self, (CS2SX_FreeFn)Point3_Free);
     return self;
 }
+
+const CS2SX_ClassInfo Point3_ClassInfo = { "Point3", &Point_ClassInfo };
 
 void Point3_Gc(void* _self, CS2SX_GcVisit visit)
 {
@@ -152,9 +162,9 @@ void Point3_Gc(void* _self, CS2SX_GcVisit visit)
     Point_Gc(_self, visit);
 }
 
-void Point3_Dispose(Point3* self)
+void Point3__Destroy(Point3* self)
 {
-    Point_Dispose((Point*)self);
+    Point__Destroy((Point*)self);
 }
 
 void Point3_Free(Point3* self)
@@ -209,8 +219,9 @@ Counter* Counter_New(void)
     Counter* self = (Counter*)calloc(1, sizeof(Counter));
     if (!self) return NULL;
     self->_rc = 1;
-    self->_dtor = (void (*)(void*))Counter_Dispose;
+    self->_dtor = (void (*)(void*))Counter__Destroy;
     self->_gc = Counter_Gc;
+    self->_class = &Counter_ClassInfo;
     Counter_Ctor(self);
     CS2SX_ReleaseLater(self, (CS2SX_FreeFn)Counter_Free);
     return self;
@@ -225,16 +236,21 @@ void Counter_Add(Counter* self, int n)
     (self->f_Changed != NULL ? Action_int_Invoke(self->f_Changed, self->value) : (void)0);
 }
 
+const CS2SX_ClassInfo Counter_ClassInfo = { "Counter", NULL };
+
 void Counter_Gc(void* _self, CS2SX_GcVisit visit)
 {
     Counter* self = (Counter*)_self; (void)self;
+    if (visit) visit((void*)self->f_Changed, &CS2SX_Delegate_GcKind);
+    else if (self->f_Changed) { void* _o = (void*)self->f_Changed; self->f_Changed = NULL; ((void (*)(void*))CS2SX_Delegate_Release)(_o); }
 }
 
 static void Counter_GcDyn(void* self, CS2SX_GcVisit visit) { ((Counter*)self)->_gc(self, visit); }
 const CS2SX_GcKind Counter_GcKind = { offsetof(Counter, _rc), Counter_GcDyn, (CS2SX_FreeFn)Counter_Free };
 
-void Counter_Dispose(Counter* self)
+void Counter__Destroy(Counter* self)
 {
+    if (self->f_Changed) { CS2SX_Delegate_Release(self->f_Changed); self->f_Changed = NULL; }
 }
 
 void Counter_Free(Counter* self)
@@ -487,13 +503,13 @@ void LanguagePhase4App_OnInit(LanguagePhase4App* self)
     CS2SX_LINE(110);
     Counter* c = Counter_New();
     CS2SX_LINE(111);
-    c->f_Changed = CS2SX_Delegate_Combine(c->f_Changed, CS2SX_Delegate_New((void*)LanguagePhase4App_OnChangedA, self, 0));
+    CS2SX_RC_STORE(CS2SX_Delegate_Retain, CS2SX_Delegate_Release, c->f_Changed, CS2SX_Delegate_Combine(c->f_Changed, CS2SX_Delegate_New((void*)LanguagePhase4App_OnChangedA, self, 0)));
     CS2SX_LINE(112);
-    c->f_Changed = CS2SX_Delegate_Combine(c->f_Changed, CS2SX_Delegate_New((void*)LanguagePhase4App_OnChangedB, self, 0));
+    CS2SX_RC_STORE(CS2SX_Delegate_Retain, CS2SX_Delegate_Release, c->f_Changed, CS2SX_Delegate_Combine(c->f_Changed, CS2SX_Delegate_New((void*)LanguagePhase4App_OnChangedB, self, 0)));
     CS2SX_LINE(113);
     Counter_Add(c, 1);
     CS2SX_LINE(114);
-    c->f_Changed = CS2SX_Delegate_Remove(c->f_Changed, CS2SX_Delegate_New((void*)LanguagePhase4App_OnChangedA, self, 0));
+    CS2SX_RC_STORE(CS2SX_Delegate_Retain, CS2SX_Delegate_Release, c->f_Changed, CS2SX_Delegate_Remove(c->f_Changed, CS2SX_Delegate_New((void*)LanguagePhase4App_OnChangedA, self, 0)));
     CS2SX_LINE(115);
     Counter_Add(c, 2);
     CS2SX_LINE(116);

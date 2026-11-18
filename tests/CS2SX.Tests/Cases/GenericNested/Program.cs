@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 
 // Generic methods inside generic classes: the method is specialised per call,
@@ -15,6 +15,13 @@ public class Box<T>
     private U Echo<U>(U x) => x;
 }
 
+public struct Pair<T>
+{
+    public T A;
+    public Pair(T a) { A = a; }
+    public U Map<U>(Func<T, U> f) => f(A);
+}
+
 public class GenericNestedApp : SwitchApp
 {
     public override void OnInit()
@@ -25,5 +32,7 @@ public class GenericNestedApp : SwitchApp
         Console.WriteLine(s.Map(x => x.Length) + " " + s.Map(x => x + x));           // 2 abab
         Console.WriteLine(n.Is("21", (a, b) => ("" + a) == b) + " " + n.Pick(1.5f)); // True 21
         Console.WriteLine(n.Same() + " " + s.Same());                                // 21 ab
+        var pair = new Pair<int>(4);
+        Console.WriteLine(pair.Map(x => "p" + x) + " " + pair.Map(x => x + 1));      // p4 5
     }
 }

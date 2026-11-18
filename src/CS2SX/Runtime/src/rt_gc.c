@@ -94,7 +94,7 @@ void CS2SX_GcLeaf(void* self, CS2SX_GcVisit visit) { (void)self; (void)visit; }
 
 void CS2SX_GcSuspect(void* obj, const CS2SX_GcKind* kind)
 {
-    if (!obj) return;
+    if (!obj || s_collecting) return;
     int added;
     gc_put(&s_suspects, obj, kind, &added);
 }
@@ -142,15 +142,15 @@ static GcEntry* gc_node(void* obj, const CS2SX_GcKind* kind)
 
 static void gc_visit_subtract(void* child, const CS2SX_GcKind* kind)
 {
-    if (!child) return;
+    // (A count of 0 or less: a static instance, e.g. a delegate without captures.)
+    if (!child || !kind || gc_rc(child, kind) <= 0) return;
     GcEntry* e = gc_node(child, kind);
     if (e) e->count--;
 }
 
 static void gc_visit_live(void* child, const CS2SX_GcKind* kind)
 {
-    (void)kind;
-    if (!child) return;
+    if (!child || !kind || gc_rc(child, kind) <= 0) return;
     GcEntry* e = gc_find(&s_graph, child);
     if (e && !e->live) { e->live = 1; gc_push(child); }
 }

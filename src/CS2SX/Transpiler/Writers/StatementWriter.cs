@@ -399,7 +399,7 @@ public sealed class StatementWriter
         var bareType = csType.TrimEnd('*').Trim();
         if (bareType == targetIfaceName) return null;
         if (!TypeRegistry.NeedsPointerSuffix(bareType)) return null; // not a class
-        return bareType + "_as_" + targetIfaceName + "(" + exprCode + ")";
+        return exprCode.Contains("_as_") ? exprCode : bareType + "_as_" + targetIfaceName + "(" + exprCode + ")";
     }
 
     private void WriteArrayAlloc(VariableDeclaratorSyntax v, string declType,
@@ -628,6 +628,7 @@ public sealed class StatementWriter
         if (declType is "var" or "var?")
             return InferVarType(v);
         if (declType == "bool") return ("int", false);
+        if (TypeRegistry.IsTuple(declType)) return (TypeRegistry.GetTupleStructName(declType), false);   // value struct
         var cType = TypeRegistry.MapType(declType);
         // MapType already appends '*' for List<T>, Dictionary<K,V>, string (const char*) etc.
         // Returning isPtr=true on top of that would produce a double-pointer.
@@ -651,6 +652,9 @@ public sealed class StatementWriter
             var semType = _ctx.GetSemanticType(initExpr);
             if (semType != null && TypeRegistry.IsUserStruct(semType))
                 return (semType, false);
+            // Tuples are value structs (_Tuple2_Item_int).
+            if (semType != null && TypeRegistry.IsTuple(semType))
+                return (TypeRegistry.GetTupleStructName(semType), false);
             // T[] → element pointer (header array), e.g. `var parts = s.Split(',')`
             if (semType != null && semType.EndsWith("[]") && !semType.Contains(','))
                 return (ArrayModel.ElemCType(semType[..^2]), true);
@@ -929,8 +933,7 @@ public sealed class StatementWriter
             var typeName = dp.Type.ToString().Trim();
             var cType = TypeRegistry.MapType(typeName);
             var subject = _expr.Write(isPattern.Expression);
-            _ctx.WriteLine(cType + "* " + desig.Identifier.Text
-                         + " = (" + cType + "*)" + subject + ";");
+            _ctx.WriteLine(cType + "* " + desig.Identifier.Text + " = " + PatternBinding(isPattern, dp, subject, cType) + ";");
             _ctx.LocalTypes[desig.Identifier.Text] = typeName;
         }
         if (ifStmt.Statement is BlockSyntax block)
@@ -950,6 +953,16 @@ public sealed class StatementWriter
             _ctx.WriteLine("else");
             WriteBlockOrStmt(ifStmt.Else.Statement);
         }
+    }
+
+    private string PatternBinding(IsPatternExpressionSyntax isPattern, DeclarationPatternSyntax dp, string subject, string cType)
+    {
+        try
+        {
+            var ti = _ctx.SemanticModel?.GetTypeInfo(dp);
+            return Arc.TypeBinding(subject, ti?.Type, ti?.ConvertedType, cType);
+        }
+        catch { return "(" + cType + "*)" + subject; }
     }
 
     private void WriteIfInline(IfStatementSyntax ifStmt)
@@ -973,8 +986,7 @@ public sealed class StatementWriter
                 var typeName = dp.Type.ToString().Trim();
                 var cType = TypeRegistry.MapType(typeName);
                 var subject = _expr.Write(isPattern.Expression);
-                _ctx.WriteLine(cType + "* " + desig.Identifier.Text
-                             + " = (" + cType + "*)" + subject + ";");
+                _ctx.WriteLine(cType + "* " + desig.Identifier.Text + " = " + PatternBinding(isPattern, dp, subject, cType) + ";");
                 _ctx.LocalTypes[desig.Identifier.Text] = typeName;
             }
             if (ifStmt.Statement is BlockSyntax blk)
@@ -1292,7 +1304,8 @@ public sealed class StatementWriter
         }
         var cInner = TypeRegistry.MapType(inner);
         // Delegate elements are CS2SX_Delegate* values themselves (Func_int_t).
-        var isPrim = TypeRegistry.IsPrimitive(inner) || TypeRegistry.IsDelegate(inner);
+        // Structs, tuples and enums are held by value.
+        var isPrim = TypeRegistry.IsPrimitive(inner) || TypeRegistry.IsDelegate(inner) || !TypeRegistry.NeedsPointerSuffix(inner);
         var elemPtr = isPrim ? "" : "*";
         var listFunc = "List_" + cInner + "_Get";
         _ctx.WriteLine(cInner + elemPtr + " " + varName
@@ -1423,7 +1436,14 @@ public sealed class StatementWriter
                 if (label is CaseSwitchLabelSyntax caseLabel)
                 {
                     var kw = first ? "if" : "else if";
-                    _ctx.WriteLine(kw + " (" + subject + " == " + _expr.Write(caseLabel.Value) + ")");
+                    // `case Cube:` names a type: a type test, not a comparison.
+                    ITypeSymbol? caseType = null;
+                    try { caseType = _ctx.SemanticModel?.GetSymbolInfo(caseLabel.Value).Symbol as ITypeSymbol; }
+                    catch { }
+                    var caseCond = caseType != null
+                        ? Arc.TypeTest(subject, _ctx.SemanticModel?.GetTypeInfo(sw.Expression).Type, caseType)
+                        : subject + " == " + _expr.Write(caseLabel.Value);
+                    _ctx.WriteLine(kw + " (" + caseCond + ")");
                     _ctx.WriteLine("{");
                     _ctx.Indent();
                     foreach (var s in section.Statements.Where(s => s is not BreakStatementSyntax))
@@ -1448,8 +1468,14 @@ public sealed class StatementWriter
                     {
                         var typeName = dp.Type.ToString().Trim();
                         var cType = TypeRegistry.MapType(typeName);
-                        _ctx.WriteLine(cType + "* " + desig.Identifier.Text
-                                     + " = (" + cType + "*)" + subject + ";");
+                        string binding;
+                        try
+                        {
+                            var pti = _ctx.SemanticModel?.GetTypeInfo(dp);
+                            binding = Arc.TypeBinding(subject, pti?.Type, pti?.ConvertedType, cType);
+                        }
+                        catch { binding = "(" + cType + "*)" + subject; }
+                        _ctx.WriteLine(cType + "* " + desig.Identifier.Text + " = " + binding + ";");
                         _ctx.LocalTypes[desig.Identifier.Text] = typeName;
                     }
                     foreach (var s in section.Statements.Where(s => s is not BreakStatementSyntax))

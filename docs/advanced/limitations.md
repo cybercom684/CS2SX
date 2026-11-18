@@ -12,7 +12,7 @@ Für diese Konstrukte gibt es keine Übersetzung nach C. `cs2sx build` und `cs2s
 |---|---|
 | Ranges auf Arrays (`arr[1..3]`), `^` in `foreach`-Ranges, Ranges auf komplexen Ausdrücken | Schleife, `Substring`/`GetRange` auf einer Variable |
 | `with` auf Nicht-Records, auf komplexen Ausdrücken oder für Nicht-Positionsparameter | `new Punkt(1, p.Y)` |
-| generische Methoden in generischen Structs/Interfaces, generische Structs innerhalb generischer Typen | in eine Klasse verschieben (dort gehen generische Methoden, auch in `Box<T>`) |
+| generische Methoden in generischen Interfaces, generische Structs innerhalb generischer Typen | in eine Klasse oder ein Struct verschieben (dort gehen generische Methoden, auch in `Box<T>` und `Pair<T>`) |
 | lokale Variablen/Parameter namens `self` in Instanzmethoden | umbenennen (`self` heißt `this` im erzeugten C) |
 | lokale Funktionen, die lokale Variablen/Parameter der umgebenden Methode benutzen, generische lokale Funktionen | Werte als Parameter übergeben, private Methode |
 | LINQ-Abfragesyntax `from x in … select x` | `list.Where(…).Select(…)` |
@@ -22,7 +22,7 @@ Für diese Konstrukte gibt es keine Übersetzung nach C. `cs2sx build` und `cs2s
 | `yield return` | Werte in einer `List<T>` sammeln |
 | `new object()`, `dynamic` | eigene Klasse, konkreter Typ |
 | `stackalloc`, `Span<T>`, `unsafe`, Zeiger | normale Arrays |
-| `GetType()` (außer bei Exceptions) | `is`/`switch` auf den Typ |
+| `GetType()` (außer bei Exceptions) | `is`/`switch` auf den Typ (prüfen den echten Typ zur Laufzeit) |
 
 Unterstützt (CS2SX schreibt es vor dem Übersetzen um): lokale Funktionen ohne Zugriff auf lokale Variablen der Methode, `[1, 2, 3]` für Arrays/List/HashSet, `with` bei Records, `foreach (var i in 0..10)`, `s[1..3]`/`s[^1]`/`list[2..]`, eigene `delegate`-Typen, generische Methoden (auch `virtual`/`abstract`/`override` und in Interfaces) und generische Structs (`struct Pair<T>`).
 
@@ -30,10 +30,11 @@ Unterstützt (CS2SX schreibt es vor dem Übersetzen um): lokale Funktionen ohne 
 
 ## Speicher: Referenzzählung statt Garbage Collector
 
-Das transpilierte Programm hat keine .NET-Laufzeit und damit keinen Garbage Collector. Objekte eigener Klassen, Collections (`List`, `Dictionary`, `Stack`, `Queue`, `HashSet`) und `StringBuilder` werden stattdessen referenzgezählt. Im Alltag verhält sich das wie in C#:
+Das transpilierte Programm hat keine .NET-Laufzeit und damit keinen Garbage Collector. Objekte eigener Klassen, Collections (`List`, `Dictionary`, `Stack`, `Queue`, `HashSet`), `StringBuilder`, Delegates (Lambdas, Methoden als Delegate, Events) und Interface-Werte werden stattdessen referenzgezählt. Im Alltag verhält sich das wie in C#:
 
-- **Was niemand behält, wird freigegeben.** Ein Objekt, das nur in lokalen Variablen lebt (`var p = new Partikel();` in `OnFrame`), wird am Anfang des nächsten Frames zerstört. Neue Objekte pro Frame sind also kein Speicherleck, das gilt auch für Zwischenergebnisse wie `gegner.Where(…).ToList()`.
-- **Was etwas behält, bleibt.** Halten können Felder und Properties, `List`, `Dictionary`, `Stack`, `Queue`, `HashSet`, Arrays, generische Klassen (`Box<Item>`), Structs, Tupel, Interface- und `object`-Werte sowie Lambdas und Event-Handler. Jede dieser Stellen hält eine eigene Referenz.
+- **Was niemand behält, wird freigegeben.** Ein Objekt, das nur in lokalen Variablen lebt (`var p = new Partikel();` in `OnFrame`), wird am Anfang des nächsten Frames zerstört. Neue Objekte pro Frame sind also kein Speicherleck, das gilt auch für Zwischenergebnisse wie `gegner.Where(…).ToList()` und für Lambdas, die jeden Frame neu entstehen.
+- **Was etwas behält, bleibt.** Halten können Felder und Properties, Events, `List`, `Dictionary`, `Stack`, `Queue`, `HashSet`, Arrays, generische Klassen (`Box<Item>`), Lambdas (was sie erfassen), Delegates (das Objekt einer Methode wie `obj.Update`) und Interface-Werte (ihr Objekt). Jede dieser Stellen hält eine eigene Referenz.
+- **Structs und Tupel** halten selbst nichts, wie eine lokale Variable. Steckt ein Struct oder Tupel in einem Feld oder einer Liste, hält diese Stelle die Objekte, Strings und Collections darin.
 - **Erst zum nächsten Frame:** Wird ein Objekt losgelassen (`RemoveAt`, `Pop`, `Remove`, `Clear`, ein überschriebenes Feld), stirbt es frühestens am Anfang des nächsten Frames. Lokale Variablen bleiben bis dahin gültig:
 
   ```csharp
@@ -43,13 +44,12 @@ Das transpilierte Programm hat keine .NET-Laufzeit und damit keinen Garbage Coll
 
 - **Zerstörung ist virtuell:** Ein `Circle` in einer `List<Shape>` räumt auch seine eigenen Felder auf. Ein C#-Finalizer (`~Circle()`) läuft dabei mit.
 
-- **Zyklen werden gefunden:** Objekte, die sich gegenseitig halten (`kind.Parent = this; Children.Add(kind);`, ein Ring, ein Objekt, das auf sich selbst zeigt), werden freigegeben, sobald von außen nichts mehr auf sie zeigt. Die Suche läuft etwa alle 16 Frames und nur, wenn Referenzen abgegeben wurden. Sie folgt Feldern und Auto-Properties mit Objekten sowie `List`, `Dictionary` (Werte), `Stack`, `Queue` und `HashSet` mit Objekten.
+- **Zyklen werden gefunden:** Objekte, die sich gegenseitig halten (`kind.Parent = this; Children.Add(kind);`, ein Ring, ein Objekt, das auf sich selbst zeigt), werden freigegeben, sobald von außen nichts mehr auf sie zeigt. Die Suche läuft etwa alle 16 Frames und nur, wenn Referenzen abgegeben wurden. Sie folgt Feldern, Auto-Properties und Events, Arrays in Feldern, `List`, `Dictionary` (Werte), `Stack`, `Queue` und `HashSet`, Structs und Tupeln in Feldern, Lambdas (was sie erfassen), Delegates und Interface-Werten. Typischer Fall: ein Objekt, dessen eigener Event-Handler `this` erfasst (`Changed += () => Count++;`).
 
 **Nicht freigegeben werden:**
 
-- Zyklen, die über ein Array, eine generische Klasse oder ein Lambda laufen. Dort einen der Verweise vor dem Wegwerfen auf `null` setzen.
-- Objekte, die über ein Struct, ein Tupel, ein Interface-/`object`-Wert, oder einen Methoden-Delegate (`+= obj.Methode`) gehalten wurden. Diese Stellen geben ihre Referenz nicht zurück.
-- Delegates selbst: Ein Lambda, das Variablen erfasst (`() => zaehler++`), und jede Umwandlung einer Methode in einen Delegate legen ein kleines Objekt an, das nicht wieder freigegeben wird, samt allem, was es erfasst. Solche Lambdas deshalb einmal anlegen (in `OnInit` oder einem Feld), nicht in jedem Frame. Lambdas direkt in LINQ-, `List.ForEach`- und `Sort`-Aufrufen sind nicht betroffen.
+- Zyklen, die über eine generische Klasse (`Box<T>`) laufen, und Objekte, die ein `object`-Wert hält. Dort einen der Verweise vor dem Wegwerfen auf `null` setzen.
+- Objekte in Arrays, die nur in einer lokalen Variable liegen, und in Tupeln, die in ein Array geschrieben werden.
 
 `GC.GetTotalMemory(false)` liefert den belegten Heap in Bytes, praktisch, um ein Speicherleck zu finden. `GC.Collect()` sucht sofort nach Zyklen; nötig ist der Aufruf nicht.
 
@@ -73,8 +73,8 @@ Auch `e.StackTrace` liefert diese Kette.
 
 Strings aus Verkettung, Interpolation oder `ToString()` entstehen in einem Zwischenspeicher, der zu jedem Frame geleert wird.
 
-- **Länge:** Verkettung (`a + b`, `+=`), Interpolation (`$"…"`) und `string.Format` sind nicht begrenzt. String-Methoden wie `Substring`, `Replace`, `ToUpper` oder `Trim` liefern höchstens **1023 Zeichen**, längere Ergebnisse werden abgeschnitten.
-- **Felder und Sammlungen:** Beim Zuweisen an ein Feld oder eine Auto-Property und beim Einfügen in `List<string>`, `Dictionary` oder ein `string[]`-Feld wird der String kopiert und bleibt gültig.
+- **Länge:** Verkettung (`a + b`, `+=`), Interpolation (`$"…"`), `string.Format`, `string.Join`, `new string('x', n)` und String-Methoden wie `Substring`, `Replace`, `ToUpper`, `Trim` oder `PadLeft` sind nicht begrenzt.
+- **Felder und Sammlungen:** Beim Zuweisen an ein Feld oder eine Auto-Property (auch an ein Struct- oder Tupel-Element in einem Feld) und beim Einfügen in `List<string>`, `Dictionary` oder ein `string[]`-Feld wird der String kopiert und bleibt gültig.
 - **Lokale Variablen und Rückgabewerte:** Diese zeigen in den Zwischenspeicher. Sie bleiben für den Rest des Frames gültig, aber nicht dauerhaft. In `async`-Methoden sind lokale Variablen Felder und überleben das `await`.
 
 ```csharp
@@ -129,7 +129,9 @@ private async Task Intro()
 public override void OnInit() { Intro(); }
 ```
 
-Unterstützt: `async Task`, `async Task<T>`, `async void`, `await` auf `Task`/`Task<T>`, `Task.Delay(ms)`, `Task.Yield()` (weiter im nächsten Frame), `Task.Delay(TimeSpan)`, `Task.CompletedTask`, `Task.FromResult`, `Task.WhenAll`, `Task.WhenAny(a, b)`, `Task.Run` (führt sofort aus), `IsCompleted`, `IsFaulted`, `Result`, `Wait()`. `await` geht auch im `try`-Block und in der Bedingung einer `while`-Schleife.
+Unterstützt: `async Task`, `async Task<T>`, `async void`, `async`-Lambdas (`Func<Task>`, `Action`, `Func<int, Task<int>>`), `await` auf `Task`/`Task<T>`, `Task.Delay(ms)`, `Task.Delay(TimeSpan)`, `Task.Yield()` (weiter im nächsten Frame), `Task.CompletedTask`, `Task.FromResult`, `Task.WhenAll` (auch mit Ergebnis: `int[] r = await Task.WhenAll(a, b)`), `Task.WhenAny(a, b)`, `Task.Run` (führt sofort aus), `IsCompleted`, `IsFaulted`, `Result`, `Wait()`.
+
+`await` geht auch in `try`, `catch` und `finally`, in `using`-Blöcken, in den Bedingungen von `while`, `do-while` und `for`, und rechts von `&&`, `||`, `??` sowie in `?:`, wenn der Ausdruck die ganze Bedingung, Zuweisung oder Rückgabe ist (`if (ok && await Pruefe())`).
 
 Eine Exception in einer `async Task`-Methode landet im Task und wird beim `await` oder bei `Result`/`Wait()` weitergeworfen; ein `catch` um das `await` fängt sie. Schaut niemand auf einen fehlgeschlagenen Task, erscheint beim Freigeben `Unobserved task exception: …` mit Aufrufkette im Log.
 
@@ -137,13 +139,13 @@ Der Build lehnt mit Zeile und Hinweis ab:
 
 | Konstrukt | Stattdessen |
 |---|---|
-| `await` in `catch`/`finally`, `using`, `lock` | im `try`-Block geht es; sonst das Ergebnis merken und das `await` dahinter ziehen |
-| `await` in der Bedingung von `do-while` oder im `for`-Kopf | Ergebnis im Rumpf in eine Variable schreiben, oder `while` |
-| Ergebnis von `await Task.WhenAll(…)`, `Task.WhenAny` mit `Task<T>` oder einer Liste | Tasks einzeln mit `await`/`.Result` auslesen |
-| `await` rechts von `&&`, `\|\|`, `??`, in `?:` oder einem `switch`-Ausdruck | vorher in eine Variable schreiben |
+| `await` in `catch`/`finally`, wenn `try`/`catch` mit `return`, `break` oder `continue` verlassen werden oder ein `catch` einen Filter (`when`) hat | Ergebnis merken und das `await` hinter den `try`-Block ziehen |
+| `await` in `do-while`- oder `for`-Kopf zusammen mit `continue` im Rumpf | `while` |
+| `await` rechts von `&&`, `\|\|`, `??` oder in `?:` mitten in einem größeren Ausdruck (z. B. als Argument), in einem `switch`-Ausdruck | vorher in eine Variable schreiben |
+| Ergebnis von `await Task.WhenAll(…)` ohne Ergebnistyp, `Task.WhenAny` mit `Task<T>` oder einer Liste | Tasks einzeln mit `await`/`.Result` auslesen |
 | `foreach` mit `await` im Rumpf über etwas anderes als `List<T>`/Array | `for`-Schleife |
 | `out var`, Muster-Variablen (`is Foo f`) und `using var` vor einem `await` im selben Block | normal deklarieren (`int n;`) |
-| `async`-Lambdas, lokale `async`-Funktionen, `await foreach`, `base.` in `async`-Methoden | `async`-Methode der Klasse |
+| `async`-Lambdas in anderen Lambdas oder in generischen Klassen, `await foreach`, `base.` in `async`-Methoden | `async`-Methode der Klasse |
 | `async` in Structs und generischen Klassen | normale Klasse |
 
 `Result` und `Wait()` blockieren nicht: Ist der Task noch nicht fertig, werfen sie eine `InvalidOperationException`. Rechenintensive Arbeit blockiert weiterhin den Frame, `await` verteilt nur Wartezeit.

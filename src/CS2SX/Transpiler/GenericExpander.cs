@@ -1,4 +1,4 @@
-﻿// ============================================================================
+// ============================================================================
 // CS2SX — Transpiler/GenericExpander.cs  (FIXED v2)
 //
 // FIX: SemanticModel-Lookup nutzt jetzt inst.BaseName (den originalen
@@ -42,6 +42,12 @@ public sealed class GenericExpander
                 return (c.Replace(" ", "_"), c, "CS2SX_ID", "CS2SX_NOREF");
             }
             if (TypeRegistry.IsUserStruct(cs)) return null;   // needs the full struct definition
+            if (TypeRegistry.IsDelegate(cs))
+            {
+                var d = TypeRegistry.MapType(cs);
+                return (d, d, "CS2SX_DLG_KEEP", "CS2SX_DLG_DROP");
+            }
+            if (TypeRegistry.IsRegisteredInterface(cs)) return (cs, cs + "*", "CS2SX_IFACE_KEEP", "CS2SX_IFACE_DROP");
             var cls = TypeRegistry.MapType(cs);
             var root = TypeRegistry.ArcRoot(cs);
             if (root == null) return (cls, cls + "*", "CS2SX_ID", "CS2SX_NOREF");
@@ -69,6 +75,8 @@ public sealed class GenericExpander
                 // Cycle collection follows the values (see Arc.TracedCollection).
                 if (TypeRegistry.ArcRoot(elem) is { } valRoot)
                     sb.AppendLine($"CS2SX_GC_ELEMENTS({name}, {valRoot}, c->vals[_i])");
+                else if (CS2SX.Transpiler.Arc.RcValue(elem) is { } valRc)
+                    sb.AppendLine($"CS2SX_GC_ELEMENTS_KIND({name}, {valRc.kind}, c->vals[_i])");
                 sb.AppendLine("#endif");
             }
             else
@@ -78,9 +86,11 @@ public sealed class GenericExpander
                 sb.AppendLine($"#ifndef CS2SX_{prefix}_{e.name}_DEFINED");
                 sb.AppendLine($"#define CS2SX_{prefix}_{e.name}_DEFINED");
                 sb.AppendLine($"CS2SX_{macro}_DEFINE_EX({e.name}, {e.cType}, {e.keep}, {e.drop})");
+                var elemAt = kind == "Queue" ? "c->data[(c->head + _i) % c->capacity]" : "c->data[_i]";
                 if (TypeRegistry.ArcRoot(elem) is { } elemRoot)
-                    sb.AppendLine($"CS2SX_GC_ELEMENTS({prefix}_{e.name}, {elemRoot}, "
-                                + (kind == "Queue" ? "c->data[(c->head + _i) % c->capacity])" : "c->data[_i])"));
+                    sb.AppendLine($"CS2SX_GC_ELEMENTS({prefix}_{e.name}, {elemRoot}, {elemAt})");
+                else if (CS2SX.Transpiler.Arc.RcValue(elem) is { } elemRc)
+                    sb.AppendLine($"CS2SX_GC_ELEMENTS_KIND({prefix}_{e.name}, {elemRc.kind}, {elemAt})");
                 sb.AppendLine("#endif");
             }
         }
@@ -88,13 +98,30 @@ public sealed class GenericExpander
 
     public (string headerPath, string implPath) WriteToFiles(string buildDir, IReadOnlyList<string>? userSources = null)
     {
+        // Tuples that hold references: their Keep/Drop/Gc (see Arc.TupleFunctions).
+        var tupleFns = new System.Text.StringBuilder();
+        var seenTuples = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var src in userSources ?? Array.Empty<string>())
+        {
+            try
+            {
+                foreach (var tt in Microsoft.CodeAnalysis.CSharp.CSharpSyntaxTree.ParseText(File.ReadAllText(src)).GetRoot()
+                             .DescendantNodes().OfType<Microsoft.CodeAnalysis.CSharp.Syntax.TupleTypeSyntax>())
+                    if (seenTuples.Add(TypeRegistry.GetTupleStructName(tt.ToString())) && Arc.TupleFunctions(tt.ToString()) is { } fns)
+                        tupleFns.Append(fns);
+            }
+            catch { }
+        }
+
         if (_collector.Instantiations.Count == 0
             && _collector.ListOfUserClassInstantiations.Count == 0
             && _collector.ListOfDelegateInstantiations.Count == 0
-            && _collector.UserCollectionInstantiations.Count == 0)
+            && _collector.UserCollectionInstantiations.Count == 0
+            && tupleFns.Length == 0)
             return (string.Empty, string.Empty);
 
         var headerSb = new System.Text.StringBuilder();
+        var tupleLists = new List<string>();
         headerSb.AppendLine("// ── Expanded Generic Types (auto-generated) ──────────────────────────");
         headerSb.AppendLine("// DO NOT EDIT — regenerated on every build");
         headerSb.AppendLine();
@@ -161,13 +188,24 @@ public sealed class GenericExpander
                         headerSb.AppendLine($"#endif");
                     }
                 }
+                // List<UserStruct> is defined in the struct's header (needs its definition);
+                // List<tuple> after the tuples' Keep/Drop (below).
+                if (TypeRegistry.IsUserStruct(userClass)) continue;
+                if (userClass.StartsWith("_Tuple")) { tupleLists.Add(userClass); continue; }
                 var guard = "CS2SX_LIST_PTR_" + userClass + "_DEFINED";
                 headerSb.AppendLine($"#ifndef {guard}");
                 headerSb.AppendLine($"#define {guard}");
                 var arcRoot = TypeRegistry.ArcRoot(userClass);
-                headerSb.AppendLine(arcRoot != null
-                    ? $"CS2SX_LIST_DEFINE_RC({userClass}, {arcRoot})"
-                    : $"CS2SX_LIST_DEFINE_PTR({userClass})");
+                if (arcRoot != null)
+                    headerSb.AppendLine($"CS2SX_LIST_DEFINE_RC({userClass}, {arcRoot})");
+                else if (TypeRegistry.IsRegisteredInterface(userClass))
+                {
+                    // Interface values: the list keeps a reference to each one.
+                    headerSb.AppendLine($"CS2SX_LIST_DEFINE_HOOK({userClass}, {userClass}*, CS2SX_IFACE_KEEP, CS2SX_IFACE_DROP)");
+                    headerSb.AppendLine($"CS2SX_GC_ELEMENTS_KIND(List_{userClass}, CS2SX_Iface_GcKind, c->data[_i])");
+                }
+                else
+                    headerSb.AppendLine($"CS2SX_LIST_DEFINE_PTR({userClass})");
                 headerSb.AppendLine($"#endif");
                 Log.Info($"GenericExpander: List<{userClass}> → CS2SX_LIST_DEFINE_PTR({userClass})");
             }
@@ -178,11 +216,30 @@ public sealed class GenericExpander
             var guard = "CS2SX_LIST_" + dg + "_DEFINED";
             headerSb.AppendLine($"#ifndef {guard}");
             headerSb.AppendLine($"#define {guard}");
-            headerSb.AppendLine($"CS2SX_LIST_DEFINE({dg})");
+            // Delegates: the list keeps a reference to each one.
+            headerSb.AppendLine($"CS2SX_LIST_DEFINE_HOOK({dg}, {dg}, CS2SX_DLG_KEEP, CS2SX_DLG_DROP)");
+            headerSb.AppendLine($"CS2SX_GC_ELEMENTS_KIND(List_{dg}, CS2SX_Delegate_GcKind, c->data[_i])");
             headerSb.AppendLine("#endif");
         }
 
         WriteUserCollections(headerSb);
+        if (tupleFns.Length > 0)
+        {
+            headerSb.AppendLine();
+            headerSb.AppendLine("// ── Tuples that hold references (kept by fields) ─────────────────────");
+            headerSb.Append(tupleFns);
+        }
+        // List<(…)>: a list of tuple values; one that holds references keeps them.
+        foreach (var tl in tupleLists)
+        {
+            var rc = tupleFns.ToString().Contains($"CS2SX_TUPLE_RC_{tl}\n");
+            headerSb.AppendLine($"#ifndef CS2SX_LIST_{tl}_DEFINED");
+            headerSb.AppendLine($"#define CS2SX_LIST_{tl}_DEFINED");
+            headerSb.AppendLine(rc
+                ? $"CS2SX_LIST_DEFINE_HOOK_EQ({tl}, {tl}, {tl}_KeepV, {tl}_DropV, CS2SX_EQ_MEM)"
+                : $"CS2SX_LIST_DEFINE_HOOK_EQ({tl}, {tl}, CS2SX_ID, CS2SX_NOREF, CS2SX_EQ_MEM)");
+            headerSb.AppendLine("#endif");
+        }
 
         var headerPath = Path.Combine(buildDir, "_generics.h");
         var implPath = Path.Combine(buildDir, "_generics.c");

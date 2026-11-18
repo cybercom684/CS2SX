@@ -12,8 +12,9 @@ Enemy* Enemy_New(void)
     Enemy* self = (Enemy*)calloc(1, sizeof(Enemy));
     if (!self) return NULL;
     self->_rc = 1;
-    self->_dtor = (void (*)(void*))Enemy_Dispose;
+    self->_dtor = (void (*)(void*))Enemy__Destroy;
     self->_gc = Enemy_Gc;
+    self->_class = &Enemy_ClassInfo;
     Enemy_Ctor(self);
     CS2SX_ReleaseLater(self, (CS2SX_FreeFn)Enemy_Free);
     return self;
@@ -26,17 +27,19 @@ void Enemy_Hit(Enemy* self)
     CS2SX_NN(self->f_Target)->f_Hp--;
 }
 
+const CS2SX_ClassInfo Enemy_ClassInfo = { "Enemy", NULL };
+
 void Enemy_Gc(void* _self, CS2SX_GcVisit visit)
 {
     Enemy* self = (Enemy*)_self; (void)self;
-    if (visit) visit(self->f_Target, &Enemy_GcKind);
-    else if (self->f_Target) { void* _o = self->f_Target; self->f_Target = NULL; ((void (*)(void*))Enemy_Free)(_o); }
+    if (visit) visit((void*)self->f_Target, &Enemy_GcKind);
+    else if (self->f_Target) { void* _o = (void*)self->f_Target; self->f_Target = NULL; ((void (*)(void*))Enemy_Free)(_o); }
 }
 
 static void Enemy_GcDyn(void* self, CS2SX_GcVisit visit) { ((Enemy*)self)->_gc(self, visit); }
 const CS2SX_GcKind Enemy_GcKind = { offsetof(Enemy, _rc), Enemy_GcDyn, (CS2SX_FreeFn)Enemy_Free };
 
-void Enemy_Dispose(Enemy* self)
+void Enemy__Destroy(Enemy* self)
 {
     if (self->f_Target) { Enemy_Free(self->f_Target); self->f_Target = NULL; }
 }

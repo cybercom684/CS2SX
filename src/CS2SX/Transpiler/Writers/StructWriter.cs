@@ -62,7 +62,23 @@ public sealed class StructWriter
         foreach (var conv in node.Members.OfType<ConversionOperatorDeclarationSyntax>())
             _ctx.WriteLine(ConversionSignature(conv, name) + ";");
         _ctx.WriteLine("int " + name + "_Equals(" + name + " a, " + name + " b);");
+        if (Symbol(node) is { } sym && Arc.StructPrototypes(sym, name) is { } protos)
+            foreach (var line in protos.TrimEnd().Split('\n')) _ctx.WriteLine(line);
+        // List<S>: a list of values; one that holds references keeps the members.
+        var hasRefs = Symbol(node) is { } s2 && Arc.StructHasRefs(s2);
+        _ctx.WriteLine($"#ifndef CS2SX_LIST_{name}_DEFINED");
+        _ctx.WriteLine($"#define CS2SX_LIST_{name}_DEFINED");
+        _ctx.WriteLine(hasRefs
+            ? $"CS2SX_LIST_DEFINE_HOOK_EQ({name}, {name}, {name}_KeepV, {name}_DropV, {name}_Equals)"
+            : $"CS2SX_LIST_DEFINE_HOOK_EQ({name}, {name}, CS2SX_ID, CS2SX_NOREF, {name}_Equals)");
+        _ctx.WriteLine("#endif");
         _ctx.WriteLine("");
+    }
+
+    private INamedTypeSymbol? Symbol(TypeDeclarationSyntax node)
+    {
+        try { return _ctx.SemanticModel?.GetDeclaredSymbol(node) as INamedTypeSymbol; }
+        catch { return null; }
     }
 
     // ── Implementation: function bodies ──────────────────────────────────────
@@ -113,6 +129,9 @@ public sealed class StructWriter
         _ctx.Dedent();
         _ctx.WriteLine("}");
         _ctx.WriteLine("");
+
+        if (Symbol(node) is { } sym && Arc.StructFunctions(sym, name) is { } fns)
+            _ctx.Out.Write(fns);
     }
 
     // ── Definition ───────────────────────────────────────────────────────────

@@ -421,7 +421,7 @@ public sealed class InvocationDispatcher
                     if (argTypeSym == null || argTypeSym is Microsoft.CodeAnalysis.IErrorTypeSymbol) continue;
                     var argType = TranspilerContext.FormatTypeSymbol(argTypeSym);
                     if (TypeRegistry.IsRegisteredInterface(argType)) continue;
-                    result[i] = argType + "_as_" + paramType + "(" + result[i] + ")";
+                    if (!result[i].Contains("_as_")) result[i] = argType + "_as_" + paramType + "(" + result[i] + ")";
                 }
             }
 

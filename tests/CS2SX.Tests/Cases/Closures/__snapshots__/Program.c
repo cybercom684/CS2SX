@@ -25,7 +25,15 @@ static void _lambda_0(void* _env)
 static void _envdtor_0(void* _e)
 {
     struct _cap_0* _c = (struct _cap_0*)_e;
-    CS2SX_ReleaseLater(_c->z, (CS2SX_FreeFn)__Ref_int_Free);
+    CS2SX_ReleaseLater((void*)_c->z, (CS2SX_FreeFn)__Ref_int_Free);
+}
+
+static void _envgc_0(void* _e, CS2SX_GcVisit visit)
+{
+    struct _cap_0* _c = (struct _cap_0*)_e;
+    if (visit) visit((void*)_c->z, &__Ref_int_GcKind);
+    else if (_c->z) { void* _o = (void*)_c->z; _c->z = NULL; ((CS2SX_FreeFn)__Ref_int_Free)(_o); }
+    (void)_c; (void)visit;
 }
 
 struct _cap_1
@@ -45,7 +53,15 @@ static int _lambda_1(void* _env)
 static void _envdtor_1(void* _e)
 {
     struct _cap_1* _c = (struct _cap_1*)_e;
-    CS2SX_ReleaseLater(_c->seen, (CS2SX_FreeFn)__Ref_int_Free);
+    CS2SX_ReleaseLater((void*)_c->seen, (CS2SX_FreeFn)__Ref_int_Free);
+}
+
+static void _envgc_1(void* _e, CS2SX_GcVisit visit)
+{
+    struct _cap_1* _c = (struct _cap_1*)_e;
+    if (visit) visit((void*)_c->seen, &__Ref_int_GcKind);
+    else if (_c->seen) { void* _o = (void*)_c->seen; _c->seen = NULL; ((CS2SX_FreeFn)__Ref_int_Free)(_o); }
+    (void)_c; (void)visit;
 }
 
 struct _cap_2
@@ -82,8 +98,9 @@ void ClosuresApp_OnInit(ClosuresApp* self)
     __Ref_int* z = __Ref_int_New(0);
     CS2SX_LINE(13);
     struct _cap_0* _env_0 = CS2SX_ENV_NEW(struct _cap_0);
-    _env_0->z = CS2SX_RETAIN(__Ref_int, z);
+    _env_0->z = z; ((void* (*)(void*))__Ref_int_Retain)((void*)_env_0->z);
     _env_0->_hdr._dtor = _envdtor_0;
+    _env_0->_hdr._gc = _envgc_0;
     Action_t inc = CS2SX_Delegate_New((void*)_lambda_0, _env_0, 1);
     CS2SX_LINE(14);
     Action_Invoke(inc);
@@ -98,8 +115,9 @@ void ClosuresApp_OnInit(ClosuresApp* self)
     __Ref_int* seen = __Ref_int_New(1);
     CS2SX_LINE(19);
     struct _cap_1* _env_1 = CS2SX_ENV_NEW(struct _cap_1);
-    _env_1->seen = CS2SX_RETAIN(__Ref_int, seen);
+    _env_1->seen = seen; ((void* (*)(void*))__Ref_int_Retain)((void*)_env_1->seen);
     _env_1->_hdr._dtor = _envdtor_1;
+    _env_1->_hdr._gc = _envgc_1;
     Func_int_t read = CS2SX_Delegate_New((void*)_lambda_1, _env_1, 1);
     CS2SX_LINE(20);
     seen->f_V = 5;
@@ -175,7 +193,15 @@ static void _lambda_4(void* _env)
 static void _envdtor_4(void* _e)
 {
     struct _cap_4* _c = (struct _cap_4*)_e;
-    CS2SX_ReleaseLater(_c->start__r, (CS2SX_FreeFn)__Ref_int_Free);
+    CS2SX_ReleaseLater((void*)_c->start__r, (CS2SX_FreeFn)__Ref_int_Free);
+}
+
+static void _envgc_4(void* _e, CS2SX_GcVisit visit)
+{
+    struct _cap_4* _c = (struct _cap_4*)_e;
+    if (visit) visit((void*)_c->start__r, &__Ref_int_GcKind);
+    else if (_c->start__r) { void* _o = (void*)_c->start__r; _c->start__r = NULL; ((CS2SX_FreeFn)__Ref_int_Free)(_o); }
+    (void)_c; (void)visit;
 }
 
 void ClosuresApp_Make(ClosuresApp* self, int start)
@@ -185,14 +211,16 @@ void ClosuresApp_Make(ClosuresApp* self, int start)
     __Ref_int* start__r = __Ref_int_New(start);
     CS2SX_LINE(43);
     struct _cap_4* _env_4 = CS2SX_ENV_NEW(struct _cap_4);
-    _env_4->start__r = CS2SX_RETAIN(__Ref_int, start__r);
+    _env_4->start__r = start__r; ((void* (*)(void*))__Ref_int_Retain)((void*)_env_4->start__r);
     _env_4->_hdr._dtor = _envdtor_4;
-    self->f_later = CS2SX_Delegate_New((void*)_lambda_4, _env_4, 1);
+    _env_4->_hdr._gc = _envgc_4;
+    CS2SX_RC_STORE(CS2SX_Delegate_Retain, CS2SX_Delegate_Release, self->f_later, CS2SX_Delegate_New((void*)_lambda_4, _env_4, 1));
 }
 
 void ClosuresApp_Free(ClosuresApp* self)
 {
     if (!self) return;
+    if (self->f_later) { CS2SX_Delegate_Release(self->f_later); self->f_later = NULL; }
     free(self);
 }
 
@@ -208,12 +236,15 @@ __Ref_int* __Ref_int_New(int v)
     __Ref_int* self = (__Ref_int*)calloc(1, sizeof(__Ref_int));
     if (!self) return NULL;
     self->_rc = 1;
-    self->_dtor = (void (*)(void*))__Ref_int_Dispose;
+    self->_dtor = (void (*)(void*))__Ref_int__Destroy;
     self->_gc = __Ref_int_Gc;
+    self->_class = &__Ref_int_ClassInfo;
     __Ref_int_Ctor(self, v);
     CS2SX_ReleaseLater(self, (CS2SX_FreeFn)__Ref_int_Free);
     return self;
 }
+
+const CS2SX_ClassInfo __Ref_int_ClassInfo = { "__Ref_int", NULL };
 
 void __Ref_int_Gc(void* _self, CS2SX_GcVisit visit)
 {
@@ -223,7 +254,7 @@ void __Ref_int_Gc(void* _self, CS2SX_GcVisit visit)
 static void __Ref_int_GcDyn(void* self, CS2SX_GcVisit visit) { ((__Ref_int*)self)->_gc(self, visit); }
 const CS2SX_GcKind __Ref_int_GcKind = { offsetof(__Ref_int, _rc), __Ref_int_GcDyn, (CS2SX_FreeFn)__Ref_int_Free };
 
-void __Ref_int_Dispose(__Ref_int* self)
+void __Ref_int__Destroy(__Ref_int* self)
 {
 }
 

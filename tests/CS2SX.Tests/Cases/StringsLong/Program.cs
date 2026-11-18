@@ -46,6 +46,12 @@ public class StringsLongApp : SwitchApp
             string huge = big + big + big + big + big + big + big + big + big;    // 90000: its own block
             Console.WriteLine("huge " + huge.Length + " " + huge[89999]);          // huge 90000 9
 
+            // String methods are not cut off either.
+            string up = s.ToUpper().Replace("9", "nine").Substring(3).PadLeft(7000, '.').Trim('.');
+            var parts = new List<string> { s, s, s };
+            string joined = string.Join(",", parts) + new string('x', 3000);
+            Console.WriteLine("methods " + up.Length + " " + joined.Length + " " + s.TrimEnd('9').Length);   // methods 6497 18002 4999
+
             _kept = s + "!";
             for (int i = 0; i < 3; i++)
             {

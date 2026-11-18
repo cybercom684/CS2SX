@@ -61,6 +61,32 @@ public sealed class ExpressionWriter : IExpressionWriter
         catch { return null; }
     }
 
+    /// The tuple literal that <paramref name="element"/> belongs to is stored straight into
+    /// a field that keeps tuples with references (Keep takes the references).
+    private bool TupleKeptByStorage(ExpressionSyntax element)
+    {
+        if (element.Parent?.Parent is not TupleExpressionSyntax tuple) return false;
+        SyntaxNode node = tuple;
+        while (node.Parent is ParenthesizedExpressionSyntax) node = node.Parent;
+        return node.Parent is AssignmentExpressionSyntax { Left: var l } a && a.Right == node
+               && OwningStoreType(l) is INamedTypeSymbol { IsTupleType: true } tt && Arc.StructHasRefs(tt);
+    }
+
+    /// A tuple that goes into an array (arrays do not keep tuple members; lists do).
+    private bool TupleGoesIntoCollection(ExpressionSyntax element)
+    {
+        if (element.Parent?.Parent is not TupleExpressionSyntax tuple) return false;
+        SyntaxNode node = tuple;
+        while (node.Parent is ParenthesizedExpressionSyntax) node = node.Parent;
+        try
+        {
+            if (node.Parent is InitializerExpressionSyntax init && init.IsKind(SyntaxKind.ArrayInitializerExpression)) return true;
+            return node.Parent is AssignmentExpressionSyntax { Left: ElementAccessExpressionSyntax ea }
+                   && _ctx.SemanticModel?.GetTypeInfo(ea.Expression).Type is IArrayTypeSymbol;
+        }
+        catch { return false; }
+    }
+
     /// True where an expression's value ends up in a variable, field, return value,
     /// collection or a parameter of a method of the project.
     private bool IsStoringContext(ExpressionSyntax expr)
@@ -111,25 +137,34 @@ public sealed class ExpressionWriter : IExpressionWriter
         try
         {
             var ti = _ctx.SemanticModel.GetTypeInfo(expr);
-            var collPrefix = Arc.CollectionPrefix(ti.Type);
-            if (Arc.Root(ti.Type) == null && collPrefix == null) return code;
             bool arrayElement = expr.Parent is InitializerExpressionSyntax init
                                 && init.IsKind(SyntaxKind.ArrayInitializerExpression);
+            // Delegates and interface values kept by an array or a tuple.
+            if (Arc.RcValue(ti.ConvertedType ?? ti.Type) is { } rcv && !Arc.IsFresh(expr)
+                && (arrayElement
+                    || expr.Parent is ArgumentSyntax { Parent: TupleExpressionSyntax }))
+                return rcv.keep + "(" + Arc.WrapInterface(expr, code, _ctx) + ")";
+            var collPrefix = Arc.CollectionPrefix(ti.Type);
+            if (Arc.Root(ti.Type) == null && collPrefix == null) return code;
+            // A class value stored as an interface: the wrapper keeps it.
+            if (Arc.IsInterface(ti.ConvertedType)) return code;
             // (A collection seen as IEnumerable<T> is the same C pointer — no wrapper.)
             // Only where the value is kept: `a == b`, "x" + a, $"{a}" and arguments of
             // framework methods (Console.WriteLine(a), Equals) convert to object too,
             // but hold nothing.
+            // (An interface value keeps its object itself: Class_as_IFace retains it.)
             bool boxed = collPrefix == null && IsStoringContext(expr)
-                         && (ti.ConvertedType is { TypeKind: TypeKind.Interface }
-                             || ti.ConvertedType?.SpecialType == SpecialType.System_Object);
+                         && ti.ConvertedType?.SpecialType == SpecialType.System_Object;
             // (node, 1) — a tuple element (not a deconstruction target)
             bool tupleElement = expr.Parent is ArgumentSyntax { Parent: TupleExpressionSyntax te }
                                 && !(te.Parent is AssignmentExpressionSyntax a && a.Left == te);
-            // holder.Node = x / new Holder { Node = x } on a struct member
-            bool structMember = expr.Parent is AssignmentExpressionSyntax { Left: var left } asg
-                                && asg.Right == expr
-                                && _ctx.SemanticModel.GetSymbolInfo(left).Symbol is IFieldSymbol or IPropertySymbol
-                                && _ctx.SemanticModel.GetSymbolInfo(left).Symbol!.ContainingType?.TypeKind == TypeKind.Struct;
+            // (A struct member holds nothing by itself: what keeps the struct — a class
+            // field, a list — keeps its members, see Arc.StructFunctions.)
+            bool structMember = false;
+            // (A tuple stored in a field is kept by Keep; a list of tuples keeps its copies.)
+            // Only a tuple that goes into a list or an array keeps a reference this way;
+            // a tuple in a local or a return value holds nothing, like a local variable.
+            if (tupleElement && (TupleKeptByStorage(expr) || !TupleGoesIntoCollection(expr))) tupleElement = false;
             if (!(arrayElement || boxed || tupleElement || structMember)) return code;
             if (collPrefix != null)
                 return Arc.IsFresh(expr) ? code : collPrefix + "_Retain(" + code + ")";
@@ -697,7 +732,12 @@ public sealed class ExpressionWriter : IExpressionWriter
             var isTypeName = bin.Right.ToString().Trim();
             if (TypeRegistry.IsPrimitive(isTypeName) && isTypeName != "string")
                 return "1";
-            return "(" + left + " != NULL)";
+            try
+            {
+                return Arc.TypeTest(left, _ctx.SemanticModel?.GetTypeInfo(bin.Left).Type,
+                    _ctx.SemanticModel?.GetTypeInfo(bin.Right).Type);
+            }
+            catch { return "(" + left + " != NULL)"; }
         }
 
         // DateTime - DateTime → TimeSpan
@@ -953,6 +993,31 @@ public sealed class ExpressionWriter : IExpressionWriter
             return "CS2SX_STR_STORE(" + target + ", " + value + ")";
         }
 
+        // A struct in a field keeps the references its members hold (S_Keep / S_Drop).
+        if (op == "=" && OwningStoreType(assign.Left) is INamedTypeSymbol { TypeKind: TypeKind.Struct } heldStruct
+            && Arc.StructHasRefs(heldStruct))
+        {
+            var sn = Arc.ValueCName(heldStruct);
+            var slv = Write(assign.Left);
+            return "({ " + sn + "* _cs2sx_sp = &(" + slv + "); " + sn + " _cs2sx_sn = " + right
+                 + "; " + sn + "_Keep(&_cs2sx_sn); " + sn + " _cs2sx_so = *_cs2sx_sp; *_cs2sx_sp = _cs2sx_sn; " + sn + "_Drop(&_cs2sx_so); _cs2sx_sn; })";
+        }
+
+        // A delegate or interface value in a field owns one reference: d = x,
+        // d += h / d -= h (a new invocation list) take one and give up the old value.
+        if (OwningStoreType(assign.Left) is { } rcType && Arc.RcValue(rcType) is { } rc)
+        {
+            if (op == "=")
+                return "CS2SX_RC_STORE(" + rc.retain + ", " + rc.free + ", " + Write(assign.Left) + ", "
+                     + Arc.WrapInterface(assign.Right, right, _ctx) + ")";
+            if ((op == "+=" || op == "-=") && Arc.IsDelegate(rcType))
+            {
+                var lv = Write(assign.Left);
+                var fn = op == "+=" ? "CS2SX_Delegate_Combine" : "CS2SX_Delegate_Remove";
+                return "CS2SX_RC_STORE(" + rc.retain + ", " + rc.free + ", " + lv + ", " + fn + "(" + lv + ", " + right + "))";
+            }
+        }
+
         // A collection field (List, Dictionary, …, StringBuilder) owns one reference.
         if (op == "=" && OwningStoreType(assign.Left) is { } collType && Arc.CollectionPrefix(collType) is { } collPrefix)
             return "CS2SX_COLL_STORE(" + collPrefix + ", " + Write(assign.Left) + ", " + right + ")";
@@ -1034,7 +1099,7 @@ public sealed class ExpressionWriter : IExpressionWriter
                         var rightTypeSym = _ctx.SemanticModel.GetTypeInfo(assign.Right).Type as INamedTypeSymbol;
                         if (rightTypeSym != null && !TypeRegistry.IsRegisteredInterface(rightTypeSym.Name)
                             && TypeRegistry.NeedsPointerSuffix(rightTypeSym.Name))
-                            wrapped = rightTypeSym.Name + "_as_" + ltIface + "(" + right + ")";
+                            wrapped = right.Contains("_as_") ? right : rightTypeSym.Name + "_as_" + ltIface + "(" + right + ")";
                     }
                     catch { }
                 }
@@ -1058,6 +1123,11 @@ public sealed class ExpressionWriter : IExpressionWriter
         try
         {
             var sym = _ctx.SemanticModel.GetSymbolInfo(left).Symbol;
+            // A string member of a struct kept by a class field (see OwningStoreType).
+            if (sym?.ContainingType is { TypeKind: TypeKind.Struct }
+                && sym is IFieldSymbol or IPropertySymbol
+                && OwningStoreType(left) is { SpecialType: SpecialType.System_String })
+                return true;
             if (sym?.ContainingType is not { TypeKind: TypeKind.Class } owner
                 || !TranspilerContext.IsUserCode(owner))
                 return false;
@@ -1096,12 +1166,25 @@ public sealed class ExpressionWriter : IExpressionWriter
         try
         {
             var sym = _ctx.SemanticModel.GetSymbolInfo(left).Symbol;
+            // A member of a struct that a class field holds (`_pos.Target = x`): the
+            // field keeps the struct's references (S_Keep), so the member owns one too.
+            if (sym?.ContainingType is { TypeKind: TypeKind.Struct } owner && Arc.StructHasRefs(owner)
+                && left is MemberAccessExpressionSyntax { Expression: var receiver }
+                && OwningStoreType(receiver) is { } holder && SymbolEqualityComparer.Default.Equals(holder, owner))
+            {
+                if (sym is IFieldSymbol { IsConst: false, IsStatic: false } sf) return sf.Type;
+                if (sym is IPropertySymbol { IsStatic: false } sp) return sp.Type;
+            }
             if (sym?.ContainingType is not { TypeKind: TypeKind.Class }) return null;
             if (sym is IFieldSymbol f && !f.IsConst) return f.Type;
             if (sym is IPropertySymbol p
                 && p.DeclaringSyntaxReferences.FirstOrDefault()?.GetSyntax() is PropertyDeclarationSyntax pd
                 && PropertyWriter.IsAutoProperty(pd))
                 return p.Type;
+            // A field-like event (`public event Action Changed;`) is a delegate field.
+            if (sym is IEventSymbol ev
+                && ev.DeclaringSyntaxReferences.FirstOrDefault()?.GetSyntax() is VariableDeclaratorSyntax)
+                return ev.Type;
         }
         catch { }
         return null;
@@ -1125,17 +1208,7 @@ public sealed class ExpressionWriter : IExpressionWriter
 
     /// A collection initializer element of a class type stored as an interface
     /// (`new List&lt;IFace&gt; { new Impl() }`) becomes `Impl_as_IFace(...)`.
-    private string WrapAsInterfaceElement(ExpressionSyntax item, string code)
-    {
-        if (_ctx.SemanticModel == null) return code;
-        var ti = _ctx.SemanticModel.GetTypeInfo(item);
-        if (ti.ConvertedType is not { TypeKind: TypeKind.Interface } iface
-            || ti.Type is not { TypeKind: TypeKind.Class } cls) return code;
-        var ifaceName = TranspilerContext.FormatTypeSymbol(iface);
-        var clsName = TranspilerContext.FormatTypeSymbol(cls);
-        if (!TypeRegistry.IsRegisteredInterface(ifaceName) || TypeRegistry.IsRegisteredInterface(clsName)) return code;
-        return clsName + "_as_" + ifaceName + "(" + code + ")";
-    }
+    private string WrapAsInterfaceElement(ExpressionSyntax item, string code) => Arc.WrapInterface(item, code, _ctx);
 
     private string? TryWrapAsInterface(string exprRaw, string exprCode, string targetIfaceName)
     {
@@ -1147,7 +1220,7 @@ public sealed class ExpressionWriter : IExpressionWriter
         if (csType == null) return null;
         var bareType = csType.TrimEnd('*').Trim();
         if (bareType == targetIfaceName) return null;
-        return bareType + "_as_" + targetIfaceName + "(" + exprCode + ")";
+        return exprCode.Contains("_as_") ? exprCode : bareType + "_as_" + targetIfaceName + "(" + exprCode + ")";
     }
 
     /// `(a, b) = t`, `var (a, b) = t`, `(var a, int b) = t`, discards with `_`:
@@ -1804,7 +1877,7 @@ public sealed class ExpressionWriter : IExpressionWriter
                     var rightTypeSym = _ctx.SemanticModel.GetTypeInfo(assign.Right).Type as INamedTypeSymbol;
                     if (rightTypeSym != null && !TypeRegistry.IsRegisteredInterface(rightTypeSym.Name)
                         && TypeRegistry.NeedsPointerSuffix(rightTypeSym.Name))
-                        finalRight = rightTypeSym.Name + "_as_" + targetIfaceName + "(" + right + ")";
+                        finalRight = right.Contains("_as_") ? right : rightTypeSym.Name + "_as_" + targetIfaceName + "(" + right + ")";
                 }
             }
             catch { }
@@ -1827,6 +1900,11 @@ public sealed class ExpressionWriter : IExpressionWriter
             if (op == "=" && _ctx.SemanticModel?.GetTypeInfo(elemLeft.Expression).Type is IArrayTypeSymbol collArr
                 && Arc.CollectionPrefix(collArr.ElementType) is { } elemColl)
                 return "CS2SX_COLL_STORE(" + elemColl + ", " + WriteElementAccess(elemLeft) + ", " + right + ")";
+            // Delegates and interface values: the array holds a reference.
+            if (op == "=" && _ctx.SemanticModel?.GetTypeInfo(elemLeft.Expression).Type is IArrayTypeSymbol rcArr
+                && Arc.RcValue(rcArr.ElementType) is { } elemRc && elemLeft.Parent is AssignmentExpressionSyntax rcAsg)
+                return "CS2SX_RC_STORE(" + elemRc.retain + ", " + elemRc.free + ", " + WriteElementAccess(elemLeft) + ", "
+                     + Arc.WrapInterface(rcAsg.Right, right, _ctx) + ")";
             return WriteElementAccess(elemLeft) + " " + op + " " + right;
         }
 
@@ -2218,13 +2296,13 @@ public sealed class ExpressionWriter : IExpressionWriter
                     && namedSym.IsTupleType)
                 {
                     // CS2SX_LIST_DEFINE_PTR stores T* — element access returns pointer → use ->
-                    bool tupleIsPtr = mem.Expression is ElementAccessExpressionSyntax;
+                    bool tupleIsPtr = false;   // lists and arrays of tuples hold values
                     var tupleAccessor = tupleIsPtr ? "->" : ".";
                     var elements = namedSym.TupleElements;
                     for (int ti = 0; ti < elements.Length; ti++)
                     {
                         var elem = elements[ti];
-                        if (elem.Name == prop || elem.Name == "Item" + (ti + 1))
+                        if (elem.Name == prop || prop == "Item" + (ti + 1))
                         {
                             return obj + tupleAccessor + "item" + (ti + 1);
                         }
@@ -2609,20 +2687,16 @@ public sealed class ExpressionWriter : IExpressionWriter
                 foreach (var item in initializer.Expressions)
                 {
                     var itemVal = WrapAsInterfaceElement(item, Write(item));
-                    // CS2SX_LIST_DEFINE_PTR stores T* — tuple compound literals MUST be heap-allocated.
-                    // Using &(compound_literal) gives a pointer with automatic storage that becomes
-                    // dangling when the enclosing function returns, corrupting the list later.
-                    if (itemVal.StartsWith("(") && itemVal.Contains("item1"))
+                    // new List<Shape> { new Circle() }: the C element type is Shape*.
+                    try
                     {
-                        var tupleTmp = _ctx.NextTmp("t");
-                        _ctx.Out.WriteLine(_ctx.Tab + cInner + "* " + tupleTmp + " = (" + cInner + "*)malloc(sizeof(" + cInner + "));");
-                        _ctx.Out.WriteLine(_ctx.Tab + "if (" + tupleTmp + ") *" + tupleTmp + " = " + itemVal + ";");
-                        _ctx.Out.WriteLine(_ctx.Tab + "List_" + cInner + "_Add(" + tmp + ", " + tupleTmp + ");");
+                        if (_ctx.SemanticModel?.GetTypeInfo(item) is { Type: { TypeKind: TypeKind.Class } from, ConvertedType: { TypeKind: TypeKind.Class } to }
+                            && !SymbolEqualityComparer.Default.Equals(from, to) && Arc.Root(from) != null && Arc.Root(to) != null)
+                            itemVal = "(" + to.Name + "*)" + itemVal;
                     }
-                    else
-                    {
-                        _ctx.Out.WriteLine(_ctx.Tab + "List_" + cInner + "_Add(" + tmp + ", " + itemVal + ");");
-                    }
+                    catch { }
+                    // (Lists of tuples and structs hold values: CS2SX_LIST_DEFINE_HOOK_EQ.)
+                    _ctx.Out.WriteLine(_ctx.Tab + "List_" + cInner + "_Add(" + tmp + ", " + itemVal + ");");
                 }
                 return tmp;
             }
@@ -2759,7 +2833,8 @@ public sealed class ExpressionWriter : IExpressionWriter
                 }
                 if (propName == "OnClick" && typeName == "Button")
                 {
-                    _ctx.Out.WriteLine(_ctx.Tab + tmp + "->OnClick = " + propVal + ";");
+                    // The button keeps the delegate (it lives as long as the button).
+                    _ctx.Out.WriteLine(_ctx.Tab + "CS2SX_RC_STORE(CS2SX_Delegate_Retain, CS2SX_Delegate_Release, " + tmp + "->OnClick, " + propVal + ");");
                     continue;
                 }
                 // For user-defined types use f_ prefix; MapProperty is for runtime/control types only
@@ -2771,6 +2846,9 @@ public sealed class ExpressionWriter : IExpressionWriter
                     : (TypeRegistry.HasNoPrefix(propName) ? propName : "f_" + propName);
                 if (IsOwnedStringField(asgn.Left))
                     _ctx.Out.WriteLine(_ctx.Tab + "CS2SX_STR_STORE(" + tmp + "->" + cp + ", " + propVal + ");");
+                else if (Arc.RcValue(OwningStoreType(asgn.Left)) is { } initRc)
+                    _ctx.Out.WriteLine(_ctx.Tab + "CS2SX_RC_STORE(" + initRc.retain + ", " + initRc.free + ", " + tmp + "->" + cp + ", "
+                        + Arc.WrapInterface(asgn.Right, propVal, _ctx) + ");");
                 else if (Arc.CollectionPrefix(OwningStoreType(asgn.Left)) is { } initColl)
                     _ctx.Out.WriteLine(_ctx.Tab + "CS2SX_COLL_STORE(" + initColl + ", " + tmp + "->" + cp + ", " + propVal + ");");
                 else if (OwningStoreRoot(asgn.Left) is { } initRoot)

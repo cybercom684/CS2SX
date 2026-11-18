@@ -14,15 +14,17 @@ struct CS2SX_Step
 {
     CS2SX_Step_vtable* vtable;
     int _rc;
-    void (*_dtor)(void* self);   // _Dispose of the dynamic type
+    void (*_dtor)(void* self);   // __Destroy of the dynamic type
     void (*_gc)(void* self, CS2SX_GcVisit visit);   // _Gc of the dynamic type
+    const CS2SX_ClassInfo* _class;   // run-time type (x is T)
 };
 
 CS2SX_Step* CS2SX_Step_New(void);
 void CS2SX_Step_Ctor(CS2SX_Step* self);
 /* abstract: void CS2SX_Step_cs2sx_resume(CS2SX_Step* self) */
 
-void CS2SX_Step_Dispose(CS2SX_Step* self);
+void CS2SX_Step__Destroy(CS2SX_Step* self);
+extern const CS2SX_ClassInfo CS2SX_Step_ClassInfo;
 void CS2SX_Step_Gc(void* self, CS2SX_GcVisit visit);
 extern const CS2SX_GcKind CS2SX_Step_GcKind;
 void CS2SX_Step_Free(CS2SX_Step* self);
@@ -36,8 +38,9 @@ void CS2SX_Async_Jump(int point, int level);
 struct CS2SX_Task
 {
     int _rc;
-    void (*_dtor)(void* self);   // _Dispose of the dynamic type
+    void (*_dtor)(void* self);   // __Destroy of the dynamic type
     void (*_gc)(void* self, CS2SX_GcVisit visit);   // _Gc of the dynamic type
+    const CS2SX_ClassInfo* _class;   // run-time type (x is T)
     int f_IsCompleted;
     Exception* f_Fault;
     long long f_Due;
@@ -62,7 +65,8 @@ CS2SX_Task* CS2SX_Task_WhenAll(CS2SX_Task** tasks);
 CS2SX_Task* CS2SX_Task_WhenAllList(List_CS2SX_Task* tasks);
 void CS2SX_Task_Tick(long long nowMs);
 
-void CS2SX_Task_Dispose(CS2SX_Task* self);
+void CS2SX_Task__Destroy(CS2SX_Task* self);
+extern const CS2SX_ClassInfo CS2SX_Task_ClassInfo;
 void CS2SX_Task_Gc(void* self, CS2SX_GcVisit visit);
 extern const CS2SX_GcKind CS2SX_Task_GcKind;
 void CS2SX_Task_Free(CS2SX_Task* self);
@@ -82,7 +86,8 @@ CS2SX_WhenAll* CS2SX_WhenAll_New(void);
 void CS2SX_WhenAll_Ctor(CS2SX_WhenAll* self);
 void CS2SX_WhenAll_cs2sx_resume(CS2SX_WhenAll* self);
 
-void CS2SX_WhenAll_Dispose(CS2SX_WhenAll* self);
+void CS2SX_WhenAll__Destroy(CS2SX_WhenAll* self);
+extern const CS2SX_ClassInfo CS2SX_WhenAll_ClassInfo;
 void CS2SX_WhenAll_Gc(void* self, CS2SX_GcVisit visit);
 void CS2SX_WhenAll_Free(CS2SX_WhenAll* self);
 CS2SX_WhenAll* CS2SX_WhenAll_Retain(CS2SX_WhenAll* self);
@@ -98,7 +103,8 @@ void CS2SX_Task_CS2SX_Task_SetResult(CS2SX_Task_CS2SX_Task* self, CS2SX_Task* v)
 CS2SX_Task_CS2SX_Task* CS2SX_Task_CS2SX_Task_From(CS2SX_Task* v);
 CS2SX_Task_CS2SX_Task* CS2SX_Task_CS2SX_Task_Run(Func_CS2SX_Task_t work);
 
-void CS2SX_Task_CS2SX_Task_Dispose(CS2SX_Task_CS2SX_Task* self);
+void CS2SX_Task_CS2SX_Task__Destroy(CS2SX_Task_CS2SX_Task* self);
+extern const CS2SX_ClassInfo CS2SX_Task_CS2SX_Task_ClassInfo;
 void CS2SX_Task_CS2SX_Task_Gc(void* self, CS2SX_GcVisit visit);
 void CS2SX_Task_CS2SX_Task_Free(CS2SX_Task_CS2SX_Task* self);
 CS2SX_Task_CS2SX_Task* CS2SX_Task_CS2SX_Task_Retain(CS2SX_Task_CS2SX_Task* self);
@@ -115,7 +121,8 @@ void CS2SX_WhenAny_Ctor(CS2SX_WhenAny* self);
 CS2SX_Task_CS2SX_Task* CS2SX_WhenAny_Of(CS2SX_Task** tasks);
 void CS2SX_WhenAny_cs2sx_resume(CS2SX_WhenAny* self);
 
-void CS2SX_WhenAny_Dispose(CS2SX_WhenAny* self);
+void CS2SX_WhenAny__Destroy(CS2SX_WhenAny* self);
+extern const CS2SX_ClassInfo CS2SX_WhenAny_ClassInfo;
 void CS2SX_WhenAny_Gc(void* self, CS2SX_GcVisit visit);
 void CS2SX_WhenAny_Free(CS2SX_WhenAny* self);
 CS2SX_WhenAny* CS2SX_WhenAny_Retain(CS2SX_WhenAny* self);
@@ -131,7 +138,8 @@ void CS2SX_Task_bool_SetResult(CS2SX_Task_bool* self, int v);
 CS2SX_Task_bool* CS2SX_Task_bool_From(int v);
 CS2SX_Task_bool* CS2SX_Task_bool_Run(Func_int_t work);
 
-void CS2SX_Task_bool_Dispose(CS2SX_Task_bool* self);
+void CS2SX_Task_bool__Destroy(CS2SX_Task_bool* self);
+extern const CS2SX_ClassInfo CS2SX_Task_bool_ClassInfo;
 void CS2SX_Task_bool_Gc(void* self, CS2SX_GcVisit visit);
 void CS2SX_Task_bool_Free(CS2SX_Task_bool* self);
 CS2SX_Task_bool* CS2SX_Task_bool_Retain(CS2SX_Task_bool* self);
@@ -148,7 +156,8 @@ void CS2SX_Task_int_SetResult(CS2SX_Task_int* self, int v);
 CS2SX_Task_int* CS2SX_Task_int_From(int v);
 CS2SX_Task_int* CS2SX_Task_int_Run(Func_int_t work);
 
-void CS2SX_Task_int_Dispose(CS2SX_Task_int* self);
+void CS2SX_Task_int__Destroy(CS2SX_Task_int* self);
+extern const CS2SX_ClassInfo CS2SX_Task_int_ClassInfo;
 void CS2SX_Task_int_Gc(void* self, CS2SX_GcVisit visit);
 void CS2SX_Task_int_Free(CS2SX_Task_int* self);
 CS2SX_Task_int* CS2SX_Task_int_Retain(CS2SX_Task_int* self);
@@ -165,7 +174,8 @@ void CS2SX_Task_str_SetResult(CS2SX_Task_str* self, const char* v);
 CS2SX_Task_str* CS2SX_Task_str_From(const char* v);
 CS2SX_Task_str* CS2SX_Task_str_Run(Func_str_t work);
 
-void CS2SX_Task_str_Dispose(CS2SX_Task_str* self);
+void CS2SX_Task_str__Destroy(CS2SX_Task_str* self);
+extern const CS2SX_ClassInfo CS2SX_Task_str_ClassInfo;
 void CS2SX_Task_str_Gc(void* self, CS2SX_GcVisit visit);
 void CS2SX_Task_str_Free(CS2SX_Task_str* self);
 CS2SX_Task_str* CS2SX_Task_str_Retain(CS2SX_Task_str* self);
@@ -173,8 +183,9 @@ const char* CS2SX_Task_str_get_Result(CS2SX_Task_str* self);
 struct Source
 {
     int _rc;
-    void (*_dtor)(void* self);   // _Dispose of the dynamic type
+    void (*_dtor)(void* self);   // __Destroy of the dynamic type
     void (*_gc)(void* self, CS2SX_GcVisit visit);   // _Gc of the dynamic type
+    const CS2SX_ClassInfo* _class;   // run-time type (x is T)
     int f_left;
 };
 
@@ -183,7 +194,8 @@ void Source_Ctor(Source* self);
 CS2SX_Task_bool* Source_Next(Source* self);
 CS2SX_Task_int* Source_Risky(Source* self, int n);
 
-void Source_Dispose(Source* self);
+void Source__Destroy(Source* self);
+extern const CS2SX_ClassInfo Source_ClassInfo;
 void Source_Gc(void* self, CS2SX_GcVisit visit);
 extern const CS2SX_GcKind Source_GcKind;
 void Source_Free(Source* self);
@@ -203,7 +215,8 @@ void Next_Async_Ctor(Next_Async* self);
 void Next_Async_cs2sx_resume(Next_Async* self);
 void Next_Async_cs2sx_run(Next_Async* self);
 
-void Next_Async_Dispose(Next_Async* self);
+void Next_Async__Destroy(Next_Async* self);
+extern const CS2SX_ClassInfo Next_Async_ClassInfo;
 void Next_Async_Gc(void* self, CS2SX_GcVisit visit);
 void Next_Async_Free(Next_Async* self);
 Next_Async* Next_Async_Retain(Next_Async* self);
@@ -222,7 +235,8 @@ void Risky_Async_Ctor(Risky_Async* self);
 void Risky_Async_cs2sx_resume(Risky_Async* self);
 void Risky_Async_cs2sx_run(Risky_Async* self);
 
-void Risky_Async_Dispose(Risky_Async* self);
+void Risky_Async__Destroy(Risky_Async* self);
+extern const CS2SX_ClassInfo Risky_Async_ClassInfo;
 void Risky_Async_Gc(void* self, CS2SX_GcVisit visit);
 void Risky_Async_Free(Risky_Async* self);
 Risky_Async* Risky_Async_Retain(Risky_Async* self);
@@ -262,7 +276,8 @@ void Guarded_Async_Ctor(Guarded_Async* self);
 void Guarded_Async_cs2sx_resume(Guarded_Async* self);
 void Guarded_Async_cs2sx_run(Guarded_Async* self);
 
-void Guarded_Async_Dispose(Guarded_Async* self);
+void Guarded_Async__Destroy(Guarded_Async* self);
+extern const CS2SX_ClassInfo Guarded_Async_ClassInfo;
 void Guarded_Async_Gc(void* self, CS2SX_GcVisit visit);
 void Guarded_Async_Free(Guarded_Async* self);
 Guarded_Async* Guarded_Async_Retain(Guarded_Async* self);
@@ -282,7 +297,8 @@ void Nested_Async_Ctor(Nested_Async* self);
 void Nested_Async_cs2sx_resume(Nested_Async* self);
 void Nested_Async_cs2sx_run(Nested_Async* self);
 
-void Nested_Async_Dispose(Nested_Async* self);
+void Nested_Async__Destroy(Nested_Async* self);
+extern const CS2SX_ClassInfo Nested_Async_ClassInfo;
 void Nested_Async_Gc(void* self, CS2SX_GcVisit visit);
 void Nested_Async_Free(Nested_Async* self);
 Nested_Async* Nested_Async_Retain(Nested_Async* self);
@@ -301,7 +317,8 @@ void Drain_Async_Ctor(Drain_Async* self);
 void Drain_Async_cs2sx_resume(Drain_Async* self);
 void Drain_Async_cs2sx_run(Drain_Async* self);
 
-void Drain_Async_Dispose(Drain_Async* self);
+void Drain_Async__Destroy(Drain_Async* self);
+extern const CS2SX_ClassInfo Drain_Async_ClassInfo;
 void Drain_Async_Gc(void* self, CS2SX_GcVisit visit);
 void Drain_Async_Free(Drain_Async* self);
 Drain_Async* Drain_Async_Retain(Drain_Async* self);
@@ -319,7 +336,8 @@ void Lost_Async_Ctor(Lost_Async* self);
 void Lost_Async_cs2sx_resume(Lost_Async* self);
 void Lost_Async_cs2sx_run(Lost_Async* self);
 
-void Lost_Async_Dispose(Lost_Async* self);
+void Lost_Async__Destroy(Lost_Async* self);
+extern const CS2SX_ClassInfo Lost_Async_ClassInfo;
 void Lost_Async_Gc(void* self, CS2SX_GcVisit visit);
 void Lost_Async_Free(Lost_Async* self);
 Lost_Async* Lost_Async_Retain(Lost_Async* self);
@@ -344,7 +362,8 @@ void Script_Async_Ctor(Script_Async* self);
 void Script_Async_cs2sx_resume(Script_Async* self);
 void Script_Async_cs2sx_run(Script_Async* self);
 
-void Script_Async_Dispose(Script_Async* self);
+void Script_Async__Destroy(Script_Async* self);
+extern const CS2SX_ClassInfo Script_Async_ClassInfo;
 void Script_Async_Gc(void* self, CS2SX_GcVisit visit);
 void Script_Async_Free(Script_Async* self);
 Script_Async* Script_Async_Retain(Script_Async* self);

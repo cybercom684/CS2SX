@@ -13,12 +13,15 @@ Label2* Label2_New(void)
     Label2* self = (Label2*)calloc(1, sizeof(Label2));
     if (!self) return NULL;
     self->_rc = 1;
-    self->_dtor = (void (*)(void*))Label2_Dispose;
+    self->_dtor = (void (*)(void*))Label2__Destroy;
     self->_gc = Label2_Gc;
+    self->_class = &Label2_ClassInfo;
     Label2_Ctor(self);
     CS2SX_ReleaseLater(self, (CS2SX_FreeFn)Label2_Free);
     return self;
 }
+
+const CS2SX_ClassInfo Label2_ClassInfo = { "Label2", NULL };
 
 void Label2_Gc(void* _self, CS2SX_GcVisit visit)
 {
@@ -28,7 +31,7 @@ void Label2_Gc(void* _self, CS2SX_GcVisit visit)
 static void Label2_GcDyn(void* self, CS2SX_GcVisit visit) { ((Label2*)self)->_gc(self, visit); }
 const CS2SX_GcKind Label2_GcKind = { offsetof(Label2, _rc), Label2_GcDyn, (CS2SX_FreeFn)Label2_Free };
 
-void Label2_Dispose(Label2* self)
+void Label2__Destroy(Label2* self)
 {
     CS2SX_StrDrop(self->f_Name); self->f_Name = NULL;
     CS2SX_StrDrop(self->f_Text); self->f_Text = NULL;

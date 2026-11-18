@@ -2,6 +2,7 @@ concat 5000 9
 interp 5002 ]
 format 5002 7
 huge 90000 9
+methods 6497 18002 4999
 kept 5001 !
 item0 item2 value4 slot11 text 1 title 1
 done

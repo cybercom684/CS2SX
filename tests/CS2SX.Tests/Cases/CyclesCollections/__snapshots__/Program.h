@@ -8,8 +8,9 @@
 struct Hub
 {
     int _rc;
-    void (*_dtor)(void* self);   // _Dispose of the dynamic type
+    void (*_dtor)(void* self);   // __Destroy of the dynamic type
     void (*_gc)(void* self, CS2SX_GcVisit visit);   // _Gc of the dynamic type
+    const CS2SX_ClassInfo* _class;   // run-time type (x is T)
     Hub* f_Owner;
     Dict_str_Hub* f_ByName;
     Stack_Hub* f_History;
@@ -22,7 +23,8 @@ Hub* Hub_New(void);
 void Hub_Ctor(Hub* self);
 Hub* Hub_Child(Hub* self);
 
-void Hub_Dispose(Hub* self);
+void Hub__Destroy(Hub* self);
+extern const CS2SX_ClassInfo Hub_ClassInfo;
 void Hub_Gc(void* self, CS2SX_GcVisit visit);
 extern const CS2SX_GcKind Hub_GcKind;
 void Hub_Free(Hub* self);

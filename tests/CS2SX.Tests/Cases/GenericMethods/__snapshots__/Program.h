@@ -17,15 +17,17 @@ int Util_CountWhere_int(List_int* items, Func_int_int_t pred);
 struct Node
 {
     int _rc;
-    void (*_dtor)(void* self);   // _Dispose of the dynamic type
+    void (*_dtor)(void* self);   // __Destroy of the dynamic type
     void (*_gc)(void* self, CS2SX_GcVisit visit);   // _Gc of the dynamic type
+    const CS2SX_ClassInfo* _class;   // run-time type (x is T)
     int f_V;
 };
 
 Node* Node_New(int v);
 void Node_Ctor(Node* self, int v);
 
-void Node_Dispose(Node* self);
+void Node__Destroy(Node* self);
+extern const CS2SX_ClassInfo Node_ClassInfo;
 void Node_Gc(void* self, CS2SX_GcVisit visit);
 extern const CS2SX_GcKind Node_GcKind;
 void Node_Free(Node* self);
@@ -42,6 +44,10 @@ typedef struct Nullable_Pair { Pair value; int has; } Nullable_Pair;
 const char* Pair_Pick_str(const char* a, const char* b, int first);
 int Pair_Pick_int(int a, int b, int first);
 int Pair_Equals(Pair a, Pair b);
+#ifndef CS2SX_LIST_Pair_DEFINED
+#define CS2SX_LIST_Pair_DEFINED
+CS2SX_LIST_DEFINE_HOOK_EQ(Pair, Pair, CS2SX_ID, CS2SX_NOREF, Pair_Equals)
+#endif
 
 struct GenericMethodsApp
 {

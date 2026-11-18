@@ -182,20 +182,44 @@ public sealed class LambdaLifter
         // Captured objects of reference-counted classes (incl. `this`) are held by the
         // environment: retained when it is filled, released with it (deferred).
         // Collections likewise (List_int_Retain / List_int_Free).
-        var owned = caps.Select(c =>
-                        {
-                            var root = TypeRegistry.ArcRoot(c.CsType.TrimEnd('?'));
-                            var coll = root == null ? Arc.CollectionPrefix(c.CsType) : null;
-                            return (cap: c, root, coll);
-                        })
-                        .Where(x => x.root != null || x.coll != null).ToList();
+        // (retain, release, cycle-collector kind or null) per captured value it keeps.
+        (string retain, string free, string? kind)? Keeps(CaptureInfo c)
+        {
+            var cs = c.CsType.TrimEnd('?');
+            if (TypeRegistry.ArcRoot(cs) is { } root)
+                return ($"(void* (*)(void*)){root}_Retain", $"(CS2SX_FreeFn){root}_Free", root + "_GcKind");
+            if (Arc.CollectionPrefix(c.CsType) is { } coll)
+            {
+                var elem = TypeRegistry.IsList(cs) ? TypeRegistry.GetListInnerType(cs)?.TrimEnd('?') : null;
+                var traced = elem != null && (TypeRegistry.ArcRoot(elem) != null || Arc.RcValue(elem) != null);
+                return ($"(void* (*)(void*)){coll}_Retain", $"(CS2SX_FreeFn){coll}_Free", traced ? coll + "_GcKind" : null);
+            }
+            if (Arc.RcValue(cs) is { } rc)
+                return ($"(void* (*)(void*)){rc.retain}", $"(CS2SX_FreeFn){rc.free}", rc.kind);
+            return null;
+        }
+        var owned = caps.Select(c => (cap: c, keep: Keeps(c))).Where(x => x.keep != null)
+                        .Select(x => (x.cap, keep: x.keep!.Value)).ToList();
         if (owned.Count > 0)
         {
             sb.AppendLine($"static void _envdtor_{id}(void* _e)");
             sb.AppendLine("{");
             sb.AppendLine($"    struct {capStruct}* _c = (struct {capStruct}*)_e;");
-            foreach (var (cap, root, coll) in owned)
-                sb.AppendLine($"    CS2SX_ReleaseLater(_c->{cap.CapName}, (CS2SX_FreeFn){root ?? coll}_Free);");
+            foreach (var (cap, keep) in owned)
+                sb.AppendLine($"    CS2SX_ReleaseLater((void*)_c->{cap.CapName}, {keep.free});");
+            sb.AppendLine("}");
+            sb.AppendLine();
+            // Cycle collection: what the environment refers to (visit == NULL: let go).
+            sb.AppendLine($"static void _envgc_{id}(void* _e, CS2SX_GcVisit visit)");
+            sb.AppendLine("{");
+            sb.AppendLine($"    struct {capStruct}* _c = (struct {capStruct}*)_e;");
+            foreach (var (cap, keep) in owned)
+            {
+                if (keep.kind == null) continue;
+                sb.AppendLine($"    if (visit) visit((void*)_c->{cap.CapName}, &{keep.kind});");
+                sb.AppendLine($"    else if (_c->{cap.CapName}) {{ void* _o = (void*)_c->{cap.CapName}; _c->{cap.CapName} = NULL; ({keep.free})(_o); }}");
+            }
+            sb.AppendLine("    (void)_c; (void)visit;");
             sb.AppendLine("}");
             sb.AppendLine();
         }
@@ -206,15 +230,16 @@ public sealed class LambdaLifter
         _ctx.WriteLine($"struct {capStruct}* {env} = CS2SX_ENV_NEW(struct {capStruct});");
         foreach (var cap in caps)
         {
-            var (_, root, coll) = owned.FirstOrDefault(o => o.cap == cap);
-            _ctx.WriteLine(root != null
-                ? $"{env}->{cap.CapName} = CS2SX_RETAIN({root}, {cap.CExpr});"
-                : coll != null
-                    ? $"{env}->{cap.CapName} = {coll}_Retain({cap.CExpr});"
-                    : $"{env}->{cap.CapName} = {cap.CExpr};");
+            var match = owned.FirstOrDefault(o => o.cap == cap);
+            _ctx.WriteLine(match.cap != null
+                ? $"{env}->{cap.CapName} = {cap.CExpr}; ({match.keep.retain})((void*){env}->{cap.CapName});"
+                : $"{env}->{cap.CapName} = {cap.CExpr};");
         }
         if (owned.Count > 0)
+        {
             _ctx.WriteLine($"{env}->_hdr._dtor = _envdtor_{id};");
+            _ctx.WriteLine($"{env}->_hdr._gc = _envgc_{id};");
+        }
         return $"CS2SX_Delegate_New((void*){name}, {env}, 1)";
     }
 

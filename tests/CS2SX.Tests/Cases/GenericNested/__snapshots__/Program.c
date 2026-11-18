@@ -2,6 +2,31 @@
 #include "_generics.h"
 #include "Program.h"
 
+// ── Struct: Pair_int ────────────────────────────────────────
+Pair_int Pair_int_New(int a)
+{
+    Pair_int _self_value = {0};
+    Pair_int* self = &_self_value;
+    CS2SX_LINE(49);
+    self->A = a;
+    return _self_value;
+}
+
+const char* Pair_int_Map_str(Pair_int* self, Func_int_str_t f)
+{
+    return Func_int_str_Invoke(f, self->A);
+}
+
+int Pair_int_Map_int(Pair_int* self, Func_int_int_t f)
+{
+    return Func_int_int_Invoke(f, self->A);
+}
+
+int Pair_int_Equals(Pair_int a, Pair_int b)
+{
+    return memcmp(&a, &b, sizeof(Pair_int)) == 0;
+}
+
 void GenericNestedApp_Init(GenericNestedApp* self)
 {
     if (!self) return;
@@ -161,33 +186,100 @@ static int _lambda_14(void* _env, int a, const char* b)
 
 static CS2SX_Delegate _dg_14 = CS2SX_DELEGATE_STATIC(_lambda_14);
 
+static const char* _lambda_15(void* _env, int x)
+{
+    CS2SX_TRACE("GenericNestedApp.<lambda>", "Program.cs");
+    (void)_env;
+    char* _sb13 = _cs2sx_next_buf();
+    _sb13 = CS2SX_Format(_sb13, "p%d", x);
+    return _sb13;
+}
+
+static CS2SX_Delegate _dg_15 = CS2SX_DELEGATE_STATIC(_lambda_15);
+
+static const char* _lambda_16(void* _env, int x)
+{
+    CS2SX_TRACE("GenericNestedApp.<lambda>", "Program.cs");
+    (void)_env;
+    char* _sb14 = _cs2sx_next_buf();
+    _sb14 = CS2SX_Format(_sb14, "p%d", x);
+    return _sb14;
+}
+
+static CS2SX_Delegate _dg_16 = CS2SX_DELEGATE_STATIC(_lambda_16);
+
+static const char* _lambda_17(void* _env, int x)
+{
+    CS2SX_TRACE("GenericNestedApp.<lambda>", "Program.cs");
+    (void)_env;
+    char* _sb15 = _cs2sx_next_buf();
+    _sb15 = CS2SX_Format(_sb15, "p%d", x);
+    return _sb15;
+}
+
+static CS2SX_Delegate _dg_17 = CS2SX_DELEGATE_STATIC(_lambda_17);
+
+static int _lambda_18(void* _env, int x)
+{
+    CS2SX_TRACE("GenericNestedApp.<lambda>", "Program.cs");
+    (void)_env;
+    return x + 1;
+}
+
+static CS2SX_Delegate _dg_18 = CS2SX_DELEGATE_STATIC(_lambda_18);
+
+static int _lambda_19(void* _env, int x)
+{
+    CS2SX_TRACE("GenericNestedApp.<lambda>", "Program.cs");
+    (void)_env;
+    return x + 1;
+}
+
+static CS2SX_Delegate _dg_19 = CS2SX_DELEGATE_STATIC(_lambda_19);
+
+static int _lambda_20(void* _env, int x)
+{
+    CS2SX_TRACE("GenericNestedApp.<lambda>", "Program.cs");
+    (void)_env;
+    return x + 1;
+}
+
+static CS2SX_Delegate _dg_20 = CS2SX_DELEGATE_STATIC(_lambda_20);
+
 void GenericNestedApp_OnInit(GenericNestedApp* self)
 {
     CS2SX_TRACE("GenericNestedApp.OnInit", "Program.cs");
-    CS2SX_LINE(37);
+    CS2SX_LINE(64);
     Box_int* n = Box_int_New(21);
-    CS2SX_LINE(38);
+    CS2SX_LINE(65);
     Box_str* s = Box_str_New("ab");
-    CS2SX_LINE(39);
+    CS2SX_LINE(66);
     char* _sb3 = _cs2sx_next_buf();
     _sb3 = CS2SX_Format(_sb3, "%d %s", Box_int_Map_int(n, (&_dg_2)), Box_int_Map_str(n, (&_dg_5)));
     const char* _ps_0 = _sb3;
     printf("%s\n", _ps_0 ? _ps_0 : "");
-    CS2SX_LINE(40);
+    CS2SX_LINE(67);
     char* _sb7 = _cs2sx_next_buf();
     _sb7 = CS2SX_Format(_sb7, "%d %s", Box_str_Map_int(s, (&_dg_8)), Box_str_Map_str(s, (&_dg_11)));
     const char* _ps_1 = _sb7;
     printf("%s\n", _ps_1 ? _ps_1 : "");
-    CS2SX_LINE(41);
+    CS2SX_LINE(68);
     char* _sb11 = _cs2sx_next_buf();
     _sb11 = CS2SX_Format(_sb11, "%s %d", CS2SX_BoolStr(Box_int_Is_str(n, "21", (&_dg_14))), Box_int_Pick_float(n, 1.5f));
     const char* _ps_2 = _sb11;
     printf("%s\n", _ps_2 ? _ps_2 : "");
-    CS2SX_LINE(42);
+    CS2SX_LINE(69);
     char* _sb12 = _cs2sx_next_buf();
     _sb12 = CS2SX_Format(_sb12, "%d %s", Box_int_Same(n), Box_str_Same(s));
     const char* _ps_3 = _sb12;
     printf("%s\n", _ps_3 ? _ps_3 : "");
+    CS2SX_LINE(70);
+    Pair_int pair = Pair_int_New(4);
+    CS2SX_LINE(71);
+    char* _sb16 = _cs2sx_next_buf();
+    _sb16 = CS2SX_Format(_sb16, "%s %d", Pair_int_Map_str(&pair, (&_dg_17)), Pair_int_Map_int(&pair, (&_dg_20)));
+    const char* _ps_4 = _sb16;
+    printf("%s\n", _ps_4 ? _ps_4 : "");
 }
 
 void GenericNestedApp_Free(GenericNestedApp* self)

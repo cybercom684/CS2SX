@@ -9,8 +9,9 @@
 struct Plain
 {
     int _rc;
-    void (*_dtor)(void* self);   // _Dispose of the dynamic type
+    void (*_dtor)(void* self);   // __Destroy of the dynamic type
     void (*_gc)(void* self, CS2SX_GcVisit visit);   // _Gc of the dynamic type
+    const CS2SX_ClassInfo* _class;   // run-time type (x is T)
     /* implements IFormatter */
 };
 
@@ -19,26 +20,28 @@ void Plain_Ctor(Plain* self);
 const char* Plain_Format_int(Plain* self, int value);
 const char* Plain_Format_str(Plain* self, const char* value);
 
-void Plain_Dispose(Plain* self);
+void Plain__Destroy(Plain* self);
+extern const CS2SX_ClassInfo Plain_ClassInfo;
 void Plain_Gc(void* self, CS2SX_GcVisit visit);
 extern const CS2SX_GcKind Plain_GcKind;
 void Plain_Free(Plain* self);
 Plain* Plain_Retain(Plain* self);
 extern IFormatter_vtable Plain_IFormatter_vtable_instance;
+Plain* Plain_Retain(Plain* self);
+void Plain_Free(Plain* self);
+extern const CS2SX_GcKind Plain_GcKind;
+extern const CS2SX_ClassInfo Plain_ClassInfo;
 static inline IFormatter* Plain_as_IFormatter(Plain* self)
 {
-    IFormatter* _iface = (IFormatter*)malloc(sizeof(IFormatter));
-    if (!_iface) return NULL;
-    _iface->vtable = &Plain_IFormatter_vtable_instance;
-    _iface->obj = self;
-    return _iface;
+    return (IFormatter*)CS2SX_Iface_Wrap(sizeof(IFormatter), &Plain_IFormatter_vtable_instance, self, (void* (*)(void*))Plain_Retain, (CS2SX_FreeFn)Plain_Free, &Plain_GcKind, &Plain_ClassInfo);
 }
 
 struct Bracket
 {
     int _rc;
-    void (*_dtor)(void* self);   // _Dispose of the dynamic type
+    void (*_dtor)(void* self);   // __Destroy of the dynamic type
     void (*_gc)(void* self, CS2SX_GcVisit visit);   // _Gc of the dynamic type
+    const CS2SX_ClassInfo* _class;   // run-time type (x is T)
     /* implements IFormatter */
 };
 
@@ -47,19 +50,20 @@ void Bracket_Ctor(Bracket* self);
 const char* Bracket_Format_int(Bracket* self, int value);
 const char* Bracket_Format_str(Bracket* self, const char* value);
 
-void Bracket_Dispose(Bracket* self);
+void Bracket__Destroy(Bracket* self);
+extern const CS2SX_ClassInfo Bracket_ClassInfo;
 void Bracket_Gc(void* self, CS2SX_GcVisit visit);
 extern const CS2SX_GcKind Bracket_GcKind;
 void Bracket_Free(Bracket* self);
 Bracket* Bracket_Retain(Bracket* self);
 extern IFormatter_vtable Bracket_IFormatter_vtable_instance;
+Bracket* Bracket_Retain(Bracket* self);
+void Bracket_Free(Bracket* self);
+extern const CS2SX_GcKind Bracket_GcKind;
+extern const CS2SX_ClassInfo Bracket_ClassInfo;
 static inline IFormatter* Bracket_as_IFormatter(Bracket* self)
 {
-    IFormatter* _iface = (IFormatter*)malloc(sizeof(IFormatter));
-    if (!_iface) return NULL;
-    _iface->vtable = &Bracket_IFormatter_vtable_instance;
-    _iface->obj = self;
-    return _iface;
+    return (IFormatter*)CS2SX_Iface_Wrap(sizeof(IFormatter), &Bracket_IFormatter_vtable_instance, self, (void* (*)(void*))Bracket_Retain, (CS2SX_FreeFn)Bracket_Free, &Bracket_GcKind, &Bracket_ClassInfo);
 }
 
 typedef struct Picker_vtable
@@ -73,8 +77,9 @@ struct Picker
 {
     Picker_vtable* vtable;
     int _rc;
-    void (*_dtor)(void* self);   // _Dispose of the dynamic type
+    void (*_dtor)(void* self);   // __Destroy of the dynamic type
     void (*_gc)(void* self, CS2SX_GcVisit visit);   // _Gc of the dynamic type
+    const CS2SX_ClassInfo* _class;   // run-time type (x is T)
 };
 
 Picker* Picker_New(void);
@@ -83,7 +88,8 @@ void Picker_Ctor(Picker* self);
 /* abstract: const char* Picker_Pick_str(Picker* self, const char* a, const char* b) */
 int Picker_Echo_int(Picker* self, int x);
 
-void Picker_Dispose(Picker* self);
+void Picker__Destroy(Picker* self);
+extern const CS2SX_ClassInfo Picker_ClassInfo;
 void Picker_Gc(void* self, CS2SX_GcVisit visit);
 extern const CS2SX_GcKind Picker_GcKind;
 void Picker_Free(Picker* self);
@@ -98,7 +104,8 @@ void FirstPicker_Ctor(FirstPicker* self);
 int FirstPicker_Pick_int(FirstPicker* self, int a, int b);
 const char* FirstPicker_Pick_str(FirstPicker* self, const char* a, const char* b);
 
-void FirstPicker_Dispose(FirstPicker* self);
+void FirstPicker__Destroy(FirstPicker* self);
+extern const CS2SX_ClassInfo FirstPicker_ClassInfo;
 void FirstPicker_Gc(void* self, CS2SX_GcVisit visit);
 void FirstPicker_Free(FirstPicker* self);
 FirstPicker* FirstPicker_Retain(FirstPicker* self);
@@ -113,7 +120,8 @@ int SecondPicker_Pick_int(SecondPicker* self, int a, int b);
 const char* SecondPicker_Pick_str(SecondPicker* self, const char* a, const char* b);
 int SecondPicker_Echo_int(SecondPicker* self, int x);
 
-void SecondPicker_Dispose(SecondPicker* self);
+void SecondPicker__Destroy(SecondPicker* self);
+extern const CS2SX_ClassInfo SecondPicker_ClassInfo;
 void SecondPicker_Gc(void* self, CS2SX_GcVisit visit);
 void SecondPicker_Free(SecondPicker* self);
 SecondPicker* SecondPicker_Retain(SecondPicker* self);
@@ -129,6 +137,10 @@ typedef struct Nullable_Pair_int { Pair_int value; int has; } Nullable_Pair_int;
 Pair_int Pair_int_New(int a, int b);
 Pair_int Pair_int_Swapped(Pair_int* self);
 int Pair_int_Equals(Pair_int a, Pair_int b);
+#ifndef CS2SX_LIST_Pair_int_DEFINED
+#define CS2SX_LIST_Pair_int_DEFINED
+CS2SX_LIST_DEFINE_HOOK_EQ(Pair_int, Pair_int, CS2SX_ID, CS2SX_NOREF, Pair_int_Equals)
+#endif
 
 // C# value-type struct: Pair_str
 typedef struct Pair_str {
@@ -142,6 +154,15 @@ typedef struct Nullable_Pair_str { Pair_str value; int has; } Nullable_Pair_str;
 Pair_str Pair_str_New(const char* a, const char* b);
 Pair_str Pair_str_Swapped(Pair_str* self);
 int Pair_str_Equals(Pair_str a, Pair_str b);
+void Pair_str_Keep(Pair_str* s);
+void Pair_str_Drop(Pair_str* s);
+void Pair_str_Gc(Pair_str* s, CS2SX_GcVisit visit);
+static inline Pair_str Pair_str_KeepV(Pair_str v) { Pair_str_Keep(&v); return v; }
+static inline void Pair_str_DropV(Pair_str v) { Pair_str_Drop(&v); }
+#ifndef CS2SX_LIST_Pair_str_DEFINED
+#define CS2SX_LIST_Pair_str_DEFINED
+CS2SX_LIST_DEFINE_HOOK_EQ(Pair_str, Pair_str, Pair_str_KeepV, Pair_str_DropV, Pair_str_Equals)
+#endif
 
 // C# value-type struct: Slot_str_int
 typedef struct Slot_str_int {
@@ -153,6 +174,15 @@ typedef struct Slot_str_int {
 typedef struct Nullable_Slot_str_int { Slot_str_int value; int has; } Nullable_Slot_str_int;
 #endif
 int Slot_str_int_Equals(Slot_str_int a, Slot_str_int b);
+void Slot_str_int_Keep(Slot_str_int* s);
+void Slot_str_int_Drop(Slot_str_int* s);
+void Slot_str_int_Gc(Slot_str_int* s, CS2SX_GcVisit visit);
+static inline Slot_str_int Slot_str_int_KeepV(Slot_str_int v) { Slot_str_int_Keep(&v); return v; }
+static inline void Slot_str_int_DropV(Slot_str_int v) { Slot_str_int_Drop(&v); }
+#ifndef CS2SX_LIST_Slot_str_int_DEFINED
+#define CS2SX_LIST_Slot_str_int_DEFINED
+CS2SX_LIST_DEFINE_HOOK_EQ(Slot_str_int, Slot_str_int, Slot_str_int_KeepV, Slot_str_int_DropV, Slot_str_int_Equals)
+#endif
 
 struct GenericTypesApp
 {

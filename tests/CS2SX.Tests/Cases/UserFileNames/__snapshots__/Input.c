@@ -13,8 +13,9 @@ InputMapper* InputMapper_New(void)
     InputMapper* self = (InputMapper*)calloc(1, sizeof(InputMapper));
     if (!self) return NULL;
     self->_rc = 1;
-    self->_dtor = (void (*)(void*))InputMapper_Dispose;
+    self->_dtor = (void (*)(void*))InputMapper__Destroy;
     self->_gc = InputMapper_Gc;
+    self->_class = &InputMapper_ClassInfo;
     InputMapper_Ctor(self);
     CS2SX_ReleaseLater(self, (CS2SX_FreeFn)InputMapper_Free);
     return self;
@@ -31,6 +32,8 @@ void InputMapper_Poll(InputMapper* self)
     }
 }
 
+const CS2SX_ClassInfo InputMapper_ClassInfo = { "InputMapper", NULL };
+
 void InputMapper_Gc(void* _self, CS2SX_GcVisit visit)
 {
     InputMapper* self = (InputMapper*)_self; (void)self;
@@ -39,7 +42,7 @@ void InputMapper_Gc(void* _self, CS2SX_GcVisit visit)
 static void InputMapper_GcDyn(void* self, CS2SX_GcVisit visit) { ((InputMapper*)self)->_gc(self, visit); }
 const CS2SX_GcKind InputMapper_GcKind = { offsetof(InputMapper, _rc), InputMapper_GcDyn, (CS2SX_FreeFn)InputMapper_Free };
 
-void InputMapper_Dispose(InputMapper* self)
+void InputMapper__Destroy(InputMapper* self)
 {
 }
 

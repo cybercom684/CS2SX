@@ -1,4 +1,4 @@
-﻿// Datei: Transpiler/Handlers/ListHandler.cs
+// Datei: Transpiler/Handlers/ListHandler.cs
 //
 // FIX: BuildCustomSort() nutzt nicht mehr lifter.HasPrelude / lifter.ConsumePrelude.
 //      Diese Methoden existieren im neuen LambdaLifter nicht mehr.
@@ -77,6 +77,8 @@ public sealed class ListHandler : InvocationHandlerBase
         }
 
         bool rcList = TypeRegistry.ArcRoot(inner) != null;
+        // Lists of delegates / interface values keep their elements themselves (CS2SX_LIST_DEFINE_HOOK).
+        bool hookList = Arc.RcValue(inner) != null || TypeRegistry.IsUserStruct(inner.TrimEnd('?')) || TypeRegistry.IsTuple(inner);
         if (rcList && method is "Add" or "Insert" && args.Count > 0
             && Arc.IsFresh(inv.ArgumentList.Arguments[^1].Expression))
         {
@@ -85,7 +87,7 @@ public sealed class ListHandler : InvocationHandlerBase
         }
 
         // For other user-class lists: free elements before Clear / on RemoveAt
-        if (method == "Clear" && isUserClass && !rcList)
+        if (method == "Clear" && isUserClass && !rcList && !hookList)
         {
             var idxVar = ctx.NextTmp("fi");
             var cInner = TypeRegistry.MapType(inner);
@@ -95,7 +97,7 @@ public sealed class ListHandler : InvocationHandlerBase
             return true;
         }
 
-        if (method == "RemoveAt" && isUserClass && !rcList && args.Count > 0)
+        if (method == "RemoveAt" && isUserClass && !rcList && !hookList && args.Count > 0)
         {
             var cInner = TypeRegistry.MapType(inner);
             ctx.WriteLine($"if ({args[0]} >= 0 && {args[0]} < {listExpr}->count && {listExpr}->data[{args[0]}])");

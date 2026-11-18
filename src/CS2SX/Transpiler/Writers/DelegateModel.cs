@@ -87,9 +87,11 @@ internal static class DelegateModel
                 : "self";
             if (method.ContainingType?.Name != ctx.CurrentClass && target == "self")
                 target = "(" + owner + "*)self";
-            // The delegate keeps its target object alive (reference-counted classes).
+            // The delegate keeps its target object alive (reference-counted classes)
+            // and gives it up with its last reference.
             if (TypeRegistry.ArcRoot(owner) is { } root)
-                target = "CS2SX_RETAIN(" + root + ", " + target + ")";
+                return "CS2SX_Delegate_NewBound((void*)" + cName + ", " + target + ", (void* (*)(void*))" + root
+                     + "_Retain, (CS2SX_FreeFn)" + root + "_Free, &" + root + "_GcKind)";
             return "CS2SX_Delegate_New((void*)" + cName + ", " + target + ", 0)";
         }
 

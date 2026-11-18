@@ -17,8 +17,9 @@ Profile* Profile_New(void)
     Profile* self = (Profile*)calloc(1, sizeof(Profile));
     if (!self) return NULL;
     self->_rc = 1;
-    self->_dtor = (void (*)(void*))Profile_Dispose;
+    self->_dtor = (void (*)(void*))Profile__Destroy;
     self->_gc = Profile_Gc;
+    self->_class = &Profile_ClassInfo;
     Profile_Ctor(self);
     CS2SX_ReleaseLater(self, (CS2SX_FreeFn)Profile_Free);
     return self;
@@ -38,6 +39,8 @@ int Profile_Add(Profile* self, Nullable_int bonus)
     return 1 + (((bonus).has ? (bonus).value : (0)));
 }
 
+const CS2SX_ClassInfo Profile_ClassInfo = { "Profile", NULL };
+
 void Profile_Gc(void* _self, CS2SX_GcVisit visit)
 {
     Profile* self = (Profile*)_self; (void)self;
@@ -46,7 +49,7 @@ void Profile_Gc(void* _self, CS2SX_GcVisit visit)
 static void Profile_GcDyn(void* self, CS2SX_GcVisit visit) { ((Profile*)self)->_gc(self, visit); }
 const CS2SX_GcKind Profile_GcKind = { offsetof(Profile, _rc), Profile_GcDyn, (CS2SX_FreeFn)Profile_Free };
 
-void Profile_Dispose(Profile* self)
+void Profile__Destroy(Profile* self)
 {
     CS2SX_StrDrop(self->f_Nickname); self->f_Nickname = NULL;
 }

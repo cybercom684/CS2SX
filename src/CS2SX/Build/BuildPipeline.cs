@@ -959,6 +959,9 @@ public sealed class BuildPipeline
 
                 if (alreadyDeclared.Add(typeName))
                     sb.AppendLine($"typedef struct {typeName} {typeName};");
+                // List<Struct> (CS2SX_LIST_DEFINE_HOOK_EQ in the struct's header)
+                if (typeDecl is StructDeclarationSyntax && alreadyDeclared.Add("List_" + typeName))
+                    sb.AppendLine($"typedef struct List_{typeName} List_{typeName};");
 
                 // Also forward-declare the vtable struct for classes with virtual methods
                 if (typeDecl is ClassDeclarationSyntax clsWithVirtuals

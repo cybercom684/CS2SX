@@ -19,6 +19,10 @@ Vec2 Vec2_op_add(Vec2 a, Vec2 b);
 Vec2 Vec2_op_sub(Vec2 a, Vec2 b);
 Vec2 Vec2_op_mul(Vec2 a, float s);
 int Vec2_Equals(Vec2 a, Vec2 b);
+#ifndef CS2SX_LIST_Vec2_DEFINED
+#define CS2SX_LIST_Vec2_DEFINED
+CS2SX_LIST_DEFINE_HOOK_EQ(Vec2, Vec2, CS2SX_ID, CS2SX_NOREF, Vec2_Equals)
+#endif
 
 struct OperatorOverloadingApp
 {

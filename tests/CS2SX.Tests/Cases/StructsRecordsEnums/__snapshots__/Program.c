@@ -48,6 +48,7 @@ Score* Score_Retain(Score* self)
 }
 
 const CS2SX_GcKind Score_GcKind = { offsetof(Score, _rc), CS2SX_GcLeaf, (CS2SX_FreeFn)Score_Free };
+const CS2SX_ClassInfo Score_ClassInfo = { "Score", NULL };
 
 void StructsRecordsEnumsApp_Init(StructsRecordsEnumsApp* self)
 {

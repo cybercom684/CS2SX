@@ -27,6 +27,7 @@ Inventory* Inventory_Retain(Inventory* self)
 }
 
 const CS2SX_GcKind Inventory_GcKind = { offsetof(Inventory, _rc), CS2SX_GcLeaf, (CS2SX_FreeFn)Inventory_Free };
+const CS2SX_ClassInfo Inventory_ClassInfo = { "Inventory", NULL };
 
 void Bag_Ctor(Bag* self)
 {
@@ -41,12 +42,15 @@ Bag* Bag_New(void)
     Bag* self = (Bag*)calloc(1, sizeof(Bag));
     if (!self) return NULL;
     self->_rc = 1;
-    self->_dtor = (void (*)(void*))Bag_Dispose;
+    self->_dtor = (void (*)(void*))Bag__Destroy;
     self->_gc = Bag_Gc;
+    self->_class = &Bag_ClassInfo;
     Bag_Ctor(self);
     CS2SX_ReleaseLater(self, (CS2SX_FreeFn)Bag_Free);
     return self;
 }
+
+const CS2SX_ClassInfo Bag_ClassInfo = { "Bag", NULL };
 
 void Bag_Gc(void* _self, CS2SX_GcVisit visit)
 {
@@ -56,7 +60,7 @@ void Bag_Gc(void* _self, CS2SX_GcVisit visit)
 static void Bag_GcDyn(void* self, CS2SX_GcVisit visit) { ((Bag*)self)->_gc(self, visit); }
 const CS2SX_GcKind Bag_GcKind = { offsetof(Bag, _rc), Bag_GcDyn, (CS2SX_FreeFn)Bag_Free };
 
-void Bag_Dispose(Bag* self)
+void Bag__Destroy(Bag* self)
 {
     if (self->f_Values) { List_int_Free(self->f_Values); self->f_Values = NULL; }
     if (self->f_Log) { StringBuilder_Free(self->f_Log); self->f_Log = NULL; }
@@ -119,7 +123,13 @@ static int _lambda_2(void* _env)
 static void _envdtor_2(void* _e)
 {
     struct _cap_2* _c = (struct _cap_2*)_e;
-    CS2SX_ReleaseLater(_c->local, (CS2SX_FreeFn)List_int_Free);
+    CS2SX_ReleaseLater((void*)_c->local, (CS2SX_FreeFn)List_int_Free);
+}
+
+static void _envgc_2(void* _e, CS2SX_GcVisit visit)
+{
+    struct _cap_2* _c = (struct _cap_2*)_e;
+    (void)_c; (void)visit;
 }
 
 void CollectionMemoryApp_OnFrame(CollectionMemoryApp* self)
@@ -177,9 +187,10 @@ void CollectionMemoryApp_OnFrame(CollectionMemoryApp* self)
             List_int* local = _list_10;
             CS2SX_LINE(45);
             struct _cap_2* _env_2 = CS2SX_ENV_NEW(struct _cap_2);
-            _env_2->local = List_int_Retain(local);
+            _env_2->local = local; ((void* (*)(void*))List_int_Retain)((void*)_env_2->local);
             _env_2->_hdr._dtor = _envdtor_2;
-            self->f_counter = CS2SX_Delegate_New((void*)_lambda_2, _env_2, 1);
+            _env_2->_hdr._gc = _envgc_2;
+            CS2SX_RC_STORE(CS2SX_Delegate_Retain, CS2SX_Delegate_Release, self->f_counter, CS2SX_Delegate_New((void*)_lambda_2, _env_2, 1));
             CS2SX_LINE(46);
             List_int* _list_11 = List_int_New();
             List_int_Add(_list_11, 7);
@@ -233,6 +244,7 @@ void CollectionMemoryApp_Free(CollectionMemoryApp* self)
     if (self->f_scores) { List_int_Free(self->f_scores); self->f_scores = NULL; }
     if (self->f_bag) { Bag_Free(self->f_bag); self->f_bag = NULL; }
     if (self->f_inv) { Inventory_Free(self->f_inv); self->f_inv = NULL; }
+    if (self->f_counter) { CS2SX_Delegate_Release(self->f_counter); self->f_counter = NULL; }
     for (int _ai = 0; _ai < CS2SX_ArrLen(self->f_grid); _ai++) List_int_Free(self->f_grid[_ai]);
     CS2SX_ArrFree(self->f_grid); self->f_grid = NULL;
     free(self);

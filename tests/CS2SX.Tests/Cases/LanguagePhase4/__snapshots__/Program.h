@@ -8,8 +8,9 @@
 struct Point
 {
     int _rc;
-    void (*_dtor)(void* self);   // _Dispose of the dynamic type
+    void (*_dtor)(void* self);   // __Destroy of the dynamic type
     void (*_gc)(void* self, CS2SX_GcVisit visit);   // _Gc of the dynamic type
+    const CS2SX_ClassInfo* _class;   // run-time type (x is T)
     int f_X;
     int f_Y;
     const char* f_Tag;
@@ -24,7 +25,8 @@ void Point_Ctor_2(Point* self, int x, int y);
 Point* Point_New_3(int x, int y, const char* tag);
 void Point_Ctor_3(Point* self, int x, int y, const char* tag);
 
-void Point_Dispose(Point* self);
+void Point__Destroy(Point* self);
+extern const CS2SX_ClassInfo Point_ClassInfo;
 void Point_Gc(void* self, CS2SX_GcVisit visit);
 extern const CS2SX_GcKind Point_GcKind;
 void Point_Free(Point* self);
@@ -40,7 +42,8 @@ void Point3_Ctor_3(Point3* self, int x, int y, int z);
 Point3* Point3_New_1(int v);
 void Point3_Ctor_1(Point3* self, int v);
 
-void Point3_Dispose(Point3* self);
+void Point3__Destroy(Point3* self);
+extern const CS2SX_ClassInfo Point3_ClassInfo;
 void Point3_Gc(void* self, CS2SX_GcVisit visit);
 void Point3_Free(Point3* self);
 Point3* Point3_Retain(Point3* self);
@@ -58,8 +61,9 @@ void ParseError_Free(ParseError* self);
 struct Counter
 {
     int _rc;
-    void (*_dtor)(void* self);   // _Dispose of the dynamic type
+    void (*_dtor)(void* self);   // __Destroy of the dynamic type
     void (*_gc)(void* self, CS2SX_GcVisit visit);   // _Gc of the dynamic type
+    const CS2SX_ClassInfo* _class;   // run-time type (x is T)
     Action_int_t f_Changed;
     int value;
 };
@@ -68,7 +72,8 @@ Counter* Counter_New(void);
 void Counter_Ctor(Counter* self);
 void Counter_Add(Counter* self, int n);
 
-void Counter_Dispose(Counter* self);
+void Counter__Destroy(Counter* self);
+extern const CS2SX_ClassInfo Counter_ClassInfo;
 void Counter_Gc(void* self, CS2SX_GcVisit visit);
 extern const CS2SX_GcKind Counter_GcKind;
 void Counter_Free(Counter* self);

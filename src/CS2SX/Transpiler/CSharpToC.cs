@@ -321,6 +321,13 @@ public sealed class CSharpToC : CSharpSyntaxWalker
                 return "CS2SX_StrOwn(" + code + ")";
         }
         catch { }
+        try
+        {
+            if (_ctx.SemanticModel?.GetTypeInfo(value).ConvertedType is INamedTypeSymbol { TypeKind: TypeKind.Struct } st
+                && Arc.StructHasRefs(st))
+                return Arc.ValueCName(st) + "_KeepV(" + code + ")";
+        }
+        catch { }
         return Arc.RetainAny(value, code, _ctx);
     }
 
@@ -392,8 +399,8 @@ public sealed class CSharpToC : CSharpSyntaxWalker
     }
 
     /// Reference-counted user class (see <see cref="Arc"/>):
-    ///   T_Dispose — releases T's own fields, then the base's (no memory freed)
-    ///   T_Free    — drops one reference; at zero runs the dynamic type's _Dispose, frees
+    ///   T__Destroy — releases T's own fields, then the base's (no memory freed)
+    ///   T_Free    — drops one reference; at zero runs the dynamic type's __Destroy, frees
     ///   T_Retain  — takes one reference
     /// Free/Retain work on the root's counter, so any static type in the chain is fine.
     private void WriteArcLifecycle(ClassDeclarationSyntax node, string name, string baseType, string root)
@@ -401,7 +408,8 @@ public sealed class CSharpToC : CSharpSyntaxWalker
         bool hasBase = !string.IsNullOrEmpty(baseType);
         if (_mode == TranspileMode.HeaderOnly)
         {
-            _ctx.Out.WriteLine($"void {name}_Dispose({name}* self);");
+            _ctx.Out.WriteLine($"void {name}__Destroy({name}* self);");
+            _ctx.Out.WriteLine($"extern const CS2SX_ClassInfo {name}_ClassInfo;");
             _ctx.Out.WriteLine($"void {name}_Gc(void* self, CS2SX_GcVisit visit);");
             if (!hasBase)
                 _ctx.Out.WriteLine($"extern const CS2SX_GcKind {name}_GcKind;");
@@ -410,16 +418,39 @@ public sealed class CSharpToC : CSharpSyntaxWalker
             return;
         }
 
+        // Run-time type (x is T): linked to the base class.
+        _ctx.Out.WriteLine($"const CS2SX_ClassInfo {name}_ClassInfo = {{ \"{name}\", {(hasBase && TypeRegistry.ArcRoot(baseType) != null ? "&" + baseType + "_ClassInfo" : "NULL")} }};");
+        _ctx.Out.WriteLine();
+
         // Cycle collection (CS2SX_GcKind): visit the objects and lists of objects
         // this class's fields hold, or — visit == NULL — give them up.
         _ctx.Out.WriteLine($"void {name}_Gc(void* _self, CS2SX_GcVisit visit)");
         _ctx.Out.WriteLine("{");
         _ctx.Indent();
         _ctx.WriteLine($"{name}* self = ({name}*)_self; (void)self;");
-        foreach (var (expr, kind, release) in TracedFields(node))
+        foreach (var (expr, kind, release, array) in TracedFields(node))
         {
-            _ctx.WriteLine($"if (visit) visit({expr}, &{kind});");
-            _ctx.WriteLine($"else if ({expr}) {{ void* _o = {expr}; {expr} = NULL; {release}(_o); }}");
+            if (array)
+            {
+                // Array fields: every element is a reference of the object.
+                _ctx.WriteLine($"for (int _ai = 0; {expr} && _ai < CS2SX_ArrLen({expr}); _ai++) {{");
+                _ctx.WriteLine($"    if (visit) visit((void*){expr}[_ai], &{kind});");
+                _ctx.WriteLine($"    else if ({expr}[_ai]) {{ void* _o = (void*){expr}[_ai]; {expr}[_ai] = NULL; {release}(_o); }} }}");
+                continue;
+            }
+            _ctx.WriteLine($"if (visit) visit((void*){expr}, &{kind});");
+            _ctx.WriteLine($"else if ({expr}) {{ void* _o = (void*){expr}; {expr} = NULL; {release}(_o); }}");
+        }
+        foreach (var field in node.Members.OfType<FieldDeclarationSyntax>())
+        {
+            if (field.Modifiers.Any(m => m.IsKind(SyntaxKind.StaticKeyword) || m.IsKind(SyntaxKind.ConstKeyword))) continue;
+            if (FieldSymbolType(field) is not INamedTypeSymbol { TypeKind: TypeKind.Struct } gcSt || !Arc.StructHasRefs(gcSt)) continue;
+            foreach (var v in field.Declaration.Variables)
+            {
+                var fieldName = v.Identifier.Text.TrimStart('_');
+                var prefix = TypeRegistry.HasNoPrefix(fieldName) ? "" : "f_";
+                _ctx.WriteLine($"{Arc.ValueCName(gcSt)}_Gc(&self->{prefix}{fieldName}, visit);");
+            }
         }
         if (hasBase)
             _ctx.WriteLine($"{baseType}_Gc(_self, visit);");
@@ -433,12 +464,12 @@ public sealed class CSharpToC : CSharpSyntaxWalker
             _ctx.Out.WriteLine();
         }
 
-        _ctx.Out.WriteLine($"void {name}_Dispose({name}* self)");
+        _ctx.Out.WriteLine($"void {name}__Destroy({name}* self)");
         _ctx.Out.WriteLine("{");
         _ctx.Indent();
         WriteFieldCleanup(node, name);
         if (hasBase)
-            _ctx.WriteLine($"{baseType}_Dispose(({baseType}*)self);");
+            _ctx.WriteLine($"{baseType}__Destroy(({baseType}*)self);");
         _ctx.Dedent();
         _ctx.Out.WriteLine("}");
         _ctx.Out.WriteLine();
@@ -466,15 +497,23 @@ public sealed class CSharpToC : CSharpSyntaxWalker
     /// reference-counted objects and lists of them. Each holds exactly one reference
     /// (the same ones WriteFieldCleanup releases). Yields the C expression, the
     /// CS2SX_GcKind of the target and the function that releases it.
-    private IEnumerable<(string expr, string kind, string release)> TracedFields(ClassDeclarationSyntax node)
+    private IEnumerable<(string expr, string kind, string release, bool array)> TracedFields(ClassDeclarationSyntax node)
     {
+        (string kind, string release)? Element(string elemType)
+        {
+            elemType = elemType.Trim().TrimEnd('?');
+            if (TypeRegistry.ArcRoot(elemType) is { } r) return (r + "_GcKind", "((void (*)(void*))" + r + "_Free)");
+            if (Arc.RcValue(elemType) is { } rv) return (rv.kind, "((void (*)(void*))" + rv.free + ")");
+            return null;
+        }
         (string kind, string release)? Target(string csType)
         {
             csType = csType.Trim().TrimEnd('?');
+            if (Arc.RcValue(csType) is { } rcv) return (rcv.kind, "((void (*)(void*))" + rcv.free + ")");
             if (TypeRegistry.IsList(csType))
             {
                 var inner = (TypeRegistry.GetListInnerType(csType) ?? "").TrimEnd('?');
-                if (TypeRegistry.ArcRoot(inner) == null) return null;
+                if (Element(inner) == null) return null;
                 var list = "List_" + TypeRegistry.MapType(inner).TrimEnd('*').Trim();
                 return (list + "_GcKind", "((void (*)(void*))" + list + "_Free)");
             }
@@ -486,7 +525,7 @@ public sealed class CSharpToC : CSharpSyntaxWalker
             else if (TypeRegistry.IsStack(csType) || TypeRegistry.IsQueue(csType) || TypeRegistry.IsHashSet(csType))
                 elem = csType[(csType.IndexOf('<') + 1)..csType.LastIndexOf('>')];
             if (elem != null)
-                return TypeRegistry.ArcRoot(elem.Trim().TrimEnd('?')) != null && Arc.CollectionPrefix(csType) is { } coll
+                return Element(elem) != null && Arc.CollectionPrefix(csType) is { } coll
                     ? (coll + "_GcKind", "((void (*)(void*))" + coll + "_Free)")
                     : null;
             if (TypeRegistry.IsDictionary(csType)) return null;
@@ -498,12 +537,24 @@ public sealed class CSharpToC : CSharpSyntaxWalker
         foreach (var field in node.Members.OfType<FieldDeclarationSyntax>())
         {
             if (field.Modifiers.Any(m => m.IsKind(SyntaxKind.StaticKeyword) || m.IsKind(SyntaxKind.ConstKeyword))) continue;
-            if (Target(ResolveFieldType(field)) is not { } t) continue;
+            var fieldType = ResolveFieldType(field).Trim().TrimEnd('?');
+            bool isArray = fieldType.EndsWith("[]") && !fieldType[..^2].EndsWith("[]");
+            if (IsAppType(field.Declaration.Type)) continue;
+            if ((isArray ? Element(fieldType[..^2]) : Target(fieldType)) is not { } t) continue;
             foreach (var v in field.Declaration.Variables)
             {
                 var fieldName = v.Identifier.Text.TrimStart('_');
                 var prefix = TypeRegistry.HasNoPrefix(fieldName) ? "" : "f_";
-                yield return ($"self->{prefix}{fieldName}", t.kind, t.release);
+                yield return ($"self->{prefix}{fieldName}", t.kind, t.release, isArray);
+            }
+        }
+        foreach (var ev in node.Members.OfType<EventFieldDeclarationSyntax>())
+        {
+            if (ev.Modifiers.Any(m => m.IsKind(SyntaxKind.StaticKeyword))) continue;
+            foreach (var v in ev.Declaration.Variables)
+            {
+                var pfx = TypeRegistry.HasNoPrefix(v.Identifier.Text) ? "" : "f_";
+                yield return ($"self->{pfx}{v.Identifier.Text}", "CS2SX_Delegate_GcKind", "((void (*)(void*))CS2SX_Delegate_Release)", false);
             }
         }
         foreach (var prop in node.Members.OfType<PropertyDeclarationSyntax>())
@@ -512,7 +563,7 @@ public sealed class CSharpToC : CSharpSyntaxWalker
             if (!PropertyWriter.IsAutoProperty(prop)) continue;
             if (Target(ResolvePropertyType(prop)) is not { } t) continue;
             var pfx = TypeRegistry.HasNoPrefix(prop.Identifier.Text) ? "" : "f_";
-            yield return ($"self->{pfx}{prop.Identifier.Text}", t.kind, t.release);
+            yield return ($"self->{pfx}{prop.Identifier.Text}", t.kind, t.release, false);
         }
     }
 
@@ -591,12 +642,40 @@ public sealed class CSharpToC : CSharpSyntaxWalker
                         _ctx.WriteLine($"for (int _ai = 0; _ai < CS2SX_ArrLen({arr}); _ai++) {elemRoot}_Free(({elemRoot}*){arr}[_ai]);");
                     else if (Arc.CollectionPrefix(csType[..^2]) is { } elemColl)
                         _ctx.WriteLine($"for (int _ai = 0; _ai < CS2SX_ArrLen({arr}); _ai++) {elemColl}_Free({arr}[_ai]);");
+                    else if ((FieldSymbolType(field) as IArrayTypeSymbol)?.ElementType is { } arrElem && Arc.RcValue(arrElem) is { } arrRc)
+                        _ctx.WriteLine($"for (int _ai = 0; _ai < CS2SX_ArrLen({arr}); _ai++) {arrRc.free}({arr}[_ai]);");
                     _ctx.WriteLine($"CS2SX_ArrFree({arr}); {arr} = NULL;");
                 }
                 continue;
             }
 
-            // Interface types are value structs — no heap allocation, nothing to free.
+            // Exceptions of the runtime (a field that remembers a caught exception):
+            // the field holds no reference of its own.
+            if (IsRuntimeException(FieldSymbolType(field))) continue;
+
+            // A struct that holds references: the field keeps them (S_Keep).
+            if (FieldSymbolType(field) is INamedTypeSymbol { TypeKind: TypeKind.Struct } heldSt && Arc.StructHasRefs(heldSt))
+            {
+                foreach (var v in field.Declaration.Variables)
+                {
+                    var fieldName = v.Identifier.Text.TrimStart('_');
+                    var prefix = TypeRegistry.HasNoPrefix(fieldName) ? "" : "f_";
+                    _ctx.WriteLine($"{Arc.ValueCName(heldSt)}_Drop(&self->{prefix}{fieldName});");
+                }
+                continue;
+            }
+
+            // Delegates and interface values: the field holds one reference.
+            if (Arc.RcValue(FieldSymbolType(field) ) is { } rcField)
+            {
+                foreach (var v in field.Declaration.Variables)
+                {
+                    var fieldName = v.Identifier.Text.TrimStart('_');
+                    var prefix = TypeRegistry.HasNoPrefix(fieldName) ? "" : "f_";
+                    _ctx.WriteLine($"if (self->{prefix}{fieldName}) {{ {rcField.free}(self->{prefix}{fieldName}); self->{prefix}{fieldName} = NULL; }}");
+                }
+                continue;
+            }
             if (TypeRegistry.IsRegisteredInterface(csType)) continue;
 
             // Collections (List, Dictionary, Stack, Queue, HashSet, StringBuilder): the
@@ -673,7 +752,43 @@ public sealed class CSharpToC : CSharpSyntaxWalker
                 _ctx.WriteLine($"if ({expr}) {{ {root}_Free(({root}*){expr}); {expr} = NULL; }}");
             else if (Arc.CollectionPrefix(csType) is { } coll)
                 _ctx.WriteLine($"if ({expr}) {{ {coll}_Free({expr}); {expr} = NULL; }}");
+            else if (Arc.RcValue(PropertySymbolType(prop)) is { } rcProp)
+                _ctx.WriteLine($"if ({expr}) {{ {rcProp.free}({expr}); {expr} = NULL; }}");
+            else if (PropertySymbolType(prop) is INamedTypeSymbol { TypeKind: TypeKind.Struct } propSt && Arc.StructHasRefs(propSt))
+                _ctx.WriteLine($"{Arc.ValueCName(propSt)}_Drop(&{expr});");
         }
+
+        // Field-like events are delegate fields.
+        foreach (var ev in node.Members.OfType<EventFieldDeclarationSyntax>())
+        {
+            if (ev.Modifiers.Any(m => m.IsKind(SyntaxKind.StaticKeyword))) continue;
+            foreach (var v in ev.Declaration.Variables)
+            {
+                var pfx = TypeRegistry.HasNoPrefix(v.Identifier.Text) ? "" : "f_";
+                var expr = $"self->{pfx}{v.Identifier.Text}";
+                _ctx.WriteLine($"if ({expr}) {{ CS2SX_Delegate_Release({expr}); {expr} = NULL; }}");
+            }
+        }
+    }
+
+    private static bool IsRuntimeException(ITypeSymbol? t)
+    {
+        if (t == null || TranspilerContext.IsUserCode(t)) return false;
+        for (var b = t; b != null; b = b.BaseType)
+            if (b.Name == "Exception" && b.ContainingNamespace?.ToDisplayString() == "System") return true;
+        return false;
+    }
+
+    private ITypeSymbol? FieldSymbolType(BaseFieldDeclarationSyntax field)
+    {
+        try { return _ctx.SemanticModel?.GetTypeInfo(field.Declaration.Type).Type; }
+        catch { return null; }
+    }
+
+    private ITypeSymbol? PropertySymbolType(PropertyDeclarationSyntax prop)
+    {
+        try { return _ctx.SemanticModel?.GetTypeInfo(prop.Type).Type; }
+        catch { return null; }
     }
 
     public override void VisitStructDeclaration(StructDeclarationSyntax node) => WriteValueStruct(node);
@@ -873,8 +988,9 @@ public sealed class CSharpToC : CSharpSyntaxWalker
             _ctx.WriteLine("int _rc;");
             if (Arc.UsesDispose(DeclaredSymbol(node)))
             {
-                _ctx.WriteLine("void (*_dtor)(void* self);   // _Dispose of the dynamic type");
+                _ctx.WriteLine("void (*_dtor)(void* self);   // __Destroy of the dynamic type");
                 _ctx.WriteLine("void (*_gc)(void* self, CS2SX_GcVisit visit);   // _Gc of the dynamic type");
+                _ctx.WriteLine("const CS2SX_ClassInfo* _class;   // run-time type (x is T)");
             }
         }
         else
@@ -1337,20 +1453,7 @@ public sealed class CSharpToC : CSharpSyntaxWalker
                 var initVal = _exprWriter.Write(v.Initializer.Value);
                 // Interface-typed field: wrap initializer with as_IFace() upcast
                 var fieldCsType = ResolveFieldType(field);
-                if (_ctx.InterfaceTypes.Contains(fieldCsType) && _ctx.SemanticModel != null)
-                {
-                    try
-                    {
-                        var rightSym = _ctx.SemanticModel.GetTypeInfo(v.Initializer.Value).Type
-                            as Microsoft.CodeAnalysis.INamedTypeSymbol;
-                        if (rightSym != null && !TypeRegistry.IsRegisteredInterface(rightSym.Name)
-                            && TypeRegistry.NeedsPointerSuffix(rightSym.Name))
-                            initVal = rightSym.Name + "_as_" + fieldCsType + "(" + initVal + ")";
-                    }
-                    catch { }
-                }
-                else
-                    initVal = FieldInit(v.Initializer.Value, initVal);
+                initVal = FieldInit(v.Initializer.Value, initVal);   // (wraps class values for interface fields)
                 _ctx.WriteLine("self->" + prefix + fieldName + " = " + initVal + ";");
             }
         }
@@ -1927,6 +2030,8 @@ public sealed class CSharpToC : CSharpSyntaxWalker
                 }
                 _ctx.Out.WriteLine($"void {name}_Free({name}* self);");
                 _ctx.Out.WriteLine($"{name}* {name}_Retain({name}* self);");
+                if (TypeRegistry.ArcRoot(name) != null)
+                    _ctx.Out.WriteLine($"extern const CS2SX_ClassInfo {name}_ClassInfo;");
             }
 
             // Method signatures from body
@@ -1973,7 +2078,9 @@ public sealed class CSharpToC : CSharpSyntaxWalker
                     ? $"self->f_{fieldName} = CS2SX_RETAIN({arcRoot}, {fieldName});"
                     : collPrefix != null
                         ? $"self->f_{fieldName} = {collPrefix}_Retain({fieldName});"   // freed with the record
-                        : $"self->f_{fieldName} = {fieldName};");
+                        : Arc.RcValue(csType) is { } recRc
+                            ? $"self->f_{fieldName} = {fieldName}; {recRc.retain}(self->f_{fieldName});"
+                            : $"self->f_{fieldName} = {fieldName};");
             }
             // The initial reference belongs to the current frame (see T_New).
             if (TypeRegistry.ArcRoot(name) != null)
@@ -1992,6 +2099,11 @@ public sealed class CSharpToC : CSharpSyntaxWalker
             foreach (var (csType, fieldName) in paramFields)
             {
                 var fieldExpr = $"self->f_{fieldName}";
+                if (Arc.RcValue(csType) is { } recFree)
+                {
+                    _ctx.WriteLine($"if ({fieldExpr}) {{ {recFree.free}({fieldExpr}); {fieldExpr} = NULL; }}");
+                    continue;
+                }
                 if (TypeRegistry.IsList(csType))
                 {
                     var inner = TypeRegistry.GetListInnerType(csType) ?? "int";
@@ -2036,6 +2148,7 @@ public sealed class CSharpToC : CSharpSyntaxWalker
             if (TypeRegistry.ArcRoot(name) != null)
             {
                 _ctx.Out.WriteLine($"const CS2SX_GcKind {name}_GcKind = {{ offsetof({name}, _rc), CS2SX_GcLeaf, (CS2SX_FreeFn){name}_Free }};");
+                _ctx.Out.WriteLine($"const CS2SX_ClassInfo {name}_ClassInfo = {{ \"{name}\", NULL }};");
                 _ctx.Out.WriteLine();
             }
 

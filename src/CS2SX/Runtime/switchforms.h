@@ -185,9 +185,12 @@ void CS2SX_GcFrame(void);
 /// whose elements are objects of the hierarchy Root; ELEM is element _i of c.
 #define CS2SX_GC_ELEMENTS(Coll, Root, ELEM)                                                         \
 extern const CS2SX_GcKind Root##_GcKind;                                                            \
+CS2SX_GC_ELEMENTS_KIND(Coll, Root##_GcKind, ELEM)
+/// The same with the elements' kind given directly (CS2SX_Delegate_GcKind, CS2SX_Iface_GcKind).
+#define CS2SX_GC_ELEMENTS_KIND(Coll, KIND, ELEM)                                                    \
 static void Coll##_Gc(void* self, CS2SX_GcVisit visit) {                                            \
     Coll* c = (Coll*)self;                                                                          \
-    if (visit) for (int _i = 0; _i < c->count; _i++) visit((void*)(ELEM), &Root##_GcKind); }        \
+    if (visit) for (int _i = 0; _i < c->count; _i++) visit((void*)(ELEM), &KIND); }                 \
 __attribute__((unused)) static const CS2SX_GcKind Coll##_GcKind =                                   \
     { offsetof(Coll, _rc), Coll##_Gc, (CS2SX_FreeFn)Coll##_Free };
 
@@ -207,6 +210,9 @@ char* _cs2sx_next_buf(void);
 /// snprintf into buf without the 1023-character limit: returns buf, or a larger
 /// block (valid until the next frame) when the text does not fit.
 char* CS2SX_Format(char* buf, const char* fmt, ...) __attribute__((format(printf, 2, 3)));
+/// A buffer for a string of len characters (plus NUL), valid until the next frame.
+char* CS2SX_StrAlloc(size_t len);
+const char* CS2SX_TrimChars(const char* s, const char* chars, int mode);
 
 // FIX: Heap-String für lange Lebensdauer (Liste von Strings etc.)
 // Caller ist verantwortlich für free(), wird aber in der Praxis durch
@@ -631,6 +637,72 @@ static inline void List_##T##_Sort(List_##T* l) {                               
         while (_j >= 0 && l->data[_j] > _key) { l->data[_j+1] = l->data[_j]; _j--; }             \
         l->data[_j+1] = _key; } }
 
+// ── List<T> for delegates and interface values ───────────────────────────────
+// Like CS2SX_LIST_DEFINE, but the list keeps a reference to every element:
+// KEEP(x) takes one (and gives x back), DROP(x) gives it up at the next frame.
+#define CS2SX_LIST_DEFINE_HOOK(N, E, KEEP, DROP) CS2SX_LIST_DEFINE_HOOK_EQ(N, E, KEEP, DROP, CS2SX_EQ)
+/// The same with an equality for Contains / IndexOf / Remove (structs: S_Equals).
+/// The struct is named (struct List_N), so List_N* can be declared before E is complete.
+#define CS2SX_LIST_DEFINE_HOOK_EQ(N, E, KEEP, DROP, EQ)                                             \
+typedef struct List_##N { E* data; int count; int capacity; int _rc; } List_##N;                    \
+static inline void List_##N##_Clear(List_##N* l);                                                   \
+static inline List_##N* List_##N##_Retain(List_##N* l) { if (l) l->_rc++; return l; }              \
+static inline void List_##N##_Free(List_##N* l) {                                                  \
+    if (!l || --l->_rc > 0) return; List_##N##_Clear(l); free(l->data); free(l); }                  \
+static inline List_##N* List_##N##_New(void) {                                                      \
+    List_##N* l = (List_##N*)malloc(sizeof(List_##N));                                              \
+    if (!l) return NULL;                                                                            \
+    l->data = (E*)malloc(CS2SX_LIST_INITIAL_CAP * sizeof(E));                                      \
+    l->count = 0; l->capacity = CS2SX_LIST_INITIAL_CAP; l->_rc = 1;                                 \
+    CS2SX_ReleaseLater(l, (CS2SX_FreeFn)List_##N##_Free); return l; }                               \
+static inline void List_##N##_Add(List_##N* l, E val) {                                            \
+    if (!l) CS2SX_ThrowNullRef();                                                                   \
+    if (l->count >= l->capacity) {                                                                  \
+        l->capacity *= 2; l->data = (E*)realloc(l->data, l->capacity * sizeof(E)); }               \
+    l->data[l->count++] = KEEP(val); }                                                              \
+static inline E    List_##N##_Get(List_##N* l, int i) {                                            \
+    CS2SX_ListCheck(l ? l->count : -1, i); return l->data[i]; }                                     \
+static inline void List_##N##_Set(List_##N* l, int i, E val) {                                     \
+    CS2SX_ListCheck(l ? l->count : -1, i);                                                          \
+    E _old = l->data[i]; l->data[i] = KEEP(val); DROP(_old); }                                      \
+static inline void List_##N##_Insert(List_##N* l, int idx, E val) {                                \
+    CS2SX_ListCheck(l ? l->count + 1 : -1, idx);                                                    \
+    List_##N##_Add(l, val);                                                                         \
+    for (int _i = l->count - 1; _i > idx; _i--) l->data[_i] = l->data[_i - 1];                    \
+    l->data[idx] = val; }                                                                           \
+static inline int  List_##N##_Count(List_##N* l) { return l ? l->count : 0; }                      \
+static inline void List_##N##_Clear(List_##N* l) {                                                 \
+    if (!l) return;                                                                                 \
+    int _n = l->count; l->count = 0;                                                                \
+    for (int _i = 0; _i < _n; _i++) DROP(l->data[_i]); }                                            \
+static inline int  List_##N##_Contains(List_##N* l, E val) {                                       \
+    if (!l) CS2SX_ThrowNullRef();                                                                   \
+    for (int _i = 0; _i < l->count; _i++) { if (EQ(l->data[_i], val)) return 1; } return 0; }      \
+static inline int  List_##N##_IndexOf(List_##N* l, E val) {                                        \
+    if (!l) CS2SX_ThrowNullRef();                                                                   \
+    for (int _i = 0; _i < l->count; _i++) { if (EQ(l->data[_i], val)) return _i; } return -1; }    \
+static inline void List_##N##_Remove(List_##N* l, int idx) {                                       \
+    CS2SX_ListCheck(l ? l->count : -1, idx);                                                        \
+    E _old = l->data[idx];                                                                          \
+    for (int _i = idx; _i < l->count - 1; _i++) l->data[_i] = l->data[_i + 1];                   \
+    l->count--; DROP(_old); }                                                                       \
+static inline void List_##N##_RemoveValue(List_##N* l, E val) {                                    \
+    if (!l) CS2SX_ThrowNullRef();                                                                   \
+    for (int _i = 0; _i < l->count; _i++) {                                                        \
+        if (EQ(l->data[_i], val)) { List_##N##_Remove(l, _i); return; } } }                        \
+static inline void List_##N##_Reverse(List_##N* l) {                                               \
+    if (!l || l->count < 2) return;                                                                 \
+    int _lo = 0, _hi = l->count - 1;                                                               \
+    while (_lo < _hi) { E _t = l->data[_lo]; l->data[_lo] = l->data[_hi];                         \
+        l->data[_hi] = _t; _lo++; _hi--; } }
+
+/// KEEP/DROP hooks of delegates and interface values (lists, Stack/Queue/HashSet,
+/// Dictionary values).
+#define CS2SX_DLG_KEEP(x)   CS2SX_Delegate_Retain(x)
+#define CS2SX_DLG_DROP(x)   CS2SX_Delegate_Drop(x)
+#define CS2SX_IFACE_KEEP(x) ((__typeof__(x))CS2SX_Iface_Retain(x))
+#define CS2SX_IFACE_DROP(x) CS2SX_Iface_Drop(x)
+
 // ── List<T> für Pointer-Typen (User-Klassen) ─────────────────────────────────
 // CS2SX_LIST_DEFINE_PTR(T) erzeugt List_T mit T*-Elementen (heap-allozierte Objekte).
 // Wird von _generics.h für jede List<UserClass>-Nutzung emittiert.
@@ -786,6 +858,7 @@ CS2SX_LIST_DEFINE(voidptr)
 #define CS2SX_ID(x)        (x)
 #define CS2SX_NOREF(x)     ((void)(x))
 #define CS2SX_EQ(a, b)     ((a) == (b))
+#define CS2SX_EQ_MEM(a, b) ({ __typeof__(a) _cs2sx_ea = (a); __typeof__(b) _cs2sx_eb = (b); memcmp(&_cs2sx_ea, &_cs2sx_eb, sizeof _cs2sx_ea) == 0; })
 #define CS2SX_EQ_STR(a, b) (strcmp((a), (b)) == 0)
 #define CS2SX_STR_KEEP(x)  _cs2sx_heap_strdup(x)
 #define CS2SX_STR_DROP(x)  CS2SX_ReleaseLater((void*)(x), free)

@@ -16,12 +16,15 @@ Item* Item_New(const char* name, int count)
     Item* self = (Item*)calloc(1, sizeof(Item));
     if (!self) return NULL;
     self->_rc = 1;
-    self->_dtor = (void (*)(void*))Item_Dispose;
+    self->_dtor = (void (*)(void*))Item__Destroy;
     self->_gc = Item_Gc;
+    self->_class = &Item_ClassInfo;
     Item_Ctor(self, name, count);
     CS2SX_ReleaseLater(self, (CS2SX_FreeFn)Item_Free);
     return self;
 }
+
+const CS2SX_ClassInfo Item_ClassInfo = { "Item", NULL };
 
 void Item_Gc(void* _self, CS2SX_GcVisit visit)
 {
@@ -31,7 +34,7 @@ void Item_Gc(void* _self, CS2SX_GcVisit visit)
 static void Item_GcDyn(void* self, CS2SX_GcVisit visit) { ((Item*)self)->_gc(self, visit); }
 const CS2SX_GcKind Item_GcKind = { offsetof(Item, _rc), Item_GcDyn, (CS2SX_FreeFn)Item_Free };
 
-void Item_Dispose(Item* self)
+void Item__Destroy(Item* self)
 {
     CS2SX_StrDrop(self->f_Name); self->f_Name = NULL;
 }

@@ -1,0 +1,7 @@
+circle r2 O False
+square side3 S3 True
+cube side3 C True
+True False
+side 3 cube
+True False
+False done

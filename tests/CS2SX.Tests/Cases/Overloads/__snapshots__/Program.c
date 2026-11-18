@@ -12,12 +12,15 @@ Shape* Shape_New(void)
     Shape* self = (Shape*)calloc(1, sizeof(Shape));
     if (!self) return NULL;
     self->_rc = 1;
-    self->_dtor = (void (*)(void*))Shape_Dispose;
+    self->_dtor = (void (*)(void*))Shape__Destroy;
     self->_gc = Shape_Gc;
+    self->_class = &Shape_ClassInfo;
     Shape_Ctor(self);
     CS2SX_ReleaseLater(self, (CS2SX_FreeFn)Shape_Free);
     return self;
 }
+
+const CS2SX_ClassInfo Shape_ClassInfo = { "Shape", NULL };
 
 void Shape_Gc(void* _self, CS2SX_GcVisit visit)
 {
@@ -27,7 +30,7 @@ void Shape_Gc(void* _self, CS2SX_GcVisit visit)
 static void Shape_GcDyn(void* self, CS2SX_GcVisit visit) { ((Shape*)self)->_gc(self, visit); }
 const CS2SX_GcKind Shape_GcKind = { offsetof(Shape, _rc), Shape_GcDyn, (CS2SX_FreeFn)Shape_Free };
 
-void Shape_Dispose(Shape* self)
+void Shape__Destroy(Shape* self)
 {
     CS2SX_StrDrop(self->f_Name); self->f_Name = NULL;
 }
@@ -58,8 +61,9 @@ Printer* Printer_New(void)
     Printer* self = (Printer*)calloc(1, sizeof(Printer));
     if (!self) return NULL;
     self->_rc = 1;
-    self->_dtor = (void (*)(void*))Printer_Dispose;
+    self->_dtor = (void (*)(void*))Printer__Destroy;
     self->_gc = Printer_Gc;
+    self->_class = &Printer_ClassInfo;
     Printer_Ctor(self);
     CS2SX_ReleaseLater(self, (CS2SX_FreeFn)Printer_Free);
     return self;
@@ -187,6 +191,8 @@ const char* Printer_All(Printer* self)
     return _sb9;
 }
 
+const CS2SX_ClassInfo Printer_ClassInfo = { "Printer", NULL };
+
 void Printer_Gc(void* _self, CS2SX_GcVisit visit)
 {
     Printer* self = (Printer*)_self; (void)self;
@@ -195,7 +201,7 @@ void Printer_Gc(void* _self, CS2SX_GcVisit visit)
 static void Printer_GcDyn(void* self, CS2SX_GcVisit visit) { ((Printer*)self)->_gc(self, visit); }
 const CS2SX_GcKind Printer_GcKind = { offsetof(Printer, _rc), Printer_GcDyn, (CS2SX_FreeFn)Printer_Free };
 
-void Printer_Dispose(Printer* self)
+void Printer__Destroy(Printer* self)
 {
 }
 

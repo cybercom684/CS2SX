@@ -19,8 +19,9 @@ Hub* Hub_New(void)
     Hub* self = (Hub*)calloc(1, sizeof(Hub));
     if (!self) return NULL;
     self->_rc = 1;
-    self->_dtor = (void (*)(void*))Hub_Dispose;
+    self->_dtor = (void (*)(void*))Hub__Destroy;
     self->_gc = Hub_Gc;
+    self->_class = &Hub_ClassInfo;
     Hub_Ctor(self);
     CS2SX_ReleaseLater(self, (CS2SX_FreeFn)Hub_Free);
     return self;
@@ -37,25 +38,27 @@ Hub* Hub_Child(Hub* self)
     return c;
 }
 
+const CS2SX_ClassInfo Hub_ClassInfo = { "Hub", NULL };
+
 void Hub_Gc(void* _self, CS2SX_GcVisit visit)
 {
     Hub* self = (Hub*)_self; (void)self;
-    if (visit) visit(self->f_Owner, &Hub_GcKind);
-    else if (self->f_Owner) { void* _o = self->f_Owner; self->f_Owner = NULL; ((void (*)(void*))Hub_Free)(_o); }
-    if (visit) visit(self->f_ByName, &Dict_str_Hub_GcKind);
-    else if (self->f_ByName) { void* _o = self->f_ByName; self->f_ByName = NULL; ((void (*)(void*))Dict_str_Hub_Free)(_o); }
-    if (visit) visit(self->f_History, &Stack_Hub_GcKind);
-    else if (self->f_History) { void* _o = self->f_History; self->f_History = NULL; ((void (*)(void*))Stack_Hub_Free)(_o); }
-    if (visit) visit(self->f_Pending, &Queue_Hub_GcKind);
-    else if (self->f_Pending) { void* _o = self->f_Pending; self->f_Pending = NULL; ((void (*)(void*))Queue_Hub_Free)(_o); }
-    if (visit) visit(self->f_Seen, &HashSet_Hub_GcKind);
-    else if (self->f_Seen) { void* _o = self->f_Seen; self->f_Seen = NULL; ((void (*)(void*))HashSet_Hub_Free)(_o); }
+    if (visit) visit((void*)self->f_Owner, &Hub_GcKind);
+    else if (self->f_Owner) { void* _o = (void*)self->f_Owner; self->f_Owner = NULL; ((void (*)(void*))Hub_Free)(_o); }
+    if (visit) visit((void*)self->f_ByName, &Dict_str_Hub_GcKind);
+    else if (self->f_ByName) { void* _o = (void*)self->f_ByName; self->f_ByName = NULL; ((void (*)(void*))Dict_str_Hub_Free)(_o); }
+    if (visit) visit((void*)self->f_History, &Stack_Hub_GcKind);
+    else if (self->f_History) { void* _o = (void*)self->f_History; self->f_History = NULL; ((void (*)(void*))Stack_Hub_Free)(_o); }
+    if (visit) visit((void*)self->f_Pending, &Queue_Hub_GcKind);
+    else if (self->f_Pending) { void* _o = (void*)self->f_Pending; self->f_Pending = NULL; ((void (*)(void*))Queue_Hub_Free)(_o); }
+    if (visit) visit((void*)self->f_Seen, &HashSet_Hub_GcKind);
+    else if (self->f_Seen) { void* _o = (void*)self->f_Seen; self->f_Seen = NULL; ((void (*)(void*))HashSet_Hub_Free)(_o); }
 }
 
 static void Hub_GcDyn(void* self, CS2SX_GcVisit visit) { ((Hub*)self)->_gc(self, visit); }
 const CS2SX_GcKind Hub_GcKind = { offsetof(Hub, _rc), Hub_GcDyn, (CS2SX_FreeFn)Hub_Free };
 
-void Hub_Dispose(Hub* self)
+void Hub__Destroy(Hub* self)
 {
     CS2SX_LINE(16);
     Hub_Alive--;

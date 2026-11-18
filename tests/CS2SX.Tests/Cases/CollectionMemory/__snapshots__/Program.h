@@ -14,12 +14,14 @@ struct Inventory
 Inventory* Inventory_New(List_str* Items, int Slots);
 void Inventory_Free(Inventory* self);
 Inventory* Inventory_Retain(Inventory* self);
+extern const CS2SX_ClassInfo Inventory_ClassInfo;
 
 struct Bag
 {
     int _rc;
-    void (*_dtor)(void* self);   // _Dispose of the dynamic type
+    void (*_dtor)(void* self);   // __Destroy of the dynamic type
     void (*_gc)(void* self, CS2SX_GcVisit visit);   // _Gc of the dynamic type
+    const CS2SX_ClassInfo* _class;   // run-time type (x is T)
     List_int* f_Values;
     StringBuilder* f_Log;
     Dict_str_int* f_Counts;
@@ -28,7 +30,8 @@ struct Bag
 Bag* Bag_New(void);
 void Bag_Ctor(Bag* self);
 
-void Bag_Dispose(Bag* self);
+void Bag__Destroy(Bag* self);
+extern const CS2SX_ClassInfo Bag_ClassInfo;
 void Bag_Gc(void* self, CS2SX_GcVisit visit);
 extern const CS2SX_GcKind Bag_GcKind;
 void Bag_Free(Bag* self);

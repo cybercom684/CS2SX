@@ -1,4 +1,4 @@
-﻿using CS2SX.Core;
+using CS2SX.Core;
 using CS2SX.Transpiler.Writers;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
@@ -207,8 +207,9 @@ public sealed class DefaultConstructorStrategy : IConstructorStrategy
             ctx.WriteLine($"self->{m.RcPath}_rc = 1;");
         if (m.RcPath != null && Arc.UsesDispose(m.Symbol))
         {
-            ctx.WriteLine($"self->{m.RcPath}_dtor = (void (*)(void*)){name}_Dispose;");
+            ctx.WriteLine($"self->{m.RcPath}_dtor = (void (*)(void*)){name}__Destroy;");
             ctx.WriteLine($"self->{m.RcPath}_gc = {name}_Gc;");
+            ctx.WriteLine($"self->{m.RcPath}_class = &{name}_ClassInfo;");
         }
         if (m.BaseVTable || m.OwnVTable)
             ctx.WriteLine($"self->{m.RcPath}vtable = &{name}_vtable_instance;");

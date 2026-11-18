@@ -89,7 +89,7 @@ void LambdasApp_OnInit(LambdasApp* self)
     CS2SX_LINE(18);
     struct _cap_3* _env_3 = CS2SX_ENV_NEW(struct _cap_3);
     _env_3->self = self;
-    self->f_onTick = CS2SX_Delegate_New((void*)_lambda_3, _env_3, 1);
+    CS2SX_RC_STORE(CS2SX_Delegate_Retain, CS2SX_Delegate_Release, self->f_onTick, CS2SX_Delegate_New((void*)_lambda_3, _env_3, 1));
     CS2SX_LINE(19);
     LambdasApp_Apply(5, (&_dg_4));
 }
@@ -111,5 +111,6 @@ void LambdasApp_OnFrame(LambdasApp* self)
 void LambdasApp_Free(LambdasApp* self)
 {
     if (!self) return;
+    if (self->f_onTick) { CS2SX_Delegate_Release(self->f_onTick); self->f_onTick = NULL; }
     free(self);
 }

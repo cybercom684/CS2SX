@@ -7,15 +7,17 @@
 struct Shape
 {
     int _rc;
-    void (*_dtor)(void* self);   // _Dispose of the dynamic type
+    void (*_dtor)(void* self);   // __Destroy of the dynamic type
     void (*_gc)(void* self, CS2SX_GcVisit visit);   // _Gc of the dynamic type
+    const CS2SX_ClassInfo* _class;   // run-time type (x is T)
     const char* f_Name;
 };
 
 Shape* Shape_New(void);
 void Shape_Ctor(Shape* self);
 
-void Shape_Dispose(Shape* self);
+void Shape__Destroy(Shape* self);
+extern const CS2SX_ClassInfo Shape_ClassInfo;
 void Shape_Gc(void* self, CS2SX_GcVisit visit);
 extern const CS2SX_GcKind Shape_GcKind;
 void Shape_Free(Shape* self);
@@ -23,8 +25,9 @@ Shape* Shape_Retain(Shape* self);
 struct Printer
 {
     int _rc;
-    void (*_dtor)(void* self);   // _Dispose of the dynamic type
+    void (*_dtor)(void* self);   // __Destroy of the dynamic type
     void (*_gc)(void* self, CS2SX_GcVisit visit);   // _Gc of the dynamic type
+    const CS2SX_ClassInfo* _class;   // run-time type (x is T)
     int f_calls;
 };
 
@@ -43,7 +46,8 @@ int Printer_Twice_1_int(int x);
 const char* Printer_Twice_1_str(const char* x);
 const char* Printer_All(Printer* self);
 
-void Printer_Dispose(Printer* self);
+void Printer__Destroy(Printer* self);
+extern const CS2SX_ClassInfo Printer_ClassInfo;
 void Printer_Gc(void* self, CS2SX_GcVisit visit);
 extern const CS2SX_GcKind Printer_GcKind;
 void Printer_Free(Printer* self);

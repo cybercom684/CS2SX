@@ -1,4 +1,4 @@
-﻿using CS2SX.Core;
+using CS2SX.Core;
 using CS2SX.Transpiler.Writers;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
@@ -175,8 +175,8 @@ public static class PatternMatchingWriter
             DeclarationPatternSyntax dp =>
                 WriteTypePattern(dp, subject, ctx),
 
-            TypePatternSyntax =>
-                "(" + subject + " != NULL)",
+            TypePatternSyntax tp =>
+                PatternTypeTest(tp, subject, ctx),
 
             DiscardPatternSyntax =>
                 "1 /* _ */",
@@ -250,16 +250,22 @@ public static class PatternMatchingWriter
         if (bindingVar != null)
             ctx.LocalTypes[bindingVar] = typeName;
 
-        // Ohne RTTI-System: Typ-Check wird als Null-Check approximiert.
         // Für Primitive (int, float, ...) ist die Bedingung immer wahr.
         if (TypeRegistry.IsPrimitive(typeName) && typeName != "string")
             return "1";
-        // No RTTI on Switch: `x is T` cannot do a real type test — it matches ANY
-        // non-null object and blind-casts. Warn loudly so this silent-corruption
-        // source is visible (matching a Cat as Dog reads garbage fields).
-        ctx.Warn(dp, $"`is {typeName}` has no runtime type check (no RTTI) — matches any "
-                   + "non-null value and casts unconditionally; verify this is safe.");
-        return "(" + subject + " != NULL)";
+        return PatternTypeTest(dp, subject, ctx);
+    }
+
+    /// The run-time type test of a type or declaration pattern (see Arc.TypeTest):
+    /// for a pattern the semantic model gives the input type and the narrowed type.
+    private static string PatternTypeTest(PatternSyntax pattern, string subject, TranspilerContext ctx)
+    {
+        try
+        {
+            var ti = ctx.SemanticModel?.GetTypeInfo(pattern);
+            return Arc.TypeTest(subject, ti?.Type, ti?.ConvertedType);
+        }
+        catch { return "(" + subject + " != NULL)"; }
     }
 
 

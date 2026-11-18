@@ -1,4 +1,5 @@
 #include <stdlib.h>
+#include "_generics.h"
 #include "Program.h"
 
 // ── Struct: Meters ────────────────────────────────────────
@@ -27,8 +28,9 @@ Outer* Outer_New(void)
     Outer* self = (Outer*)calloc(1, sizeof(Outer));
     if (!self) return NULL;
     self->_rc = 1;
-    self->_dtor = (void (*)(void*))Outer_Dispose;
+    self->_dtor = (void (*)(void*))Outer__Destroy;
     self->_gc = Outer_Gc;
+    self->_class = &Outer_ClassInfo;
     Outer_Ctor(self);
     CS2SX_ReleaseLater(self, (CS2SX_FreeFn)Outer_Free);
     return self;
@@ -41,6 +43,8 @@ Inner* Outer_Make(Outer* self)
     return Inner_New();
 }
 
+const CS2SX_ClassInfo Outer_ClassInfo = { "Outer", NULL };
+
 void Outer_Gc(void* _self, CS2SX_GcVisit visit)
 {
     Outer* self = (Outer*)_self; (void)self;
@@ -49,7 +53,7 @@ void Outer_Gc(void* _self, CS2SX_GcVisit visit)
 static void Outer_GcDyn(void* self, CS2SX_GcVisit visit) { ((Outer*)self)->_gc(self, visit); }
 const CS2SX_GcKind Outer_GcKind = { offsetof(Outer, _rc), Outer_GcDyn, (CS2SX_FreeFn)Outer_Free };
 
-void Outer_Dispose(Outer* self)
+void Outer__Destroy(Outer* self)
 {
 }
 
@@ -80,8 +84,9 @@ Inner* Inner_New(void)
     Inner* self = (Inner*)calloc(1, sizeof(Inner));
     if (!self) return NULL;
     self->_rc = 1;
-    self->_dtor = (void (*)(void*))Inner_Dispose;
+    self->_dtor = (void (*)(void*))Inner__Destroy;
     self->_gc = Inner_Gc;
+    self->_class = &Inner_ClassInfo;
     Inner_Ctor(self);
     CS2SX_ReleaseLater(self, (CS2SX_FreeFn)Inner_Free);
     return self;
@@ -94,6 +99,8 @@ int Inner_Twice(Inner* self)
     return self->f_V * 2;
 }
 
+const CS2SX_ClassInfo Inner_ClassInfo = { "Inner", NULL };
+
 void Inner_Gc(void* _self, CS2SX_GcVisit visit)
 {
     Inner* self = (Inner*)_self; (void)self;
@@ -102,7 +109,7 @@ void Inner_Gc(void* _self, CS2SX_GcVisit visit)
 static void Inner_GcDyn(void* self, CS2SX_GcVisit visit) { ((Inner*)self)->_gc(self, visit); }
 const CS2SX_GcKind Inner_GcKind = { offsetof(Inner, _rc), Inner_GcDyn, (CS2SX_FreeFn)Inner_Free };
 
-void Inner_Dispose(Inner* self)
+void Inner__Destroy(Inner* self)
 {
 }
 
@@ -143,12 +150,15 @@ Registry* Registry_New(void)
     Registry* self = (Registry*)calloc(1, sizeof(Registry));
     if (!self) return NULL;
     self->_rc = 1;
-    self->_dtor = (void (*)(void*))Registry_Dispose;
+    self->_dtor = (void (*)(void*))Registry__Destroy;
     self->_gc = Registry_Gc;
+    self->_class = &Registry_ClassInfo;
     Registry_Ctor(self);
     CS2SX_ReleaseLater(self, (CS2SX_FreeFn)Registry_Free);
     return self;
 }
+
+const CS2SX_ClassInfo Registry_ClassInfo = { "Registry", NULL };
 
 void Registry_Gc(void* _self, CS2SX_GcVisit visit)
 {
@@ -158,7 +168,7 @@ void Registry_Gc(void* _self, CS2SX_GcVisit visit)
 static void Registry_GcDyn(void* self, CS2SX_GcVisit visit) { ((Registry*)self)->_gc(self, visit); }
 const CS2SX_GcKind Registry_GcKind = { offsetof(Registry, _rc), Registry_GcDyn, (CS2SX_FreeFn)Registry_Free };
 
-void Registry_Dispose(Registry* self)
+void Registry__Destroy(Registry* self)
 {
 }
 
@@ -189,24 +199,27 @@ Link* Link_New(void)
     Link* self = (Link*)calloc(1, sizeof(Link));
     if (!self) return NULL;
     self->_rc = 1;
-    self->_dtor = (void (*)(void*))Link_Dispose;
+    self->_dtor = (void (*)(void*))Link__Destroy;
     self->_gc = Link_Gc;
+    self->_class = &Link_ClassInfo;
     Link_Ctor(self);
     CS2SX_ReleaseLater(self, (CS2SX_FreeFn)Link_Free);
     return self;
 }
 
+const CS2SX_ClassInfo Link_ClassInfo = { "Link", NULL };
+
 void Link_Gc(void* _self, CS2SX_GcVisit visit)
 {
     Link* self = (Link*)_self; (void)self;
-    if (visit) visit(self->f_Next, &Link_GcKind);
-    else if (self->f_Next) { void* _o = self->f_Next; self->f_Next = NULL; ((void (*)(void*))Link_Free)(_o); }
+    if (visit) visit((void*)self->f_Next, &Link_GcKind);
+    else if (self->f_Next) { void* _o = (void*)self->f_Next; self->f_Next = NULL; ((void (*)(void*))Link_Free)(_o); }
 }
 
 static void Link_GcDyn(void* self, CS2SX_GcVisit visit) { ((Link*)self)->_gc(self, visit); }
 const CS2SX_GcKind Link_GcKind = { offsetof(Link, _rc), Link_GcDyn, (CS2SX_FreeFn)Link_Free };
 
-void Link_Dispose(Link* self)
+void Link__Destroy(Link* self)
 {
     if (self->f_Next) { Link_Free(self->f_Next); self->f_Next = NULL; }
 }

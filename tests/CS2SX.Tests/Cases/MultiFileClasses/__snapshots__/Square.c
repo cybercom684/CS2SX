@@ -20,8 +20,9 @@ Square* Square_New(float side)
     Square* self = (Square*)calloc(1, sizeof(Square));
     if (!self) return NULL;
     self->base._rc = 1;
-    self->base._dtor = (void (*)(void*))Square_Dispose;
+    self->base._dtor = (void (*)(void*))Square__Destroy;
     self->base._gc = Square_Gc;
+    self->base._class = &Square_ClassInfo;
     self->base.vtable = &Square_vtable_instance;
     Square_Ctor(self, side);
     CS2SX_ReleaseLater(self, (CS2SX_FreeFn)Square_Free);
@@ -39,16 +40,18 @@ float Square_Area(Square* self, Painter* p, float factor)
     return self->f_side * self->f_side * factor * Shape_Scale;
 }
 
+const CS2SX_ClassInfo Square_ClassInfo = { "Square", &Shape_ClassInfo };
+
 void Square_Gc(void* _self, CS2SX_GcVisit visit)
 {
     Square* self = (Square*)_self; (void)self;
     Shape_Gc(_self, visit);
 }
 
-void Square_Dispose(Square* self)
+void Square__Destroy(Square* self)
 {
     CS2SX_ArrFree(self->f_history); self->f_history = NULL;
-    Shape_Dispose((Shape*)self);
+    Shape__Destroy((Shape*)self);
 }
 
 void Square_Free(Square* self)

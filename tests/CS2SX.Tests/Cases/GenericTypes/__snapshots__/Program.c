@@ -13,8 +13,9 @@ Plain* Plain_New(void)
     Plain* self = (Plain*)calloc(1, sizeof(Plain));
     if (!self) return NULL;
     self->_rc = 1;
-    self->_dtor = (void (*)(void*))Plain_Dispose;
+    self->_dtor = (void (*)(void*))Plain__Destroy;
     self->_gc = Plain_Gc;
+    self->_class = &Plain_ClassInfo;
     Plain_Ctor(self);
     CS2SX_ReleaseLater(self, (CS2SX_FreeFn)Plain_Free);
     return self;
@@ -38,6 +39,8 @@ const char* Plain_Format_str(Plain* self, const char* value)
     return _sb1;
 }
 
+const CS2SX_ClassInfo Plain_ClassInfo = { "Plain", NULL };
+
 void Plain_Gc(void* _self, CS2SX_GcVisit visit)
 {
     Plain* self = (Plain*)_self; (void)self;
@@ -46,7 +49,7 @@ void Plain_Gc(void* _self, CS2SX_GcVisit visit)
 static void Plain_GcDyn(void* self, CS2SX_GcVisit visit) { ((Plain*)self)->_gc(self, visit); }
 const CS2SX_GcKind Plain_GcKind = { offsetof(Plain, _rc), Plain_GcDyn, (CS2SX_FreeFn)Plain_Free };
 
-void Plain_Dispose(Plain* self)
+void Plain__Destroy(Plain* self)
 {
 }
 
@@ -83,8 +86,9 @@ Bracket* Bracket_New(void)
     Bracket* self = (Bracket*)calloc(1, sizeof(Bracket));
     if (!self) return NULL;
     self->_rc = 1;
-    self->_dtor = (void (*)(void*))Bracket_Dispose;
+    self->_dtor = (void (*)(void*))Bracket__Destroy;
     self->_gc = Bracket_Gc;
+    self->_class = &Bracket_ClassInfo;
     Bracket_Ctor(self);
     CS2SX_ReleaseLater(self, (CS2SX_FreeFn)Bracket_Free);
     return self;
@@ -108,6 +112,8 @@ const char* Bracket_Format_str(Bracket* self, const char* value)
     return _sb1;
 }
 
+const CS2SX_ClassInfo Bracket_ClassInfo = { "Bracket", NULL };
+
 void Bracket_Gc(void* _self, CS2SX_GcVisit visit)
 {
     Bracket* self = (Bracket*)_self; (void)self;
@@ -116,7 +122,7 @@ void Bracket_Gc(void* _self, CS2SX_GcVisit visit)
 static void Bracket_GcDyn(void* self, CS2SX_GcVisit visit) { ((Bracket*)self)->_gc(self, visit); }
 const CS2SX_GcKind Bracket_GcKind = { offsetof(Bracket, _rc), Bracket_GcDyn, (CS2SX_FreeFn)Bracket_Free };
 
-void Bracket_Dispose(Bracket* self)
+void Bracket__Destroy(Bracket* self)
 {
 }
 
@@ -158,8 +164,9 @@ Picker* Picker_New(void)
     Picker* self = (Picker*)calloc(1, sizeof(Picker));
     if (!self) return NULL;
     self->_rc = 1;
-    self->_dtor = (void (*)(void*))Picker_Dispose;
+    self->_dtor = (void (*)(void*))Picker__Destroy;
     self->_gc = Picker_Gc;
+    self->_class = &Picker_ClassInfo;
     self->vtable = &Picker_vtable_instance;
     Picker_Ctor(self);
     CS2SX_ReleaseLater(self, (CS2SX_FreeFn)Picker_Free);
@@ -173,6 +180,8 @@ int Picker_Echo_int(Picker* self, int x)
     return x;
 }
 
+const CS2SX_ClassInfo Picker_ClassInfo = { "Picker", NULL };
+
 void Picker_Gc(void* _self, CS2SX_GcVisit visit)
 {
     Picker* self = (Picker*)_self; (void)self;
@@ -181,7 +190,7 @@ void Picker_Gc(void* _self, CS2SX_GcVisit visit)
 static void Picker_GcDyn(void* self, CS2SX_GcVisit visit) { ((Picker*)self)->_gc(self, visit); }
 const CS2SX_GcKind Picker_GcKind = { offsetof(Picker, _rc), Picker_GcDyn, (CS2SX_FreeFn)Picker_Free };
 
-void Picker_Dispose(Picker* self)
+void Picker__Destroy(Picker* self)
 {
 }
 
@@ -214,8 +223,9 @@ FirstPicker* FirstPicker_New(void)
     FirstPicker* self = (FirstPicker*)calloc(1, sizeof(FirstPicker));
     if (!self) return NULL;
     self->base._rc = 1;
-    self->base._dtor = (void (*)(void*))FirstPicker_Dispose;
+    self->base._dtor = (void (*)(void*))FirstPicker__Destroy;
     self->base._gc = FirstPicker_Gc;
+    self->base._class = &FirstPicker_ClassInfo;
     self->base.vtable = &FirstPicker_vtable_instance;
     FirstPicker_Ctor(self);
     CS2SX_ReleaseLater(self, (CS2SX_FreeFn)FirstPicker_Free);
@@ -236,15 +246,17 @@ const char* FirstPicker_Pick_str(FirstPicker* self, const char* a, const char* b
     return a;
 }
 
+const CS2SX_ClassInfo FirstPicker_ClassInfo = { "FirstPicker", &Picker_ClassInfo };
+
 void FirstPicker_Gc(void* _self, CS2SX_GcVisit visit)
 {
     FirstPicker* self = (FirstPicker*)_self; (void)self;
     Picker_Gc(_self, visit);
 }
 
-void FirstPicker_Dispose(FirstPicker* self)
+void FirstPicker__Destroy(FirstPicker* self)
 {
-    Picker_Dispose((Picker*)self);
+    Picker__Destroy((Picker*)self);
 }
 
 void FirstPicker_Free(FirstPicker* self)
@@ -283,8 +295,9 @@ SecondPicker* SecondPicker_New(void)
     SecondPicker* self = (SecondPicker*)calloc(1, sizeof(SecondPicker));
     if (!self) return NULL;
     self->base._rc = 1;
-    self->base._dtor = (void (*)(void*))SecondPicker_Dispose;
+    self->base._dtor = (void (*)(void*))SecondPicker__Destroy;
     self->base._gc = SecondPicker_Gc;
+    self->base._class = &SecondPicker_ClassInfo;
     self->base.vtable = &SecondPicker_vtable_instance;
     SecondPicker_Ctor(self);
     CS2SX_ReleaseLater(self, (CS2SX_FreeFn)SecondPicker_Free);
@@ -312,15 +325,17 @@ int SecondPicker_Echo_int(SecondPicker* self, int x)
     return self->base.vtable->Pick_int(self, x, x);
 }
 
+const CS2SX_ClassInfo SecondPicker_ClassInfo = { "SecondPicker", &Picker_ClassInfo };
+
 void SecondPicker_Gc(void* _self, CS2SX_GcVisit visit)
 {
     SecondPicker* self = (SecondPicker*)_self; (void)self;
     Picker_Gc(_self, visit);
 }
 
-void SecondPicker_Dispose(SecondPicker* self)
+void SecondPicker__Destroy(SecondPicker* self)
 {
-    Picker_Dispose((Picker*)self);
+    Picker__Destroy((Picker*)self);
 }
 
 void SecondPicker_Free(SecondPicker* self)
@@ -390,10 +405,42 @@ int Pair_str_Equals(Pair_str a, Pair_str b)
     return memcmp(&a, &b, sizeof(Pair_str)) == 0;
 }
 
+void Pair_str_Keep(Pair_str* s)
+{
+    s->A = CS2SX_StrOwn(s->A);
+    s->B = CS2SX_StrOwn(s->B);
+}
+
+void Pair_str_Drop(Pair_str* s)
+{
+    CS2SX_StrDrop(s->A);
+    CS2SX_StrDrop(s->B);
+}
+
+void Pair_str_Gc(Pair_str* s, CS2SX_GcVisit visit)
+{
+    (void)s; (void)visit;
+}
+
 // ── Struct: Slot_str_int ────────────────────────────────────────
 int Slot_str_int_Equals(Slot_str_int a, Slot_str_int b)
 {
     return memcmp(&a, &b, sizeof(Slot_str_int)) == 0;
+}
+
+void Slot_str_int_Keep(Slot_str_int* s)
+{
+    s->Key = CS2SX_StrOwn(s->Key);
+}
+
+void Slot_str_int_Drop(Slot_str_int* s)
+{
+    CS2SX_StrDrop(s->Key);
+}
+
+void Slot_str_int_Gc(Slot_str_int* s, CS2SX_GcVisit visit)
+{
+    (void)s; (void)visit;
 }
 
 void GenericTypesApp_Init(GenericTypesApp* self)
@@ -407,8 +454,8 @@ void GenericTypesApp_OnInit(GenericTypesApp* self)
     CS2SX_TRACE("GenericTypesApp.OnInit", "Program.cs");
     CS2SX_LINE(123);
     List_IFormatter* _list_0 = List_IFormatter_New();
-    List_IFormatter_Add(_list_0, Plain_as_IFormatter(CS2SX_RETAIN(Plain, Plain_New())));
-    List_IFormatter_Add(_list_0, Bracket_as_IFormatter(CS2SX_RETAIN(Bracket, Bracket_New())));
+    List_IFormatter_Add(_list_0, Plain_as_IFormatter(Plain_New()));
+    List_IFormatter_Add(_list_0, Bracket_as_IFormatter(Bracket_New()));
     List_IFormatter* formatters = _list_0;
     CS2SX_LINE(124);
     for (int _i_f = 0; _i_f < (int)(formatters->count); _i_f++)

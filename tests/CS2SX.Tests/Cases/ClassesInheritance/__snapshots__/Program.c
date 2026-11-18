@@ -21,8 +21,9 @@ Shape* Shape_New(const char* name)
     Shape* self = (Shape*)calloc(1, sizeof(Shape));
     if (!self) return NULL;
     self->_rc = 1;
-    self->_dtor = (void (*)(void*))Shape_Dispose;
+    self->_dtor = (void (*)(void*))Shape__Destroy;
     self->_gc = Shape_Gc;
+    self->_class = &Shape_ClassInfo;
     self->vtable = &Shape_vtable_instance;
     Shape_Ctor(self, name);
     CS2SX_ReleaseLater(self, (CS2SX_FreeFn)Shape_Free);
@@ -38,6 +39,8 @@ const char* Shape_Describe(Shape* self)
     return _sb0;
 }
 
+const CS2SX_ClassInfo Shape_ClassInfo = { "Shape", NULL };
+
 void Shape_Gc(void* _self, CS2SX_GcVisit visit)
 {
     Shape* self = (Shape*)_self; (void)self;
@@ -46,7 +49,7 @@ void Shape_Gc(void* _self, CS2SX_GcVisit visit)
 static void Shape_GcDyn(void* self, CS2SX_GcVisit visit) { ((Shape*)self)->_gc(self, visit); }
 const CS2SX_GcKind Shape_GcKind = { offsetof(Shape, _rc), Shape_GcDyn, (CS2SX_FreeFn)Shape_Free };
 
-void Shape_Dispose(Shape* self)
+void Shape__Destroy(Shape* self)
 {
     CS2SX_StrDrop(self->f_Name); self->f_Name = NULL;
 }
@@ -84,8 +87,9 @@ Rect* Rect_New(float w, float h)
     Rect* self = (Rect*)calloc(1, sizeof(Rect));
     if (!self) return NULL;
     self->base._rc = 1;
-    self->base._dtor = (void (*)(void*))Rect_Dispose;
+    self->base._dtor = (void (*)(void*))Rect__Destroy;
     self->base._gc = Rect_Gc;
+    self->base._class = &Rect_ClassInfo;
     self->base.vtable = &Rect_vtable_instance;
     Rect_Ctor(self, w, h);
     CS2SX_ReleaseLater(self, (CS2SX_FreeFn)Rect_Free);
@@ -99,15 +103,17 @@ float Rect_Area(Rect* self)
     return self->f_W * self->f_H;
 }
 
+const CS2SX_ClassInfo Rect_ClassInfo = { "Rect", &Shape_ClassInfo };
+
 void Rect_Gc(void* _self, CS2SX_GcVisit visit)
 {
     Rect* self = (Rect*)_self; (void)self;
     Shape_Gc(_self, visit);
 }
 
-void Rect_Dispose(Rect* self)
+void Rect__Destroy(Rect* self)
 {
-    Shape_Dispose((Shape*)self);
+    Shape__Destroy((Shape*)self);
 }
 
 void Rect_Free(Rect* self)
@@ -147,8 +153,9 @@ Square* Square_New(float side)
     Square* self = (Square*)calloc(1, sizeof(Square));
     if (!self) return NULL;
     self->base.base._rc = 1;
-    self->base.base._dtor = (void (*)(void*))Square_Dispose;
+    self->base.base._dtor = (void (*)(void*))Square__Destroy;
     self->base.base._gc = Square_Gc;
+    self->base.base._class = &Square_ClassInfo;
     self->base.base.vtable = &Square_vtable_instance;
     Square_Ctor(self, side);
     CS2SX_ReleaseLater(self, (CS2SX_FreeFn)Square_Free);
@@ -164,15 +171,17 @@ const char* Square_Describe(Square* self)
     return _sb0;
 }
 
+const CS2SX_ClassInfo Square_ClassInfo = { "Square", &Rect_ClassInfo };
+
 void Square_Gc(void* _self, CS2SX_GcVisit visit)
 {
     Square* self = (Square*)_self; (void)self;
     Rect_Gc(_self, visit);
 }
 
-void Square_Dispose(Square* self)
+void Square__Destroy(Square* self)
 {
-    Rect_Dispose((Rect*)self);
+    Rect__Destroy((Rect*)self);
 }
 
 void Square_Free(Square* self)
@@ -212,8 +221,9 @@ Circle* Circle_New(float r)
     Circle* self = (Circle*)calloc(1, sizeof(Circle));
     if (!self) return NULL;
     self->base._rc = 1;
-    self->base._dtor = (void (*)(void*))Circle_Dispose;
+    self->base._dtor = (void (*)(void*))Circle__Destroy;
     self->base._gc = Circle_Gc;
+    self->base._class = &Circle_ClassInfo;
     self->base.vtable = &Circle_vtable_instance;
     Circle_Ctor(self, r);
     CS2SX_ReleaseLater(self, (CS2SX_FreeFn)Circle_Free);
@@ -227,15 +237,17 @@ float Circle_Area(Circle* self)
     return 3.14159f * self->f_r * self->f_r;
 }
 
+const CS2SX_ClassInfo Circle_ClassInfo = { "Circle", &Shape_ClassInfo };
+
 void Circle_Gc(void* _self, CS2SX_GcVisit visit)
 {
     Circle* self = (Circle*)_self; (void)self;
     Shape_Gc(_self, visit);
 }
 
-void Circle_Dispose(Circle* self)
+void Circle__Destroy(Circle* self)
 {
-    Shape_Dispose((Shape*)self);
+    Shape__Destroy((Shape*)self);
 }
 
 void Circle_Free(Circle* self)

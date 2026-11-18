@@ -16,13 +16,16 @@ CS2SX_Step* CS2SX_Step_New(void)
     CS2SX_Step* self = (CS2SX_Step*)calloc(1, sizeof(CS2SX_Step));
     if (!self) return NULL;
     self->_rc = 1;
-    self->_dtor = (void (*)(void*))CS2SX_Step_Dispose;
+    self->_dtor = (void (*)(void*))CS2SX_Step__Destroy;
     self->_gc = CS2SX_Step_Gc;
+    self->_class = &CS2SX_Step_ClassInfo;
     self->vtable = &CS2SX_Step_vtable_instance;
     CS2SX_Step_Ctor(self);
     CS2SX_ReleaseLater(self, (CS2SX_FreeFn)CS2SX_Step_Free);
     return self;
 }
+
+const CS2SX_ClassInfo CS2SX_Step_ClassInfo = { "CS2SX_Step", NULL };
 
 void CS2SX_Step_Gc(void* _self, CS2SX_GcVisit visit)
 {
@@ -32,7 +35,7 @@ void CS2SX_Step_Gc(void* _self, CS2SX_GcVisit visit)
 static void CS2SX_Step_GcDyn(void* self, CS2SX_GcVisit visit) { ((CS2SX_Step*)self)->_gc(self, visit); }
 const CS2SX_GcKind CS2SX_Step_GcKind = { offsetof(CS2SX_Step, _rc), CS2SX_Step_GcDyn, (CS2SX_FreeFn)CS2SX_Step_Free };
 
-void CS2SX_Step_Dispose(CS2SX_Step* self)
+void CS2SX_Step__Destroy(CS2SX_Step* self)
 {
 }
 
@@ -93,8 +96,9 @@ CS2SX_Task* CS2SX_Task_New(void)
     CS2SX_Task* self = (CS2SX_Task*)calloc(1, sizeof(CS2SX_Task));
     if (!self) return NULL;
     self->_rc = 1;
-    self->_dtor = (void (*)(void*))CS2SX_Task_Dispose;
+    self->_dtor = (void (*)(void*))CS2SX_Task__Destroy;
     self->_gc = CS2SX_Task_Gc;
+    self->_class = &CS2SX_Task_ClassInfo;
     CS2SX_Task_Ctor(self);
     CS2SX_ReleaseLater(self, (CS2SX_FreeFn)CS2SX_Task_Free);
     return self;
@@ -315,17 +319,19 @@ void CS2SX_Task_Tick(long long nowMs)
     }
 }
 
+const CS2SX_ClassInfo CS2SX_Task_ClassInfo = { "CS2SX_Task", NULL };
+
 void CS2SX_Task_Gc(void* _self, CS2SX_GcVisit visit)
 {
     CS2SX_Task* self = (CS2SX_Task*)_self; (void)self;
-    if (visit) visit(self->f_waiting, &List_CS2SX_Step_GcKind);
-    else if (self->f_waiting) { void* _o = self->f_waiting; self->f_waiting = NULL; ((void (*)(void*))List_CS2SX_Step_Free)(_o); }
+    if (visit) visit((void*)self->f_waiting, &List_CS2SX_Step_GcKind);
+    else if (self->f_waiting) { void* _o = (void*)self->f_waiting; self->f_waiting = NULL; ((void (*)(void*))List_CS2SX_Step_Free)(_o); }
 }
 
 static void CS2SX_Task_GcDyn(void* self, CS2SX_GcVisit visit) { ((CS2SX_Task*)self)->_gc(self, visit); }
 const CS2SX_GcKind CS2SX_Task_GcKind = { offsetof(CS2SX_Task, _rc), CS2SX_Task_GcDyn, (CS2SX_FreeFn)CS2SX_Task_Free };
 
-void CS2SX_Task_Dispose(CS2SX_Task* self)
+void CS2SX_Task__Destroy(CS2SX_Task* self)
 {
     CS2SX_LINE(9);
     if (self->f_Fault != NULL && !self->f_Observed)
@@ -336,7 +342,6 @@ void CS2SX_Task_Dispose(CS2SX_Task* self)
         const char* _ps_1 = _sb0;
         printf("%s\n", _ps_1 ? _ps_1 : "");
     }
-    if (self->f_Fault) { Exception_Free(self->f_Fault); self->f_Fault = NULL; }
     if (self->f_waiting) { List_CS2SX_Step_Free(self->f_waiting); self->f_waiting = NULL; }
 }
 
@@ -392,8 +397,9 @@ CS2SX_WhenAll* CS2SX_WhenAll_New(void)
     CS2SX_WhenAll* self = (CS2SX_WhenAll*)calloc(1, sizeof(CS2SX_WhenAll));
     if (!self) return NULL;
     self->base._rc = 1;
-    self->base._dtor = (void (*)(void*))CS2SX_WhenAll_Dispose;
+    self->base._dtor = (void (*)(void*))CS2SX_WhenAll__Destroy;
     self->base._gc = CS2SX_WhenAll_Gc;
+    self->base._class = &CS2SX_WhenAll_ClassInfo;
     self->base.vtable = &CS2SX_WhenAll_vtable_instance;
     CS2SX_WhenAll_Ctor(self);
     CS2SX_ReleaseLater(self, (CS2SX_FreeFn)CS2SX_WhenAll_Free);
@@ -439,21 +445,23 @@ void CS2SX_WhenAll_cs2sx_resume(CS2SX_WhenAll* self)
     CS2SX_Task_Finish(CS2SX_NN(self->f_Done));
 }
 
+const CS2SX_ClassInfo CS2SX_WhenAll_ClassInfo = { "CS2SX_WhenAll", &CS2SX_Step_ClassInfo };
+
 void CS2SX_WhenAll_Gc(void* _self, CS2SX_GcVisit visit)
 {
     CS2SX_WhenAll* self = (CS2SX_WhenAll*)_self; (void)self;
-    if (visit) visit(self->f_Tasks, &List_CS2SX_Task_GcKind);
-    else if (self->f_Tasks) { void* _o = self->f_Tasks; self->f_Tasks = NULL; ((void (*)(void*))List_CS2SX_Task_Free)(_o); }
-    if (visit) visit(self->f_Done, &CS2SX_Task_GcKind);
-    else if (self->f_Done) { void* _o = self->f_Done; self->f_Done = NULL; ((void (*)(void*))CS2SX_Task_Free)(_o); }
+    if (visit) visit((void*)self->f_Tasks, &List_CS2SX_Task_GcKind);
+    else if (self->f_Tasks) { void* _o = (void*)self->f_Tasks; self->f_Tasks = NULL; ((void (*)(void*))List_CS2SX_Task_Free)(_o); }
+    if (visit) visit((void*)self->f_Done, &CS2SX_Task_GcKind);
+    else if (self->f_Done) { void* _o = (void*)self->f_Done; self->f_Done = NULL; ((void (*)(void*))CS2SX_Task_Free)(_o); }
     CS2SX_Step_Gc(_self, visit);
 }
 
-void CS2SX_WhenAll_Dispose(CS2SX_WhenAll* self)
+void CS2SX_WhenAll__Destroy(CS2SX_WhenAll* self)
 {
     if (self->f_Tasks) { List_CS2SX_Task_Free(self->f_Tasks); self->f_Tasks = NULL; }
     if (self->f_Done) { CS2SX_Task_Free(self->f_Done); self->f_Done = NULL; }
-    CS2SX_Step_Dispose((CS2SX_Step*)self);
+    CS2SX_Step__Destroy((CS2SX_Step*)self);
 }
 
 void CS2SX_WhenAll_Free(CS2SX_WhenAll* self)
@@ -488,8 +496,9 @@ CS2SX_Task_CS2SX_Task* CS2SX_Task_CS2SX_Task_New(void)
     CS2SX_Task_CS2SX_Task* self = (CS2SX_Task_CS2SX_Task*)calloc(1, sizeof(CS2SX_Task_CS2SX_Task));
     if (!self) return NULL;
     self->base._rc = 1;
-    self->base._dtor = (void (*)(void*))CS2SX_Task_CS2SX_Task_Dispose;
+    self->base._dtor = (void (*)(void*))CS2SX_Task_CS2SX_Task__Destroy;
     self->base._gc = CS2SX_Task_CS2SX_Task_Gc;
+    self->base._class = &CS2SX_Task_CS2SX_Task_ClassInfo;
     CS2SX_Task_CS2SX_Task_Ctor(self);
     CS2SX_ReleaseLater(self, (CS2SX_FreeFn)CS2SX_Task_CS2SX_Task_Free);
     return self;
@@ -547,18 +556,20 @@ CS2SX_Task_CS2SX_Task* CS2SX_Task_CS2SX_Task_Run(Func_CS2SX_Task_t work)
     return t;
 }
 
+const CS2SX_ClassInfo CS2SX_Task_CS2SX_Task_ClassInfo = { "CS2SX_Task_CS2SX_Task", &CS2SX_Task_ClassInfo };
+
 void CS2SX_Task_CS2SX_Task_Gc(void* _self, CS2SX_GcVisit visit)
 {
     CS2SX_Task_CS2SX_Task* self = (CS2SX_Task_CS2SX_Task*)_self; (void)self;
-    if (visit) visit(self->f_Value, &CS2SX_Task_GcKind);
-    else if (self->f_Value) { void* _o = self->f_Value; self->f_Value = NULL; ((void (*)(void*))CS2SX_Task_Free)(_o); }
+    if (visit) visit((void*)self->f_Value, &CS2SX_Task_GcKind);
+    else if (self->f_Value) { void* _o = (void*)self->f_Value; self->f_Value = NULL; ((void (*)(void*))CS2SX_Task_Free)(_o); }
     CS2SX_Task_Gc(_self, visit);
 }
 
-void CS2SX_Task_CS2SX_Task_Dispose(CS2SX_Task_CS2SX_Task* self)
+void CS2SX_Task_CS2SX_Task__Destroy(CS2SX_Task_CS2SX_Task* self)
 {
     if (self->f_Value) { CS2SX_Task_Free(self->f_Value); self->f_Value = NULL; }
-    CS2SX_Task_Dispose((CS2SX_Task*)self);
+    CS2SX_Task__Destroy((CS2SX_Task*)self);
 }
 
 void CS2SX_Task_CS2SX_Task_Free(CS2SX_Task_CS2SX_Task* self)
@@ -601,8 +612,9 @@ CS2SX_WhenAny* CS2SX_WhenAny_New(void)
     CS2SX_WhenAny* self = (CS2SX_WhenAny*)calloc(1, sizeof(CS2SX_WhenAny));
     if (!self) return NULL;
     self->base._rc = 1;
-    self->base._dtor = (void (*)(void*))CS2SX_WhenAny_Dispose;
+    self->base._dtor = (void (*)(void*))CS2SX_WhenAny__Destroy;
     self->base._gc = CS2SX_WhenAny_Gc;
+    self->base._class = &CS2SX_WhenAny_ClassInfo;
     self->base.vtable = &CS2SX_WhenAny_vtable_instance;
     CS2SX_WhenAny_Ctor(self);
     CS2SX_ReleaseLater(self, (CS2SX_FreeFn)CS2SX_WhenAny_Free);
@@ -661,21 +673,23 @@ void CS2SX_WhenAny_cs2sx_resume(CS2SX_WhenAny* self)
     }
 }
 
+const CS2SX_ClassInfo CS2SX_WhenAny_ClassInfo = { "CS2SX_WhenAny", &CS2SX_Step_ClassInfo };
+
 void CS2SX_WhenAny_Gc(void* _self, CS2SX_GcVisit visit)
 {
     CS2SX_WhenAny* self = (CS2SX_WhenAny*)_self; (void)self;
-    if (visit) visit(self->f_Tasks, &List_CS2SX_Task_GcKind);
-    else if (self->f_Tasks) { void* _o = self->f_Tasks; self->f_Tasks = NULL; ((void (*)(void*))List_CS2SX_Task_Free)(_o); }
-    if (visit) visit(self->f_Done, &CS2SX_Task_GcKind);
-    else if (self->f_Done) { void* _o = self->f_Done; self->f_Done = NULL; ((void (*)(void*))CS2SX_Task_Free)(_o); }
+    if (visit) visit((void*)self->f_Tasks, &List_CS2SX_Task_GcKind);
+    else if (self->f_Tasks) { void* _o = (void*)self->f_Tasks; self->f_Tasks = NULL; ((void (*)(void*))List_CS2SX_Task_Free)(_o); }
+    if (visit) visit((void*)self->f_Done, &CS2SX_Task_GcKind);
+    else if (self->f_Done) { void* _o = (void*)self->f_Done; self->f_Done = NULL; ((void (*)(void*))CS2SX_Task_Free)(_o); }
     CS2SX_Step_Gc(_self, visit);
 }
 
-void CS2SX_WhenAny_Dispose(CS2SX_WhenAny* self)
+void CS2SX_WhenAny__Destroy(CS2SX_WhenAny* self)
 {
     if (self->f_Tasks) { List_CS2SX_Task_Free(self->f_Tasks); self->f_Tasks = NULL; }
     if (self->f_Done) { CS2SX_Task_CS2SX_Task_Free(self->f_Done); self->f_Done = NULL; }
-    CS2SX_Step_Dispose((CS2SX_Step*)self);
+    CS2SX_Step__Destroy((CS2SX_Step*)self);
 }
 
 void CS2SX_WhenAny_Free(CS2SX_WhenAny* self)
@@ -710,8 +724,9 @@ CS2SX_Task_bool* CS2SX_Task_bool_New(void)
     CS2SX_Task_bool* self = (CS2SX_Task_bool*)calloc(1, sizeof(CS2SX_Task_bool));
     if (!self) return NULL;
     self->base._rc = 1;
-    self->base._dtor = (void (*)(void*))CS2SX_Task_bool_Dispose;
+    self->base._dtor = (void (*)(void*))CS2SX_Task_bool__Destroy;
     self->base._gc = CS2SX_Task_bool_Gc;
+    self->base._class = &CS2SX_Task_bool_ClassInfo;
     CS2SX_Task_bool_Ctor(self);
     CS2SX_ReleaseLater(self, (CS2SX_FreeFn)CS2SX_Task_bool_Free);
     return self;
@@ -769,15 +784,17 @@ CS2SX_Task_bool* CS2SX_Task_bool_Run(Func_int_t work)
     return t;
 }
 
+const CS2SX_ClassInfo CS2SX_Task_bool_ClassInfo = { "CS2SX_Task_bool", &CS2SX_Task_ClassInfo };
+
 void CS2SX_Task_bool_Gc(void* _self, CS2SX_GcVisit visit)
 {
     CS2SX_Task_bool* self = (CS2SX_Task_bool*)_self; (void)self;
     CS2SX_Task_Gc(_self, visit);
 }
 
-void CS2SX_Task_bool_Dispose(CS2SX_Task_bool* self)
+void CS2SX_Task_bool__Destroy(CS2SX_Task_bool* self)
 {
-    CS2SX_Task_Dispose((CS2SX_Task*)self);
+    CS2SX_Task__Destroy((CS2SX_Task*)self);
 }
 
 void CS2SX_Task_bool_Free(CS2SX_Task_bool* self)
@@ -816,8 +833,9 @@ CS2SX_Task_int* CS2SX_Task_int_New(void)
     CS2SX_Task_int* self = (CS2SX_Task_int*)calloc(1, sizeof(CS2SX_Task_int));
     if (!self) return NULL;
     self->base._rc = 1;
-    self->base._dtor = (void (*)(void*))CS2SX_Task_int_Dispose;
+    self->base._dtor = (void (*)(void*))CS2SX_Task_int__Destroy;
     self->base._gc = CS2SX_Task_int_Gc;
+    self->base._class = &CS2SX_Task_int_ClassInfo;
     CS2SX_Task_int_Ctor(self);
     CS2SX_ReleaseLater(self, (CS2SX_FreeFn)CS2SX_Task_int_Free);
     return self;
@@ -875,15 +893,17 @@ CS2SX_Task_int* CS2SX_Task_int_Run(Func_int_t work)
     return t;
 }
 
+const CS2SX_ClassInfo CS2SX_Task_int_ClassInfo = { "CS2SX_Task_int", &CS2SX_Task_ClassInfo };
+
 void CS2SX_Task_int_Gc(void* _self, CS2SX_GcVisit visit)
 {
     CS2SX_Task_int* self = (CS2SX_Task_int*)_self; (void)self;
     CS2SX_Task_Gc(_self, visit);
 }
 
-void CS2SX_Task_int_Dispose(CS2SX_Task_int* self)
+void CS2SX_Task_int__Destroy(CS2SX_Task_int* self)
 {
-    CS2SX_Task_Dispose((CS2SX_Task*)self);
+    CS2SX_Task__Destroy((CS2SX_Task*)self);
 }
 
 void CS2SX_Task_int_Free(CS2SX_Task_int* self)
@@ -922,8 +942,9 @@ CS2SX_Task_str* CS2SX_Task_str_New(void)
     CS2SX_Task_str* self = (CS2SX_Task_str*)calloc(1, sizeof(CS2SX_Task_str));
     if (!self) return NULL;
     self->base._rc = 1;
-    self->base._dtor = (void (*)(void*))CS2SX_Task_str_Dispose;
+    self->base._dtor = (void (*)(void*))CS2SX_Task_str__Destroy;
     self->base._gc = CS2SX_Task_str_Gc;
+    self->base._class = &CS2SX_Task_str_ClassInfo;
     CS2SX_Task_str_Ctor(self);
     CS2SX_ReleaseLater(self, (CS2SX_FreeFn)CS2SX_Task_str_Free);
     return self;
@@ -981,16 +1002,18 @@ CS2SX_Task_str* CS2SX_Task_str_Run(Func_str_t work)
     return t;
 }
 
+const CS2SX_ClassInfo CS2SX_Task_str_ClassInfo = { "CS2SX_Task_str", &CS2SX_Task_ClassInfo };
+
 void CS2SX_Task_str_Gc(void* _self, CS2SX_GcVisit visit)
 {
     CS2SX_Task_str* self = (CS2SX_Task_str*)_self; (void)self;
     CS2SX_Task_Gc(_self, visit);
 }
 
-void CS2SX_Task_str_Dispose(CS2SX_Task_str* self)
+void CS2SX_Task_str__Destroy(CS2SX_Task_str* self)
 {
     CS2SX_StrDrop(self->f_Value); self->f_Value = NULL;
-    CS2SX_Task_Dispose((CS2SX_Task*)self);
+    CS2SX_Task__Destroy((CS2SX_Task*)self);
 }
 
 void CS2SX_Task_str_Free(CS2SX_Task_str* self)
@@ -1029,8 +1052,9 @@ Source* Source_New(void)
     Source* self = (Source*)calloc(1, sizeof(Source));
     if (!self) return NULL;
     self->_rc = 1;
-    self->_dtor = (void (*)(void*))Source_Dispose;
+    self->_dtor = (void (*)(void*))Source__Destroy;
     self->_gc = Source_Gc;
+    self->_class = &Source_ClassInfo;
     Source_Ctor(self);
     CS2SX_ReleaseLater(self, (CS2SX_FreeFn)Source_Free);
     return self;
@@ -1068,6 +1092,8 @@ CS2SX_Task_int* Source_Risky(Source* self, int n)
     return cs2sx_sm->f_cs2sx_task;
 }
 
+const CS2SX_ClassInfo Source_ClassInfo = { "Source", NULL };
+
 void Source_Gc(void* _self, CS2SX_GcVisit visit)
 {
     Source* self = (Source*)_self; (void)self;
@@ -1076,7 +1102,7 @@ void Source_Gc(void* _self, CS2SX_GcVisit visit)
 static void Source_GcDyn(void* self, CS2SX_GcVisit visit) { ((Source*)self)->_gc(self, visit); }
 const CS2SX_GcKind Source_GcKind = { offsetof(Source, _rc), Source_GcDyn, (CS2SX_FreeFn)Source_Free };
 
-void Source_Dispose(Source* self)
+void Source__Destroy(Source* self)
 {
 }
 
@@ -1114,8 +1140,9 @@ Next_Async* Next_Async_New(void)
     Next_Async* self = (Next_Async*)calloc(1, sizeof(Next_Async));
     if (!self) return NULL;
     self->base._rc = 1;
-    self->base._dtor = (void (*)(void*))Next_Async_Dispose;
+    self->base._dtor = (void (*)(void*))Next_Async__Destroy;
     self->base._gc = Next_Async_Gc;
+    self->base._class = &Next_Async_ClassInfo;
     self->base.vtable = &Next_Async_vtable_instance;
     Next_Async_Ctor(self);
     CS2SX_ReleaseLater(self, (CS2SX_FreeFn)Next_Async_Free);
@@ -1179,24 +1206,26 @@ void Next_Async_cs2sx_run(Next_Async* self)
     CS2SX_Task_Finish((CS2SX_Task*)CS2SX_NN(self->f_cs2sx_task));
 }
 
+const CS2SX_ClassInfo Next_Async_ClassInfo = { "Next_Async", &CS2SX_Step_ClassInfo };
+
 void Next_Async_Gc(void* _self, CS2SX_GcVisit visit)
 {
     Next_Async* self = (Next_Async*)_self; (void)self;
-    if (visit) visit(self->f_cs2sx_this, &Source_GcKind);
-    else if (self->f_cs2sx_this) { void* _o = self->f_cs2sx_this; self->f_cs2sx_this = NULL; ((void (*)(void*))Source_Free)(_o); }
-    if (visit) visit(self->f_cs2sx_task, &CS2SX_Task_GcKind);
-    else if (self->f_cs2sx_task) { void* _o = self->f_cs2sx_task; self->f_cs2sx_task = NULL; ((void (*)(void*))CS2SX_Task_Free)(_o); }
-    if (visit) visit(self->f_cs2sx_a1, &CS2SX_Task_GcKind);
-    else if (self->f_cs2sx_a1) { void* _o = self->f_cs2sx_a1; self->f_cs2sx_a1 = NULL; ((void (*)(void*))CS2SX_Task_Free)(_o); }
+    if (visit) visit((void*)self->f_cs2sx_this, &Source_GcKind);
+    else if (self->f_cs2sx_this) { void* _o = (void*)self->f_cs2sx_this; self->f_cs2sx_this = NULL; ((void (*)(void*))Source_Free)(_o); }
+    if (visit) visit((void*)self->f_cs2sx_task, &CS2SX_Task_GcKind);
+    else if (self->f_cs2sx_task) { void* _o = (void*)self->f_cs2sx_task; self->f_cs2sx_task = NULL; ((void (*)(void*))CS2SX_Task_Free)(_o); }
+    if (visit) visit((void*)self->f_cs2sx_a1, &CS2SX_Task_GcKind);
+    else if (self->f_cs2sx_a1) { void* _o = (void*)self->f_cs2sx_a1; self->f_cs2sx_a1 = NULL; ((void (*)(void*))CS2SX_Task_Free)(_o); }
     CS2SX_Step_Gc(_self, visit);
 }
 
-void Next_Async_Dispose(Next_Async* self)
+void Next_Async__Destroy(Next_Async* self)
 {
     if (self->f_cs2sx_this) { Source_Free(self->f_cs2sx_this); self->f_cs2sx_this = NULL; }
     if (self->f_cs2sx_task) { CS2SX_Task_bool_Free(self->f_cs2sx_task); self->f_cs2sx_task = NULL; }
     if (self->f_cs2sx_a1) { CS2SX_Task_Free(self->f_cs2sx_a1); self->f_cs2sx_a1 = NULL; }
-    CS2SX_Step_Dispose((CS2SX_Step*)self);
+    CS2SX_Step__Destroy((CS2SX_Step*)self);
 }
 
 void Next_Async_Free(Next_Async* self)
@@ -1233,8 +1262,9 @@ Risky_Async* Risky_Async_New(void)
     Risky_Async* self = (Risky_Async*)calloc(1, sizeof(Risky_Async));
     if (!self) return NULL;
     self->base._rc = 1;
-    self->base._dtor = (void (*)(void*))Risky_Async_Dispose;
+    self->base._dtor = (void (*)(void*))Risky_Async__Destroy;
     self->base._gc = Risky_Async_Gc;
+    self->base._class = &Risky_Async_ClassInfo;
     self->base.vtable = &Risky_Async_vtable_instance;
     Risky_Async_Ctor(self);
     CS2SX_ReleaseLater(self, (CS2SX_FreeFn)Risky_Async_Free);
@@ -1302,24 +1332,26 @@ void Risky_Async_cs2sx_run(Risky_Async* self)
     CS2SX_Task_Finish((CS2SX_Task*)CS2SX_NN(self->f_cs2sx_task));
 }
 
+const CS2SX_ClassInfo Risky_Async_ClassInfo = { "Risky_Async", &CS2SX_Step_ClassInfo };
+
 void Risky_Async_Gc(void* _self, CS2SX_GcVisit visit)
 {
     Risky_Async* self = (Risky_Async*)_self; (void)self;
-    if (visit) visit(self->f_cs2sx_this, &Source_GcKind);
-    else if (self->f_cs2sx_this) { void* _o = self->f_cs2sx_this; self->f_cs2sx_this = NULL; ((void (*)(void*))Source_Free)(_o); }
-    if (visit) visit(self->f_cs2sx_task, &CS2SX_Task_GcKind);
-    else if (self->f_cs2sx_task) { void* _o = self->f_cs2sx_task; self->f_cs2sx_task = NULL; ((void (*)(void*))CS2SX_Task_Free)(_o); }
-    if (visit) visit(self->f_cs2sx_a1, &CS2SX_Task_GcKind);
-    else if (self->f_cs2sx_a1) { void* _o = self->f_cs2sx_a1; self->f_cs2sx_a1 = NULL; ((void (*)(void*))CS2SX_Task_Free)(_o); }
+    if (visit) visit((void*)self->f_cs2sx_this, &Source_GcKind);
+    else if (self->f_cs2sx_this) { void* _o = (void*)self->f_cs2sx_this; self->f_cs2sx_this = NULL; ((void (*)(void*))Source_Free)(_o); }
+    if (visit) visit((void*)self->f_cs2sx_task, &CS2SX_Task_GcKind);
+    else if (self->f_cs2sx_task) { void* _o = (void*)self->f_cs2sx_task; self->f_cs2sx_task = NULL; ((void (*)(void*))CS2SX_Task_Free)(_o); }
+    if (visit) visit((void*)self->f_cs2sx_a1, &CS2SX_Task_GcKind);
+    else if (self->f_cs2sx_a1) { void* _o = (void*)self->f_cs2sx_a1; self->f_cs2sx_a1 = NULL; ((void (*)(void*))CS2SX_Task_Free)(_o); }
     CS2SX_Step_Gc(_self, visit);
 }
 
-void Risky_Async_Dispose(Risky_Async* self)
+void Risky_Async__Destroy(Risky_Async* self)
 {
     if (self->f_cs2sx_this) { Source_Free(self->f_cs2sx_this); self->f_cs2sx_this = NULL; }
     if (self->f_cs2sx_task) { CS2SX_Task_int_Free(self->f_cs2sx_task); self->f_cs2sx_task = NULL; }
     if (self->f_cs2sx_a1) { CS2SX_Task_Free(self->f_cs2sx_a1); self->f_cs2sx_a1 = NULL; }
-    CS2SX_Step_Dispose((CS2SX_Step*)self);
+    CS2SX_Step__Destroy((CS2SX_Step*)self);
 }
 
 void Risky_Async_Free(Risky_Async* self)
@@ -1472,8 +1504,9 @@ Guarded_Async* Guarded_Async_New(void)
     Guarded_Async* self = (Guarded_Async*)calloc(1, sizeof(Guarded_Async));
     if (!self) return NULL;
     self->base._rc = 1;
-    self->base._dtor = (void (*)(void*))Guarded_Async_Dispose;
+    self->base._dtor = (void (*)(void*))Guarded_Async__Destroy;
     self->base._gc = Guarded_Async_Gc;
+    self->base._class = &Guarded_Async_ClassInfo;
     self->base.vtable = &Guarded_Async_vtable_instance;
     Guarded_Async_Ctor(self);
     CS2SX_ReleaseLater(self, (CS2SX_FreeFn)Guarded_Async_Free);
@@ -1612,25 +1645,27 @@ void Guarded_Async_cs2sx_run(Guarded_Async* self)
     CS2SX_Task_Finish((CS2SX_Task*)CS2SX_NN(self->f_cs2sx_task));
 }
 
+const CS2SX_ClassInfo Guarded_Async_ClassInfo = { "Guarded_Async", &CS2SX_Step_ClassInfo };
+
 void Guarded_Async_Gc(void* _self, CS2SX_GcVisit visit)
 {
     Guarded_Async* self = (Guarded_Async*)_self; (void)self;
-    if (visit) visit(self->f_cs2sx_task, &CS2SX_Task_GcKind);
-    else if (self->f_cs2sx_task) { void* _o = self->f_cs2sx_task; self->f_cs2sx_task = NULL; ((void (*)(void*))CS2SX_Task_Free)(_o); }
-    if (visit) visit(self->f_cs2sx_a1, &CS2SX_Task_GcKind);
-    else if (self->f_cs2sx_a1) { void* _o = self->f_cs2sx_a1; self->f_cs2sx_a1 = NULL; ((void (*)(void*))CS2SX_Task_Free)(_o); }
-    if (visit) visit(self->f_cs2sx_a2, &CS2SX_Task_GcKind);
-    else if (self->f_cs2sx_a2) { void* _o = self->f_cs2sx_a2; self->f_cs2sx_a2 = NULL; ((void (*)(void*))CS2SX_Task_Free)(_o); }
+    if (visit) visit((void*)self->f_cs2sx_task, &CS2SX_Task_GcKind);
+    else if (self->f_cs2sx_task) { void* _o = (void*)self->f_cs2sx_task; self->f_cs2sx_task = NULL; ((void (*)(void*))CS2SX_Task_Free)(_o); }
+    if (visit) visit((void*)self->f_cs2sx_a1, &CS2SX_Task_GcKind);
+    else if (self->f_cs2sx_a1) { void* _o = (void*)self->f_cs2sx_a1; self->f_cs2sx_a1 = NULL; ((void (*)(void*))CS2SX_Task_Free)(_o); }
+    if (visit) visit((void*)self->f_cs2sx_a2, &CS2SX_Task_GcKind);
+    else if (self->f_cs2sx_a2) { void* _o = (void*)self->f_cs2sx_a2; self->f_cs2sx_a2 = NULL; ((void (*)(void*))CS2SX_Task_Free)(_o); }
     CS2SX_Step_Gc(_self, visit);
 }
 
-void Guarded_Async_Dispose(Guarded_Async* self)
+void Guarded_Async__Destroy(Guarded_Async* self)
 {
     if (self->f_cs2sx_task) { CS2SX_Task_str_Free(self->f_cs2sx_task); self->f_cs2sx_task = NULL; }
     CS2SX_StrDrop(self->f_result); self->f_result = NULL;
     if (self->f_cs2sx_a1) { CS2SX_Task_int_Free(self->f_cs2sx_a1); self->f_cs2sx_a1 = NULL; }
     if (self->f_cs2sx_a2) { CS2SX_Task_Free(self->f_cs2sx_a2); self->f_cs2sx_a2 = NULL; }
-    CS2SX_Step_Dispose((CS2SX_Step*)self);
+    CS2SX_Step__Destroy((CS2SX_Step*)self);
 }
 
 void Guarded_Async_Free(Guarded_Async* self)
@@ -1667,8 +1702,9 @@ Nested_Async* Nested_Async_New(void)
     Nested_Async* self = (Nested_Async*)calloc(1, sizeof(Nested_Async));
     if (!self) return NULL;
     self->base._rc = 1;
-    self->base._dtor = (void (*)(void*))Nested_Async_Dispose;
+    self->base._dtor = (void (*)(void*))Nested_Async__Destroy;
     self->base._gc = Nested_Async_Gc;
+    self->base._class = &Nested_Async_ClassInfo;
     self->base.vtable = &Nested_Async_vtable_instance;
     Nested_Async_Ctor(self);
     CS2SX_ReleaseLater(self, (CS2SX_FreeFn)Nested_Async_Free);
@@ -1788,21 +1824,23 @@ void Nested_Async_cs2sx_run(Nested_Async* self)
     CS2SX_Task_Finish((CS2SX_Task*)CS2SX_NN(self->f_cs2sx_task));
 }
 
+const CS2SX_ClassInfo Nested_Async_ClassInfo = { "Nested_Async", &CS2SX_Step_ClassInfo };
+
 void Nested_Async_Gc(void* _self, CS2SX_GcVisit visit)
 {
     Nested_Async* self = (Nested_Async*)_self; (void)self;
-    if (visit) visit(self->f_cs2sx_task, &CS2SX_Task_GcKind);
-    else if (self->f_cs2sx_task) { void* _o = self->f_cs2sx_task; self->f_cs2sx_task = NULL; ((void (*)(void*))CS2SX_Task_Free)(_o); }
-    if (visit) visit(self->f_cs2sx_a1, &CS2SX_Task_GcKind);
-    else if (self->f_cs2sx_a1) { void* _o = self->f_cs2sx_a1; self->f_cs2sx_a1 = NULL; ((void (*)(void*))CS2SX_Task_Free)(_o); }
+    if (visit) visit((void*)self->f_cs2sx_task, &CS2SX_Task_GcKind);
+    else if (self->f_cs2sx_task) { void* _o = (void*)self->f_cs2sx_task; self->f_cs2sx_task = NULL; ((void (*)(void*))CS2SX_Task_Free)(_o); }
+    if (visit) visit((void*)self->f_cs2sx_a1, &CS2SX_Task_GcKind);
+    else if (self->f_cs2sx_a1) { void* _o = (void*)self->f_cs2sx_a1; self->f_cs2sx_a1 = NULL; ((void (*)(void*))CS2SX_Task_Free)(_o); }
     CS2SX_Step_Gc(_self, visit);
 }
 
-void Nested_Async_Dispose(Nested_Async* self)
+void Nested_Async__Destroy(Nested_Async* self)
 {
     if (self->f_cs2sx_task) { CS2SX_Task_int_Free(self->f_cs2sx_task); self->f_cs2sx_task = NULL; }
     if (self->f_cs2sx_a1) { CS2SX_Task_int_Free(self->f_cs2sx_a1); self->f_cs2sx_a1 = NULL; }
-    CS2SX_Step_Dispose((CS2SX_Step*)self);
+    CS2SX_Step__Destroy((CS2SX_Step*)self);
 }
 
 void Nested_Async_Free(Nested_Async* self)
@@ -1839,8 +1877,9 @@ Drain_Async* Drain_Async_New(void)
     Drain_Async* self = (Drain_Async*)calloc(1, sizeof(Drain_Async));
     if (!self) return NULL;
     self->base._rc = 1;
-    self->base._dtor = (void (*)(void*))Drain_Async_Dispose;
+    self->base._dtor = (void (*)(void*))Drain_Async__Destroy;
     self->base._gc = Drain_Async_Gc;
+    self->base._class = &Drain_Async_ClassInfo;
     self->base.vtable = &Drain_Async_vtable_instance;
     Drain_Async_Ctor(self);
     CS2SX_ReleaseLater(self, (CS2SX_FreeFn)Drain_Async_Free);
@@ -1920,21 +1959,23 @@ void Drain_Async_cs2sx_run(Drain_Async* self)
     CS2SX_Task_Finish((CS2SX_Task*)CS2SX_NN(self->f_cs2sx_task));
 }
 
+const CS2SX_ClassInfo Drain_Async_ClassInfo = { "Drain_Async", &CS2SX_Step_ClassInfo };
+
 void Drain_Async_Gc(void* _self, CS2SX_GcVisit visit)
 {
     Drain_Async* self = (Drain_Async*)_self; (void)self;
-    if (visit) visit(self->f_cs2sx_task, &CS2SX_Task_GcKind);
-    else if (self->f_cs2sx_task) { void* _o = self->f_cs2sx_task; self->f_cs2sx_task = NULL; ((void (*)(void*))CS2SX_Task_Free)(_o); }
-    if (visit) visit(self->f_cs2sx_a1, &CS2SX_Task_GcKind);
-    else if (self->f_cs2sx_a1) { void* _o = self->f_cs2sx_a1; self->f_cs2sx_a1 = NULL; ((void (*)(void*))CS2SX_Task_Free)(_o); }
+    if (visit) visit((void*)self->f_cs2sx_task, &CS2SX_Task_GcKind);
+    else if (self->f_cs2sx_task) { void* _o = (void*)self->f_cs2sx_task; self->f_cs2sx_task = NULL; ((void (*)(void*))CS2SX_Task_Free)(_o); }
+    if (visit) visit((void*)self->f_cs2sx_a1, &CS2SX_Task_GcKind);
+    else if (self->f_cs2sx_a1) { void* _o = (void*)self->f_cs2sx_a1; self->f_cs2sx_a1 = NULL; ((void (*)(void*))CS2SX_Task_Free)(_o); }
     CS2SX_Step_Gc(_self, visit);
 }
 
-void Drain_Async_Dispose(Drain_Async* self)
+void Drain_Async__Destroy(Drain_Async* self)
 {
     if (self->f_cs2sx_task) { CS2SX_Task_int_Free(self->f_cs2sx_task); self->f_cs2sx_task = NULL; }
     if (self->f_cs2sx_a1) { CS2SX_Task_bool_Free(self->f_cs2sx_a1); self->f_cs2sx_a1 = NULL; }
-    CS2SX_Step_Dispose((CS2SX_Step*)self);
+    CS2SX_Step__Destroy((CS2SX_Step*)self);
 }
 
 void Drain_Async_Free(Drain_Async* self)
@@ -1971,8 +2012,9 @@ Lost_Async* Lost_Async_New(void)
     Lost_Async* self = (Lost_Async*)calloc(1, sizeof(Lost_Async));
     if (!self) return NULL;
     self->base._rc = 1;
-    self->base._dtor = (void (*)(void*))Lost_Async_Dispose;
+    self->base._dtor = (void (*)(void*))Lost_Async__Destroy;
     self->base._gc = Lost_Async_Gc;
+    self->base._class = &Lost_Async_ClassInfo;
     self->base.vtable = &Lost_Async_vtable_instance;
     Lost_Async_Ctor(self);
     CS2SX_ReleaseLater(self, (CS2SX_FreeFn)Lost_Async_Free);
@@ -2030,21 +2072,23 @@ void Lost_Async_cs2sx_run(Lost_Async* self)
     CS2SX_Task_Finish(CS2SX_NN(self->f_cs2sx_task));
 }
 
+const CS2SX_ClassInfo Lost_Async_ClassInfo = { "Lost_Async", &CS2SX_Step_ClassInfo };
+
 void Lost_Async_Gc(void* _self, CS2SX_GcVisit visit)
 {
     Lost_Async* self = (Lost_Async*)_self; (void)self;
-    if (visit) visit(self->f_cs2sx_task, &CS2SX_Task_GcKind);
-    else if (self->f_cs2sx_task) { void* _o = self->f_cs2sx_task; self->f_cs2sx_task = NULL; ((void (*)(void*))CS2SX_Task_Free)(_o); }
-    if (visit) visit(self->f_cs2sx_a1, &CS2SX_Task_GcKind);
-    else if (self->f_cs2sx_a1) { void* _o = self->f_cs2sx_a1; self->f_cs2sx_a1 = NULL; ((void (*)(void*))CS2SX_Task_Free)(_o); }
+    if (visit) visit((void*)self->f_cs2sx_task, &CS2SX_Task_GcKind);
+    else if (self->f_cs2sx_task) { void* _o = (void*)self->f_cs2sx_task; self->f_cs2sx_task = NULL; ((void (*)(void*))CS2SX_Task_Free)(_o); }
+    if (visit) visit((void*)self->f_cs2sx_a1, &CS2SX_Task_GcKind);
+    else if (self->f_cs2sx_a1) { void* _o = (void*)self->f_cs2sx_a1; self->f_cs2sx_a1 = NULL; ((void (*)(void*))CS2SX_Task_Free)(_o); }
     CS2SX_Step_Gc(_self, visit);
 }
 
-void Lost_Async_Dispose(Lost_Async* self)
+void Lost_Async__Destroy(Lost_Async* self)
 {
     if (self->f_cs2sx_task) { CS2SX_Task_Free(self->f_cs2sx_task); self->f_cs2sx_task = NULL; }
     if (self->f_cs2sx_a1) { CS2SX_Task_Free(self->f_cs2sx_a1); self->f_cs2sx_a1 = NULL; }
-    CS2SX_Step_Dispose((CS2SX_Step*)self);
+    CS2SX_Step__Destroy((CS2SX_Step*)self);
 }
 
 void Lost_Async_Free(Lost_Async* self)
@@ -2081,8 +2125,9 @@ Script_Async* Script_Async_New(void)
     Script_Async* self = (Script_Async*)calloc(1, sizeof(Script_Async));
     if (!self) return NULL;
     self->base._rc = 1;
-    self->base._dtor = (void (*)(void*))Script_Async_Dispose;
+    self->base._dtor = (void (*)(void*))Script_Async__Destroy;
     self->base._gc = Script_Async_Gc;
+    self->base._class = &Script_Async_ClassInfo;
     self->base.vtable = &Script_Async_vtable_instance;
     Script_Async_Ctor(self);
     CS2SX_ReleaseLater(self, (CS2SX_FreeFn)Script_Async_Free);
@@ -2216,31 +2261,33 @@ void Script_Async_cs2sx_run(Script_Async* self)
     CS2SX_Task_Finish(CS2SX_NN(self->f_cs2sx_task));
 }
 
+const CS2SX_ClassInfo Script_Async_ClassInfo = { "Script_Async", &CS2SX_Step_ClassInfo };
+
 void Script_Async_Gc(void* _self, CS2SX_GcVisit visit)
 {
     Script_Async* self = (Script_Async*)_self; (void)self;
-    if (visit) visit(self->f_cs2sx_task, &CS2SX_Task_GcKind);
-    else if (self->f_cs2sx_task) { void* _o = self->f_cs2sx_task; self->f_cs2sx_task = NULL; ((void (*)(void*))CS2SX_Task_Free)(_o); }
-    if (visit) visit(self->f_slow, &CS2SX_Task_GcKind);
-    else if (self->f_slow) { void* _o = self->f_slow; self->f_slow = NULL; ((void (*)(void*))CS2SX_Task_Free)(_o); }
-    if (visit) visit(self->f_fast, &CS2SX_Task_GcKind);
-    else if (self->f_fast) { void* _o = self->f_fast; self->f_fast = NULL; ((void (*)(void*))CS2SX_Task_Free)(_o); }
-    if (visit) visit(self->f_first, &CS2SX_Task_GcKind);
-    else if (self->f_first) { void* _o = self->f_first; self->f_first = NULL; ((void (*)(void*))CS2SX_Task_Free)(_o); }
-    if (visit) visit(self->f_cs2sx_a1, &CS2SX_Task_GcKind);
-    else if (self->f_cs2sx_a1) { void* _o = self->f_cs2sx_a1; self->f_cs2sx_a1 = NULL; ((void (*)(void*))CS2SX_Task_Free)(_o); }
-    if (visit) visit(self->f_cs2sx_a2, &CS2SX_Task_GcKind);
-    else if (self->f_cs2sx_a2) { void* _o = self->f_cs2sx_a2; self->f_cs2sx_a2 = NULL; ((void (*)(void*))CS2SX_Task_Free)(_o); }
-    if (visit) visit(self->f_cs2sx_a3, &CS2SX_Task_GcKind);
-    else if (self->f_cs2sx_a3) { void* _o = self->f_cs2sx_a3; self->f_cs2sx_a3 = NULL; ((void (*)(void*))CS2SX_Task_Free)(_o); }
-    if (visit) visit(self->f_cs2sx_a4, &CS2SX_Task_GcKind);
-    else if (self->f_cs2sx_a4) { void* _o = self->f_cs2sx_a4; self->f_cs2sx_a4 = NULL; ((void (*)(void*))CS2SX_Task_Free)(_o); }
-    if (visit) visit(self->f_cs2sx_a5, &CS2SX_Task_GcKind);
-    else if (self->f_cs2sx_a5) { void* _o = self->f_cs2sx_a5; self->f_cs2sx_a5 = NULL; ((void (*)(void*))CS2SX_Task_Free)(_o); }
+    if (visit) visit((void*)self->f_cs2sx_task, &CS2SX_Task_GcKind);
+    else if (self->f_cs2sx_task) { void* _o = (void*)self->f_cs2sx_task; self->f_cs2sx_task = NULL; ((void (*)(void*))CS2SX_Task_Free)(_o); }
+    if (visit) visit((void*)self->f_slow, &CS2SX_Task_GcKind);
+    else if (self->f_slow) { void* _o = (void*)self->f_slow; self->f_slow = NULL; ((void (*)(void*))CS2SX_Task_Free)(_o); }
+    if (visit) visit((void*)self->f_fast, &CS2SX_Task_GcKind);
+    else if (self->f_fast) { void* _o = (void*)self->f_fast; self->f_fast = NULL; ((void (*)(void*))CS2SX_Task_Free)(_o); }
+    if (visit) visit((void*)self->f_first, &CS2SX_Task_GcKind);
+    else if (self->f_first) { void* _o = (void*)self->f_first; self->f_first = NULL; ((void (*)(void*))CS2SX_Task_Free)(_o); }
+    if (visit) visit((void*)self->f_cs2sx_a1, &CS2SX_Task_GcKind);
+    else if (self->f_cs2sx_a1) { void* _o = (void*)self->f_cs2sx_a1; self->f_cs2sx_a1 = NULL; ((void (*)(void*))CS2SX_Task_Free)(_o); }
+    if (visit) visit((void*)self->f_cs2sx_a2, &CS2SX_Task_GcKind);
+    else if (self->f_cs2sx_a2) { void* _o = (void*)self->f_cs2sx_a2; self->f_cs2sx_a2 = NULL; ((void (*)(void*))CS2SX_Task_Free)(_o); }
+    if (visit) visit((void*)self->f_cs2sx_a3, &CS2SX_Task_GcKind);
+    else if (self->f_cs2sx_a3) { void* _o = (void*)self->f_cs2sx_a3; self->f_cs2sx_a3 = NULL; ((void (*)(void*))CS2SX_Task_Free)(_o); }
+    if (visit) visit((void*)self->f_cs2sx_a4, &CS2SX_Task_GcKind);
+    else if (self->f_cs2sx_a4) { void* _o = (void*)self->f_cs2sx_a4; self->f_cs2sx_a4 = NULL; ((void (*)(void*))CS2SX_Task_Free)(_o); }
+    if (visit) visit((void*)self->f_cs2sx_a5, &CS2SX_Task_GcKind);
+    else if (self->f_cs2sx_a5) { void* _o = (void*)self->f_cs2sx_a5; self->f_cs2sx_a5 = NULL; ((void (*)(void*))CS2SX_Task_Free)(_o); }
     CS2SX_Step_Gc(_self, visit);
 }
 
-void Script_Async_Dispose(Script_Async* self)
+void Script_Async__Destroy(Script_Async* self)
 {
     if (self->f_cs2sx_task) { CS2SX_Task_Free(self->f_cs2sx_task); self->f_cs2sx_task = NULL; }
     if (self->f_slow) { CS2SX_Task_Free(self->f_slow); self->f_slow = NULL; }
@@ -2251,7 +2298,7 @@ void Script_Async_Dispose(Script_Async* self)
     if (self->f_cs2sx_a3) { CS2SX_Task_int_Free(self->f_cs2sx_a3); self->f_cs2sx_a3 = NULL; }
     if (self->f_cs2sx_a4) { CS2SX_Task_int_Free(self->f_cs2sx_a4); self->f_cs2sx_a4 = NULL; }
     if (self->f_cs2sx_a5) { CS2SX_Task_CS2SX_Task_Free(self->f_cs2sx_a5); self->f_cs2sx_a5 = NULL; }
-    CS2SX_Step_Dispose((CS2SX_Step*)self);
+    CS2SX_Step__Destroy((CS2SX_Step*)self);
 }
 
 void Script_Async_Free(Script_Async* self)

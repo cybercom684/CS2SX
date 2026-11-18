@@ -123,9 +123,27 @@ char* _cs2sx_next_buf(void)
     return _cs2sx_arena + pos;
 }
 
+// A buffer for a string of `len` characters (and its terminating NUL), valid
+// until the next frame: from the frame arena, or — very long — from the heap.
+char* CS2SX_StrAlloc(size_t len)
+{
+    size_t size = len + 1;
+    if (size <= CS2SX_STRBUF_SIZE) return _cs2sx_next_buf();
+    if (size <= CS2SX_ARENA_SIZE / 8)
+    {
+        size_t pos = (_cs2sx_arena_pos + 7u) & ~(size_t)7u;
+        if (pos + size > CS2SX_ARENA_SIZE) pos = 0;
+        _cs2sx_arena_pos = pos + size;
+        return _cs2sx_arena + pos;
+    }
+    char* big = (char*)malloc(size);
+    if (!big) return _cs2sx_next_buf();   // out of memory: a short (cut) result
+    CS2SX_ReleaseLater(big, free);
+    return big;
+}
+
 // Concatenation and interpolation ("a" + b, $"{x}"): formats into buf (a
-// _cs2sx_next_buf buffer); a longer result gets a block of its own size — from
-// the frame arena, or from the heap until the next frame when it is very long.
+// _cs2sx_next_buf buffer); a longer result gets a block of its own size.
 char* CS2SX_Format(char* buf, const char* fmt, ...)
 {
     va_list args, again;
@@ -135,26 +153,13 @@ char* CS2SX_Format(char* buf, const char* fmt, ...)
     va_end(args);
     if (n >= CS2SX_STRBUF_SIZE)
     {
-        size_t size = (size_t)n + 1;
-        char* big = NULL;
-        if (size <= CS2SX_ARENA_SIZE / 8)
-        {
-            size_t pos = (_cs2sx_arena_pos + 7u) & ~(size_t)7u;
-            if (pos + size > CS2SX_ARENA_SIZE) pos = 0;
-            _cs2sx_arena_pos = pos + size;
-            big = _cs2sx_arena + pos;
-        }
-        else
-        {
-            big = (char*)malloc(size);
-            CS2SX_ReleaseLater(big, free);
-        }
-        if (big) { vsnprintf(big, size, fmt, again); buf = big; }
+        char* big = CS2SX_StrAlloc((size_t)n);
+        vsnprintf(big, (size_t)n + 1, fmt, again);
+        buf = big;
     }
     va_end(again);
     return buf;
 }
-
 // ── Owned strings of fields ─────────────────────────────────────────────────
 // A string field holds its own heap copy, marked by a header in front of the
 // characters, so overwriting the field can free the old value — and leave alone
@@ -398,12 +403,11 @@ const char* String_Trim(const char* s)
 {
     if (!s) return "";
     while (*s == ' ' || *s == '\t' || *s == '\r' || *s == '\n') s++;
-    char* buf = _cs2sx_next_buf();
     int len = (int)strlen(s);
     while (len > 0 && (s[len - 1] == ' ' || s[len - 1] == '\t'
         || s[len - 1] == '\r' || s[len - 1] == '\n'))
         len--;
-    if (len >= CS2SX_STRBUF_SIZE) len = CS2SX_STRBUF_SIZE - 1;
+    char* buf = CS2SX_StrAlloc((size_t)len);
     memcpy(buf, s, len);
     buf[len] = '\0';
     return buf;
@@ -413,22 +417,19 @@ const char* String_TrimStart(const char* s)
 {
     if (!s) return "";
     while (*s == ' ' || *s == '\t') s++;
-    // Copy into a pooled buffer instead of returning an interior pointer into
-    // the source (which would alias/dangle if the source is freed or reused).
-    char* buf = _cs2sx_next_buf();
-    int i = 0;
-    for (; s[i] && i < CS2SX_STRBUF_SIZE - 1; i++) buf[i] = s[i];
-    buf[i] = '\0';
+    // A copy rather than an interior pointer into the source (which may be freed).
+    int len = (int)strlen(s);
+    char* buf = CS2SX_StrAlloc((size_t)len);
+    memcpy(buf, s, (size_t)len + 1);
     return buf;
 }
 
 const char* String_TrimEnd(const char* s)
 {
     if (!s) return "";
-    char* buf = _cs2sx_next_buf();
     int len = (int)strlen(s);
     while (len > 0 && (s[len - 1] == ' ' || s[len - 1] == '\t')) len--;
-    if (len >= CS2SX_STRBUF_SIZE) len = CS2SX_STRBUF_SIZE - 1;
+    char* buf = CS2SX_StrAlloc((size_t)len);
     memcpy(buf, s, len);
     buf[len] = '\0';
     return buf;
@@ -437,22 +438,20 @@ const char* String_TrimEnd(const char* s)
 const char* String_ToUpper(const char* s)
 {
     if (!s) return "";
-    char* buf = _cs2sx_next_buf();
-    int i = 0;
-    for (; s[i] && i < CS2SX_STRBUF_SIZE - 1; i++)
-        buf[i] = (char)toupper((unsigned char)s[i]);
-    buf[i] = '\0';
+    int len = (int)strlen(s);
+    char* buf = CS2SX_StrAlloc((size_t)len);
+    for (int i = 0; i < len; i++) buf[i] = (char)toupper((unsigned char)s[i]);
+    buf[len] = '\0';
     return buf;
 }
 
 const char* String_ToLower(const char* s)
 {
     if (!s) return "";
-    char* buf = _cs2sx_next_buf();
-    int i = 0;
-    for (; s[i] && i < CS2SX_STRBUF_SIZE - 1; i++)
-        buf[i] = (char)tolower((unsigned char)s[i]);
-    buf[i] = '\0';
+    int len = (int)strlen(s);
+    char* buf = CS2SX_StrAlloc((size_t)len);
+    for (int i = 0; i < len; i++) buf[i] = (char)tolower((unsigned char)s[i]);
+    buf[len] = '\0';
     return buf;
 }
 
@@ -463,8 +462,7 @@ const char* String_Substring(const char* s, int start, int length)
     // C#: startIndex in [0, Length], length >= 0, startIndex + length <= Length
     if (start < 0 || start > slen) CS2SX_ThrowArgOutOfRange("startIndex");
     if (length < 0 || length > slen - start) CS2SX_ThrowArgOutOfRange("length");
-    char* buf = _cs2sx_next_buf();
-    if (length >= CS2SX_STRBUF_SIZE) length = CS2SX_STRBUF_SIZE - 1;
+    char* buf = CS2SX_StrAlloc((size_t)length);
     memcpy(buf, s + start, length);
     buf[length] = '\0';
     return buf;
@@ -476,11 +474,8 @@ const char* String_SubstringFrom(const char* s, int start)
     int slen = (int)strlen(s);
     if (start < 0 || start > slen) CS2SX_ThrowArgOutOfRange("startIndex");
     if (start == slen) return "";
-    // Copy into a pooled buffer rather than returning an interior pointer.
-    char* buf = _cs2sx_next_buf();
-    int i = 0;
-    for (; s[start + i] && i < CS2SX_STRBUF_SIZE - 1; i++) buf[i] = s[start + i];
-    buf[i] = '\0';
+    char* buf = CS2SX_StrAlloc((size_t)(slen - start));
+    memcpy(buf, s + start, (size_t)(slen - start) + 1);
     return buf;
 }
 
@@ -497,18 +492,21 @@ int String_LastIndexOf(const char* s, const char* sub)
 const char* String_Replace(const char* s, const char* from, const char* to)
 {
     if (!s || !from || !to) return s ? s : "";
-    char* buf = _cs2sx_next_buf();
     int fromlen = (int)strlen(from);
+    if (fromlen == 0) return s;
     int tolen = (int)strlen(to);
+    // Count first, so the result has exactly the room it needs.
+    int hits = 0;
+    for (const char* p = s; (p = strstr(p, from)) != NULL; p += fromlen) hits++;
+    size_t outlen = strlen(s) + (size_t)hits * (size_t)tolen - (size_t)hits * (size_t)fromlen;
+    char* buf = CS2SX_StrAlloc(outlen);
     int out = 0;
-    while (*s && out < CS2SX_STRBUF_SIZE - 2)
+    while (*s)
     {
         if (strncmp(s, from, fromlen) == 0)
         {
-            int copy = tolen;
-            if (out + copy > CS2SX_STRBUF_SIZE - 2) copy = CS2SX_STRBUF_SIZE - 2 - out;
-            memcpy(buf + out, to, copy);
-            out += copy;
+            memcpy(buf + out, to, tolen);
+            out += tolen;
             s += fromlen;
         }
         else { buf[out++] = *s++; }
@@ -520,12 +518,10 @@ const char* String_Replace(const char* s, const char* from, const char* to)
 const char* String_PadLeft(const char* s, int totalWidth, char padChar)
 {
     if (!s) s = "";
-    char* buf = _cs2sx_next_buf();
     int len = (int)strlen(s);
     int pad = totalWidth - len;
     if (pad < 0) pad = 0;
-    if (pad + len >= CS2SX_STRBUF_SIZE) pad = CS2SX_STRBUF_SIZE - 1 - len;
-    if (pad < 0) pad = 0;
+    char* buf = CS2SX_StrAlloc((size_t)(pad + len));
     memset(buf, padChar, pad);
     memcpy(buf + pad, s, len);
     buf[pad + len] = '\0';
@@ -535,16 +531,26 @@ const char* String_PadLeft(const char* s, int totalWidth, char padChar)
 const char* String_PadRight(const char* s, int totalWidth, char padChar)
 {
     if (!s) s = "";
-    char* buf = _cs2sx_next_buf();
     int len = (int)strlen(s);
-    if (len >= CS2SX_STRBUF_SIZE) len = CS2SX_STRBUF_SIZE - 1;
     int pad = totalWidth - len;
     if (pad < 0) pad = 0;
-    if (len + pad >= CS2SX_STRBUF_SIZE) pad = CS2SX_STRBUF_SIZE - 1 - len;
-    if (pad < 0) pad = 0;
+    char* buf = CS2SX_StrAlloc((size_t)(pad + len));
     memcpy(buf, s, len);
     memset(buf + len, padChar, pad);
     buf[len + pad] = '\0';
+    return buf;
+}
+
+/// s.Trim(chars) (mode 3), TrimStart (1), TrimEnd (2): removes the given characters.
+const char* CS2SX_TrimChars(const char* s, const char* chars, int mode)
+{
+    if (!s) return "";
+    if (mode & 1) while (*s && strchr(chars, *s)) s++;
+    size_t len = strlen(s);
+    if (mode & 2) while (len > 0 && strchr(chars, s[len - 1])) len--;
+    char* buf = CS2SX_StrAlloc(len);
+    memcpy(buf, s, len);
+    buf[len] = '\0';
     return buf;
 }
 
@@ -633,28 +639,21 @@ void List_str_Sort(List_str* l)
 const char* String_Join(const char* sep, List_str* list)
 {
     if (!list || list->count == 0) return "";
-    char* buf = _cs2sx_next_buf();
-    int out = 0;
     int seplen = sep ? (int)strlen(sep) : 0;
-    for (int i = 0; i < list->count && out < CS2SX_STRBUF_SIZE - 2; i++)
+    size_t total = 0;
+    for (int i = 0; i < list->count; i++)
+        total += (list->data[i] ? strlen(list->data[i]) : 0) + (i > 0 ? (size_t)seplen : 0);
+    char* buf = CS2SX_StrAlloc(total);
+    size_t out = 0;
+    for (int i = 0; i < list->count; i++)
     {
-        if (i > 0 && sep)
-        {
-            int copy = seplen;
-            if (out + copy > CS2SX_STRBUF_SIZE - 2) copy = CS2SX_STRBUF_SIZE - 2 - out;
-            memcpy(buf + out, sep, copy);
-            out += copy;
-        }
+        if (i > 0 && seplen) { memcpy(buf + out, sep, seplen); out += seplen; }
         const char* item = list->data[i];
-        int         itemlen = item ? (int)strlen(item) : 0;
-        if (out + itemlen > CS2SX_STRBUF_SIZE - 2) itemlen = CS2SX_STRBUF_SIZE - 2 - out;
-        if (item) memcpy(buf + out, item, itemlen);
-        out += itemlen;
+        if (item) { size_t n = strlen(item); memcpy(buf + out, item, n); out += n; }
     }
     buf[out] = '\0';
     return buf;
 }
-
 List_str* String_Split(const char* s, const char* sep)
 {
     List_str* result = List_str_New();

@@ -14,6 +14,7 @@ struct Punkt
 Punkt* Punkt_New(int X, int Y);
 void Punkt_Free(Punkt* self);
 Punkt* Punkt_Retain(Punkt* self);
+extern const CS2SX_ClassInfo Punkt_ClassInfo;
 
 struct LanguageSugarApp
 {

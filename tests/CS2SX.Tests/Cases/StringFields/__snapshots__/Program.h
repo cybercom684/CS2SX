@@ -7,8 +7,9 @@
 struct Label2
 {
     int _rc;
-    void (*_dtor)(void* self);   // _Dispose of the dynamic type
+    void (*_dtor)(void* self);   // __Destroy of the dynamic type
     void (*_gc)(void* self, CS2SX_GcVisit visit);   // _Gc of the dynamic type
+    const CS2SX_ClassInfo* _class;   // run-time type (x is T)
     const char* f_Name;
     const char* f_Text;
 };
@@ -16,7 +17,8 @@ struct Label2
 Label2* Label2_New(void);
 void Label2_Ctor(Label2* self);
 
-void Label2_Dispose(Label2* self);
+void Label2__Destroy(Label2* self);
+extern const CS2SX_ClassInfo Label2_ClassInfo;
 void Label2_Gc(void* self, CS2SX_GcVisit visit);
 extern const CS2SX_GcKind Label2_GcKind;
 void Label2_Free(Label2* self);

@@ -17,8 +17,9 @@ Node* Node_New(void)
     Node* self = (Node*)calloc(1, sizeof(Node));
     if (!self) return NULL;
     self->_rc = 1;
-    self->_dtor = (void (*)(void*))Node_Dispose;
+    self->_dtor = (void (*)(void*))Node__Destroy;
     self->_gc = Node_Gc;
+    self->_class = &Node_ClassInfo;
     self->vtable = &Node_vtable_instance;
     Node_Ctor(self);
     CS2SX_ReleaseLater(self, (CS2SX_FreeFn)Node_Free);
@@ -39,17 +40,19 @@ const char* Node_Kind(Node* self)
     return "node";
 }
 
+const CS2SX_ClassInfo Node_ClassInfo = { "Node", NULL };
+
 void Node_Gc(void* _self, CS2SX_GcVisit visit)
 {
     Node* self = (Node*)_self; (void)self;
-    if (visit) visit(self->f_Next, &Node_GcKind);
-    else if (self->f_Next) { void* _o = self->f_Next; self->f_Next = NULL; ((void (*)(void*))Node_Free)(_o); }
+    if (visit) visit((void*)self->f_Next, &Node_GcKind);
+    else if (self->f_Next) { void* _o = (void*)self->f_Next; self->f_Next = NULL; ((void (*)(void*))Node_Free)(_o); }
 }
 
 static void Node_GcDyn(void* self, CS2SX_GcVisit visit) { ((Node*)self)->_gc(self, visit); }
 const CS2SX_GcKind Node_GcKind = { offsetof(Node, _rc), Node_GcDyn, (CS2SX_FreeFn)Node_Free };
 
-void Node_Dispose(Node* self)
+void Node__Destroy(Node* self)
 {
     if (self->f_Next) { Node_Free(self->f_Next); self->f_Next = NULL; }
     CS2SX_StrDrop(self->f_Name); self->f_Name = NULL;
@@ -81,8 +84,9 @@ Square* Square_New(void)
     Square* self = (Square*)calloc(1, sizeof(Square));
     if (!self) return NULL;
     self->_rc = 1;
-    self->_dtor = (void (*)(void*))Square_Dispose;
+    self->_dtor = (void (*)(void*))Square__Destroy;
     self->_gc = Square_Gc;
+    self->_class = &Square_ClassInfo;
     Square_Ctor(self);
     CS2SX_ReleaseLater(self, (CS2SX_FreeFn)Square_Free);
     return self;
@@ -95,6 +99,8 @@ int Square_Area(Square* self)
     return 4;
 }
 
+const CS2SX_ClassInfo Square_ClassInfo = { "Square", NULL };
+
 void Square_Gc(void* _self, CS2SX_GcVisit visit)
 {
     Square* self = (Square*)_self; (void)self;
@@ -103,7 +109,7 @@ void Square_Gc(void* _self, CS2SX_GcVisit visit)
 static void Square_GcDyn(void* self, CS2SX_GcVisit visit) { ((Square*)self)->_gc(self, visit); }
 const CS2SX_GcKind Square_GcKind = { offsetof(Square, _rc), Square_GcDyn, (CS2SX_FreeFn)Square_Free };
 
-void Square_Dispose(Square* self)
+void Square__Destroy(Square* self)
 {
 }
 
@@ -190,7 +196,15 @@ static void _lambda_0(void* _env)
 static void _envdtor_0(void* _e)
 {
     struct _cap_0* _c = (struct _cap_0*)_e;
-    CS2SX_ReleaseLater(_c->missing, (CS2SX_FreeFn)Node_Free);
+    CS2SX_ReleaseLater((void*)_c->missing, (CS2SX_FreeFn)Node_Free);
+}
+
+static void _envgc_0(void* _e, CS2SX_GcVisit visit)
+{
+    struct _cap_0* _c = (struct _cap_0*)_e;
+    if (visit) visit((void*)_c->missing, &Node_GcKind);
+    else if (_c->missing) { void* _o = (void*)_c->missing; _c->missing = NULL; ((CS2SX_FreeFn)Node_Free)(_o); }
+    (void)_c; (void)visit;
 }
 
 struct _cap_1
@@ -211,7 +225,15 @@ static void _lambda_1(void* _env)
 static void _envdtor_1(void* _e)
 {
     struct _cap_1* _c = (struct _cap_1*)_e;
-    CS2SX_ReleaseLater(_c->missing, (CS2SX_FreeFn)Node_Free);
+    CS2SX_ReleaseLater((void*)_c->missing, (CS2SX_FreeFn)Node_Free);
+}
+
+static void _envgc_1(void* _e, CS2SX_GcVisit visit)
+{
+    struct _cap_1* _c = (struct _cap_1*)_e;
+    if (visit) visit((void*)_c->missing, &Node_GcKind);
+    else if (_c->missing) { void* _o = (void*)_c->missing; _c->missing = NULL; ((CS2SX_FreeFn)Node_Free)(_o); }
+    (void)_c; (void)visit;
 }
 
 struct _cap_2
@@ -231,7 +253,15 @@ static void _lambda_2(void* _env)
 static void _envdtor_2(void* _e)
 {
     struct _cap_2* _c = (struct _cap_2*)_e;
-    CS2SX_ReleaseLater(_c->missing, (CS2SX_FreeFn)Node_Free);
+    CS2SX_ReleaseLater((void*)_c->missing, (CS2SX_FreeFn)Node_Free);
+}
+
+static void _envgc_2(void* _e, CS2SX_GcVisit visit)
+{
+    struct _cap_2* _c = (struct _cap_2*)_e;
+    if (visit) visit((void*)_c->missing, &Node_GcKind);
+    else if (_c->missing) { void* _o = (void*)_c->missing; _c->missing = NULL; ((CS2SX_FreeFn)Node_Free)(_o); }
+    (void)_c; (void)visit;
 }
 
 struct _cap_3
@@ -251,7 +281,15 @@ static void _lambda_3(void* _env)
 static void _envdtor_3(void* _e)
 {
     struct _cap_3* _c = (struct _cap_3*)_e;
-    CS2SX_ReleaseLater(_c->missing, (CS2SX_FreeFn)Node_Free);
+    CS2SX_ReleaseLater((void*)_c->missing, (CS2SX_FreeFn)Node_Free);
+}
+
+static void _envgc_3(void* _e, CS2SX_GcVisit visit)
+{
+    struct _cap_3* _c = (struct _cap_3*)_e;
+    if (visit) visit((void*)_c->missing, &Node_GcKind);
+    else if (_c->missing) { void* _o = (void*)_c->missing; _c->missing = NULL; ((CS2SX_FreeFn)Node_Free)(_o); }
+    (void)_c; (void)visit;
 }
 
 struct _cap_4
@@ -272,7 +310,15 @@ static void _lambda_4(void* _env)
 static void _envdtor_4(void* _e)
 {
     struct _cap_4* _c = (struct _cap_4*)_e;
-    CS2SX_ReleaseLater(_c->n, (CS2SX_FreeFn)Node_Free);
+    CS2SX_ReleaseLater((void*)_c->n, (CS2SX_FreeFn)Node_Free);
+}
+
+static void _envgc_4(void* _e, CS2SX_GcVisit visit)
+{
+    struct _cap_4* _c = (struct _cap_4*)_e;
+    if (visit) visit((void*)_c->n, &Node_GcKind);
+    else if (_c->n) { void* _o = (void*)_c->n; _c->n = NULL; ((CS2SX_FreeFn)Node_Free)(_o); }
+    (void)_c; (void)visit;
 }
 
 struct _cap_5
@@ -287,6 +333,20 @@ static void _lambda_5(void* _env)
     struct _cap_5* _c = (struct _cap_5*)_env;
     IShape* shape = _c->shape;
     ({ __auto_type _cs2sx_r = CS2SX_NN(shape); _cs2sx_r->vtable->Area(_cs2sx_r->obj); });
+}
+
+static void _envdtor_5(void* _e)
+{
+    struct _cap_5* _c = (struct _cap_5*)_e;
+    CS2SX_ReleaseLater((void*)_c->shape, (CS2SX_FreeFn)CS2SX_Iface_Free);
+}
+
+static void _envgc_5(void* _e, CS2SX_GcVisit visit)
+{
+    struct _cap_5* _c = (struct _cap_5*)_e;
+    if (visit) visit((void*)_c->shape, &CS2SX_Iface_GcKind);
+    else if (_c->shape) { void* _o = (void*)_c->shape; _c->shape = NULL; ((CS2SX_FreeFn)CS2SX_Iface_Free)(_o); }
+    (void)_c; (void)visit;
 }
 
 struct _cap_6
@@ -335,7 +395,13 @@ static void _lambda_8(void* _env)
 static void _envdtor_8(void* _e)
 {
     struct _cap_8* _c = (struct _cap_8*)_e;
-    CS2SX_ReleaseLater(_c->list, (CS2SX_FreeFn)List_int_Free);
+    CS2SX_ReleaseLater((void*)_c->list, (CS2SX_FreeFn)List_int_Free);
+}
+
+static void _envgc_8(void* _e, CS2SX_GcVisit visit)
+{
+    struct _cap_8* _c = (struct _cap_8*)_e;
+    (void)_c; (void)visit;
 }
 
 struct _cap_9
@@ -356,7 +422,13 @@ static void _lambda_9(void* _env)
 static void _envdtor_9(void* _e)
 {
     struct _cap_9* _c = (struct _cap_9*)_e;
-    CS2SX_ReleaseLater(_c->list, (CS2SX_FreeFn)List_int_Free);
+    CS2SX_ReleaseLater((void*)_c->list, (CS2SX_FreeFn)List_int_Free);
+}
+
+static void _envgc_9(void* _e, CS2SX_GcVisit visit)
+{
+    struct _cap_9* _c = (struct _cap_9*)_e;
+    (void)_c; (void)visit;
 }
 
 struct _cap_10
@@ -377,7 +449,15 @@ static void _lambda_10(void* _env)
 static void _envdtor_10(void* _e)
 {
     struct _cap_10* _c = (struct _cap_10*)_e;
-    CS2SX_ReleaseLater(_c->missing, (CS2SX_FreeFn)Node_Free);
+    CS2SX_ReleaseLater((void*)_c->missing, (CS2SX_FreeFn)Node_Free);
+}
+
+static void _envgc_10(void* _e, CS2SX_GcVisit visit)
+{
+    struct _cap_10* _c = (struct _cap_10*)_e;
+    if (visit) visit((void*)_c->missing, &Node_GcKind);
+    else if (_c->missing) { void* _o = (void*)_c->missing; _c->missing = NULL; ((CS2SX_FreeFn)Node_Free)(_o); }
+    (void)_c; (void)visit;
 }
 
 void NullChecksApp_OnInit(NullChecksApp* self)
@@ -391,39 +471,46 @@ void NullChecksApp_OnInit(NullChecksApp* self)
     Node* missing = NULL;
     CS2SX_LINE(31);
     struct _cap_0* _env_0 = CS2SX_ENV_NEW(struct _cap_0);
-    _env_0->missing = CS2SX_RETAIN(Node, missing);
+    _env_0->missing = missing; ((void* (*)(void*))Node_Retain)((void*)_env_0->missing);
     _env_0->_hdr._dtor = _envdtor_0;
+    _env_0->_hdr._gc = _envgc_0;
     const char* _ps_3 = NullChecksApp_Try(CS2SX_Delegate_New((void*)_lambda_0, _env_0, 1));
     printf("%s\n", _ps_3 ? _ps_3 : "");
     CS2SX_LINE(32);
     struct _cap_1* _env_1 = CS2SX_ENV_NEW(struct _cap_1);
-    _env_1->missing = CS2SX_RETAIN(Node, missing);
+    _env_1->missing = missing; ((void* (*)(void*))Node_Retain)((void*)_env_1->missing);
     _env_1->_hdr._dtor = _envdtor_1;
+    _env_1->_hdr._gc = _envgc_1;
     const char* _ps_4 = NullChecksApp_Try(CS2SX_Delegate_New((void*)_lambda_1, _env_1, 1));
     printf("%s\n", _ps_4 ? _ps_4 : "");
     CS2SX_LINE(33);
     struct _cap_2* _env_2 = CS2SX_ENV_NEW(struct _cap_2);
-    _env_2->missing = CS2SX_RETAIN(Node, missing);
+    _env_2->missing = missing; ((void* (*)(void*))Node_Retain)((void*)_env_2->missing);
     _env_2->_hdr._dtor = _envdtor_2;
+    _env_2->_hdr._gc = _envgc_2;
     const char* _ps_5 = NullChecksApp_Try(CS2SX_Delegate_New((void*)_lambda_2, _env_2, 1));
     printf("%s\n", _ps_5 ? _ps_5 : "");
     CS2SX_LINE(34);
     struct _cap_3* _env_3 = CS2SX_ENV_NEW(struct _cap_3);
-    _env_3->missing = CS2SX_RETAIN(Node, missing);
+    _env_3->missing = missing; ((void* (*)(void*))Node_Retain)((void*)_env_3->missing);
     _env_3->_hdr._dtor = _envdtor_3;
+    _env_3->_hdr._gc = _envgc_3;
     const char* _ps_6 = NullChecksApp_Try(CS2SX_Delegate_New((void*)_lambda_3, _env_3, 1));
     printf("%s\n", _ps_6 ? _ps_6 : "");
     CS2SX_LINE(35);
     struct _cap_4* _env_4 = CS2SX_ENV_NEW(struct _cap_4);
-    _env_4->n = CS2SX_RETAIN(Node, n);
+    _env_4->n = n; ((void* (*)(void*))Node_Retain)((void*)_env_4->n);
     _env_4->_hdr._dtor = _envdtor_4;
+    _env_4->_hdr._gc = _envgc_4;
     const char* _ps_7 = NullChecksApp_Try(CS2SX_Delegate_New((void*)_lambda_4, _env_4, 1));
     printf("%s\n", _ps_7 ? _ps_7 : "");
     CS2SX_LINE(36);
     IShape* shape = NULL;
     CS2SX_LINE(37);
     struct _cap_5* _env_5 = CS2SX_ENV_NEW(struct _cap_5);
-    _env_5->shape = shape;
+    _env_5->shape = shape; ((void* (*)(void*))CS2SX_Iface_Retain)((void*)_env_5->shape);
+    _env_5->_hdr._dtor = _envdtor_5;
+    _env_5->_hdr._gc = _envgc_5;
     const char* _ps_8 = NullChecksApp_Try(CS2SX_Delegate_New((void*)_lambda_5, _env_5, 1));
     printf("%s\n", _ps_8 ? _ps_8 : "");
     CS2SX_LINE(38);
@@ -442,18 +529,20 @@ void NullChecksApp_OnInit(NullChecksApp* self)
     List_int* list = NULL;
     CS2SX_LINE(42);
     struct _cap_8* _env_8 = CS2SX_ENV_NEW(struct _cap_8);
-    _env_8->list = List_int_Retain(list);
+    _env_8->list = list; ((void* (*)(void*))List_int_Retain)((void*)_env_8->list);
     _env_8->_hdr._dtor = _envdtor_8;
+    _env_8->_hdr._gc = _envgc_8;
     const char* _ps_11 = NullChecksApp_Try(CS2SX_Delegate_New((void*)_lambda_8, _env_8, 1));
     printf("%s\n", _ps_11 ? _ps_11 : "");
     CS2SX_LINE(43);
     struct _cap_9* _env_9 = CS2SX_ENV_NEW(struct _cap_9);
-    _env_9->list = List_int_Retain(list);
+    _env_9->list = list; ((void* (*)(void*))List_int_Retain)((void*)_env_9->list);
     _env_9->_hdr._dtor = _envdtor_9;
+    _env_9->_hdr._gc = _envgc_9;
     const char* _ps_12 = NullChecksApp_Try(CS2SX_Delegate_New((void*)_lambda_9, _env_9, 1));
     printf("%s\n", _ps_12 ? _ps_12 : "");
     CS2SX_LINE(45);
-    IShape* real = Square_as_IShape(CS2SX_RETAIN(Square, Square_New()));
+    IShape* real = Square_as_IShape(Square_New());
     CS2SX_LINE(46);
     char* _sb0 = _cs2sx_next_buf();
     _sb0 = CS2SX_Format(_sb0, "ok %d %s %d %s", Node_Get(n), n->vtable->Kind(n), ({ __auto_type _cs2sx_r = real; _cs2sx_r->vtable->Area(_cs2sx_r->obj); }), (((missing != NULL ? missing->f_Name : NULL) ?: "none")));
@@ -461,8 +550,9 @@ void NullChecksApp_OnInit(NullChecksApp* self)
     printf("%s\n", _ps_13 ? _ps_13 : "");
     CS2SX_LINE(50);
     struct _cap_10* _env_10 = CS2SX_ENV_NEW(struct _cap_10);
-    _env_10->missing = CS2SX_RETAIN(Node, missing);
+    _env_10->missing = missing; ((void* (*)(void*))Node_Retain)((void*)_env_10->missing);
     _env_10->_hdr._dtor = _envdtor_10;
+    _env_10->_hdr._gc = _envgc_10;
     const char* _ps_14 = NullChecksApp_Try(CS2SX_Delegate_New((void*)_lambda_10, _env_10, 1));
     printf("%s\n", _ps_14 ? _ps_14 : "");
 }

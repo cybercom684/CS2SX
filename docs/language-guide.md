@@ -159,10 +159,17 @@ string text = richtung switch
     _ => "Unbekannt",
 };
 
-// Pattern matching
-if (obj is Hund hund)
+// Pattern matching: prüft den echten Typ zur Laufzeit, auch durch ein Interface
+if (tier is Hund hund)
     hund.LautMachen();
+switch (tier)
+{
+    case Dackel: …; break;        // abgeleitete Klassen zuerst
+    case Hund h: …; break;
+}
 ```
+
+`is`, Typ-Muster und `switch` auf den Typ funktionieren für eigene Klassen, Interface-Werte und Exceptions. Bei `object` (z. B. `object o = …; o is Hund`) prüft CS2SX nur auf `null`.
 
 ---
 
@@ -415,7 +422,7 @@ string s = Max("Apfel", "Birne");   // → Max_str
 
 Generics werden zur Compilezeit expandiert, ähnlich wie C++ Templates: Für jeden verwendeten Typ entsteht eine eigene Kopie der Klasse bzw. Methode. Das gilt auch für generische Methoden, die andere generische Methoden aufrufen, und für generische Erweiterungsmethoden.
 
-Generische Methoden dürfen auch `virtual`/`abstract`/`override` sein oder in einem Interface stehen, und generische Structs (`struct Pair<T>`) funktionieren ebenso. Generische Methoden gehen auch in generischen Klassen (`class Box<T> { U Map<U>(Func<T, U> f) … }`). Nicht unterstützt sind generische Methoden in generischen Structs/Interfaces und generische Structs innerhalb generischer Typen. Der Build meldet sie mit Zeile und Hinweis.
+Generische Methoden dürfen auch `virtual`/`abstract`/`override` sein oder in einem Interface stehen, und generische Structs (`struct Pair<T>`) funktionieren ebenso. Generische Methoden gehen auch in generischen Klassen und Structs (`class Box<T> { U Map<U>(Func<T, U> f) … }`). Nicht unterstützt sind generische Methoden in generischen Interfaces und generische Structs innerhalb generischer Typen. Der Build meldet sie mit Zeile und Hinweis.
 
 ---
 

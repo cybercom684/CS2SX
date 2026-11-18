@@ -78,9 +78,9 @@ static inline int CS2SX_Sign(int x) { return (x > 0) - (x < 0); }
 
 static inline const char* CS2SX_RepeatChar(char c, int count)
 {
-    char* buf = _cs2sx_next_buf();
-    if (count <= 0) { buf[0] = '\0'; return buf; }
-    int n = count < CS2SX_STRBUF_SIZE - 1 ? count : CS2SX_STRBUF_SIZE - 1;
+    if (count <= 0) return "";
+    int n = count;
+    char* buf = CS2SX_StrAlloc((size_t)n);
     memset(buf, (unsigned char)c, (size_t)n);
     buf[n] = '\0';
     return buf;
@@ -88,9 +88,9 @@ static inline const char* CS2SX_RepeatChar(char c, int count)
 
 static inline const char* CS2SX_SubstrFromChars(const char* arr, int start, int count)
 {
-    char* buf = _cs2sx_next_buf();
-    if (!arr || count <= 0) { buf[0] = '\0'; return buf; }
-    int n = count < CS2SX_STRBUF_SIZE - 1 ? count : CS2SX_STRBUF_SIZE - 1;
+    if (!arr || count <= 0) return "";
+    int n = count;
+    char* buf = CS2SX_StrAlloc((size_t)n);
     memcpy(buf, arr + start, (size_t)n);
     buf[n] = '\0';
     return buf;

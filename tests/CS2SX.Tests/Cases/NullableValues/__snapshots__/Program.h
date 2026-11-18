@@ -14,12 +14,17 @@ typedef struct Size {
 typedef struct Nullable_Size { Size value; int has; } Nullable_Size;
 #endif
 int Size_Equals(Size a, Size b);
+#ifndef CS2SX_LIST_Size_DEFINED
+#define CS2SX_LIST_Size_DEFINED
+CS2SX_LIST_DEFINE_HOOK_EQ(Size, Size, CS2SX_ID, CS2SX_NOREF, Size_Equals)
+#endif
 
 struct Profile
 {
     int _rc;
-    void (*_dtor)(void* self);   // _Dispose of the dynamic type
+    void (*_dtor)(void* self);   // __Destroy of the dynamic type
     void (*_gc)(void* self, CS2SX_GcVisit visit);   // _Gc of the dynamic type
+    const CS2SX_ClassInfo* _class;   // run-time type (x is T)
     Nullable_int f_BestScore;
     Nullable_Mode f_LastMode;
     const char* f_Nickname;
@@ -30,7 +35,8 @@ void Profile_Ctor(Profile* self);
 Nullable_int Profile_Find(Profile* self, int key);
 int Profile_Add(Profile* self, Nullable_int bonus);
 
-void Profile_Dispose(Profile* self);
+void Profile__Destroy(Profile* self);
+extern const CS2SX_ClassInfo Profile_ClassInfo;
 void Profile_Gc(void* self, CS2SX_GcVisit visit);
 extern const CS2SX_GcKind Profile_GcKind;
 void Profile_Free(Profile* self);

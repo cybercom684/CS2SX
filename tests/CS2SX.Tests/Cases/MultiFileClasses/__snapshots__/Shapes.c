@@ -18,13 +18,16 @@ Shape* Shape_New(void)
     Shape* self = (Shape*)calloc(1, sizeof(Shape));
     if (!self) return NULL;
     self->_rc = 1;
-    self->_dtor = (void (*)(void*))Shape_Dispose;
+    self->_dtor = (void (*)(void*))Shape__Destroy;
     self->_gc = Shape_Gc;
+    self->_class = &Shape_ClassInfo;
     self->vtable = &Shape_vtable_instance;
     Shape_Ctor(self);
     CS2SX_ReleaseLater(self, (CS2SX_FreeFn)Shape_Free);
     return self;
 }
+
+const CS2SX_ClassInfo Shape_ClassInfo = { "Shape", NULL };
 
 void Shape_Gc(void* _self, CS2SX_GcVisit visit)
 {
@@ -34,7 +37,7 @@ void Shape_Gc(void* _self, CS2SX_GcVisit visit)
 static void Shape_GcDyn(void* self, CS2SX_GcVisit visit) { ((Shape*)self)->_gc(self, visit); }
 const CS2SX_GcKind Shape_GcKind = { offsetof(Shape, _rc), Shape_GcDyn, (CS2SX_FreeFn)Shape_Free };
 
-void Shape_Dispose(Shape* self)
+void Shape__Destroy(Shape* self)
 {
 }
 
@@ -64,12 +67,15 @@ Painter* Painter_New(void)
     Painter* self = (Painter*)calloc(1, sizeof(Painter));
     if (!self) return NULL;
     self->_rc = 1;
-    self->_dtor = (void (*)(void*))Painter_Dispose;
+    self->_dtor = (void (*)(void*))Painter__Destroy;
     self->_gc = Painter_Gc;
+    self->_class = &Painter_ClassInfo;
     Painter_Ctor(self);
     CS2SX_ReleaseLater(self, (CS2SX_FreeFn)Painter_Free);
     return self;
 }
+
+const CS2SX_ClassInfo Painter_ClassInfo = { "Painter", NULL };
 
 void Painter_Gc(void* _self, CS2SX_GcVisit visit)
 {
@@ -79,7 +85,7 @@ void Painter_Gc(void* _self, CS2SX_GcVisit visit)
 static void Painter_GcDyn(void* self, CS2SX_GcVisit visit) { ((Painter*)self)->_gc(self, visit); }
 const CS2SX_GcKind Painter_GcKind = { offsetof(Painter, _rc), Painter_GcDyn, (CS2SX_FreeFn)Painter_Free };
 
-void Painter_Dispose(Painter* self)
+void Painter__Destroy(Painter* self)
 {
 }
 

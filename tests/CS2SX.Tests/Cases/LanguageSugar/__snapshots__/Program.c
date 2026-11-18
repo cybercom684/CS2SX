@@ -26,6 +26,7 @@ Punkt* Punkt_Retain(Punkt* self)
 }
 
 const CS2SX_GcKind Punkt_GcKind = { offsetof(Punkt, _rc), CS2SX_GcLeaf, (CS2SX_FreeFn)Punkt_Free };
+const CS2SX_ClassInfo Punkt_ClassInfo = { "Punkt", NULL };
 
 void LanguageSugarApp_Init(LanguageSugarApp* self)
 {

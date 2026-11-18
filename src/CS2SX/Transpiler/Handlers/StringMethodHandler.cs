@@ -266,6 +266,9 @@ public sealed class StringMethodHandler : InvocationHandlerBase
             "StartsWith" => "String_StartsWith(" + receiver + ", " + ArgAt(args, 0) + ")",
             "EndsWith" => "String_EndsWith(" + receiver + ", " + ArgAt(args, 0) + ")",
             "Equals" => "strcmp(" + receiver + ", " + ArgAt(args, 0) + ") == 0",
+            // s.Trim('.') / s.TrimEnd('a', 'b'): the characters as a C string (CS2SX_TrimChars).
+            "Trim" or "TrimStart" or "TrimEnd" when args.Count > 0
+                => "CS2SX_TrimChars(" + receiver + ", (const char[]){ " + string.Join(", ", args) + ", 0 }, " + (methodName == "Trim" ? "3" : methodName == "TrimStart" ? "1" : "2") + ")",
             "Trim" => "String_Trim(" + receiver + ")",
             "TrimStart" => "String_TrimStart(" + receiver + ")",
             "TrimEnd" => "String_TrimEnd(" + receiver + ")",

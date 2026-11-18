@@ -14,12 +14,15 @@ Counter* Counter_New(void)
     Counter* self = (Counter*)calloc(1, sizeof(Counter));
     if (!self) return NULL;
     self->_rc = 1;
-    self->_dtor = (void (*)(void*))Counter_Dispose;
+    self->_dtor = (void (*)(void*))Counter__Destroy;
     self->_gc = Counter_Gc;
+    self->_class = &Counter_ClassInfo;
     Counter_Ctor(self);
     CS2SX_ReleaseLater(self, (CS2SX_FreeFn)Counter_Free);
     return self;
 }
+
+const CS2SX_ClassInfo Counter_ClassInfo = { "Counter", NULL };
 
 void Counter_Gc(void* _self, CS2SX_GcVisit visit)
 {
@@ -29,7 +32,7 @@ void Counter_Gc(void* _self, CS2SX_GcVisit visit)
 static void Counter_GcDyn(void* self, CS2SX_GcVisit visit) { ((Counter*)self)->_gc(self, visit); }
 const CS2SX_GcKind Counter_GcKind = { offsetof(Counter, _rc), Counter_GcDyn, (CS2SX_FreeFn)Counter_Free };
 
-void Counter_Dispose(Counter* self)
+void Counter__Destroy(Counter* self)
 {
 }
 
@@ -61,12 +64,15 @@ Item* Item_New(int v)
     Item* self = (Item*)calloc(1, sizeof(Item));
     if (!self) return NULL;
     self->_rc = 1;
-    self->_dtor = (void (*)(void*))Item_Dispose;
+    self->_dtor = (void (*)(void*))Item__Destroy;
     self->_gc = Item_Gc;
+    self->_class = &Item_ClassInfo;
     Item_Ctor(self, v);
     CS2SX_ReleaseLater(self, (CS2SX_FreeFn)Item_Free);
     return self;
 }
+
+const CS2SX_ClassInfo Item_ClassInfo = { "Item", NULL };
 
 void Item_Gc(void* _self, CS2SX_GcVisit visit)
 {
@@ -76,7 +82,7 @@ void Item_Gc(void* _self, CS2SX_GcVisit visit)
 static void Item_GcDyn(void* self, CS2SX_GcVisit visit) { ((Item*)self)->_gc(self, visit); }
 const CS2SX_GcKind Item_GcKind = { offsetof(Item, _rc), Item_GcDyn, (CS2SX_FreeFn)Item_Free };
 
-void Item_Dispose(Item* self)
+void Item__Destroy(Item* self)
 {
     CS2SX_LINE(16);
     Counter_Freed++;
@@ -110,8 +116,9 @@ Wrapped* Wrapped_New(int v)
     Wrapped* self = (Wrapped*)calloc(1, sizeof(Wrapped));
     if (!self) return NULL;
     self->_rc = 1;
-    self->_dtor = (void (*)(void*))Wrapped_Dispose;
+    self->_dtor = (void (*)(void*))Wrapped__Destroy;
     self->_gc = Wrapped_Gc;
+    self->_class = &Wrapped_ClassInfo;
     Wrapped_Ctor(self, v);
     CS2SX_ReleaseLater(self, (CS2SX_FreeFn)Wrapped_Free);
     return self;
@@ -124,6 +131,8 @@ int Wrapped_Get(Wrapped* self)
     return self->f_V;
 }
 
+const CS2SX_ClassInfo Wrapped_ClassInfo = { "Wrapped", NULL };
+
 void Wrapped_Gc(void* _self, CS2SX_GcVisit visit)
 {
     Wrapped* self = (Wrapped*)_self; (void)self;
@@ -132,7 +141,7 @@ void Wrapped_Gc(void* _self, CS2SX_GcVisit visit)
 static void Wrapped_GcDyn(void* self, CS2SX_GcVisit visit) { ((Wrapped*)self)->_gc(self, visit); }
 const CS2SX_GcKind Wrapped_GcKind = { offsetof(Wrapped, _rc), Wrapped_GcDyn, (CS2SX_FreeFn)Wrapped_Free };
 
-void Wrapped_Dispose(Wrapped* self)
+void Wrapped__Destroy(Wrapped* self)
 {
     CS2SX_LINE(26);
     Counter_Freed += 100;
@@ -164,6 +173,22 @@ IHas_vtable Wrapped_IHas_vtable_instance =
 int Pair_Equals(Pair a, Pair b)
 {
     return memcmp(&a, &b, sizeof(Pair)) == 0;
+}
+
+void Pair_Keep(Pair* s)
+{
+    if (s->A) Item_Retain((Item*)s->A);
+}
+
+void Pair_Drop(Pair* s)
+{
+    CS2SX_ReleaseLater((void*)s->A, (CS2SX_FreeFn)Item_Free);
+}
+
+void Pair_Gc(Pair* s, CS2SX_GcVisit visit)
+{
+    if (visit) visit((void*)s->A, &Item_GcKind); else if (s->A) { void* _o = (void*)s->A; s->A = NULL; Item_Free((Item*)_o); }
+    (void)s; (void)visit;
 }
 
 void FrameMemoryApp_Init(FrameMemoryApp* self)
@@ -212,7 +237,15 @@ static int _lambda_0(void* _env)
 static void _envdtor_0(void* _e)
 {
     struct _cap_0* _c = (struct _cap_0*)_e;
-    CS2SX_ReleaseLater(_c->cap, (CS2SX_FreeFn)Item_Free);
+    CS2SX_ReleaseLater((void*)_c->cap, (CS2SX_FreeFn)Item_Free);
+}
+
+static void _envgc_0(void* _e, CS2SX_GcVisit visit)
+{
+    struct _cap_0* _c = (struct _cap_0*)_e;
+    if (visit) visit((void*)_c->cap, &Item_GcKind);
+    else if (_c->cap) { void* _o = (void*)_c->cap; _c->cap = NULL; ((CS2SX_FreeFn)Item_Free)(_o); }
+    (void)_c; (void)visit;
 }
 
 void FrameMemoryApp_OnFrame(FrameMemoryApp* self)
@@ -239,16 +272,17 @@ void FrameMemoryApp_OnFrame(FrameMemoryApp* self)
             CS2SX_LINE(76);
             CS2SX_ARC_STORE(Item, CS2SX_AT(self->f_arr, 0), CS2SX_RETAIN(Item, Item_New(14)));
             CS2SX_LINE(77);
-            self->f_pair.A = CS2SX_RETAIN(Item, Item_New(16));
+            CS2SX_ARC_STORE(Item, self->f_pair.A, CS2SX_RETAIN(Item, Item_New(16)));
             CS2SX_LINE(78);
-            self->f_iface = Wrapped_as_IHas(CS2SX_RETAIN(Wrapped, Wrapped_New(17)));
+            CS2SX_RC_STORE(CS2SX_Iface_Retain, CS2SX_Iface_Free, self->f_iface, Wrapped_as_IHas(Wrapped_New(17)));
             CS2SX_LINE(79);
             Item* cap = Item_New(18);
             CS2SX_LINE(80);
             struct _cap_0* _env_0 = CS2SX_ENV_NEW(struct _cap_0);
-            _env_0->cap = CS2SX_RETAIN(Item, cap);
+            _env_0->cap = cap; ((void* (*)(void*))Item_Retain)((void*)_env_0->cap);
             _env_0->_hdr._dtor = _envdtor_0;
-            self->f_fn = CS2SX_Delegate_New((void*)_lambda_0, _env_0, 1);
+            _env_0->_hdr._gc = _envgc_0;
+            CS2SX_RC_STORE(CS2SX_Delegate_Retain, CS2SX_Delegate_Release, self->f_fn, CS2SX_Delegate_New((void*)_lambda_0, _env_0, 1));
             CS2SX_LINE(81);
             CS2SX_ARC_STORE(Item, self->f_field, CS2SX_RETAIN(Item, Item_New(19)));
             CS2SX_LINE(82);
@@ -309,6 +343,9 @@ void FrameMemoryApp_Free(FrameMemoryApp* self)
     for (int _ai = 0; _ai < CS2SX_ArrLen(self->f_arr); _ai++) Item_Free((Item*)self->f_arr[_ai]);
     CS2SX_ArrFree(self->f_arr); self->f_arr = NULL;
     if (self->f_box) { Box_Item_Free(self->f_box); self->f_box = NULL; }
+    Pair_Drop(&self->f_pair);
+    if (self->f_iface) { CS2SX_Iface_Free(self->f_iface); self->f_iface = NULL; }
+    if (self->f_fn) { CS2SX_Delegate_Release(self->f_fn); self->f_fn = NULL; }
     if (self->f_field) { Item_Free(self->f_field); self->f_field = NULL; }
     free(self);
 }

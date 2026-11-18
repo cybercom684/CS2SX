@@ -16,6 +16,10 @@ typedef struct Nullable_Point { Point value; int has; } Nullable_Point;
 Point Point_New(int x, int y);
 int Point_ManhattanLength(Point* self);
 int Point_Equals(Point a, Point b);
+#ifndef CS2SX_LIST_Point_DEFINED
+#define CS2SX_LIST_Point_DEFINED
+CS2SX_LIST_DEFINE_HOOK_EQ(Point, Point, CS2SX_ID, CS2SX_NOREF, Point_Equals)
+#endif
 
 struct Score
 {
@@ -27,6 +31,7 @@ struct Score
 Score* Score_New(const char* Player, int Points);
 void Score_Free(Score* self);
 Score* Score_Retain(Score* self);
+extern const CS2SX_ClassInfo Score_ClassInfo;
 
 struct StructsRecordsEnumsApp
 {

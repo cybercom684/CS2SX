@@ -13,12 +13,15 @@ Counter* Counter_New(void)
     Counter* self = (Counter*)calloc(1, sizeof(Counter));
     if (!self) return NULL;
     self->_rc = 1;
-    self->_dtor = (void (*)(void*))Counter_Dispose;
+    self->_dtor = (void (*)(void*))Counter__Destroy;
     self->_gc = Counter_Gc;
+    self->_class = &Counter_ClassInfo;
     Counter_Ctor(self);
     CS2SX_ReleaseLater(self, (CS2SX_FreeFn)Counter_Free);
     return self;
 }
+
+const CS2SX_ClassInfo Counter_ClassInfo = { "Counter", NULL };
 
 void Counter_Gc(void* _self, CS2SX_GcVisit visit)
 {
@@ -28,7 +31,7 @@ void Counter_Gc(void* _self, CS2SX_GcVisit visit)
 static void Counter_GcDyn(void* self, CS2SX_GcVisit visit) { ((Counter*)self)->_gc(self, visit); }
 const CS2SX_GcKind Counter_GcKind = { offsetof(Counter, _rc), Counter_GcDyn, (CS2SX_FreeFn)Counter_Free };
 
-void Counter_Dispose(Counter* self)
+void Counter__Destroy(Counter* self)
 {
 }
 
@@ -60,12 +63,15 @@ Node* Node_New(int v)
     Node* self = (Node*)calloc(1, sizeof(Node));
     if (!self) return NULL;
     self->_rc = 1;
-    self->_dtor = (void (*)(void*))Node_Dispose;
+    self->_dtor = (void (*)(void*))Node__Destroy;
     self->_gc = Node_Gc;
+    self->_class = &Node_ClassInfo;
     Node_Ctor(self, v);
     CS2SX_ReleaseLater(self, (CS2SX_FreeFn)Node_Free);
     return self;
 }
+
+const CS2SX_ClassInfo Node_ClassInfo = { "Node", NULL };
 
 void Node_Gc(void* _self, CS2SX_GcVisit visit)
 {
@@ -75,7 +81,7 @@ void Node_Gc(void* _self, CS2SX_GcVisit visit)
 static void Node_GcDyn(void* self, CS2SX_GcVisit visit) { ((Node*)self)->_gc(self, visit); }
 const CS2SX_GcKind Node_GcKind = { offsetof(Node, _rc), Node_GcDyn, (CS2SX_FreeFn)Node_Free };
 
-void Node_Dispose(Node* self)
+void Node__Destroy(Node* self)
 {
     CS2SX_LINE(16);
     Counter_Disposed++;
@@ -107,12 +113,15 @@ Shape* Shape_New(void)
     Shape* self = (Shape*)calloc(1, sizeof(Shape));
     if (!self) return NULL;
     self->_rc = 1;
-    self->_dtor = (void (*)(void*))Shape_Dispose;
+    self->_dtor = (void (*)(void*))Shape__Destroy;
     self->_gc = Shape_Gc;
+    self->_class = &Shape_ClassInfo;
     Shape_Ctor(self);
     CS2SX_ReleaseLater(self, (CS2SX_FreeFn)Shape_Free);
     return self;
 }
+
+const CS2SX_ClassInfo Shape_ClassInfo = { "Shape", NULL };
 
 void Shape_Gc(void* _self, CS2SX_GcVisit visit)
 {
@@ -122,7 +131,7 @@ void Shape_Gc(void* _self, CS2SX_GcVisit visit)
 static void Shape_GcDyn(void* self, CS2SX_GcVisit visit) { ((Shape*)self)->_gc(self, visit); }
 const CS2SX_GcKind Shape_GcKind = { offsetof(Shape, _rc), Shape_GcDyn, (CS2SX_FreeFn)Shape_Free };
 
-void Shape_Dispose(Shape* self)
+void Shape__Destroy(Shape* self)
 {
     CS2SX_LINE(21);
     Counter_Disposed += 10;
@@ -156,27 +165,30 @@ Circle* Circle_New(void)
     Circle* self = (Circle*)calloc(1, sizeof(Circle));
     if (!self) return NULL;
     self->base._rc = 1;
-    self->base._dtor = (void (*)(void*))Circle_Dispose;
+    self->base._dtor = (void (*)(void*))Circle__Destroy;
     self->base._gc = Circle_Gc;
+    self->base._class = &Circle_ClassInfo;
     Circle_Ctor(self);
     CS2SX_ReleaseLater(self, (CS2SX_FreeFn)Circle_Free);
     return self;
 }
 
+const CS2SX_ClassInfo Circle_ClassInfo = { "Circle", &Shape_ClassInfo };
+
 void Circle_Gc(void* _self, CS2SX_GcVisit visit)
 {
     Circle* self = (Circle*)_self; (void)self;
-    if (visit) visit(self->f_Center, &Node_GcKind);
-    else if (self->f_Center) { void* _o = self->f_Center; self->f_Center = NULL; ((void (*)(void*))Node_Free)(_o); }
+    if (visit) visit((void*)self->f_Center, &Node_GcKind);
+    else if (self->f_Center) { void* _o = (void*)self->f_Center; self->f_Center = NULL; ((void (*)(void*))Node_Free)(_o); }
     Shape_Gc(_self, visit);
 }
 
-void Circle_Dispose(Circle* self)
+void Circle__Destroy(Circle* self)
 {
     CS2SX_LINE(27);
     Counter_Disposed += 100;
     if (self->f_Center) { Node_Free(self->f_Center); self->f_Center = NULL; }
-    Shape_Dispose((Shape*)self);
+    Shape__Destroy((Shape*)self);
 }
 
 void Circle_Free(Circle* self)
@@ -205,24 +217,27 @@ Holder* Holder_New(void)
     Holder* self = (Holder*)calloc(1, sizeof(Holder));
     if (!self) return NULL;
     self->_rc = 1;
-    self->_dtor = (void (*)(void*))Holder_Dispose;
+    self->_dtor = (void (*)(void*))Holder__Destroy;
     self->_gc = Holder_Gc;
+    self->_class = &Holder_ClassInfo;
     Holder_Ctor(self);
     CS2SX_ReleaseLater(self, (CS2SX_FreeFn)Holder_Free);
     return self;
 }
 
+const CS2SX_ClassInfo Holder_ClassInfo = { "Holder", NULL };
+
 void Holder_Gc(void* _self, CS2SX_GcVisit visit)
 {
     Holder* self = (Holder*)_self; (void)self;
-    if (visit) visit(self->f_Kept, &Node_GcKind);
-    else if (self->f_Kept) { void* _o = self->f_Kept; self->f_Kept = NULL; ((void (*)(void*))Node_Free)(_o); }
+    if (visit) visit((void*)self->f_Kept, &Node_GcKind);
+    else if (self->f_Kept) { void* _o = (void*)self->f_Kept; self->f_Kept = NULL; ((void (*)(void*))Node_Free)(_o); }
 }
 
 static void Holder_GcDyn(void* self, CS2SX_GcVisit visit) { ((Holder*)self)->_gc(self, visit); }
 const CS2SX_GcKind Holder_GcKind = { offsetof(Holder, _rc), Holder_GcDyn, (CS2SX_FreeFn)Holder_Free };
 
-void Holder_Dispose(Holder* self)
+void Holder__Destroy(Holder* self)
 {
     if (self->f_Kept) { Node_Free(self->f_Kept); self->f_Kept = NULL; }
 }
@@ -269,6 +284,7 @@ Pair* Pair_Retain(Pair* self)
 }
 
 const CS2SX_GcKind Pair_GcKind = { offsetof(Pair, _rc), CS2SX_GcLeaf, (CS2SX_FreeFn)Pair_Free };
+const CS2SX_ClassInfo Pair_ClassInfo = { "Pair", NULL };
 
 void RefCountingApp_Init(RefCountingApp* self)
 {

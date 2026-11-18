@@ -8,8 +8,9 @@
 struct Item
 {
     int _rc;
-    void (*_dtor)(void* self);   // _Dispose of the dynamic type
+    void (*_dtor)(void* self);   // __Destroy of the dynamic type
     void (*_gc)(void* self, CS2SX_GcVisit visit);   // _Gc of the dynamic type
+    const CS2SX_ClassInfo* _class;   // run-time type (x is T)
     const char* f_Name;
     int f_Count;
 };
@@ -17,7 +18,8 @@ struct Item
 Item* Item_New(const char* name, int count);
 void Item_Ctor(Item* self, const char* name, int count);
 
-void Item_Dispose(Item* self);
+void Item__Destroy(Item* self);
+extern const CS2SX_ClassInfo Item_ClassInfo;
 void Item_Gc(void* self, CS2SX_GcVisit visit);
 extern const CS2SX_GcKind Item_GcKind;
 void Item_Free(Item* self);
