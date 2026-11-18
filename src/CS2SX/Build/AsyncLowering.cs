@@ -72,6 +72,7 @@ public static class AsyncLowering
         if (!files.Any(f => CSharpSyntaxTree.ParseText(File.ReadAllText(f)).GetRoot().DescendantNodes().Any(Candidate)))
             return files.ToList();
 
+        files = AsyncDesugar.Rewrite(files, outDir);
         var sem = new SemanticModelBuilder(files);
         var edits = files.ToDictionary(f => f, _ => new Edits());
         var taskTypes = new SortedDictionary<string, string>(StringComparer.Ordinal);   // CS2SX_Task_int → int
@@ -199,6 +200,17 @@ public static class AsyncLowering
                 var of = TypeText(called.ReturnType, taskTypes);
                 e.Replace(span.Parent!.SpanStart, span.Parent.Span.Length, of + "." + (called.Name == "FromResult" ? "From" : "Run"));
             }
+            // Task.WhenAll(Task<T>…) → a task of the results (T[]): CS2SX_WhenAll_T
+            else if (called is { Name: "WhenAll", TypeArguments: [var resultType] })
+            {
+                var elem = TypeText(resultType, taskTypes);
+                TypeText(called.ReturnType, taskTypes);                               // CS2SX_Task_TArr
+                TypeText(called.Parameters[0].Type is IArrayTypeSymbol at ? at.ElementType
+                         : ((INamedTypeSymbol)called.Parameters[0].Type).TypeArguments[0], taskTypes);   // CS2SX_Task_T
+                taskTypes["\u0001WhenAll_" + Suffix(elem)] = elem;
+                e.Replace(span.Parent!.SpanStart, span.Parent.Span.Length,
+                    "CS2SX_WhenAll_" + Suffix(elem) + (called.Parameters[0].IsParams ? ".Of" : ".OfList"));
+            }
             // Task.WhenAll(list) — not the params form
             else if (called is { Name: "WhenAll", Parameters: [{ IsParams: false }] })
                 e.Replace(span.Parent!.SpanStart, span.Parent.Span.Length, "CS2SX_Task.WhenAllList");
@@ -229,7 +241,7 @@ public static class AsyncLowering
             {
                 case AnonymousFunctionExpressionSyntax { AsyncKeyword.RawKind: not 0 }:
                 case LocalFunctionStatementSyntax lf when lf.Modifiers.Any(SyntaxKind.AsyncKeyword):
-                    yield return (node, "async-Lambdas und lokale async-Funktionen werden nicht unterstützt — eine async-Methode der Klasse verwenden.");
+                    yield return (node, "Dieses async-Lambda wird nicht unterstützt (in einem anderen Lambda, in einer generischen Klasse oder Methode, mit ref-Parametern oder in einem Feldinitialisierer) — eine async-Methode der Klasse verwenden.");
                     break;
                 case MethodDeclarationSyntax m when m.Modifiers.Any(SyntaxKind.AsyncKeyword) && (m.Body != null || m.ExpressionBody != null):
                     foreach (var p in MethodProblems(m, model)) yield return p;
@@ -251,7 +263,7 @@ public static class AsyncLowering
 
     private static bool IsWhenAll(ExpressionSyntax operand, SemanticModel model) =>
         operand is InvocationExpressionSyntax inv
-        && model.GetSymbolInfo(inv).Symbol is IMethodSymbol { Name: "WhenAll" } ms && IsTaskLike(ms.ContainingType);
+        && model.GetSymbolInfo(inv).Symbol is IMethodSymbol { Name: "WhenAll", TypeArguments.Length: 0 } ms && IsTaskLike(ms.ContainingType);
 
     private static bool IsListOrArray(ITypeSymbol? t) =>
         t is IArrayTypeSymbol { Rank: 1 }
@@ -305,10 +317,10 @@ public static class AsyncLowering
                 if (why != null) break;
                 why = up switch
                 {
-                    CatchClauseSyntax or FinallyClauseSyntax => "await in catch/finally wird nicht unterstützt (im try-Block geht es) — das Ergebnis in einer Variable merken und das await hinter den try-Block ziehen.",
-                    UsingStatementSyntax or LockStatementSyntax => "await in using/lock wird nicht unterstützt.",
-                    DoStatementSyntax d when d.Condition == child => "await in der Bedingung von do-while wird nicht unterstützt — am Ende des Rumpfs in eine Variable schreiben.",
-                    ForStatementSyntax f when f.Statement != child => "await im Kopf einer for-Schleife wird nicht unterstützt.",
+                    CatchClauseSyntax or FinallyClauseSyntax => "await in catch/finally geht nicht, wenn try oder catch mit return, break oder continue verlassen werden oder ein catch einen Filter (when) hat — das Ergebnis in einer Variable merken und das await hinter den try-Block ziehen.",
+                    UsingStatementSyntax => "await in using geht nur mit einem Block als Rumpf: using (…) { … }.",
+                    DoStatementSyntax d when d.Condition == child => "await in der Bedingung von do-while geht nicht zusammen mit continue im Rumpf — while verwenden.",
+                    ForStatementSyntax f when f.Statement != child => "await im Kopf einer for-Schleife geht nicht zusammen mit continue im Rumpf — while verwenden.",
                     BinaryExpressionSyntax b when b.Right == child && (b.IsKind(SyntaxKind.LogicalAndExpression)
                         || b.IsKind(SyntaxKind.LogicalOrExpression) || b.IsKind(SyntaxKind.CoalesceExpression))
                         => "await rechts von &&, || oder ?? wird nicht unterstützt — das Ergebnis vorher in eine Variable schreiben.",
@@ -728,6 +740,52 @@ public sealed class CS2SX_WhenAll : CS2SX_Step
 ");
         foreach (var (name, type) in taskTypes)
         {
+            // Task.WhenAll(Task<T>…): waits for all, then the array of their results.
+            if (name.StartsWith("\u0001WhenAll_"))
+            {
+                var cls = "CS2SX_WhenAll_" + Suffix(type);
+                var task = "CS2SX_Task_" + Suffix(type);
+                var arrTask = "CS2SX_Task_" + Suffix(type + "[]");
+                sb.Append($@"public sealed class {cls} : CS2SX_Step
+{{
+    public List<{task}> Tasks = new List<{task}>();
+    public {arrTask} Done = new {arrTask}();
+    public int Next;
+    public static {arrTask} Of(params {task}[] tasks)
+    {{
+        var all = new {cls}();
+        for (int i = 0; i < tasks.Length; i++) all.Tasks.Add(tasks[i]);
+        all.cs2sx_resume();
+        return all.Done;
+    }}
+    public static {arrTask} OfList(List<{task}> tasks)
+    {{
+        var all = new {cls}();
+        for (int i = 0; i < tasks.Count; i++) all.Tasks.Add(tasks[i]);
+        all.cs2sx_resume();
+        return all.Done;
+    }}
+    public override void cs2sx_resume()
+    {{
+        while (Next < Tasks.Count)
+        {{
+            var t = Tasks[Next];
+            if (!t.IsCompleted) {{ t.Then(this); return; }}
+            Next++;
+        }}
+        for (int i = 0; i < Tasks.Count; i++)
+        {{
+            var failed = Tasks[i].Fault;
+            if (failed != null) {{ Tasks[i].Observed = true; Done.Fail(failed); return; }}
+        }}
+        {type}[] results = new {type}[Tasks.Count];
+        for (int i = 0; i < Tasks.Count; i++) results[i] = Tasks[i].Value;
+        Done.SetResult(results);
+    }}
+}}
+");
+                continue;
+            }
             sb.Append($@"public class {name} : CS2SX_Task
 {{
     public {type} Value;

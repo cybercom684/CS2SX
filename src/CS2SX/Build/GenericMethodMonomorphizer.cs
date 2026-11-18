@@ -254,7 +254,7 @@ public static class GenericMethodMonomorphizer
     /// methods have no body.
     private static bool IsSupported(MethodDeclarationSyntax m) =>
         m.Parent is ClassDeclarationSyntax   // (also generic classes: the class is expanded later)
-                 or StructDeclarationSyntax { TypeParameterList: null }
+                 or StructDeclarationSyntax   // (generic structs too: specialised later, see GenericStructMonomorphizer)
                  or InterfaceDeclarationSyntax { TypeParameterList: null }
         && (m.Body != null || m.ExpressionBody != null
             || m.Parent is InterfaceDeclarationSyntax

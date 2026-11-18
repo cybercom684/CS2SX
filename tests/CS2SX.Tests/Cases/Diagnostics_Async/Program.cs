@@ -12,17 +12,17 @@ public class Diagnostics_AsyncApp : SwitchApp
     private async Task InTry()
     {
         try { Console.WriteLine("x"); }
-        catch (Exception) { await Task.Delay(1); }
+        catch (Exception e) when (e.Message != "") { await Task.Delay(1); }
     }
 
     private async Task InCondition()
     {
-        do { } while (await Ready());
+        do { if (DateTime.Now.Second > 99) continue; } while (await Ready());
     }
 
     private async Task ShortCircuit(bool on)
     {
-        if (on && await Ready()) Console.WriteLine("x");
+        Console.WriteLine(on && await Ready());
     }
 
     private async Task OutVar(string s)
@@ -39,6 +39,6 @@ public class Diagnostics_AsyncApp : SwitchApp
 
     public override void OnInit()
     {
-        Func<Task> later = async () => { await Task.Delay(1); };
+        Action outer = () => { Func<Task> inner = async () => { await Task.Delay(1); }; };
     }
 }

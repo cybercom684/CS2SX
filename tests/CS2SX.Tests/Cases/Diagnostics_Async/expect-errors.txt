@@ -1,7 +1,7 @@
 # One substring per line: an error CS2SX must report for Program.cs.
-Program.cs(15): await in catch/finally wird nicht unterstützt
-Program.cs(20): await in der Bedingung von do-while wird nicht unterstützt
+Program.cs(15): await in catch/finally geht nicht
+Program.cs(20): await in der Bedingung von do-while geht nicht zusammen mit continue
 Program.cs(25): await rechts von &&, || oder ?? wird nicht unterstützt
 Program.cs(30): Die Variable n (out var, Muster oder Zerlegung) behält ihren Wert nicht über ein await
 Program.cs(37): foreach mit await im Rumpf geht nur über eine List<T> oder ein Array
-Program.cs(42): async-Lambdas und lokale async-Funktionen werden nicht unterstützt
+Program.cs(42): Dieses async-Lambda wird nicht unterstützt

@@ -1,0 +1,10 @@
+caught a5 finally
+outer b
+dispose r1
+loops 308 0
+and
+name 7
+all 3 6
+lambda 15
+later True
+done
