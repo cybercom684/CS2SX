@@ -145,7 +145,8 @@ public static class AsyncDesugar
             }
             if (!ok) continue;
 
-            var name = "__AsyncLambda" + (++count) + "_" + Math.Abs(lambda.SpanStart);
+            // (Named after the line: a character offset differs between LF and CRLF files.)
+            var name = "__AsyncLambda" + (++count) + "_L" + (lambda.GetLocation().GetLineSpan().StartLinePosition.Line + 1);
             var ret = invoke.ReturnsVoid ? "void" : invoke.ReturnType.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat);
             var ps = invoke.Parameters.Select((p, i) => Display(p.Type) + " " + names[i])
                 .Concat(captured.Select(c => Display(c.type) + " " + c.name));

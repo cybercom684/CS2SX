@@ -1157,11 +1157,11 @@ void AsyncMoreApp_OnFrame(AsyncMoreApp* self)
     }
 }
 
-CS2SX_Task_int* AsyncMoreApp___AsyncLambda1_3269(AsyncMoreApp* self, int x, int bonus)
+CS2SX_Task_int* AsyncMoreApp___AsyncLambda1_L111(AsyncMoreApp* self, int x, int bonus)
 {
-    CS2SX_TRACE("AsyncMoreApp.__AsyncLambda1_3269", "Program.cs");
+    CS2SX_TRACE("AsyncMoreApp.__AsyncLambda1_L111", "Program.cs");
     CS2SX_LINE(127);
-    __AsyncLambda1_3269_Async* cs2sx_sm = __AsyncLambda1_3269_Async_New();
+    __AsyncLambda1_L111_Async* cs2sx_sm = __AsyncLambda1_L111_Async_New();
     CS2SX_LINE(127);
     cs2sx_sm->f_cs2sx_this = self;
     CS2SX_LINE(127);
@@ -1176,11 +1176,11 @@ CS2SX_Task_int* AsyncMoreApp___AsyncLambda1_3269(AsyncMoreApp* self, int x, int 
     return cs2sx_sm->f_cs2sx_task;
 }
 
-CS2SX_Task* AsyncMoreApp___AsyncLambda2_3418(AsyncMoreApp* self)
+CS2SX_Task* AsyncMoreApp___AsyncLambda2_L114(AsyncMoreApp* self)
 {
-    CS2SX_TRACE("AsyncMoreApp.__AsyncLambda2_3418", "Program.cs");
+    CS2SX_TRACE("AsyncMoreApp.__AsyncLambda2_L114", "Program.cs");
     CS2SX_LINE(127);
-    __AsyncLambda2_3418_Async* cs2sx_sm = __AsyncLambda2_3418_Async_New();
+    __AsyncLambda2_L114_Async* cs2sx_sm = __AsyncLambda2_L114_Async_New();
     CS2SX_LINE(127);
     cs2sx_sm->f_cs2sx_this = self;
     CS2SX_LINE(127);
@@ -1191,11 +1191,11 @@ CS2SX_Task* AsyncMoreApp___AsyncLambda2_3418(AsyncMoreApp* self)
     return cs2sx_sm->f_cs2sx_task;
 }
 
-void AsyncMoreApp___AsyncLambda3_3601(AsyncMoreApp* self)
+void AsyncMoreApp___AsyncLambda3_L116(AsyncMoreApp* self)
 {
-    CS2SX_TRACE("AsyncMoreApp.__AsyncLambda3_3601", "Program.cs");
+    CS2SX_TRACE("AsyncMoreApp.__AsyncLambda3_L116", "Program.cs");
     CS2SX_LINE(127);
-    __AsyncLambda3_3601_Async* cs2sx_sm = __AsyncLambda3_3601_Async_New();
+    __AsyncLambda3_L116_Async* cs2sx_sm = __AsyncLambda3_L116_Async_New();
     CS2SX_LINE(127);
     cs2sx_sm->f_cs2sx_this = self;
     CS2SX_LINE(127);
@@ -2310,7 +2310,7 @@ static CS2SX_Task_int* _lambda_0(void* _env, int x)
     CS2SX_TRACE("Script_Async.<lambda>", "Program.cs");
     struct _cap_0* _c = (struct _cap_0*)_env;
     Script_Async* self = _c->self;
-    return AsyncMoreApp___AsyncLambda1_3269(CS2SX_NN(self->f_cs2sx_this), x, self->f_bonus);
+    return AsyncMoreApp___AsyncLambda1_L111(CS2SX_NN(self->f_cs2sx_this), x, self->f_bonus);
 }
 
 static void _envdtor_0(void* _e)
@@ -2338,7 +2338,7 @@ static CS2SX_Task* _lambda_1(void* _env)
     CS2SX_TRACE("Script_Async.<lambda>", "Program.cs");
     struct _cap_1* _c = (struct _cap_1*)_env;
     Script_Async* self = _c->self;
-    return AsyncMoreApp___AsyncLambda2_3418(CS2SX_NN(self->f_cs2sx_this));
+    return AsyncMoreApp___AsyncLambda2_L114(CS2SX_NN(self->f_cs2sx_this));
 }
 
 static void _envdtor_1(void* _e)
@@ -2366,7 +2366,7 @@ static void _lambda_2(void* _env)
     CS2SX_TRACE("Script_Async.<lambda>", "Program.cs");
     struct _cap_2* _c = (struct _cap_2*)_env;
     Script_Async* self = _c->self;
-    AsyncMoreApp___AsyncLambda3_3601(CS2SX_NN(self->f_cs2sx_this));
+    AsyncMoreApp___AsyncLambda3_L116(CS2SX_NN(self->f_cs2sx_this));
 }
 
 static void _envdtor_2(void* _e)
@@ -2662,31 +2662,31 @@ static CS2SX_Step_vtable Script_Async_vtable_instance =
     .cs2sx_resume = (void(*)(void*))Script_Async_cs2sx_resume,
 };
 
-static CS2SX_Step_vtable __AsyncLambda1_3269_Async_vtable_instance;
+static CS2SX_Step_vtable __AsyncLambda1_L111_Async_vtable_instance;
 
-void __AsyncLambda1_3269_Async_Ctor(__AsyncLambda1_3269_Async* self)
+void __AsyncLambda1_L111_Async_Ctor(__AsyncLambda1_L111_Async* self)
 {
-    CS2SX_TRACE("__AsyncLambda1_3269_Async..ctor", "Program.cs");
+    CS2SX_TRACE("__AsyncLambda1_L111_Async..ctor", "Program.cs");
     CS2SX_Step_Ctor((CS2SX_Step*)self);
 }
 
-__AsyncLambda1_3269_Async* __AsyncLambda1_3269_Async_New(void)
+__AsyncLambda1_L111_Async* __AsyncLambda1_L111_Async_New(void)
 {
-    __AsyncLambda1_3269_Async* self = (__AsyncLambda1_3269_Async*)calloc(1, sizeof(__AsyncLambda1_3269_Async));
+    __AsyncLambda1_L111_Async* self = (__AsyncLambda1_L111_Async*)calloc(1, sizeof(__AsyncLambda1_L111_Async));
     if (!self) return NULL;
     self->base._rc = 1;
-    self->base._dtor = (void (*)(void*))__AsyncLambda1_3269_Async__Destroy;
-    self->base._gc = __AsyncLambda1_3269_Async_Gc;
-    self->base._class = &__AsyncLambda1_3269_Async_ClassInfo;
-    self->base.vtable = &__AsyncLambda1_3269_Async_vtable_instance;
-    __AsyncLambda1_3269_Async_Ctor(self);
-    CS2SX_ReleaseLater(self, (CS2SX_FreeFn)__AsyncLambda1_3269_Async_Free);
+    self->base._dtor = (void (*)(void*))__AsyncLambda1_L111_Async__Destroy;
+    self->base._gc = __AsyncLambda1_L111_Async_Gc;
+    self->base._class = &__AsyncLambda1_L111_Async_ClassInfo;
+    self->base.vtable = &__AsyncLambda1_L111_Async_vtable_instance;
+    __AsyncLambda1_L111_Async_Ctor(self);
+    CS2SX_ReleaseLater(self, (CS2SX_FreeFn)__AsyncLambda1_L111_Async_Free);
     return self;
 }
 
-void __AsyncLambda1_3269_Async_cs2sx_resume(__AsyncLambda1_3269_Async* self)
+void __AsyncLambda1_L111_Async_cs2sx_resume(__AsyncLambda1_L111_Async* self)
 {
-    CS2SX_TRACE("__AsyncLambda1_3269_Async.cs2sx_resume", "Program.cs");
+    CS2SX_TRACE("__AsyncLambda1_L111_Async.cs2sx_resume", "Program.cs");
     CS2SX_LINE(127);
     {
         CS2SX_ExFrame _exf_0;
@@ -2694,7 +2694,7 @@ void __AsyncLambda1_3269_Async_cs2sx_resume(__AsyncLambda1_3269_Async* self)
         if (setjmp(_exf_0.buf) == 0)
         {
             CS2SX_LINE(127);
-            __AsyncLambda1_3269_Async_cs2sx_run(self);
+            __AsyncLambda1_L111_Async_cs2sx_run(self);
             CS2SX_ExPop(&_exf_0);
         }
         else
@@ -2710,9 +2710,9 @@ void __AsyncLambda1_3269_Async_cs2sx_resume(__AsyncLambda1_3269_Async* self)
     }
 }
 
-void __AsyncLambda1_3269_Async_cs2sx_run(__AsyncLambda1_3269_Async* self)
+void __AsyncLambda1_L111_Async_cs2sx_run(__AsyncLambda1_L111_Async* self)
 {
-    CS2SX_TRACE("__AsyncLambda1_3269_Async.cs2sx_run", "Program.cs");
+    CS2SX_TRACE("__AsyncLambda1_L111_Async.cs2sx_run", "Program.cs");
     CS2SX_LINE(127);
     switch (self->f_cs2sx_state) { case 1: goto _cs2sx_r1_0; default: break; };
     {
@@ -2739,11 +2739,11 @@ void __AsyncLambda1_3269_Async_cs2sx_run(__AsyncLambda1_3269_Async* self)
     CS2SX_Task_Finish((CS2SX_Task*)CS2SX_NN(self->f_cs2sx_task));
 }
 
-const CS2SX_ClassInfo __AsyncLambda1_3269_Async_ClassInfo = { "__AsyncLambda1_3269_Async", &CS2SX_Step_ClassInfo };
+const CS2SX_ClassInfo __AsyncLambda1_L111_Async_ClassInfo = { "__AsyncLambda1_L111_Async", &CS2SX_Step_ClassInfo };
 
-void __AsyncLambda1_3269_Async_Gc(void* _self, CS2SX_GcVisit visit)
+void __AsyncLambda1_L111_Async_Gc(void* _self, CS2SX_GcVisit visit)
 {
-    __AsyncLambda1_3269_Async* self = (__AsyncLambda1_3269_Async*)_self; (void)self;
+    __AsyncLambda1_L111_Async* self = (__AsyncLambda1_L111_Async*)_self; (void)self;
     if (visit) visit((void*)self->f_cs2sx_task, &CS2SX_Task_GcKind);
     else if (self->f_cs2sx_task) { void* _o = (void*)self->f_cs2sx_task; self->f_cs2sx_task = NULL; ((void (*)(void*))CS2SX_Task_Free)(_o); }
     if (visit) visit((void*)self->f_cs2sx_a1, &CS2SX_Task_GcKind);
@@ -2751,14 +2751,14 @@ void __AsyncLambda1_3269_Async_Gc(void* _self, CS2SX_GcVisit visit)
     CS2SX_Step_Gc(_self, visit);
 }
 
-void __AsyncLambda1_3269_Async__Destroy(__AsyncLambda1_3269_Async* self)
+void __AsyncLambda1_L111_Async__Destroy(__AsyncLambda1_L111_Async* self)
 {
     if (self->f_cs2sx_task) { CS2SX_Task_int_Free(self->f_cs2sx_task); self->f_cs2sx_task = NULL; }
     if (self->f_cs2sx_a1) { CS2SX_Task_Free(self->f_cs2sx_a1); self->f_cs2sx_a1 = NULL; }
     CS2SX_Step__Destroy((CS2SX_Step*)self);
 }
 
-void __AsyncLambda1_3269_Async_Free(__AsyncLambda1_3269_Async* self)
+void __AsyncLambda1_L111_Async_Free(__AsyncLambda1_L111_Async* self)
 {
     if (!self) return;
     CS2SX_Step* _o = (CS2SX_Step*)self;
@@ -2768,42 +2768,42 @@ void __AsyncLambda1_3269_Async_Free(__AsyncLambda1_3269_Async* self)
     free(_o);
 }
 
-__AsyncLambda1_3269_Async* __AsyncLambda1_3269_Async_Retain(__AsyncLambda1_3269_Async* self)
+__AsyncLambda1_L111_Async* __AsyncLambda1_L111_Async_Retain(__AsyncLambda1_L111_Async* self)
 {
     if (self) ((CS2SX_Step*)self)->_rc++;
     return self;
 }
 
-static CS2SX_Step_vtable __AsyncLambda1_3269_Async_vtable_instance =
+static CS2SX_Step_vtable __AsyncLambda1_L111_Async_vtable_instance =
 {
-    .cs2sx_resume = (void(*)(void*))__AsyncLambda1_3269_Async_cs2sx_resume,
+    .cs2sx_resume = (void(*)(void*))__AsyncLambda1_L111_Async_cs2sx_resume,
 };
 
-static CS2SX_Step_vtable __AsyncLambda2_3418_Async_vtable_instance;
+static CS2SX_Step_vtable __AsyncLambda2_L114_Async_vtable_instance;
 
-void __AsyncLambda2_3418_Async_Ctor(__AsyncLambda2_3418_Async* self)
+void __AsyncLambda2_L114_Async_Ctor(__AsyncLambda2_L114_Async* self)
 {
-    CS2SX_TRACE("__AsyncLambda2_3418_Async..ctor", "Program.cs");
+    CS2SX_TRACE("__AsyncLambda2_L114_Async..ctor", "Program.cs");
     CS2SX_Step_Ctor((CS2SX_Step*)self);
 }
 
-__AsyncLambda2_3418_Async* __AsyncLambda2_3418_Async_New(void)
+__AsyncLambda2_L114_Async* __AsyncLambda2_L114_Async_New(void)
 {
-    __AsyncLambda2_3418_Async* self = (__AsyncLambda2_3418_Async*)calloc(1, sizeof(__AsyncLambda2_3418_Async));
+    __AsyncLambda2_L114_Async* self = (__AsyncLambda2_L114_Async*)calloc(1, sizeof(__AsyncLambda2_L114_Async));
     if (!self) return NULL;
     self->base._rc = 1;
-    self->base._dtor = (void (*)(void*))__AsyncLambda2_3418_Async__Destroy;
-    self->base._gc = __AsyncLambda2_3418_Async_Gc;
-    self->base._class = &__AsyncLambda2_3418_Async_ClassInfo;
-    self->base.vtable = &__AsyncLambda2_3418_Async_vtable_instance;
-    __AsyncLambda2_3418_Async_Ctor(self);
-    CS2SX_ReleaseLater(self, (CS2SX_FreeFn)__AsyncLambda2_3418_Async_Free);
+    self->base._dtor = (void (*)(void*))__AsyncLambda2_L114_Async__Destroy;
+    self->base._gc = __AsyncLambda2_L114_Async_Gc;
+    self->base._class = &__AsyncLambda2_L114_Async_ClassInfo;
+    self->base.vtable = &__AsyncLambda2_L114_Async_vtable_instance;
+    __AsyncLambda2_L114_Async_Ctor(self);
+    CS2SX_ReleaseLater(self, (CS2SX_FreeFn)__AsyncLambda2_L114_Async_Free);
     return self;
 }
 
-void __AsyncLambda2_3418_Async_cs2sx_resume(__AsyncLambda2_3418_Async* self)
+void __AsyncLambda2_L114_Async_cs2sx_resume(__AsyncLambda2_L114_Async* self)
 {
-    CS2SX_TRACE("__AsyncLambda2_3418_Async.cs2sx_resume", "Program.cs");
+    CS2SX_TRACE("__AsyncLambda2_L114_Async.cs2sx_resume", "Program.cs");
     CS2SX_LINE(127);
     {
         CS2SX_ExFrame _exf_0;
@@ -2811,7 +2811,7 @@ void __AsyncLambda2_3418_Async_cs2sx_resume(__AsyncLambda2_3418_Async* self)
         if (setjmp(_exf_0.buf) == 0)
         {
             CS2SX_LINE(127);
-            __AsyncLambda2_3418_Async_cs2sx_run(self);
+            __AsyncLambda2_L114_Async_cs2sx_run(self);
             CS2SX_ExPop(&_exf_0);
         }
         else
@@ -2827,9 +2827,9 @@ void __AsyncLambda2_3418_Async_cs2sx_resume(__AsyncLambda2_3418_Async* self)
     }
 }
 
-void __AsyncLambda2_3418_Async_cs2sx_run(__AsyncLambda2_3418_Async* self)
+void __AsyncLambda2_L114_Async_cs2sx_run(__AsyncLambda2_L114_Async* self)
 {
-    CS2SX_TRACE("__AsyncLambda2_3418_Async.cs2sx_run", "Program.cs");
+    CS2SX_TRACE("__AsyncLambda2_L114_Async.cs2sx_run", "Program.cs");
     CS2SX_LINE(127);
     switch (self->f_cs2sx_state) { case 1: goto _cs2sx_r1_0; default: break; };
     {
@@ -2855,11 +2855,11 @@ void __AsyncLambda2_3418_Async_cs2sx_run(__AsyncLambda2_3418_Async* self)
     CS2SX_Task_Finish(CS2SX_NN(self->f_cs2sx_task));
 }
 
-const CS2SX_ClassInfo __AsyncLambda2_3418_Async_ClassInfo = { "__AsyncLambda2_3418_Async", &CS2SX_Step_ClassInfo };
+const CS2SX_ClassInfo __AsyncLambda2_L114_Async_ClassInfo = { "__AsyncLambda2_L114_Async", &CS2SX_Step_ClassInfo };
 
-void __AsyncLambda2_3418_Async_Gc(void* _self, CS2SX_GcVisit visit)
+void __AsyncLambda2_L114_Async_Gc(void* _self, CS2SX_GcVisit visit)
 {
-    __AsyncLambda2_3418_Async* self = (__AsyncLambda2_3418_Async*)_self; (void)self;
+    __AsyncLambda2_L114_Async* self = (__AsyncLambda2_L114_Async*)_self; (void)self;
     if (visit) visit((void*)self->f_cs2sx_task, &CS2SX_Task_GcKind);
     else if (self->f_cs2sx_task) { void* _o = (void*)self->f_cs2sx_task; self->f_cs2sx_task = NULL; ((void (*)(void*))CS2SX_Task_Free)(_o); }
     if (visit) visit((void*)self->f_cs2sx_a1, &CS2SX_Task_GcKind);
@@ -2867,14 +2867,14 @@ void __AsyncLambda2_3418_Async_Gc(void* _self, CS2SX_GcVisit visit)
     CS2SX_Step_Gc(_self, visit);
 }
 
-void __AsyncLambda2_3418_Async__Destroy(__AsyncLambda2_3418_Async* self)
+void __AsyncLambda2_L114_Async__Destroy(__AsyncLambda2_L114_Async* self)
 {
     if (self->f_cs2sx_task) { CS2SX_Task_Free(self->f_cs2sx_task); self->f_cs2sx_task = NULL; }
     if (self->f_cs2sx_a1) { CS2SX_Task_Free(self->f_cs2sx_a1); self->f_cs2sx_a1 = NULL; }
     CS2SX_Step__Destroy((CS2SX_Step*)self);
 }
 
-void __AsyncLambda2_3418_Async_Free(__AsyncLambda2_3418_Async* self)
+void __AsyncLambda2_L114_Async_Free(__AsyncLambda2_L114_Async* self)
 {
     if (!self) return;
     CS2SX_Step* _o = (CS2SX_Step*)self;
@@ -2884,49 +2884,49 @@ void __AsyncLambda2_3418_Async_Free(__AsyncLambda2_3418_Async* self)
     free(_o);
 }
 
-__AsyncLambda2_3418_Async* __AsyncLambda2_3418_Async_Retain(__AsyncLambda2_3418_Async* self)
+__AsyncLambda2_L114_Async* __AsyncLambda2_L114_Async_Retain(__AsyncLambda2_L114_Async* self)
 {
     if (self) ((CS2SX_Step*)self)->_rc++;
     return self;
 }
 
-static CS2SX_Step_vtable __AsyncLambda2_3418_Async_vtable_instance =
+static CS2SX_Step_vtable __AsyncLambda2_L114_Async_vtable_instance =
 {
-    .cs2sx_resume = (void(*)(void*))__AsyncLambda2_3418_Async_cs2sx_resume,
+    .cs2sx_resume = (void(*)(void*))__AsyncLambda2_L114_Async_cs2sx_resume,
 };
 
-static CS2SX_Step_vtable __AsyncLambda3_3601_Async_vtable_instance;
+static CS2SX_Step_vtable __AsyncLambda3_L116_Async_vtable_instance;
 
-void __AsyncLambda3_3601_Async_Ctor(__AsyncLambda3_3601_Async* self)
+void __AsyncLambda3_L116_Async_Ctor(__AsyncLambda3_L116_Async* self)
 {
-    CS2SX_TRACE("__AsyncLambda3_3601_Async..ctor", "Program.cs");
+    CS2SX_TRACE("__AsyncLambda3_L116_Async..ctor", "Program.cs");
     CS2SX_Step_Ctor((CS2SX_Step*)self);
 }
 
-__AsyncLambda3_3601_Async* __AsyncLambda3_3601_Async_New(void)
+__AsyncLambda3_L116_Async* __AsyncLambda3_L116_Async_New(void)
 {
-    __AsyncLambda3_3601_Async* self = (__AsyncLambda3_3601_Async*)calloc(1, sizeof(__AsyncLambda3_3601_Async));
+    __AsyncLambda3_L116_Async* self = (__AsyncLambda3_L116_Async*)calloc(1, sizeof(__AsyncLambda3_L116_Async));
     if (!self) return NULL;
     self->base._rc = 1;
-    self->base._dtor = (void (*)(void*))__AsyncLambda3_3601_Async__Destroy;
-    self->base._gc = __AsyncLambda3_3601_Async_Gc;
-    self->base._class = &__AsyncLambda3_3601_Async_ClassInfo;
-    self->base.vtable = &__AsyncLambda3_3601_Async_vtable_instance;
-    __AsyncLambda3_3601_Async_Ctor(self);
-    CS2SX_ReleaseLater(self, (CS2SX_FreeFn)__AsyncLambda3_3601_Async_Free);
+    self->base._dtor = (void (*)(void*))__AsyncLambda3_L116_Async__Destroy;
+    self->base._gc = __AsyncLambda3_L116_Async_Gc;
+    self->base._class = &__AsyncLambda3_L116_Async_ClassInfo;
+    self->base.vtable = &__AsyncLambda3_L116_Async_vtable_instance;
+    __AsyncLambda3_L116_Async_Ctor(self);
+    CS2SX_ReleaseLater(self, (CS2SX_FreeFn)__AsyncLambda3_L116_Async_Free);
     return self;
 }
 
-void __AsyncLambda3_3601_Async_cs2sx_resume(__AsyncLambda3_3601_Async* self)
+void __AsyncLambda3_L116_Async_cs2sx_resume(__AsyncLambda3_L116_Async* self)
 {
-    CS2SX_TRACE("__AsyncLambda3_3601_Async.cs2sx_resume", "Program.cs");
+    CS2SX_TRACE("__AsyncLambda3_L116_Async.cs2sx_resume", "Program.cs");
     CS2SX_LINE(127);
-    __AsyncLambda3_3601_Async_cs2sx_run(self);
+    __AsyncLambda3_L116_Async_cs2sx_run(self);
 }
 
-void __AsyncLambda3_3601_Async_cs2sx_run(__AsyncLambda3_3601_Async* self)
+void __AsyncLambda3_L116_Async_cs2sx_run(__AsyncLambda3_L116_Async* self)
 {
-    CS2SX_TRACE("__AsyncLambda3_3601_Async.cs2sx_run", "Program.cs");
+    CS2SX_TRACE("__AsyncLambda3_L116_Async.cs2sx_run", "Program.cs");
     CS2SX_LINE(127);
     switch (self->f_cs2sx_state) { case 1: goto _cs2sx_r1_0; default: break; };
     {
@@ -2949,11 +2949,11 @@ void __AsyncLambda3_3601_Async_cs2sx_run(__AsyncLambda3_3601_Async* self)
     CS2SX_Task_Finish(CS2SX_NN(self->f_cs2sx_task));
 }
 
-const CS2SX_ClassInfo __AsyncLambda3_3601_Async_ClassInfo = { "__AsyncLambda3_3601_Async", &CS2SX_Step_ClassInfo };
+const CS2SX_ClassInfo __AsyncLambda3_L116_Async_ClassInfo = { "__AsyncLambda3_L116_Async", &CS2SX_Step_ClassInfo };
 
-void __AsyncLambda3_3601_Async_Gc(void* _self, CS2SX_GcVisit visit)
+void __AsyncLambda3_L116_Async_Gc(void* _self, CS2SX_GcVisit visit)
 {
-    __AsyncLambda3_3601_Async* self = (__AsyncLambda3_3601_Async*)_self; (void)self;
+    __AsyncLambda3_L116_Async* self = (__AsyncLambda3_L116_Async*)_self; (void)self;
     if (visit) visit((void*)self->f_cs2sx_task, &CS2SX_Task_GcKind);
     else if (self->f_cs2sx_task) { void* _o = (void*)self->f_cs2sx_task; self->f_cs2sx_task = NULL; ((void (*)(void*))CS2SX_Task_Free)(_o); }
     if (visit) visit((void*)self->f_cs2sx_a1, &CS2SX_Task_GcKind);
@@ -2961,14 +2961,14 @@ void __AsyncLambda3_3601_Async_Gc(void* _self, CS2SX_GcVisit visit)
     CS2SX_Step_Gc(_self, visit);
 }
 
-void __AsyncLambda3_3601_Async__Destroy(__AsyncLambda3_3601_Async* self)
+void __AsyncLambda3_L116_Async__Destroy(__AsyncLambda3_L116_Async* self)
 {
     if (self->f_cs2sx_task) { CS2SX_Task_Free(self->f_cs2sx_task); self->f_cs2sx_task = NULL; }
     if (self->f_cs2sx_a1) { CS2SX_Task_Free(self->f_cs2sx_a1); self->f_cs2sx_a1 = NULL; }
     CS2SX_Step__Destroy((CS2SX_Step*)self);
 }
 
-void __AsyncLambda3_3601_Async_Free(__AsyncLambda3_3601_Async* self)
+void __AsyncLambda3_L116_Async_Free(__AsyncLambda3_L116_Async* self)
 {
     if (!self) return;
     CS2SX_Step* _o = (CS2SX_Step*)self;
@@ -2978,13 +2978,13 @@ void __AsyncLambda3_3601_Async_Free(__AsyncLambda3_3601_Async* self)
     free(_o);
 }
 
-__AsyncLambda3_3601_Async* __AsyncLambda3_3601_Async_Retain(__AsyncLambda3_3601_Async* self)
+__AsyncLambda3_L116_Async* __AsyncLambda3_L116_Async_Retain(__AsyncLambda3_L116_Async* self)
 {
     if (self) ((CS2SX_Step*)self)->_rc++;
     return self;
 }
 
-static CS2SX_Step_vtable __AsyncLambda3_3601_Async_vtable_instance =
+static CS2SX_Step_vtable __AsyncLambda3_L116_Async_vtable_instance =
 {
-    .cs2sx_resume = (void(*)(void*))__AsyncLambda3_3601_Async_cs2sx_resume,
+    .cs2sx_resume = (void(*)(void*))__AsyncLambda3_L116_Async_cs2sx_resume,
 };

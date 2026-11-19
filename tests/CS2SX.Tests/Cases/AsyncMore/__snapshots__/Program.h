@@ -202,9 +202,9 @@ CS2SX_Task_int* AsyncMoreApp_Loops(AsyncMoreApp* self);
 CS2SX_Task* AsyncMoreApp_Script(AsyncMoreApp* self);
 void AsyncMoreApp_OnInit(AsyncMoreApp* self);
 void AsyncMoreApp_OnFrame(AsyncMoreApp* self);
-CS2SX_Task_int* AsyncMoreApp___AsyncLambda1_3269(AsyncMoreApp* self, int x, int bonus);
-CS2SX_Task* AsyncMoreApp___AsyncLambda2_3418(AsyncMoreApp* self);
-void AsyncMoreApp___AsyncLambda3_3601(AsyncMoreApp* self);
+CS2SX_Task_int* AsyncMoreApp___AsyncLambda1_L111(AsyncMoreApp* self, int x, int bonus);
+CS2SX_Task* AsyncMoreApp___AsyncLambda2_L114(AsyncMoreApp* self);
+void AsyncMoreApp___AsyncLambda3_L116(AsyncMoreApp* self);
 
 void AsyncMoreApp_Free(AsyncMoreApp* self);
 struct Value_Async
@@ -374,7 +374,7 @@ extern const CS2SX_ClassInfo Script_Async_ClassInfo;
 void Script_Async_Gc(void* self, CS2SX_GcVisit visit);
 void Script_Async_Free(Script_Async* self);
 Script_Async* Script_Async_Retain(Script_Async* self);
-struct __AsyncLambda1_3269_Async
+struct __AsyncLambda1_L111_Async
 {
     CS2SX_Step base;
     AsyncMoreApp* f_cs2sx_this;
@@ -385,17 +385,17 @@ struct __AsyncLambda1_3269_Async
     CS2SX_Task* f_cs2sx_a1;
 };
 
-__AsyncLambda1_3269_Async* __AsyncLambda1_3269_Async_New(void);
-void __AsyncLambda1_3269_Async_Ctor(__AsyncLambda1_3269_Async* self);
-void __AsyncLambda1_3269_Async_cs2sx_resume(__AsyncLambda1_3269_Async* self);
-void __AsyncLambda1_3269_Async_cs2sx_run(__AsyncLambda1_3269_Async* self);
+__AsyncLambda1_L111_Async* __AsyncLambda1_L111_Async_New(void);
+void __AsyncLambda1_L111_Async_Ctor(__AsyncLambda1_L111_Async* self);
+void __AsyncLambda1_L111_Async_cs2sx_resume(__AsyncLambda1_L111_Async* self);
+void __AsyncLambda1_L111_Async_cs2sx_run(__AsyncLambda1_L111_Async* self);
 
-void __AsyncLambda1_3269_Async__Destroy(__AsyncLambda1_3269_Async* self);
-extern const CS2SX_ClassInfo __AsyncLambda1_3269_Async_ClassInfo;
-void __AsyncLambda1_3269_Async_Gc(void* self, CS2SX_GcVisit visit);
-void __AsyncLambda1_3269_Async_Free(__AsyncLambda1_3269_Async* self);
-__AsyncLambda1_3269_Async* __AsyncLambda1_3269_Async_Retain(__AsyncLambda1_3269_Async* self);
-struct __AsyncLambda2_3418_Async
+void __AsyncLambda1_L111_Async__Destroy(__AsyncLambda1_L111_Async* self);
+extern const CS2SX_ClassInfo __AsyncLambda1_L111_Async_ClassInfo;
+void __AsyncLambda1_L111_Async_Gc(void* self, CS2SX_GcVisit visit);
+void __AsyncLambda1_L111_Async_Free(__AsyncLambda1_L111_Async* self);
+__AsyncLambda1_L111_Async* __AsyncLambda1_L111_Async_Retain(__AsyncLambda1_L111_Async* self);
+struct __AsyncLambda2_L114_Async
 {
     CS2SX_Step base;
     AsyncMoreApp* f_cs2sx_this;
@@ -404,17 +404,17 @@ struct __AsyncLambda2_3418_Async
     CS2SX_Task* f_cs2sx_a1;
 };
 
-__AsyncLambda2_3418_Async* __AsyncLambda2_3418_Async_New(void);
-void __AsyncLambda2_3418_Async_Ctor(__AsyncLambda2_3418_Async* self);
-void __AsyncLambda2_3418_Async_cs2sx_resume(__AsyncLambda2_3418_Async* self);
-void __AsyncLambda2_3418_Async_cs2sx_run(__AsyncLambda2_3418_Async* self);
+__AsyncLambda2_L114_Async* __AsyncLambda2_L114_Async_New(void);
+void __AsyncLambda2_L114_Async_Ctor(__AsyncLambda2_L114_Async* self);
+void __AsyncLambda2_L114_Async_cs2sx_resume(__AsyncLambda2_L114_Async* self);
+void __AsyncLambda2_L114_Async_cs2sx_run(__AsyncLambda2_L114_Async* self);
 
-void __AsyncLambda2_3418_Async__Destroy(__AsyncLambda2_3418_Async* self);
-extern const CS2SX_ClassInfo __AsyncLambda2_3418_Async_ClassInfo;
-void __AsyncLambda2_3418_Async_Gc(void* self, CS2SX_GcVisit visit);
-void __AsyncLambda2_3418_Async_Free(__AsyncLambda2_3418_Async* self);
-__AsyncLambda2_3418_Async* __AsyncLambda2_3418_Async_Retain(__AsyncLambda2_3418_Async* self);
-struct __AsyncLambda3_3601_Async
+void __AsyncLambda2_L114_Async__Destroy(__AsyncLambda2_L114_Async* self);
+extern const CS2SX_ClassInfo __AsyncLambda2_L114_Async_ClassInfo;
+void __AsyncLambda2_L114_Async_Gc(void* self, CS2SX_GcVisit visit);
+void __AsyncLambda2_L114_Async_Free(__AsyncLambda2_L114_Async* self);
+__AsyncLambda2_L114_Async* __AsyncLambda2_L114_Async_Retain(__AsyncLambda2_L114_Async* self);
+struct __AsyncLambda3_L116_Async
 {
     CS2SX_Step base;
     AsyncMoreApp* f_cs2sx_this;
@@ -423,16 +423,16 @@ struct __AsyncLambda3_3601_Async
     CS2SX_Task* f_cs2sx_a1;
 };
 
-__AsyncLambda3_3601_Async* __AsyncLambda3_3601_Async_New(void);
-void __AsyncLambda3_3601_Async_Ctor(__AsyncLambda3_3601_Async* self);
-void __AsyncLambda3_3601_Async_cs2sx_resume(__AsyncLambda3_3601_Async* self);
-void __AsyncLambda3_3601_Async_cs2sx_run(__AsyncLambda3_3601_Async* self);
+__AsyncLambda3_L116_Async* __AsyncLambda3_L116_Async_New(void);
+void __AsyncLambda3_L116_Async_Ctor(__AsyncLambda3_L116_Async* self);
+void __AsyncLambda3_L116_Async_cs2sx_resume(__AsyncLambda3_L116_Async* self);
+void __AsyncLambda3_L116_Async_cs2sx_run(__AsyncLambda3_L116_Async* self);
 
-void __AsyncLambda3_3601_Async__Destroy(__AsyncLambda3_3601_Async* self);
-extern const CS2SX_ClassInfo __AsyncLambda3_3601_Async_ClassInfo;
-void __AsyncLambda3_3601_Async_Gc(void* self, CS2SX_GcVisit visit);
-void __AsyncLambda3_3601_Async_Free(__AsyncLambda3_3601_Async* self);
-__AsyncLambda3_3601_Async* __AsyncLambda3_3601_Async_Retain(__AsyncLambda3_3601_Async* self);
+void __AsyncLambda3_L116_Async__Destroy(__AsyncLambda3_L116_Async* self);
+extern const CS2SX_ClassInfo __AsyncLambda3_L116_Async_ClassInfo;
+void __AsyncLambda3_L116_Async_Gc(void* self, CS2SX_GcVisit visit);
+void __AsyncLambda3_L116_Async_Free(__AsyncLambda3_L116_Async* self);
+__AsyncLambda3_L116_Async* __AsyncLambda3_L116_Async_Retain(__AsyncLambda3_L116_Async* self);
 
 
 #endif
