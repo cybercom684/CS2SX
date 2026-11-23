@@ -1,6 +1,6 @@
 namespace CS2SX.Switch;
 
-/// <summary>Controller buttons for <see cref="Input.IsDown"/> / IsHeld / IsUp.</summary>
+/// <summary>Controller buttons for <see cref="Input.IsDown(NpadButton)"/> / IsHeld / IsUp.</summary>
 public enum NpadButton
 {
     A, B, X, Y,

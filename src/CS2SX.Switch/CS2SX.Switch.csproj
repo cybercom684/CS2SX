@@ -22,6 +22,7 @@
     <PackageId>CS2SX.Switch</PackageId>
     <Description>Nintendo Switch homebrew API for CS2SX: write Switch apps in C#; `dotnet build` produces an .nro.</Description>
     <PackageTags>nintendo-switch;homebrew;libnx;transpiler</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
     <PackageOutputPath>$(MSBuildThisFileDirectory)..\..\nupkg</PackageOutputPath>
     <!-- The cs2sx tool bundles this package (see src/CS2SX/CS2SX.csproj). -->
     <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
@@ -31,6 +32,7 @@
     <!-- MSBuild integration for consuming app projects (implicit usings, .nro build). -->
     <None Include="build\CS2SX.Switch.props" Pack="true" PackagePath="build\" />
     <None Include="build\CS2SX.Switch.targets" Pack="true" PackagePath="build\" />
+    <None Include="README.md" Pack="true" PackagePath="\" />
   </ItemGroup>
 
 </Project>
