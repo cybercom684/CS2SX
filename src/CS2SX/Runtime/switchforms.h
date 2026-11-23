@@ -702,6 +702,8 @@ static inline void List_##N##_Reverse(List_##N* l) {                            
 #define CS2SX_DLG_DROP(x)   CS2SX_Delegate_Drop(x)
 #define CS2SX_IFACE_KEEP(x) ((__typeof__(x))CS2SX_Iface_Retain(x))
 #define CS2SX_IFACE_DROP(x) CS2SX_Iface_Drop(x)
+#define CS2SX_OBJ_KEEP(x)   CS2SX_Obj_Retain(x)
+#define CS2SX_OBJ_DROP(x)   CS2SX_Obj_Drop(x)
 
 // ── List<T> für Pointer-Typen (User-Klassen) ─────────────────────────────────
 // CS2SX_LIST_DEFINE_PTR(T) erzeugt List_T mit T*-Elementen (heap-allozierte Objekte).
@@ -841,9 +843,6 @@ CS2SX_LIST_DEFINE(u64)
 CS2SX_LIST_DEFINE(s32)
 CS2SX_LIST_DEFINE(s64)
 
-// voidptr list — fallback for List<tuple> and other opaque pointer lists
-typedef void* voidptr;
-CS2SX_LIST_DEFINE(voidptr)
 
 // ============================================================================
 // Element hooks of Stack / Queue / HashSet / Dictionary
@@ -864,6 +863,11 @@ CS2SX_LIST_DEFINE(voidptr)
 #define CS2SX_STR_DROP(x)  CS2SX_ReleaseLater((void*)(x), free)
 #define CS2SX_NOCHECK(k)   ((void)0)
 #define CS2SX_KEYCHECK_STR(k) do { if (!(k)) CS2SX_ThrowArgNull("key"); } while (0)
+
+// List<object>: keeps its elements (objects and boxes, see CS2SX_ObjHdr).
+typedef void* voidptr;
+CS2SX_LIST_DEFINE_HOOK(voidptr, void*, CS2SX_OBJ_KEEP, CS2SX_OBJ_DROP)
+CS2SX_GC_ELEMENTS_KIND(List_voidptr, CS2SX_Obj_GcKind, c->data[_i])
 
 /// T_RcKeep / T_RcDrop for a reference-counted user class T with root class Root.
 #define CS2SX_RC_HOOKS(T, Root)                                                                     \

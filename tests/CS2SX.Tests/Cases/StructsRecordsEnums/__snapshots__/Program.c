@@ -1,6 +1,8 @@
 #include <stdlib.h>
 #include "Program.h"
 
+static const char* State__boxstr(void* b) { return State_ToString(((CS2SX_Box*)b)->v.i); }
+const CS2SX_ClassInfo State_BoxInfo = { "State", NULL, State__boxstr };
 // ── Struct: Point ────────────────────────────────────────
 Point Point_New(int x, int y)
 {

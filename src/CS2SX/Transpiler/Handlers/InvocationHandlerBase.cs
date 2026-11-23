@@ -124,7 +124,7 @@ public abstract class InvocationHandlerBase : IInvocationHandler
     {
         var inner = TypeRegistry.GetListInnerType(listType)!;
         // string → "str" (nicht "char") damit List_str_Add/Get/etc. korrekt ist
-        var cInner = inner == "string" ? "str" : TypeRegistry.MapType(inner);
+        var cInner = TypeRegistry.ListElementName(inner);
         return "List_" + cInner;
     }
 

@@ -1,0 +1,23 @@
+is True True False True True False True True
+bar 7
+string text
+int 6
+rank Gold
+other Other
+other True
+other x
+other 1.5 foo 1 null
+cast 6 text 1 Gold
+as text True True
+bound 10
+bound text
+big 5
+switch Zahl 5 foo 1
+print Bar text 5 Gold True x 5 Gold
+caught Unable to cast object of type 'System.Int32' to type 'System.String'.
+caught long
+caught bar
+props Mia 4 True
+held frame text 41 7 text Mia
+held 7 True
+done

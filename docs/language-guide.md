@@ -171,7 +171,25 @@ switch (tier)
 }
 ```
 
-`is`, Typ-Muster und `switch` auf den Typ funktionieren für eigene Klassen, Interface-Werte und Exceptions. Bei `object` (z. B. `object o = …; o is Hund`) prüft CS2SX nur auf `null`.
+`is`, Typ-Muster und `switch` auf den Typ funktionieren für eigene Klassen, Interface-Werte, Exceptions und `object`. Ein Cast von einer Basisklasse auf eine abgeleitete (`(Hund)tier`) prüft den echten Typ und wirft sonst eine `InvalidCastException`.
+
+### object
+
+Ein `object` hält Objekte eigener Klassen, Strings, Zahlen, `bool`, `char` und Enums. Werte werden dabei wie in .NET „geboxt“, und alle Prüfungen sehen den echten Inhalt:
+
+```csharp
+object o = 5;
+if (o is int n) Console.WriteLine(n + 1);        // 6
+string text = o switch { string s => s, int i => "Zahl " + i, Hund h => h.Name, _ => "?" };
+int wert = (int)o;                                // (string)o würde InvalidCastException werfen
+Hund? h2 = o as Hund;                             // null, weil o kein Hund ist
+Console.WriteLine(o);                             // "5", bei Objekten der Klassenname
+
+var daten = new Dictionary<string, object> { ["name"] = "Mia", ["level"] = 3 };
+int level = (int)daten["level"];
+```
+
+Felder, Listen und Dictionaries mit `object` halten ihre Werte wie bei anderen Typen. Structs, Records, Collections und Delegates passen nicht in ein `object`, und Tests auf Interfaces (`o is IForm`) gehen nicht. Beides lehnt der Build mit Zeile und Hinweis ab.
 
 ---
 

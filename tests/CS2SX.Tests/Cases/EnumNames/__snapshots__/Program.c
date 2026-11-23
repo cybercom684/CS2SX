@@ -1,6 +1,12 @@
 #include <stdlib.h>
 #include "Program.h"
 
+static const char* Rank__boxstr(void* b) { return Rank_ToString(((CS2SX_Box*)b)->v.i); }
+const CS2SX_ClassInfo Rank_BoxInfo = { "Rank", NULL, Rank__boxstr };
+static const char* Code__boxstr(void* b) { return Code_ToString(((CS2SX_Box*)b)->v.i); }
+const CS2SX_ClassInfo Code_BoxInfo = { "Code", NULL, Code__boxstr };
+static const char* Access__boxstr(void* b) { return Access_ToString(((CS2SX_Box*)b)->v.i); }
+const CS2SX_ClassInfo Access_BoxInfo = { "Access", NULL, Access__boxstr };
 void Player_Ctor(Player* self)
 {
     CS2SX_TRACE("Player..ctor", "Program.cs");

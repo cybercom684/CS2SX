@@ -371,6 +371,8 @@ public sealed class StringMethodHandler : InvocationHandlerBase
         if (members == null && ctx.EnumDefs.TryGetValue(recvType, out var localMembers))
             members = localMembers;
 
+        if (recvType is "object" or "object?")
+            return "CS2SX_Obj_ToString(" + receiver + ")";
         // Every user enum has a name function (_forward.h, BuildPipeline).
         if (members != null || CS2SX.Core.TypeRegistry.IsUserDefinedEnum(enumName))
             return enumName + "_ToString(" + receiver + ")";

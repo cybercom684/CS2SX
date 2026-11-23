@@ -2,6 +2,8 @@
 #include "_generics.h"
 #include "Program.h"
 
+static const char* Access__boxstr(void* b) { return Access_ToString(((CS2SX_Box*)b)->v.i); }
+const CS2SX_ClassInfo Access_BoxInfo = { "Access", NULL, Access__boxstr };
 // ── Struct: Meters ────────────────────────────────────────
 int Meters_implicit_int(Meters m)
 {

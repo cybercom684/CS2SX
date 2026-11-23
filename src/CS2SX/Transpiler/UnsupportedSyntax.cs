@@ -21,11 +21,64 @@ internal static class UnsupportedSyntax
         if (model != null)
             foreach (var (node, message) in CS2SX.Build.AsyncLowering.Problems(root, model))
                 error(node, message);
+        // Values stored as object must be boxable; tests and casts from object need a
+        // type an object can hold (see Writers/ObjectModel).
+        if (model != null)
+            foreach (var node in root.DescendantNodes())
+                if (ObjectProblem(node, model) is { } why) error(node, why);
+
         // JsonSerializer calls that could not be turned into generated code (JsonLowering).
         if (model != null)
             foreach (var (node, message) in CS2SX.Build.JsonLowering.Problems(root, model))
                 error(node, message);
     }
+
+    private static string? ObjectProblem(SyntaxNode node, SemanticModel model)
+    {
+        try
+        {
+            switch (node)
+            {
+                case CastExpressionSyntax c:
+                {
+                    var from = model.GetTypeInfo(c.Expression).Type;
+                    var to = model.GetTypeInfo(c.Type).Type;
+                    if (Writers.ObjectModel.IsObject(to) && from != null && !Writers.ObjectModel.IsObject(from))
+                        return Writers.ObjectModel.WhyNot(from);
+                    if (Writers.ObjectModel.IsObject(from) && to != null && !Writers.ObjectModel.IsObject(to)
+                        && Writers.ObjectModel.TypeInfo(to) == null)
+                        return ObjectTarget(to);
+                    return null;
+                }
+                case BinaryExpressionSyntax b when b.IsKind(SyntaxKind.IsExpression) || b.IsKind(SyntaxKind.AsExpression):
+                {
+                    var to = model.GetTypeInfo(b.Right).Type;
+                    return Writers.ObjectModel.IsObject(model.GetTypeInfo(b.Left).Type) && to != null
+                           && !Writers.ObjectModel.IsObject(to) && Writers.ObjectModel.TypeInfo(to) == null ? ObjectTarget(to) : null;
+                }
+                case DeclarationPatternSyntax or TypePatternSyntax:
+                {
+                    var ti = model.GetTypeInfo((PatternSyntax)node);
+                    return Writers.ObjectModel.IsObject(ti.Type) && ti.ConvertedType != null
+                           && !Writers.ObjectModel.IsObject(ti.ConvertedType) && Writers.ObjectModel.TypeInfo(ti.ConvertedType) == null
+                        ? ObjectTarget(ti.ConvertedType) : null;
+                }
+                case ExpressionSyntax e when e.Parent is not CastExpressionSyntax:
+                {
+                    var ti = model.GetTypeInfo(e);
+                    if (!Writers.ObjectModel.IsObject(ti.ConvertedType) || ti.Type == null || Writers.ObjectModel.IsObject(ti.Type)
+                        || !Writers.ObjectModel.BoxesHere(e, model)) return null;
+                    return Writers.ObjectModel.WhyNot(ti.Type);
+                }
+            }
+        }
+        catch { }
+        return null;
+    }
+
+    private static string ObjectTarget(ITypeSymbol t) =>
+        $"Ein object kann hier nicht auf {t.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat)} geprüft oder umgewandelt werden — "
+        + "ein object hält nur Objekte eigener Klassen, Strings, Zahlen, bool, char und Enums. Für Interfaces: auf die Klasse prüfen oder einen gemeinsamen Basistyp verwenden.";
 
     /// True inside an instance member — its C function has a parameter named `self`.
     private static bool InInstanceMember(SyntaxNode node) =>

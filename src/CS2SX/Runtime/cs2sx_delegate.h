@@ -34,6 +34,7 @@ typedef struct CS2SX_ClassInfo
 {
     const char* name;
     const struct CS2SX_ClassInfo* base;
+    const char* (*str)(void* self);   // ToString of an `object` holding it; NULL: the name
 } CS2SX_ClassInfo;
 
 static inline int CS2SX_IsA(const CS2SX_ClassInfo* t, const CS2SX_ClassInfo* target)
@@ -101,6 +102,56 @@ void* CS2SX_Iface_Retain(void* iface);
 void  CS2SX_Iface_Free(void* iface);
 void  CS2SX_Iface_Drop(void* iface);
 extern const struct CS2SX_GcKind CS2SX_Iface_GcKind;
+
+// ── object ───────────────────────────────────────────────────────────────────
+// An `object` value (void*) always points to something with the header of a
+// reference-counted class: an object of a class, or a box. A box holds a string
+// (its own copy), a number, bool, char or enum value; its type info tells what
+// it holds (CS2SX_Box_Int32, …, an enum's E_BoxInfo). So `o is T`, casts and
+// ToString work on any `object`, and it is counted like everything else.
+typedef struct CS2SX_ObjHdr
+{
+    int _rc;
+    void (*_dtor)(void* self);
+    void (*_gc)(void* self, void (*visit)(void* child, const struct CS2SX_GcKind* kind));
+    const CS2SX_ClassInfo* _class;
+} CS2SX_ObjHdr;
+
+typedef struct CS2SX_Box
+{
+    CS2SX_ObjHdr h;
+    union { long long i; unsigned long long u; double d; char* s; } v;
+} CS2SX_Box;
+
+extern const CS2SX_ClassInfo CS2SX_Box_String, CS2SX_Box_Boolean, CS2SX_Box_Char,
+    CS2SX_Box_SByte, CS2SX_Box_Byte, CS2SX_Box_Int16, CS2SX_Box_UInt16, CS2SX_Box_Int32,
+    CS2SX_Box_UInt32, CS2SX_Box_Int64, CS2SX_Box_UInt64, CS2SX_Box_Single, CS2SX_Box_Double;
+
+void* CS2SX_Obj_Retain(void* o);
+void  CS2SX_Obj_Release(void* o);
+void  CS2SX_Obj_Drop(void* o);
+extern const struct CS2SX_GcKind CS2SX_Obj_GcKind;
+
+/// A new box (frame-owned, like a new object). NULL string → NULL.
+void* CS2SX_Box_I(const CS2SX_ClassInfo* type, long long v);
+void* CS2SX_Box_U(const CS2SX_ClassInfo* type, unsigned long long v);
+void* CS2SX_Box_D(const CS2SX_ClassInfo* type, double v);
+void* CS2SX_Box_Str(const char* s);
+
+static inline int CS2SX_Obj_Is(const void* o, const CS2SX_ClassInfo* type)
+{
+    return o && CS2SX_IsA(((const CS2SX_ObjHdr*)o)->_class, type);
+}
+/// (T)o for a class T: null stays null, another type throws InvalidCastException.
+void* CS2SX_Obj_Cast(void* o, const CS2SX_ClassInfo* type);
+/// (int)o, (string)o, …: the box must hold exactly that type (null: NullReferenceException,
+/// for string: null).
+long long          CS2SX_Unbox_I(void* o, const CS2SX_ClassInfo* type);
+unsigned long long CS2SX_Unbox_U(void* o, const CS2SX_ClassInfo* type);
+double             CS2SX_Unbox_D(void* o, const CS2SX_ClassInfo* type);
+const char*        CS2SX_Unbox_Str(void* o);
+/// o.ToString(), Console.WriteLine(o), "x" + o: the value of a box, the class name of an object.
+const char* CS2SX_Obj_ToString(void* o);
 
 /// Stores v into the field lv: takes a reference to v, gives up the previous
 /// value at the next frame. For delegates and interface values. lv is evaluated

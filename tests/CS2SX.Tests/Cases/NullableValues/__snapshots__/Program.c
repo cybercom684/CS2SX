@@ -1,6 +1,8 @@
 #include <stdlib.h>
 #include "Program.h"
 
+static const char* Mode__boxstr(void* b) { return Mode_ToString(((CS2SX_Box*)b)->v.i); }
+const CS2SX_ClassInfo Mode_BoxInfo = { "Mode", NULL, Mode__boxstr };
 // ── Struct: Size ────────────────────────────────────────
 int Size_Equals(Size a, Size b)
 {

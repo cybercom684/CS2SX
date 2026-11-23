@@ -3,6 +3,8 @@
 #include "Program.h"
 #include "CS2SX_Json.h"
 
+static const char* Rank__boxstr(void* b) { return Rank_ToString(((CS2SX_Box*)b)->v.i); }
+const CS2SX_ClassInfo Rank_BoxInfo = { "Rank", NULL, Rank__boxstr };
 void Item_Ctor(Item* self)
 {
     CS2SX_TRACE("Item..ctor", "Program.cs");

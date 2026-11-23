@@ -933,7 +933,7 @@ public sealed class StatementWriter
             var typeName = dp.Type.ToString().Trim();
             var cType = TypeRegistry.MapType(typeName);
             var subject = _expr.Write(isPattern.Expression);
-            _ctx.WriteLine(cType + "* " + desig.Identifier.Text + " = " + PatternBinding(isPattern, dp, subject, cType) + ";");
+            _ctx.WriteLine(PatternVarType(dp, cType) + " " + desig.Identifier.Text + " = " + PatternBinding(isPattern, dp, subject, cType) + ";");
             _ctx.LocalTypes[desig.Identifier.Text] = typeName;
         }
         if (ifStmt.Statement is BlockSyntax block)
@@ -953,6 +953,20 @@ public sealed class StatementWriter
             _ctx.WriteLine("else");
             WriteBlockOrStmt(ifStmt.Else.Statement);
         }
+    }
+
+    /// C type of the variable of a declaration pattern: a value for numbers, enums
+    /// and structs, const char* for strings, a pointer for classes.
+    private string PatternVarType(DeclarationPatternSyntax dp, string cType)
+    {
+        try
+        {
+            var t = _ctx.SemanticModel?.GetTypeInfo(dp.Type).Type;
+            if (t?.SpecialType == SpecialType.System_String) return "const char*";
+            if (t != null && t.IsValueType) return cType;
+        }
+        catch { }
+        return cType + "*";
     }
 
     private string PatternBinding(IsPatternExpressionSyntax isPattern, DeclarationPatternSyntax dp, string subject, string cType)
@@ -986,7 +1000,7 @@ public sealed class StatementWriter
                 var typeName = dp.Type.ToString().Trim();
                 var cType = TypeRegistry.MapType(typeName);
                 var subject = _expr.Write(isPattern.Expression);
-                _ctx.WriteLine(cType + "* " + desig.Identifier.Text + " = " + PatternBinding(isPattern, dp, subject, cType) + ";");
+                _ctx.WriteLine(PatternVarType(dp, cType) + " " + desig.Identifier.Text + " = " + PatternBinding(isPattern, dp, subject, cType) + ";");
                 _ctx.LocalTypes[desig.Identifier.Text] = typeName;
             }
             if (ifStmt.Statement is BlockSyntax blk)
@@ -1307,7 +1321,7 @@ public sealed class StatementWriter
         // Structs, tuples and enums are held by value.
         var isPrim = TypeRegistry.IsPrimitive(inner) || TypeRegistry.IsDelegate(inner) || !TypeRegistry.NeedsPointerSuffix(inner);
         var elemPtr = isPrim ? "" : "*";
-        var listFunc = "List_" + cInner + "_Get";
+        var listFunc = "List_" + TypeRegistry.ListElementName(inner) + "_Get";
         _ctx.WriteLine(cInner + elemPtr + " " + varName
                      + " = " + listFunc + "(" + colExpr + ", " + idxVar + ");");
     }
@@ -1475,7 +1489,7 @@ public sealed class StatementWriter
                             binding = Arc.TypeBinding(subject, pti?.Type, pti?.ConvertedType, cType);
                         }
                         catch { binding = "(" + cType + "*)" + subject; }
-                        _ctx.WriteLine(cType + "* " + desig.Identifier.Text + " = " + binding + ";");
+                        _ctx.WriteLine(PatternVarType(dp, cType) + " " + desig.Identifier.Text + " = " + binding + ";");
                         _ctx.LocalTypes[desig.Identifier.Text] = typeName;
                     }
                     foreach (var s in section.Statements.Where(s => s is not BreakStatementSyntax))

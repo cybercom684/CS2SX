@@ -405,7 +405,7 @@ public sealed class GenericInstantiationCollector
         var args = gn.TypeArgumentList.Arguments.Select(a => a.ToString().Trim()).ToList();
         if (args.Any(a => a.Contains('<') || a.Contains('(') || a.EndsWith('?'))) return;
         static bool IsUserType(string t) =>
-            !TypeRegistry.IsPrimitive(t) && t != "string" && t != "object";
+            t == "object" || !TypeRegistry.IsPrimitive(t) && t != "string";   // object: counted values
         switch (kind)
         {
             case "Stack" or "Queue" or "HashSet" when args.Count == 1 && IsUserType(args[0]):

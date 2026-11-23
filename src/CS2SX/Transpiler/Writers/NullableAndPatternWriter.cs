@@ -106,7 +106,28 @@ public static class PatternMatchingWriter
         var governed = writeExpr(switchExpr.GoverningExpression);
         var arms = switchExpr.Arms.ToList();
 
-        return BuildTernaryChain(governed, arms, 0, ctx, writeExpr);
+        // Arms that bind a variable (`string s => s.Length`): the value is evaluated
+        // once, the variables are declared and set when their arm matches.
+        var bound = arms.Where(a => a.Pattern is DeclarationPatternSyntax { Designation: SingleVariableDesignationSyntax }).ToList();
+        if (bound.Count == 0 || ctx.SemanticModel == null)
+            return BuildTernaryChain(governed, arms, 0, ctx, writeExpr);
+
+        var temp = ctx.NextTmp("sw");
+        var decls = new System.Text.StringBuilder();
+        foreach (var arm in bound)
+        {
+            var dp = (DeclarationPatternSyntax)arm.Pattern;
+            var name = ((SingleVariableDesignationSyntax)dp.Designation).Identifier.Text;
+            var target = ctx.SemanticModel.GetTypeInfo(dp.Type).Type;
+            var typeName = dp.Type.ToString().Trim();
+            var cType = TypeRegistry.MapType(typeName);
+            var varType = target?.SpecialType == SpecialType.System_String ? "const char*"
+                : target != null && target.IsValueType ? cType : cType + "*";
+            ctx.LocalTypes[name] = typeName;
+            decls.Append($"{varType} {name} = {{0}}; ");
+        }
+        var chain = BuildTernaryChain(temp, arms, 0, ctx, writeExpr);
+        return $"({{ __auto_type {temp} = ({governed}); {decls}{chain}; }})";
     }
 
     private static string BuildTernaryChain(
@@ -119,20 +140,40 @@ public static class PatternMatchingWriter
         if (index >= arms.Count) return "0 /* unreachable */";
 
         var arm = arms[index];
-        var val = writeExpr(arm.Expression);
+        // What the arm writes in front of the statement (string buffers, LINQ loops)
+        // moves into the arm: it runs only when the arm is taken, after its variable is set.
+        var val = InArm(ctx, () => writeExpr(arm.Expression));
 
         // Discard pattern "_" → else-Zweig
         if (arm.Pattern is DiscardPatternSyntax)
             return val;
 
         var cond = WritePattern(arm.Pattern, governed, ctx, writeExpr);
+        if (arm.Pattern is DeclarationPatternSyntax { Designation: SingleVariableDesignationSyntax v } bdp
+            && governed.StartsWith("_sw") && ctx.SemanticModel != null)
+        {
+            var ti = ctx.SemanticModel.GetTypeInfo(bdp);
+            var binding = Arc.TypeBinding(governed, ti.Type, ti.ConvertedType, TypeRegistry.MapType(bdp.Type.ToString().Trim()));
+            cond = "((" + cond + ") ? (" + v.Identifier.Text + " = " + binding + ", 1) : 0)";
+        }
 
         // When-Klausel
         if (arm.WhenClause != null)
-            cond = "(" + cond + " && " + writeExpr(arm.WhenClause.Condition) + ")";
+            cond = "(" + cond + " && " + InArm(ctx, () => writeExpr(arm.WhenClause.Condition)) + ")";
 
         var rest = BuildTernaryChain(governed, arms, index + 1, ctx, writeExpr);
         return "(" + cond + " ? " + val + " : " + rest + ")";
+    }
+
+    private static string InArm(TranspilerContext ctx, Func<string> write)
+    {
+        var sb = ctx.Out.GetStringBuilder();
+        int mark = sb.Length;
+        var code = write();
+        if (sb.Length == mark) return code;
+        var pre = sb.ToString(mark, sb.Length - mark).Trim();
+        sb.Length = mark;
+        return "({ " + pre + " " + code + "; })";
     }
 
     /// <summary>
@@ -153,6 +194,10 @@ public static class PatternMatchingWriter
     {
         return pattern switch
         {
+            // `Foo =>` / `case Foo:` with a type name is a type pattern.
+            ConstantPatternSyntax cp when IsTypeName(cp.Expression, ctx) =>
+                PatternTypeTest(cp, subject, ctx),
+
             ConstantPatternSyntax cp =>
                 subject + " == " + writeExpr(cp.Expression),
 
@@ -250,10 +295,23 @@ public static class PatternMatchingWriter
         if (bindingVar != null)
             ctx.LocalTypes[bindingVar] = typeName;
 
-        // Für Primitive (int, float, ...) ist die Bedingung immer wahr.
-        if (TypeRegistry.IsPrimitive(typeName) && typeName != "string")
+        // Für Primitive (int, float, ...) ist die Bedingung immer wahr — außer auf einem
+        // object, das prüft, was es hält.
+        if (TypeRegistry.IsPrimitive(typeName) && typeName != "string" && !OnObject(dp, ctx))
             return "1";
         return PatternTypeTest(dp, subject, ctx);
+    }
+
+    private static bool IsTypeName(ExpressionSyntax e, TranspilerContext ctx)
+    {
+        try { return ctx.SemanticModel?.GetSymbolInfo(e).Symbol is ITypeSymbol; }
+        catch { return false; }
+    }
+
+    private static bool OnObject(PatternSyntax pattern, TranspilerContext ctx)
+    {
+        try { return ctx.SemanticModel?.GetTypeInfo(pattern).Type?.SpecialType == SpecialType.System_Object; }
+        catch { return false; }
     }
 
     /// The run-time type test of a type or declaration pattern (see Arc.TypeTest):
@@ -336,6 +394,24 @@ public static class PatternMatchingWriter
         Func<SyntaxNode?, string> writeExpr)
     {
         var subject = writeExpr(isExpr.Expression);
+        // `x is T v` anywhere but as the whole condition of an if (StatementWriter
+        // declares v there): v is declared in front of the statement and assigned
+        // when the test succeeds — `if (o is string s && s.Length > 2)`, `?:`, while.
+        if (isExpr.Pattern is DeclarationPatternSyntax dp && dp.Designation is SingleVariableDesignationSyntax v
+            && !(isExpr.Parent is IfStatementSyntax ifs && ifs.Condition == isExpr) && ctx.SemanticModel != null)
+        {
+            var ti = ctx.SemanticModel.GetTypeInfo(dp);
+            var target = ctx.SemanticModel.GetTypeInfo(dp.Type).Type;
+            var typeName = dp.Type.ToString().Trim();
+            var cType = TypeRegistry.MapType(typeName);
+            var varType = target?.SpecialType == SpecialType.System_String ? "const char*"
+                : target != null && target.IsValueType ? cType : cType + "*";
+            ctx.LocalTypes[v.Identifier.Text] = typeName;
+            ctx.WriteLine($"{varType} {v.Identifier.Text} = {{0}};");
+            var test = WritePattern(isExpr.Pattern, "_cs2sx_ps", ctx, writeExpr);
+            var binding = Arc.TypeBinding("_cs2sx_ps", ti.Type, ti.ConvertedType, cType);
+            return $"({{ __auto_type _cs2sx_ps = ({subject}); ({test}) ? ({v.Identifier.Text} = {binding}, 1) : 0; }})";
+        }
         return WritePattern(isExpr.Pattern, subject, ctx, writeExpr);
     }
 

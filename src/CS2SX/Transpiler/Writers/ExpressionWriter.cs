@@ -50,9 +50,25 @@ public sealed class ExpressionWriter : IExpressionWriter
         var code = WriteCore(node);
         if (node is not ExpressionSyntax expr) return code;
         code = ApplyUserConversion(expr, code);
+        code = ApplyObjectConversion(expr, code);
         code = ApplyEscapeRetain(expr, code);
         code = ApplyArgumentUpcast(expr, code);
         return ApplyNullableConversion(expr, code);
+    }
+
+    /// A value converted to object where it is kept: boxed (strings, numbers, enums)
+    /// or as it is (objects of classes) — see ObjectModel.
+    private string ApplyObjectConversion(ExpressionSyntax expr, string code)
+    {
+        if (_ctx.SemanticModel == null || code.Length == 0) return code;
+        try
+        {
+            var ti = _ctx.SemanticModel.GetTypeInfo(expr);
+            if (!ObjectModel.IsObject(ti.ConvertedType) || ti.Type == null || ObjectModel.IsObject(ti.Type)) return code;
+            if (!ObjectModel.BoxesHere(expr, _ctx.SemanticModel)) return code;
+            return ObjectModel.Box(ti.Type, code);
+        }
+        catch { return code; }
     }
 
     /// What `s += x` appends: a string as it is (null → ""), a number, char or bool
@@ -207,8 +223,9 @@ public sealed class ExpressionWriter : IExpressionWriter
             // framework methods (Console.WriteLine(a), Equals) convert to object too,
             // but hold nothing.
             // (An interface value keeps its object itself: Class_as_IFace retains it.)
-            bool boxed = collPrefix == null && IsStoringContext(expr)
-                         && ti.ConvertedType?.SpecialType == SpecialType.System_Object;
+            // (A value stored as object is counted like every object value: the store
+            // takes its reference, see Arc.RcValue.)
+            bool boxed = false;
             // (node, 1) — a tuple element (not a deconstruction target)
             bool tupleElement = expr.Parent is ArgumentSyntax { Parent: TupleExpressionSyntax te }
                                 && !(te.Parent is AssignmentExpressionSyntax a && a.Left == te);
@@ -781,10 +798,14 @@ public sealed class ExpressionWriter : IExpressionWriter
             }
         }
 
+        if (bin.IsKind(SyntaxKind.AsExpression) && _ctx.SemanticModel != null)
+            return WriteAs(bin, left);
+
         if (bin.IsKind(SyntaxKind.IsExpression))
         {
             var isTypeName = bin.Right.ToString().Trim();
-            if (TypeRegistry.IsPrimitive(isTypeName) && isTypeName != "string")
+            if (TypeRegistry.IsPrimitive(isTypeName) && isTypeName != "string"
+                && !ObjectModel.IsObject(_ctx.SemanticModel?.GetTypeInfo(bin.Left).Type))
                 return "1";
             try
             {
@@ -1986,8 +2007,8 @@ public sealed class ExpressionWriter : IExpressionWriter
         {
             var dictType = lt ?? ft!;
             var types = TypeRegistry.GetDictionaryTypes(dictType)!.Value;
-            var cKey = types.key == "string" ? "str" : TypeRegistry.MapType(types.key);
-            var cVal = types.val == "string" ? "str" : TypeRegistry.MapType(types.val);
+            var cKey = TypeRegistry.ListElementName(types.key);
+            var cVal = TypeRegistry.ListElementName(types.val);
             var prefix = "Dict_" + cKey + "_" + cVal;
             return AccessorAssignment(prefix + "_Get", prefix + "_Set", obj, key, op, right);
         }
@@ -1998,7 +2019,7 @@ public sealed class ExpressionWriter : IExpressionWriter
         {
             var listType = lt ?? ft!;
             var inner = TypeRegistry.GetListInnerType(listType) ?? "int";
-            var cInner = inner == "string" ? "str" : TypeRegistry.MapType(inner);
+            var cInner = TypeRegistry.ListElementName(inner);
             return AccessorAssignment("List_" + cInner + "_Get", "List_" + cInner + "_Set", obj, key, op, right);
         }
 
@@ -2725,8 +2746,7 @@ public sealed class ExpressionWriter : IExpressionWriter
         {
             var inner = TypeRegistry.GetListInnerType(typeName)!;
             // Normalize cInner to a valid C identifier: void* → voidptr, spaces → _
-            var cInner = inner == "string" ? "str"
-                : TypeRegistry.MapType(inner).Replace("*", "ptr").Replace(" ", "_");
+            var cInner = TypeRegistry.ListElementName(inner);
             var listCreate = "List_" + cInner + "_New()";
 
             // new List<T>(source) — copy from an existing List<T> or IEnumerable<T> source
@@ -2776,8 +2796,8 @@ public sealed class ExpressionWriter : IExpressionWriter
         if (TypeRegistry.IsDictionary(typeName))
         {
             var types = TypeRegistry.GetDictionaryTypes(typeName)!.Value;
-            var cKey = types.key == "string" ? "str" : TypeRegistry.MapType(types.key);
-            var cVal = types.val == "string" ? "str" : TypeRegistry.MapType(types.val);
+            var cKey = TypeRegistry.ListElementName(types.key);
+            var cVal = TypeRegistry.ListElementName(types.val);
             var dictCreate = "Dict_" + cKey + "_" + cVal + "_New()";
 
             // new Dictionary<K,V> { { key1, val1 }, { key2, val2 }, ... }
@@ -2803,19 +2823,19 @@ public sealed class ExpressionWriter : IExpressionWriter
         if (TypeRegistry.IsStack(typeName))
         {
             var inner = TypeRegistry.GetStackInnerType(typeName)!;
-            var cInner = inner == "string" ? "str" : TypeRegistry.MapType(inner);
+            var cInner = TypeRegistry.ListElementName(inner);
             return "Stack_" + cInner + "_New()";
         }
         if (TypeRegistry.IsQueue(typeName))
         {
             var inner = TypeRegistry.GetQueueInnerType(typeName)!;
-            var cInner = inner == "string" ? "str" : TypeRegistry.MapType(inner);
+            var cInner = TypeRegistry.ListElementName(inner);
             return "Queue_" + cInner + "_New()";
         }
         if (TypeRegistry.IsHashSet(typeName))
         {
             var inner = TypeRegistry.GetHashSetInnerType(typeName)!;
-            var cInner = inner == "string" ? "str" : TypeRegistry.MapType(inner);
+            var cInner = TypeRegistry.ListElementName(inner);
             if (initializer?.Expressions.Count > 0)
             {
                 // new HashSet<int> { 1, 2 } — the elements were dropped before
@@ -3126,11 +3146,57 @@ public sealed class ExpressionWriter : IExpressionWriter
         return "({ " + string.Join(" ", lines) + " " + expr + "; })";
     }
 
+    /// x as T: the value when it is a T, otherwise null.
+    private string WriteAs(BinaryExpressionSyntax bin, string left)
+    {
+        var from = _ctx.SemanticModel!.GetTypeInfo(bin.Left).Type;
+        var target = _ctx.SemanticModel.GetTypeInfo(bin.Right).Type;
+        if (target == null) return left;
+        if (ObjectModel.IsObject(target)) return from != null && !ObjectModel.IsObject(from) ? ObjectModel.Box(from, left) : left;
+        var cType = TypeRegistry.MapType(TranspilerContext.FormatTypeSymbol(target));
+        if (target.SpecialType == SpecialType.System_String && ObjectModel.IsObject(from))
+            return $"({{ void* _cs2sx_as = ({left}); CS2SX_Obj_Is(_cs2sx_as, &CS2SX_Box_String) ? ((CS2SX_Box*)_cs2sx_as)->v.s : NULL; }})";
+        if (from != null && target.IsReferenceType)
+        {
+            var test = Arc.TypeTest("_cs2sx_as", from, target);
+            var value = Arc.TypeBinding("_cs2sx_as", from, target, cType);
+            return $"({{ __auto_type _cs2sx_as = ({left}); {test} ? {value} : NULL; }})";
+        }
+        return left;
+    }
+
+    private static bool IsBaseOf(INamedTypeSymbol baseType, INamedTypeSymbol derived)
+    {
+        for (var t = derived.BaseType; t != null; t = t.BaseType)
+            if (SymbolEqualityComparer.Default.Equals(t, baseType)) return true;
+        return false;
+    }
+
     private string WriteCast(CastExpressionSyntax cast)
     {
         var targetType = cast.Type.ToString().Trim();
         var cType = TypeRegistry.MapType(targetType);
         var inner = Write(cast.Expression);
+        if (_ctx.SemanticModel != null)
+        {
+            try
+            {
+                var from = _ctx.SemanticModel.GetTypeInfo(cast.Expression).Type;
+                var to = _ctx.SemanticModel.GetTypeInfo(cast.Type).Type;
+                // (object)x boxes; (int)o, (string)o, (Foo)o check what the object holds.
+                if (ObjectModel.IsObject(to) && from != null && !ObjectModel.IsObject(from))
+                    return ObjectModel.Box(from, inner);
+                if (ObjectModel.IsObject(from) && to != null && !ObjectModel.IsObject(to)
+                    && ObjectModel.Unbox(to, inner, TypeRegistry.MapType(TranspilerContext.FormatTypeSymbol(to))) is { } unboxed)
+                    return unboxed;
+                // (Derived)baseValue: checked at run time like C# (InvalidCastException).
+                if (from is INamedTypeSymbol { TypeKind: TypeKind.Class } fc && to is INamedTypeSymbol { TypeKind: TypeKind.Class } tc
+                    && !SymbolEqualityComparer.Default.Equals(fc, tc) && Arc.UsesDispose(fc) && Arc.UsesDispose(tc)
+                    && tc.BaseType != null && IsBaseOf(fc, tc))
+                    return "((" + tc.Name + "*)CS2SX_Obj_Cast(" + inner + ", &" + tc.Name + "_ClassInfo))";
+            }
+            catch { }
+        }
         if (TypeRegistry.IsControlType(targetType) || TypeRegistry.NeedsPointerSuffix(targetType))
             return "((" + cType + "*)" + inner + ")";
         return "((" + cType + ")" + inner + ")";
@@ -3199,8 +3265,8 @@ public sealed class ExpressionWriter : IExpressionWriter
         {
             var dictType = lt ?? ft!;
             var types = TypeRegistry.GetDictionaryTypes(dictType)!.Value;
-            var cKey = types.key == "string" ? "str" : TypeRegistry.MapType(types.key);
-            var cVal = types.val == "string" ? "str" : TypeRegistry.MapType(types.val);
+            var cKey = TypeRegistry.ListElementName(types.key);
+            var cVal = TypeRegistry.ListElementName(types.val);
             return "Dict_" + cKey + "_" + cVal + "_Get(" + objExpr + ", " + index + ")";
         }
 
@@ -3228,8 +3294,7 @@ public sealed class ExpressionWriter : IExpressionWriter
         {
             var listType = lt ?? ft!;
             var inner = TypeRegistry.GetListInnerType(listType) ?? "int";
-            var cInner = inner == "string" ? "str"
-                : TypeRegistry.MapType(inner).Replace("*", "ptr").Replace(" ", "_");
+            var cInner = TypeRegistry.ListElementName(inner);
             return "List_" + cInner + "_Get(" + objExpr + ", " + index + ")";
         }
 

@@ -262,3 +262,135 @@ void* CS2SX_Iface_Wrap(size_t size, void* vtable, void* obj, void* (*retainFn)(v
     CS2SX_ReleaseLater(h, CS2SX_Iface_Free);   // the frame's reference
     return h;
 }
+
+// ── object: boxes and the functions every `object` value goes through ──────────
+
+void* CS2SX_Obj_Retain(void* o)
+{
+    if (o) ((CS2SX_ObjHdr*)o)->_rc++;
+    return o;
+}
+
+void CS2SX_Obj_Release(void* o)
+{
+    if (!o) return;
+    CS2SX_ObjHdr* h = (CS2SX_ObjHdr*)o;
+    if (--h->_rc > 0) { CS2SX_GcSuspect(h, &CS2SX_Obj_GcKind); return; }
+    CS2SX_GcForget(h);
+    h->_dtor(h);
+    free(h);
+}
+
+void CS2SX_Obj_Drop(void* o)
+{
+    CS2SX_ReleaseLater(o, CS2SX_Obj_Release);
+}
+
+static void obj_gc(void* self, CS2SX_GcVisit visit)
+{
+    CS2SX_ObjHdr* h = (CS2SX_ObjHdr*)self;
+    if (h->_gc) h->_gc(self, visit);
+}
+
+const CS2SX_GcKind CS2SX_Obj_GcKind = { offsetof(CS2SX_ObjHdr, _rc), obj_gc, CS2SX_Obj_Release };
+
+static const char* box_str_int(void* self)    { return Long_ToString(((CS2SX_Box*)self)->v.i); }
+static const char* box_str_uint(void* self)   { return ULong_ToString(((CS2SX_Box*)self)->v.u); }
+static const char* box_str_double(void* self) { return Double_ToString(((CS2SX_Box*)self)->v.d); }
+static const char* box_str_single(void* self) { return Float_ToString((float)((CS2SX_Box*)self)->v.d); }
+static const char* box_str_bool(void* self)   { return ((CS2SX_Box*)self)->v.i ? "True" : "False"; }
+static const char* box_str_string(void* self) { return ((CS2SX_Box*)self)->v.s; }
+static const char* box_str_char(void* self)
+{
+    char* s = CS2SX_StrAlloc(1);
+    s[0] = (char)((CS2SX_Box*)self)->v.i;
+    s[1] = 0;
+    return s;
+}
+
+const CS2SX_ClassInfo CS2SX_Box_String  = { "System.String",  NULL, box_str_string };
+const CS2SX_ClassInfo CS2SX_Box_Boolean = { "System.Boolean", NULL, box_str_bool };
+const CS2SX_ClassInfo CS2SX_Box_Char    = { "System.Char",    NULL, box_str_char };
+const CS2SX_ClassInfo CS2SX_Box_SByte   = { "System.SByte",   NULL, box_str_int };
+const CS2SX_ClassInfo CS2SX_Box_Byte    = { "System.Byte",    NULL, box_str_int };
+const CS2SX_ClassInfo CS2SX_Box_Int16   = { "System.Int16",   NULL, box_str_int };
+const CS2SX_ClassInfo CS2SX_Box_UInt16  = { "System.UInt16",  NULL, box_str_int };
+const CS2SX_ClassInfo CS2SX_Box_Int32   = { "System.Int32",   NULL, box_str_int };
+const CS2SX_ClassInfo CS2SX_Box_UInt32  = { "System.UInt32",  NULL, box_str_int };
+const CS2SX_ClassInfo CS2SX_Box_Int64   = { "System.Int64",   NULL, box_str_int };
+const CS2SX_ClassInfo CS2SX_Box_UInt64  = { "System.UInt64",  NULL, box_str_uint };
+const CS2SX_ClassInfo CS2SX_Box_Single  = { "System.Single",  NULL, box_str_single };
+const CS2SX_ClassInfo CS2SX_Box_Double  = { "System.Double",  NULL, box_str_double };
+
+static void box_dtor(void* self)
+{
+    CS2SX_Box* b = (CS2SX_Box*)self;
+    if (b->h._class == &CS2SX_Box_String) free(b->v.s);
+}
+
+static CS2SX_Box* box_new(const CS2SX_ClassInfo* type)
+{
+    CS2SX_Box* b = (CS2SX_Box*)calloc(1, sizeof(CS2SX_Box));
+    if (!b) CS2SX_ThrowNew(&CS2SX_TI_OutOfMemoryException, NULL);
+    b->h._rc = 1;
+    b->h._dtor = box_dtor;
+    b->h._gc = CS2SX_GcLeaf;
+    b->h._class = type;
+    CS2SX_ReleaseLater(b, CS2SX_Obj_Release);   // the frame's reference
+    return b;
+}
+
+void* CS2SX_Box_I(const CS2SX_ClassInfo* type, long long v)  { CS2SX_Box* b = box_new(type); b->v.i = v; return b; }
+void* CS2SX_Box_U(const CS2SX_ClassInfo* type, unsigned long long v) { CS2SX_Box* b = box_new(type); b->v.u = v; return b; }
+void* CS2SX_Box_D(const CS2SX_ClassInfo* type, double v)     { CS2SX_Box* b = box_new(type); b->v.d = v; return b; }
+
+void* CS2SX_Box_Str(const char* s)
+{
+    if (!s) return NULL;
+    CS2SX_Box* b = box_new(&CS2SX_Box_String);
+    size_t n = strlen(s) + 1;
+    b->v.s = (char*)malloc(n);
+    if (!b->v.s) CS2SX_ThrowNew(&CS2SX_TI_OutOfMemoryException, NULL);
+    memcpy(b->v.s, s, n);
+    return b;
+}
+
+static void obj_cast_fail(void* o, const CS2SX_ClassInfo* type)
+{
+    char msg[160];
+    snprintf(msg, sizeof msg, "Unable to cast object of type '%s' to type '%s'.",
+             ((CS2SX_ObjHdr*)o)->_class ? ((CS2SX_ObjHdr*)o)->_class->name : "?", type->name);
+    CS2SX_ThrowNew(&CS2SX_TI_InvalidCastException, msg);
+}
+
+void* CS2SX_Obj_Cast(void* o, const CS2SX_ClassInfo* type)
+{
+    if (o && !CS2SX_Obj_Is(o, type)) obj_cast_fail(o, type);
+    return o;
+}
+
+static CS2SX_Box* unbox(void* o, const CS2SX_ClassInfo* type)
+{
+    if (!o) CS2SX_ThrowNew(&CS2SX_TI_NullReferenceException, NULL);
+    if (((CS2SX_ObjHdr*)o)->_class != type) obj_cast_fail(o, type);
+    return (CS2SX_Box*)o;
+}
+
+long long          CS2SX_Unbox_I(void* o, const CS2SX_ClassInfo* type) { return unbox(o, type)->v.i; }
+unsigned long long CS2SX_Unbox_U(void* o, const CS2SX_ClassInfo* type) { return unbox(o, type)->v.u; }
+double             CS2SX_Unbox_D(void* o, const CS2SX_ClassInfo* type) { return unbox(o, type)->v.d; }
+
+const char* CS2SX_Unbox_Str(void* o)
+{
+    if (!o) return NULL;
+    if (((CS2SX_ObjHdr*)o)->_class != &CS2SX_Box_String) obj_cast_fail(o, &CS2SX_Box_String);
+    return ((CS2SX_Box*)o)->v.s;
+}
+
+const char* CS2SX_Obj_ToString(void* o)
+{
+    if (!o) return "";
+    const CS2SX_ClassInfo* t = ((CS2SX_ObjHdr*)o)->_class;
+    if (!t) return "Object";
+    return t->str ? t->str(o) : t->name;
+}

@@ -153,7 +153,7 @@ public sealed class LinqHandler : InvocationHandlerBase
         var inner = TypeRegistry.IsList(colType)
             ? TypeRegistry.GetListInnerType(colType) ?? "int"
             : colType[..^2].Trim();
-        var cInner = inner == "string" ? "str" : TypeRegistry.MapType(inner);
+        var cInner = TypeRegistry.ListElementName(inner);
         var cInnerType = inner == "string" ? "const char*" : TypeRegistry.MapType(inner);
         var isPrim = TypeRegistry.IsPrimitive(inner) || TypeRegistry.IsUserDefinedEnum(inner);   // enums are values
         var elemPtr = (isPrim || inner == "string") ? "" : "*";

@@ -2,6 +2,10 @@
 #include "_generics.h"
 #include "Program.h"
 
+static const char* Mode__boxstr(void* b) { return Mode_ToString(((CS2SX_Box*)b)->v.i); }
+const CS2SX_ClassInfo Mode_BoxInfo = { "Mode", NULL, Mode__boxstr };
+static const char* Level__boxstr(void* b) { return Level_ToString(((CS2SX_Box*)b)->v.i); }
+const CS2SX_ClassInfo Level_BoxInfo = { "Level", NULL, Level__boxstr };
 void Point_Ctor_0(Point* self)
 {
     CS2SX_TRACE("Point..ctor", "Program.cs");

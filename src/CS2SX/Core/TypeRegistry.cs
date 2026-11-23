@@ -506,6 +506,15 @@ public static class TypeRegistry
     /// Mappt den inneren Typ einer generischen Collection auf einen C-Suffix.
     /// Behandelt verschachtelte Generics rekursiv.
     /// </summary>
+    /// The element part of a list's C name: List_int, List_str, List_Item, List_voidptr (object).
+    public static string ListElementName(string inner)
+    {
+        inner = inner.Trim();
+        if (inner is "object" or "object?" or "Object") return "voidptr";
+        if (inner == "string") return "str";
+        return MapType(inner).TrimEnd('*').Trim().Replace(" ", "_");
+    }
+
     private static string MapListInnerType(string csType)
     {
         csType = csType.Trim();

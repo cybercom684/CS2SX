@@ -163,6 +163,13 @@ public sealed class CSharpToC : CSharpSyntaxWalker
         // across all translation units. Emitting it per-file too would be a C
         // redefinition error, so we only register here.
 
+        // Type info of a boxed value (`object o = Rank.Gold; o is Rank`), once per program.
+        if (_mode == TranspileMode.Implementation)
+        {
+            _ctx.WriteLine($"static const char* {enumName}__boxstr(void* b) {{ return {enumName}_ToString(((CS2SX_Box*)b)->v.i); }}");
+            _ctx.WriteLine($"const CS2SX_ClassInfo {enumName}_BoxInfo = {{ \"{enumName}\", NULL, {enumName}__boxstr }};");
+        }
+
         // List<E>: a list of the enum's values (in this file's header, like structs).
         if (_mode == TranspileMode.HeaderOnly)
         {
@@ -523,7 +530,7 @@ public sealed class CSharpToC : CSharpSyntaxWalker
             {
                 var inner = (TypeRegistry.GetListInnerType(csType) ?? "").TrimEnd('?');
                 if (Element(inner) == null) return null;
-                var list = "List_" + TypeRegistry.MapType(inner).TrimEnd('*').Trim();
+                var list = "List_" + TypeRegistry.ListElementName(inner);
                 return (list + "_GcKind", "((void (*)(void*))" + list + "_Free)");
             }
             if (csType.EndsWith("[]") || NullableHandler.IsNullable(csType)) return null;

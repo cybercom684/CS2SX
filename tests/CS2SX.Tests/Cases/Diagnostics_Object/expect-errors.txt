@@ -1,0 +1,6 @@
+# One substring per line: an error CS2SX must report for Program.cs.
+Program.cs(16): Der Werttyp Point kann nicht in object gespeichert werden
+Program.cs(17): Ein Wert vom Typ List<int> kann nicht in object gespeichert werden
+Program.cs(18): Ein Record (Pair) kann nicht in object gespeichert werden
+Program.cs(19): Ein object kann hier nicht auf IShape geprüft oder umgewandelt werden
+Program.cs(20): Ein object kann hier nicht auf Point geprüft oder umgewandelt werden

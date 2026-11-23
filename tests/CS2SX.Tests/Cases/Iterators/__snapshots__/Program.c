@@ -51,6 +51,8 @@ const CS2SX_ClassInfo CS2SX_Iter_ClassInfo = { "CS2SX_Iter", NULL };
 void CS2SX_Iter_Gc(void* _self, CS2SX_GcVisit visit)
 {
     CS2SX_Iter* self = (CS2SX_Iter*)_self; (void)self;
+    if (visit) visit((void*)self->f_Current, &CS2SX_Obj_GcKind);
+    else if (self->f_Current) { void* _o = (void*)self->f_Current; self->f_Current = NULL; ((void (*)(void*))CS2SX_Obj_Release)(_o); }
 }
 
 static void CS2SX_Iter_GcDyn(void* self, CS2SX_GcVisit visit) { ((CS2SX_Iter*)self)->_gc(self, visit); }
@@ -58,6 +60,7 @@ const CS2SX_GcKind CS2SX_Iter_GcKind = { offsetof(CS2SX_Iter, _rc), CS2SX_Iter_G
 
 void CS2SX_Iter__Destroy(CS2SX_Iter* self)
 {
+    if (self->f_Current) { CS2SX_Obj_Release(self->f_Current); self->f_Current = NULL; }
 }
 
 void CS2SX_Iter_Free(CS2SX_Iter* self)
@@ -1008,7 +1011,7 @@ int Wait_Iter_MoveNext(Wait_Iter* self)
         self->f_frames--;
         {
             CS2SX_LINE(84);
-            self->base.f_Current = NULL;
+            CS2SX_RC_STORE(CS2SX_Obj_Retain, CS2SX_Obj_Release, self->base.f_Current, NULL);
             CS2SX_LINE(84);
             self->f_cs2sx_state = 1; return true; _cs2sx_r1_0: self->f_cs2sx_state = 0;
         }

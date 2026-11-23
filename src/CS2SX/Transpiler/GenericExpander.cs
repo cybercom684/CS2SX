@@ -36,6 +36,7 @@ public sealed class GenericExpander
         (string name, string cType, string keep, string drop)? Element(string cs)
         {
             if (cs == "string") return ("str", "const char*", "CS2SX_STR_KEEP", "CS2SX_STR_DROP");
+            if (cs == "object") return ("voidptr", "void*", "CS2SX_OBJ_KEEP", "CS2SX_OBJ_DROP");
             if (TypeRegistry.IsPrimitive(cs) || TypeRegistry.IsUserDefinedEnum(cs))
             {
                 var c = TypeRegistry.MapType(cs);

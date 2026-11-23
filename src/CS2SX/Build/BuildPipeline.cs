@@ -1001,6 +1001,7 @@ public sealed class BuildPipeline
                 }
                 sb.AppendLine($"}} {enName};");
                 sb.AppendLine(CS2SX.Core.TypeRegistry.NullableTypedef(enName));
+                sb.AppendLine($"extern const CS2SX_ClassInfo {enName}_BoxInfo;   // an {enName} stored as object");
                 // The member names, for ToString() and enums in strings.
                 bool flags = en.AttributeLists.SelectMany(a => a.Attributes)
                     .Any(a => a.Name.ToString() is "Flags" or "FlagsAttribute" or "System.Flags" or "System.FlagsAttribute");

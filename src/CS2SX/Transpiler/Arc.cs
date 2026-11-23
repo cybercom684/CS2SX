@@ -50,11 +50,11 @@ internal static class Arc
         if (TypeRegistry.IsList(cs))
         {
             var inner = TypeRegistry.GetListInnerType(cs) ?? "int";
-            return "List_" + (inner == "string" ? "str" : TypeRegistry.MapType(inner).TrimEnd('*').Replace(" ", "_"));
+            return "List_" + (inner == "string" ? "str" : TypeRegistry.ListElementName(inner));
         }
         if (TypeRegistry.IsDictionary(cs) && TypeRegistry.GetDictionaryTypes(cs) is { } kv)
         {
-            string N(string x) => x == "string" ? "str" : TypeRegistry.MapType(x).TrimEnd('*').Replace(" ", "_");
+            string N(string x) => TypeRegistry.ListElementName(x);
             return "Dict_" + N(kv.key) + "_" + N(kv.val);
         }
         if (TypeRegistry.IsStack(cs) || TypeRegistry.IsQueue(cs) || TypeRegistry.IsHashSet(cs))
@@ -93,7 +93,11 @@ internal static class Arc
     public static (string retain, string free, string keep, string drop, string kind)? RcValue(ITypeSymbol? t) =>
         IsDelegate(t) ? ("CS2SX_Delegate_Retain", "CS2SX_Delegate_Release", "CS2SX_DLG_KEEP", "CS2SX_DLG_DROP", "CS2SX_Delegate_GcKind")
         : IsInterface(t) ? ("CS2SX_Iface_Retain", "CS2SX_Iface_Free", "CS2SX_IFACE_KEEP", "CS2SX_IFACE_DROP", "CS2SX_Iface_GcKind")
+        : t?.SpecialType == SpecialType.System_Object ? ObjectRc
         : null;
+
+    private static readonly (string, string, string, string, string) ObjectRc =
+        ("CS2SX_Obj_Retain", "CS2SX_Obj_Release", "CS2SX_OBJ_KEEP", "CS2SX_OBJ_DROP", "CS2SX_Obj_GcKind");
 
     /// The same for a C# type name (generated code that has no symbols).
     public static (string retain, string free, string keep, string drop, string kind)? RcValue(string csType)
@@ -103,6 +107,7 @@ internal static class Arc
             return ("CS2SX_Delegate_Retain", "CS2SX_Delegate_Release", "CS2SX_DLG_KEEP", "CS2SX_DLG_DROP", "CS2SX_Delegate_GcKind");
         if (TypeRegistry.IsRegisteredInterface(csType))
             return ("CS2SX_Iface_Retain", "CS2SX_Iface_Free", "CS2SX_IFACE_KEEP", "CS2SX_IFACE_DROP", "CS2SX_Iface_GcKind");
+        if (csType is "object" or "Object") return ObjectRc;
         return null;
     }
 
@@ -114,6 +119,9 @@ internal static class Arc
     public static string TypeTest(string code, ITypeSymbol? input, ITypeSymbol? target)
     {
         if (target == null || input == null) return "(" + code + " != NULL)";
+        // An object: what it holds (a box's or a class's type info), see ObjectModel.
+        if (input.SpecialType == SpecialType.System_Object && target.SpecialType != SpecialType.System_Object)
+            return CS2SX.Transpiler.Writers.ObjectModel.Is(target, code) ?? "0";
         if (target.IsValueType) return "1";
         if (DerivesFrom(input, target)) return "(" + code + " != NULL)";
         if (IsException(target))
@@ -135,6 +143,9 @@ internal static class Arc
     /// `x is T t`): a cast; an interface value gives up its object.
     public static string TypeBinding(string code, ITypeSymbol? input, ITypeSymbol? target, string cType)
     {
+        if (input?.SpecialType == SpecialType.System_Object && target != null
+            && CS2SX.Transpiler.Writers.ObjectModel.Read(target, code, cType) is { } read)
+            return read;
         if (IsInterface(input) && target is INamedTypeSymbol { TypeKind: TypeKind.Class })
             return "(" + cType + "*)((CS2SX_IfaceHdr*)(" + code + "))->obj";
         return "(" + cType + "*)" + code;
