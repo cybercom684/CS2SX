@@ -77,7 +77,9 @@ public class FunkenjagdApp : SwitchApp
 
     private void UpdateTitle()
     {
-        if (Input.IsDown(NpadButton.Y)) Input.ShowControllerSupport(1, 4);
+        // Y: connect another controller. The console's dialog only opens when it is
+        // needed, so it asks for one more player than are connected now.
+        if (Input.IsDown(NpadButton.Y)) Input.ShowControllerSupport(Math.Min(4, Input.ConnectedCount() + 1), 4);
         if (Input.IsDown(NpadButton.A)) StartRound(false);
         else if (++_idle > 600) StartRound(true);   // 10 s nothing pressed: demo round
     }

@@ -156,7 +156,9 @@ for (int p = 0; p < 4; p++)
 | `Input.GetStickLeft(player)`, `GetStickRight(player)` | Sticks eines Spielers |
 | `Input.IsConnected(player)` → `bool` | Ist für den Spieler ein Controller verbunden? |
 | `Input.ConnectedCount()` → `int` | Anzahl verbundener Spieler |
-| `Input.ShowControllerSupport(minPlayers = 1, maxPlayers = 4)` → `int` | Controller-Auswahl der Konsole öffnen (blockierend); liefert die Anzahl der Spieler danach, `-1` bei Fehler |
+| `Input.ShowControllerSupport(minPlayers = 1, maxPlayers = 4)` → `int` | Controller-Auswahl der Konsole öffnen (blockierend); liefert die Anzahl der Spieler danach, `-1` bei Abbruch oder Fehler |
+
+> Die Switch zeigt die Controller-Auswahl nur, wenn sie nötig ist: Sind schon `minPlayers` Controller verbunden, kehrt der Aufruf sofort zurück. Um einen weiteren Spieler dazuzuholen, `Input.ShowControllerSupport(Input.ConnectedCount() + 1, 4)` aufrufen.
 
 ---
 

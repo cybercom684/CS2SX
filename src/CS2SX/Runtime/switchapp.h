@@ -319,7 +319,10 @@ static inline int CS2SX_Input_ShowControllerSupport(int minPlayers, int maxPlaye
     arg.hdr.player_count_max = (s8)maxPlayers;
     arg.hdr.enable_single_mode = maxPlayers == 1;
     HidLaControllerSupportResultInfo info = { 0 };
-    if (R_FAILED(hidLaShowControllerSupport(&info, &arg))) return -1;
+    // The console shows the dialog only when it is needed: when fewer than
+    // minPlayers controllers are connected (otherwise it returns at once).
+    Result rc = hidLaShowControllerSupport(&info, &arg);
+    if (R_FAILED(rc)) return -1;
     return info.player_count;
 }
 

@@ -5,7 +5,7 @@ Ein kleines Spiel für 1 bis 4 Spieler an einer Konsole: Jeder fliegt eine Drohn
 | Taste | |
 |---|---|
 | A | Runde starten / nochmal |
-| Y | Controller-Auswahl der Switch (Spieler verbinden) |
+| Y | weiteren Controller verbinden (Controller-Auswahl der Switch) |
 | B | nach einer Runde zurück zum Titel |
 | + | Beenden |
 
