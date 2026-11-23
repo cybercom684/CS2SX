@@ -23,10 +23,9 @@ static inline void CS2SX_Vibration_RumbleSimple(float strength)
     CS2SX_Vibration_Rumble(160.0f, strength, 320.0f, strength * 0.7f);
 }
 
-static inline void CS2SX_Vibration_Pulse(float strength, int durationMs)
-{
-    (void)durationMs;
-    CS2SX_Vibration_RumbleSimple(strength);
-}
+/// Rumbles for durationMs, then stops by itself (CS2SX_Vibration_Tick, every frame).
+void CS2SX_Vibration_Pulse(float strength, int durationMs);
+/// Called by the app loop each frame and at exit (weak: only when vibration is used).
+void CS2SX_Vibration_Tick(void);
 
 void CS2SX_Vibration_Stop(void);

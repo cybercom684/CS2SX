@@ -57,7 +57,32 @@ void Graphics_Init(int width, int height)
 
 typedef struct { float x, y, u, v; u32 color; } GfxVtx;
 
-typedef struct GfxTexGpu { DkMemBlock mem; DkImage image; int slot; } GfxTexGpu;
+// Every texture on the GPU is in a list, so the shutdown can give their memory
+// back before the device goes (textures in static fields live until the end).
+typedef struct GfxTexGpu
+{
+    DkMemBlock mem; DkImage image; int slot;
+    Texture* owner;
+    struct GfxTexGpu* prev;
+    struct GfxTexGpu* next;
+} GfxTexGpu;
+
+static GfxTexGpu* s_texList;
+
+static void gfx_tex_link(GfxTexGpu* g)
+{
+    g->prev = NULL;
+    g->next = s_texList;
+    if (s_texList) s_texList->prev = g;
+    s_texList = g;
+}
+
+static void gfx_tex_unlink(GfxTexGpu* g)
+{
+    if (g->prev) g->prev->next = g->next; else if (s_texList == g) s_texList = g->next;
+    if (g->next) g->next->prev = g->prev;
+    g->prev = g->next = NULL;
+}
 
 typedef struct { DkMemBlock mem; int slot; } GfxDeferred;
 
@@ -264,6 +289,8 @@ static int gfx_upload(Texture* t)
         if (!g) { dkMemBlockDestroy(mem); s_slotUsed[slot] = 0; return -1; }
         g->mem = mem;
         g->slot = slot;
+        g->owner = t;
+        gfx_tex_link(g);
         dkImageInitialize(&g->image, &layout, mem, 0);
 
         // descriptor for this slot
@@ -325,6 +352,7 @@ void Texture_Dispose(Texture* t)
     GfxTexGpu* g = (GfxTexGpu*)t->_gpu;
     if (g)
     {
+        gfx_tex_unlink(g);
         if (s_ready) gfx_defer(g->mem, g->slot);   // the GPU may still sample it this frame
         else { if (g->mem) dkMemBlockDestroy(g->mem); s_slotUsed[g->slot] = 0; }
         free(g);
@@ -341,6 +369,7 @@ void Texture_Update(Texture* t)
     {
         // outside a frame: drop the GPU copy, it is re-created on the next draw
         GfxTexGpu* g = (GfxTexGpu*)t->_gpu;
+        gfx_tex_unlink(g);
         gfx_defer(g->mem, g->slot);
         free(g);
         t->_gpu = NULL;
@@ -551,6 +580,17 @@ void CS2SX_Gfx_Shutdown(void)
     for (int i = 0; i < GFX_FRAMES; i++) gfx_release_deferred(i);
     s_ready = 0;
     if (s_atlas) { Texture_Dispose(s_atlas); s_atlas = NULL; }   // s_ready = 0 → freed directly
+    // Textures the app still holds: their GPU copy goes now (the CPU pixels stay;
+    // a texture freed later only frees those).
+    while (s_texList)
+    {
+        GfxTexGpu* g = s_texList;
+        gfx_tex_unlink(g);
+        if (g->mem) dkMemBlockDestroy(g->mem);
+        s_slotUsed[g->slot] = 0;
+        if (g->owner) g->owner->_gpu = NULL;
+        free(g);
+    }
     for (int i = 0; i < GFX_FRAMES; i++)
     {
         dkCmdBufDestroy(s_cmd[i]);

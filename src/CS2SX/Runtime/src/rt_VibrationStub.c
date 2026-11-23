@@ -61,6 +61,25 @@ void CS2SX_Vibration_Rumble(
     hidSendVibrationValues(_cs2sx_vib_handles, vals, _cs2sx_vib_count);
 }
 
+static u64 s_pulse_end;   // armGetSystemTick() when the current pulse ends; 0: none
+
+void CS2SX_Vibration_Pulse(float strength, int durationMs)
+{
+    CS2SX_Vibration_RumbleSimple(strength);
+    if (durationMs < 0) durationMs = 0;
+    s_pulse_end = armGetSystemTick() + armNsToTicks((u64)durationMs * 1000000ULL);
+    if (s_pulse_end == 0) s_pulse_end = 1;
+}
+
+void CS2SX_Vibration_Tick(void)
+{
+    if (s_pulse_end && armGetSystemTick() >= s_pulse_end)
+    {
+        s_pulse_end = 0;
+        CS2SX_Vibration_Stop();
+    }
+}
+
 void CS2SX_Vibration_Stop(void)
 {
     _cs2sx_vib_ensure();

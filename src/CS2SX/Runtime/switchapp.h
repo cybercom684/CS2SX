@@ -229,6 +229,10 @@ void CS2SX_InstallTestOutput(int console_active);
 
 // Requests a clean exit of the app (the main loop breaks after the current frame;
 // OnExit + cleanup still run). App.Quit() in C#.
+// Vibration (rt_VibrationStub.c, linked only when the app rumbles).
+__attribute__((weak)) void CS2SX_Vibration_Tick(void);
+__attribute__((weak)) void CS2SX_Vibration_Stop(void);
+
 static inline void CS2SX_App_Quit(void) { g_cs2sx_want_exit = 1; }
 
 // Queues another homebrew .nro to be launched after this app exits (via the
@@ -446,6 +450,7 @@ static inline void SwitchApp_Run(SwitchApp* self)
     while (appletMainLoop())
     {
         cs2sx_frame_begin();
+        if (CS2SX_Vibration_Tick) CS2SX_Vibration_Tick();   // ends Vibration.Pulse
         padUpdate(&pad);
         g_cs2sx_pad  = pad;
         self->kDown  = padGetButtonsDown(&pad);
@@ -491,6 +496,9 @@ static inline void SwitchApp_Run(SwitchApp* self)
 
     if (self->OnExit)
         self->OnExit(self);
+
+    // no rumble left running after the app
+    if (CS2SX_Vibration_Stop) CS2SX_Vibration_Stop();
 
     Form_Free(&self->form);
 
