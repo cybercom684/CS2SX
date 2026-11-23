@@ -33,6 +33,8 @@ Willkommen bei CS2SX — dem C#-zu-C-Transpiler für Nintendo Switch Homebrew.
 | [Input-Demo](examples/02-input-demo.md) | Alle Buttons in Echtzeit anzeigen |
 | [Ball fangen](examples/03-simple-game.md) | Vollständiges Spiel mit Physik und Highscore |
 | [Datei-Browser](examples/04-file-manager.md) | Text-UI-Tool mit Verzeichnis-Navigation |
+| [Funkenjagd](../samples/Funkenjagd/README.md) | Mehrspieler-Spiel mit Sprite-Sheets, Coroutines und JSON-Bestenliste (Projekt in `samples/`) |
+| [CS2SX Lab](../samples/LabDemo/README.md) | Interaktive Demo: Bildrate, Controller, Reaktionstest, Bewegungssensoren (Projekt in `samples/`) |
 
 ## Fortgeschrittenes
 

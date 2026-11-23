@@ -4,7 +4,7 @@
 
 CS2SX übersetzt den C#-Code mit Roslyn nach C und kompiliert ihn mit devkitPro/libnx zu nativem AArch64-Code. Auf der Konsole läuft also keine .NET-Laufzeit, kein JIT und kein Garbage Collector, nur kompakter C-Code. Geschrieben wird in Visual Studio, Rider oder VS Code mit voller IntelliSense über das NuGet-Paket `CS2SX.Switch`.
 
-**[Download](https://github.com/cybercom684/CS2SX/releases/latest)** · [Dokumentation](docs/index.md) · [Erste Schritte](docs/getting-started.md) · [Sprachunterstützung](docs/language-guide.md) · [Grafik](docs/graphics.md) · [Beispiele](docs/examples/)
+**[Download](https://github.com/cybercom684/CS2SX/releases/latest)** · [Dokumentation](docs/index.md) · [Erste Schritte](docs/getting-started.md) · [Sprachunterstützung](docs/language-guide.md) · [Grafik](docs/graphics.md) · [Beispiele](docs/examples/) · [Beispielspiel](samples/Funkenjagd/)
 
 ---
 

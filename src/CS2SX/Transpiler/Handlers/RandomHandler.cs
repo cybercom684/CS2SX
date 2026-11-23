@@ -44,7 +44,8 @@ public sealed class RandomHandler : InvocationHandlerBase
             var objKey = objRaw.TrimStart('_');
 
             bool isRandom = ctx.LocalTypes.TryGetValue(objRaw, out var lt) && lt == "Random"
-                         || ctx.FieldTypes.TryGetValue(objKey, out var ft) && ft == "Random";
+                         || ctx.FieldTypes.TryGetValue(objKey, out var ft) && ft == "Random"
+                         || IsRandomType(mem.Expression, ctx);   // also cs2sx_this._rng, other.rng, …
 
             if (isRandom)
             {
@@ -54,6 +55,16 @@ public sealed class RandomHandler : InvocationHandlerBase
         }
 
         return NotHandled(out result);
+    }
+
+    private static bool IsRandomType(ExpressionSyntax e, TranspilerContext ctx)
+    {
+        try
+        {
+            return ctx.SemanticModel?.GetTypeInfo(e).Type is INamedTypeSymbol { Name: "Random" } t
+                   && t.ContainingNamespace?.ToDisplayString() == "System";
+        }
+        catch { return false; }
     }
 
     private static string BuildRandomCall(string method, List<string> args) =>

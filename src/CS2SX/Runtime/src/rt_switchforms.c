@@ -15,6 +15,7 @@ long long CS2SX_HeapUsed(void)
 // With g_cs2sx_test_output set (build with CS2SX_TEST_OUTPUT=1) every stdout line
 // is also sent to svcOutputDebugString; emulators log it as guest output, where the
 // test harness reads it. stdout keeps going to the console when one is active.
+// In graphics mode (no console) stdout always goes to svcOutputDebugString.
 extern int g_cs2sx_test_output;
 static const devoptab_t* s_cs2sx_console_stdout;
 static devoptab_t s_cs2sx_test_stdout;
@@ -38,10 +39,40 @@ static ssize_t cs2sx_test_write(struct _reent* r, void* fd, const char* ptr, siz
     return (ssize_t)len;
 }
 
+static devoptab_t s_cs2sx_err_sink;
+
+static int cs2sx_is_console(const devoptab_t* d)
+{
+    return d && d->name && strcmp(d->name, "con") == 0;
+}
+
 void CS2SX_InstallTestOutput(int console_active)
 {
-    if (!g_cs2sx_test_output) return;
     const devoptab_t* cur = devoptab_list[STD_OUT];
+    if (!g_cs2sx_test_output)
+    {
+        // The text console is closed when graphics start: stdout/stderr that still
+        // point at it would crash on the next printf (Console.WriteLine). Send them
+        // to the debug log instead (svcOutputDebugString). A redirect the app set up
+        // itself (nxlink) is left alone; consoleInit installs the console again.
+        if (console_active) return;
+        if (cs2sx_is_console(cur))
+        {
+            s_cs2sx_console_stdout = NULL;
+            s_cs2sx_test_stdout = (devoptab_t){ 0 };
+            s_cs2sx_test_stdout.name = "cs2sx_log";
+            s_cs2sx_test_stdout.write_r = cs2sx_test_write;
+            devoptab_list[STD_OUT] = &s_cs2sx_test_stdout;
+        }
+        if (cs2sx_is_console(devoptab_list[STD_ERR]))
+        {
+            s_cs2sx_err_sink = (devoptab_t){ 0 };
+            s_cs2sx_err_sink.name = "cs2sx_log";
+            s_cs2sx_err_sink.write_r = cs2sx_test_write;
+            devoptab_list[STD_ERR] = &s_cs2sx_err_sink;
+        }
+        return;
+    }
     if (cur != &s_cs2sx_test_stdout)
         s_cs2sx_console_stdout = cur;
     if (!console_active)

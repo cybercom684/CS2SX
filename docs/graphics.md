@@ -17,7 +17,7 @@ public override void OnInit()
 }
 ```
 
-Sobald `Graphics.Init()` aufgerufen wurde, rendert jeder `OnFrame()`-Aufruf auf die GPU; der Bildschirm wird vor jedem Frame schwarz gelöscht. Konsolen-Ausgabe (`Console.WriteLine`) ist danach nicht mehr sichtbar. `Graphics.BeginFrame()`/`EndFrame()` sind nicht nötig (die Runtime steuert die Frames) und bewirken nichts.
+Sobald `Graphics.Init()` aufgerufen wurde, rendert jeder `OnFrame()`-Aufruf auf die GPU; der Bildschirm wird vor jedem Frame schwarz gelöscht. Konsolen-Ausgabe (`Console.WriteLine`) ist danach nicht mehr auf dem Bildschirm zu sehen. Sie geht ins Debug-Log (`svcOutputDebugString`), das Emulatoren wie Ryujinx anzeigen. `Graphics.BeginFrame()`/`EndFrame()` sind nicht nötig (die Runtime steuert die Frames) und bewirken nichts.
 
 Alle Koordinaten sind **logisch** (die Größe aus `Graphics.Init`). Ausnahmen in **physischen** Ausgabe-Pixeln: `SetPixel`, `SetPixelAlpha`, `BlitPhysical`. Umrisse (`DrawRect`, `DrawCircle`, …) sind einen physischen Pixel breit.
 
