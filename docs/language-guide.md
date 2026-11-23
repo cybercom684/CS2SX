@@ -125,6 +125,8 @@ public enum Status : byte { Idle = 0, Running = 1, Done = 2 }
 public enum Optionen { Keine = 0, Sound = 1, Musik = 2, Alle = 3 }
 ```
 
+In Strings, bei `Console.WriteLine` und mit `ToString()` erscheint der Name des Werts wie in .NET: `"Stufe " + Rang.Gold` ergibt `Stufe Gold`. Bei `[Flags]`-Enums werden die gesetzten Werte aufgezählt (`Read, Write`), ein Wert ohne Namen erscheint als Zahl. Für die Zahl selbst `(int)wert` schreiben. `List<MeinEnum>` funktioniert wie eine Liste von Zahlen.
+
 Mehrere Enums dürfen gleichnamige Werte haben (`Modus.Keine`, `Stufe.Keine`). Im generierten C heißen die Konstanten `Modus_Keine` — wichtig nur, wenn man eigenen C-Code dazu schreibt.
 
 ---

@@ -4,6 +4,10 @@
 
 #include "_forward.h"
 
+#ifndef CS2SX_LIST_Mode_DEFINED
+#define CS2SX_LIST_Mode_DEFINED
+CS2SX_LIST_DEFINE_HOOK_EQ(Mode, Mode, CS2SX_ID, CS2SX_NOREF, CS2SX_EQ_MEM)
+#endif
 // C# value-type struct: Size
 typedef struct Size {
     int W;

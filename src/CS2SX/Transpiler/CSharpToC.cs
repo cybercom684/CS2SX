@@ -162,6 +162,15 @@ public sealed class CSharpToC : CSharpSyntaxWalker
         // _forward.h (see BuildPipeline.WriteForwardDeclarations) so it is visible
         // across all translation units. Emitting it per-file too would be a C
         // redefinition error, so we only register here.
+
+        // List<E>: a list of the enum's values (in this file's header, like structs).
+        if (_mode == TranspileMode.HeaderOnly)
+        {
+            _ctx.WriteLine($"#ifndef CS2SX_LIST_{enumName}_DEFINED");
+            _ctx.WriteLine($"#define CS2SX_LIST_{enumName}_DEFINED");
+            _ctx.WriteLine($"CS2SX_LIST_DEFINE_HOOK_EQ({enumName}, {enumName}, CS2SX_ID, CS2SX_NOREF, CS2SX_EQ_MEM)");
+            _ctx.WriteLine("#endif");
+        }
     }
 
     // ── Klassen ───────────────────────────────────────────────────────────────

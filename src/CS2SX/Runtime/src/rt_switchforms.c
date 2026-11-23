@@ -636,6 +636,50 @@ void List_str_Sort(List_str* l)
     }
 }
 
+/// The name of an enum value, as C# prints it: the member's name; for [Flags] the
+/// names of the set bits ("Read, Write", in the order of their values); otherwise
+/// the number. Valid until the next frame.
+const char* CS2SX_EnumName(long long v, const char* const* names, const long long* values, int n, int flags)
+{
+    for (int i = 0; i < n; i++)
+        if (values[i] == v) return names[i];
+    if (flags && v > 0)
+    {
+        // the members with bits, smallest value first; each used bit once
+        int order[64]; int count = 0;
+        for (int i = 0; i < n && count < 64; i++)
+        {
+            if (values[i] == 0 || (values[i] & v) != values[i]) continue;
+            int at = count++;
+            while (at > 0 && values[order[at - 1]] > values[i]) { order[at] = order[at - 1]; at--; }
+            order[at] = i;
+        }
+        long long rest = v;
+        int pick[64]; int picked = 0;
+        for (int k = count - 1; k >= 0; k--)          // largest first, like .NET
+        {
+            long long bits = values[order[k]];
+            if ((rest & bits) == bits && bits != 0) { rest &= ~bits; pick[picked++] = order[k]; }
+        }
+        if (rest == 0 && picked > 0)
+        {
+            size_t len = 0;
+            for (int k = 0; k < picked; k++) len += strlen(names[pick[k]]) + 2;
+            char* out = CS2SX_StrAlloc(len);
+            out[0] = 0;
+            for (int k = picked - 1; k >= 0; k--)      // printed smallest first
+            {
+                strcat(out, names[pick[k]]);
+                if (k > 0) strcat(out, ", ");
+            }
+            return out;
+        }
+    }
+    char* num = CS2SX_StrAlloc(24);
+    snprintf(num, 25, "%lld", v);
+    return num;
+}
+
 const char* String_Join(const char* sep, List_str* list)
 {
     if (!list || list->count == 0) return "";

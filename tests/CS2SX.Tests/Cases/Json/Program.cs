@@ -52,9 +52,9 @@ public class JsonApp : SwitchApp
         // {"Player":"Mia \"M\"","Level":7,"Time":12.5,"Hard":true,"Rank":2,"Best":null,"Items":[{"Name":"Schwert","Count":1},{"Name":"Trank","Count":3}],"Scores":[10,20],"Flags":{"door":1},"hp":100,"Note":"default"}
 
         var back = JsonSerializer.Deserialize<SaveGame>(text)!;
-        Console.WriteLine(back.Player + " " + back.Level + " " + back.Time + " " + back.Hard + " " + (back.Rank == Rank.Gold)
+        Console.WriteLine(back.Player + " " + back.Level + " " + back.Time + " " + back.Hard + " " + back.Rank
             + " " + back.Items.Count + " " + back.Items[1].Name + " " + back.Scores[1] + " " + back.Flags["door"]
-            + " " + back.Health + " " + back.Secret + " " + (back.Best == null));          // Mia "M" 7 12.5 True True 2 Trank 20 1 100 keep True
+            + " " + back.Health + " " + back.Secret + " " + (back.Best == null));          // Mia "M" 7 12.5 True Gold 2 Trank 20 1 100 keep True
 
         // missing members keep their defaults, unknown ones are skipped
         var part = JsonSerializer.Deserialize<SaveGame>("{ \"Level\": 3, \"Unknown\": [1, {\"a\": null}], \"Best\": 9 }")!;

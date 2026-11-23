@@ -5,6 +5,10 @@
 #include "_forward.h"
 #include "_generics.h"
 
+#ifndef CS2SX_LIST_Access_DEFINED
+#define CS2SX_LIST_Access_DEFINED
+CS2SX_LIST_DEFINE_HOOK_EQ(Access, Access, CS2SX_ID, CS2SX_NOREF, CS2SX_EQ_MEM)
+#endif
 // C# value-type struct: Meters
 typedef struct Meters {
     int Value;

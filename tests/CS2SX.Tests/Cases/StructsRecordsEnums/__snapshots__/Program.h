@@ -4,6 +4,10 @@
 
 #include "_forward.h"
 
+#ifndef CS2SX_LIST_State_DEFINED
+#define CS2SX_LIST_State_DEFINED
+CS2SX_LIST_DEFINE_HOOK_EQ(State, State, CS2SX_ID, CS2SX_NOREF, CS2SX_EQ_MEM)
+#endif
 // C# value-type struct: Point
 typedef struct Point {
     int X;

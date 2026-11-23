@@ -155,7 +155,7 @@ public sealed class LinqHandler : InvocationHandlerBase
             : colType[..^2].Trim();
         var cInner = inner == "string" ? "str" : TypeRegistry.MapType(inner);
         var cInnerType = inner == "string" ? "const char*" : TypeRegistry.MapType(inner);
-        var isPrim = TypeRegistry.IsPrimitive(inner);
+        var isPrim = TypeRegistry.IsPrimitive(inner) || TypeRegistry.IsUserDefinedEnum(inner);   // enums are values
         var elemPtr = (isPrim || inner == "string") ? "" : "*";
 
         // A list a call returns (list.Sum(x => …) on GetItems()): evaluated once, not

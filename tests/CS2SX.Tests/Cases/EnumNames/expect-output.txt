@@ -1,0 +1,9 @@
+Gold
+rank Gold Gold
+interp Gold 2 NotFound
+prop Silver
+odd 7 201
+flags Read, Exec / All / None / 8
+xBronze
+list Gold,Bronze
+done

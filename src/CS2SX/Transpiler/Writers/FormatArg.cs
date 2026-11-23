@@ -15,6 +15,8 @@ internal static class FormatArg
             "bool" => ("%s", "CS2SX_BoolStr(" + code + ")"),
             "double" => ("%s", "Double_ToString(" + code + ")"),
             "float" => ("%s", "Float_ToString(" + code + ")"),
+            // An enum shows its member name ("Gold", "Read, Write" for [Flags]).
+            _ when CS2SX.Core.TypeRegistry.IsUserDefinedEnum(csType) => ("%s", csType + "_ToString(" + code + ")"),
             _ => (spec, code),
         };
 }

@@ -5,6 +5,10 @@
 #include "_forward.h"
 #include "_generics.h"
 
+#ifndef CS2SX_LIST_Rank_DEFINED
+#define CS2SX_LIST_Rank_DEFINED
+CS2SX_LIST_DEFINE_HOOK_EQ(Rank, Rank, CS2SX_ID, CS2SX_NOREF, CS2SX_EQ_MEM)
+#endif
 struct Item
 {
     int _rc;

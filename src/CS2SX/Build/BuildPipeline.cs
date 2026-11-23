@@ -932,6 +932,8 @@ public sealed class BuildPipeline
         sb.AppendLine("#include <setjmp.h>");
         // Runtime types + headers — shared with the runtime modules (rt_*.c).
         sb.AppendLine("#include \"cs2sx_prelude.h\"");
+        // enum → member name (runtime: rt_switchforms.c); every enum's _ToString uses it.
+        sb.AppendLine("const char* CS2SX_EnumName(long long v, const char* const* names, const long long* values, int n, int flags);");
         sb.AppendLine();
         sb.AppendLine("// Nullable value types: T? → { T value; int has; }");
         foreach (var prim in CS2SX.Core.TypeRegistry.NullablePrimitives)
@@ -999,6 +1001,17 @@ public sealed class BuildPipeline
                 }
                 sb.AppendLine($"}} {enName};");
                 sb.AppendLine(CS2SX.Core.TypeRegistry.NullableTypedef(enName));
+                // The member names, for ToString() and enums in strings.
+                bool flags = en.AttributeLists.SelectMany(a => a.Attributes)
+                    .Any(a => a.Name.ToString() is "Flags" or "FlagsAttribute" or "System.Flags" or "System.FlagsAttribute");
+                if (enMembers.Count == 0)
+                    sb.AppendLine($"static inline const char* {enName}_ToString(long long v) {{ return CS2SX_EnumName(v, NULL, NULL, 0, 0); }}");
+                else
+                {
+                    sb.AppendLine($"static const char* const {enName}__names[] = {{ {string.Join(", ", enMembers.Select(m => "\"" + m + "\""))} }};");
+                    sb.AppendLine($"static const long long {enName}__values[] = {{ {string.Join(", ", enMembers.Select(m => "(long long)" + CS2SX.Core.TypeRegistry.EnumMemberCName(enName, m)))} }};");
+                    sb.AppendLine($"static inline const char* {enName}_ToString(long long v) {{ return CS2SX_EnumName(v, {enName}__names, {enName}__values, {enMembers.Count}, {(flags ? 1 : 0)}); }}");
+                }
             }
         }
 

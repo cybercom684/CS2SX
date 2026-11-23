@@ -190,7 +190,7 @@ void JsonApp_OnInit(JsonApp* self)
     SaveGame* back = CS2SX_Json_D_SaveGame(text, NULL);
     CS2SX_LINE(55);
     char* _sb0 = _cs2sx_next_buf();
-    _sb0 = CS2SX_Format(_sb0, "%s %d %s %s %s %d %s %d %d %s %s %s", CS2SX_NN(back)->f_Player, CS2SX_NN(back)->f_Level, Double_ToString(CS2SX_NN(back)->f_Time), CS2SX_BoolStr(CS2SX_NN(back)->f_Hard), CS2SX_BoolStr((CS2SX_NN(back)->f_Rank == Rank_Gold)), CS2SX_NN(CS2SX_NN(back)->f_Items)->count, CS2SX_NN(List_Item_Get(CS2SX_NN(back)->f_Items, 1))->f_Name, CS2SX_AT(CS2SX_NN(back)->f_Scores, 1), Dict_str_int_Get(CS2SX_NN(back)->f_Flags, "door"), Float_ToString(CS2SX_NN(back)->f_Health), CS2SX_NN(back)->f_Secret, CS2SX_BoolStr((!(CS2SX_NN(back)->f_Best).has)));
+    _sb0 = CS2SX_Format(_sb0, "%s %d %s %s %s %d %s %d %d %s %s %s", CS2SX_NN(back)->f_Player, CS2SX_NN(back)->f_Level, Double_ToString(CS2SX_NN(back)->f_Time), CS2SX_BoolStr(CS2SX_NN(back)->f_Hard), Rank_ToString(CS2SX_NN(back)->f_Rank), CS2SX_NN(CS2SX_NN(back)->f_Items)->count, CS2SX_NN(List_Item_Get(CS2SX_NN(back)->f_Items, 1))->f_Name, CS2SX_AT(CS2SX_NN(back)->f_Scores, 1), Dict_str_int_Get(CS2SX_NN(back)->f_Flags, "door"), Float_ToString(CS2SX_NN(back)->f_Health), CS2SX_NN(back)->f_Secret, CS2SX_BoolStr((!(CS2SX_NN(back)->f_Best).has)));
     const char* _ps_4 = _sb0;
     printf("%s\n", _ps_4 ? _ps_4 : "");
     CS2SX_LINE(60);
