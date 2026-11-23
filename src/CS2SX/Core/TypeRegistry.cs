@@ -196,6 +196,7 @@ public static class TypeRegistry
         ("FileNotFoundException", "IOException"),
         ("DirectoryNotFoundException", "IOException"),
         ("EndOfStreamException", "IOException"),
+        ("JsonException", "Exception"),
     };
 
     private static readonly HashSet<string> s_builtinExceptions =

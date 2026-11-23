@@ -28,7 +28,7 @@ if (Http.IsAvailable())
 
 ## JSON auslesen
 
-Kein vollständiger JSON-Parser, aber leichtgewichtige Feld-Extraktoren für flache Objekte:
+Leichtgewichtige Feld-Extraktoren für flache Objekte. Ganze Objekte liest und schreibt `JsonSerializer`, siehe [JSON](json.md):
 
 ```csharp
 string json = Http.Get("https://api.example.com/user");

@@ -50,6 +50,7 @@ CS2SX_TI(IOException,                 SystemException,     "I/O error occurred."
 CS2SX_TI(FileNotFoundException,       IOException,         "Unable to find the specified file.")
 CS2SX_TI(DirectoryNotFoundException,  IOException,         "Attempted to access a path that is not on the disk.")
 CS2SX_TI(EndOfStreamException,        IOException,         "Attempted to read past the end of the stream.")
+CS2SX_TI(JsonException,               Exception,           "The JSON value could not be converted.")
 #undef CS2SX_TI
 
 static char* exc_strdup(const char* s)
@@ -131,7 +132,7 @@ const char* CS2SX_Exc_ToString(const Exception* ex)
 #define CS2SX_IS_BUILTIN(N) if (t == &CS2SX_TI_##N) builtin = 1;
     CS2SX_EXCEPTION_TYPES(CS2SX_IS_BUILTIN)
 #undef CS2SX_IS_BUILTIN
-    snprintf(buf, sizeof buf, "%s%s: %s", builtin ? "System." : "",
+    snprintf(buf, sizeof buf, "%s%s: %s", t == &CS2SX_TI_JsonException ? "System.Text.Json." : builtin ? "System." : "",
              CS2SX_Exc_TypeName(ex), ex->f_Message ? ex->f_Message : "");
     return buf;
 }

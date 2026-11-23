@@ -1,0 +1,6 @@
+# One substring per line: an error CS2SX must report for Program.cs.
+Program.cs(17): JSON: Der Typ IShape (Holder.Shape) wird nicht unterstützt
+Program.cs(18): JSON: NoCtor braucht einen öffentlichen parameterlosen Konstruktor
+Program.cs(19): JSON: Der Typ DateTime (WithDate.When) wird nicht unterstützt
+Program.cs(20): JSON: Der Typ object (object) wird nicht unterstützt
+Program.cs(21): JSON: mehrdimensionale Arrays

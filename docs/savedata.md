@@ -25,7 +25,7 @@ int.TryParse(hs, out score);               // selbst in int wandeln
 | `SaveData.Commit()` | Schreibvorgänge auf die SD-Karte flushen. |
 | `SaveData.Unmount()` | Speicher freigeben (optional, beim App-Ende). |
 
-> **Werte sind Strings.** Für Zahlen/Booleans selbst serialisieren (`value.ToString()`) und beim Lesen parsen. Mehrere Felder kannst du mit einem Trennzeichen in **einen** Schlüssel packen (z.B. `"label\tpfad"`) und nach dem Lesen splitten. Für größere Spielstände eignet sich eine eigene Datei mit `BinaryWriter`/`BinaryReader` (siehe [Sprachunterstützung → Datei-I/O](language-guide.md#datei-io)).
+> **Werte sind Strings.** Für Zahlen/Booleans selbst serialisieren (`value.ToString()`) und beim Lesen parsen. Mehrere Felder kannst du mit einem Trennzeichen in **einen** Schlüssel packen (z.B. `"label\tpfad"`) und nach dem Lesen splitten. Für größere Spielstände eignet sich eine eigene Datei mit [JSON](json.md) oder `BinaryWriter`/`BinaryReader` (siehe [Sprachunterstützung → Datei-I/O](language-guide.md#datei-io)).
 
 ---
 

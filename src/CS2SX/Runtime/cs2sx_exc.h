@@ -73,7 +73,7 @@ static inline void cs2sx_trace_leave(CS2SX_TraceFrame* f) { g_cs2sx_trace = f->p
     X(OutOfMemoryException)        X(TimeoutException)              \
     X(KeyNotFoundException)        X(IOException)                   \
     X(FileNotFoundException)       X(DirectoryNotFoundException)    \
-    X(EndOfStreamException)
+    X(EndOfStreamException)        X(JsonException)
 
 extern const CS2SX_TypeInfo CS2SX_TI_Exception;
 #define CS2SX_EXC_DECLARE(N) typedef Exception N; extern const CS2SX_TypeInfo CS2SX_TI_##N;

@@ -45,6 +45,9 @@ public sealed class SemanticModelBuilder
                          or "System.Console"
                          or "System.Linq"
                          or "System.Text.RegularExpressions"
+                         or "System.Text.Json"
+                         or "System.Text.Encodings.Web"
+                         or "System.Memory"
                          or "netstandard")
                 {
                     try { refs.Add(MetadataReference.CreateFromFile(path)); }

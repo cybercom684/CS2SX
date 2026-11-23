@@ -21,6 +21,7 @@ Willkommen bei CS2SX — dem C#-zu-C-Transpiler für Nintendo Switch Homebrew.
 | [HTTP API](http.md) | GET/POST über WLAN, JSON-Felder, Wetter-Helfer |
 | [Sensoren & Haptik](sensors.md) | Gyro/Beschleunigung (Motion) und HD-Rumble (Vibration) |
 | [Save Data & Tastatur](savedata.md) | Schlüssel-Wert-Persistenz + Bildschirm-Tastatur |
+| [JSON](json.md) | `JsonSerializer.Serialize`/`Deserialize<T>` für eigene Klassen, ohne Reflection |
 | [Forms API](forms.md) | Text-UI mit Label, Button, ProgressBar |
 | System API | `NX.GetBattery()` → `BatteryInfo`, `NX.GetTime()` → `TimeInfo` |
 

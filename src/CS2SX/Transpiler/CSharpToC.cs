@@ -2395,10 +2395,11 @@ public sealed class CSharpToC : CSharpSyntaxWalker
             return csType + "* " + p.Identifier;
 
         var cType = TypeRegistry.MapType(csType);
-        var isPrim = TypeRegistry.IsPrimitive(csType)
+        var isPrim = TypeRegistry.IsPrimitive(csType) && !TypeRegistry.IsStringBuilder(csType)   // a StringBuilder is a pointer
                   || csType == "string"
                   || _ctx.EnumDefs.ContainsKey(csType)
                   || TypeRegistry.IsUserDefinedEnum(csType) // enum from another file → value
+                  || TypeRegistry.IsUserStruct(csType) || TypeRegistry.IsTuple(csType)   // value structs
                   || TypeRegistry.IsDelegate(csType); // function pointer typedefs — no extra *
 
         if (isRef)

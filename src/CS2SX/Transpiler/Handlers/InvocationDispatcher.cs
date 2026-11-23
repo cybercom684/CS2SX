@@ -174,6 +174,22 @@ public sealed class InvocationDispatcher
         if (calleeStr is "CS2SX_Async.Jump" && args.Count == 2)
             return $"if (self->f_cs2sx_state == {args[0]}) goto _cs2sx_r{args[0]}_{args[1]}";
 
+        // double.IsNaN(x) & Co. → <math.h>
+        if (args.Count == 1 && calleeStr.StartsWith("double.") || args.Count == 1 && calleeStr.StartsWith("float.")
+            || args.Count == 1 && calleeStr.StartsWith("Double.") || args.Count == 1 && calleeStr.StartsWith("Single."))
+        {
+            var x = args[0];
+            var test = calleeStr[(calleeStr.IndexOf('.') + 1)..] switch
+            {
+                "IsNaN" => $"(isnan({x}) != 0)",
+                "IsInfinity" => $"(isinf({x}) != 0)",
+                "IsFinite" => $"(isfinite({x}) != 0)",
+                "IsPositiveInfinity" => $"({{ __auto_type _fv = ({x}); isinf(_fv) && _fv > 0; }})",
+                "IsNegativeInfinity" => $"({{ __auto_type _fv = ({x}); isinf(_fv) && _fv < 0; }})",
+                _ => null,
+            };
+            if (test != null) return test;
+        }
         if (calleeStr is "GC.Collect") return "((void)CS2SX_GcCollect())";
         if (calleeStr is "GC.WaitForPendingFinalizers") return "((void)0)";
 

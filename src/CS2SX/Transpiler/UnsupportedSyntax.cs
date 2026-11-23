@@ -21,6 +21,10 @@ internal static class UnsupportedSyntax
         if (model != null)
             foreach (var (node, message) in CS2SX.Build.AsyncLowering.Problems(root, model))
                 error(node, message);
+        // JsonSerializer calls that could not be turned into generated code (JsonLowering).
+        if (model != null)
+            foreach (var (node, message) in CS2SX.Build.JsonLowering.Problems(root, model))
+                error(node, message);
     }
 
     /// True inside an instance member — its C function has a parameter named `self`.
