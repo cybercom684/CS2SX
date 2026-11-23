@@ -361,7 +361,7 @@ static void _lambda_6(void* _env)
     struct _cap_6* _c = (struct _cap_6*)_env;
     const char* s = _c->s;
     CS2SX_LINE(39);
-    int l = strlen(CS2SX_NN(s));
+    int l = CS2SX_Str16Len(CS2SX_NN(s));
 }
 
 struct _cap_7

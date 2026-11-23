@@ -486,7 +486,18 @@ public sealed class InvocationDispatcher
         catch { return false; }
     }
 
-    private string BuildArg(ArgumentSyntax a)
+    private bool IsUserMethodArg(ArgumentSyntax a)
+    {
+        try
+        {
+            return a.Parent?.Parent is InvocationExpressionSyntax inv
+                   && _ctx.SemanticModel?.GetSymbolInfo(inv).Symbol is IMethodSymbol m
+                   && TranspilerContext.IsUserCode(m.ContainingType);
+        }
+        catch { return false; }
+    }
+
+    internal string BuildArg(ArgumentSyntax a)
     {
         // Skip lifting lambdas for LINQ methods — LinqHandler accesses raw syntax directly
         // and re-lifts with the correct element type. Lifting here generates a stale
@@ -535,8 +546,11 @@ public sealed class InvocationDispatcher
             var needsPtr = !cTypeName.EndsWith("*") && TypeRegistry.NeedsPointerSuffix(typeName);
             var ptr = needsPtr ? "*" : "";
 
+            if (!_ctx.DeclaredOutArgs.Add(declExpr)) return "&" + singleDesig.Identifier.Text;   // written before
+            if (_ctx.DeclaredOutVars.Remove(singleDesig.Identifier.Text))   // declared before the if
+                return "&" + singleDesig.Identifier.Text;
             _ctx.LocalTypes[singleDesig.Identifier.Text] = typeName;
-            _ctx.WriteLine($"{cTypeName}{ptr} {singleDesig.Identifier.Text} = {(needsPtr ? "NULL" : "0")};");
+            _ctx.WriteLine($"{cTypeName}{ptr} {singleDesig.Identifier.Text} = {(needsPtr ? "NULL" : "{0}")};");
             return "&" + singleDesig.Identifier.Text;
         }
 
@@ -564,6 +578,8 @@ public sealed class InvocationDispatcher
 
         // Für out/ref-Parameter: & nur wenn der Typ kein Pointer ist
         var resolvedType = lt ?? (_ctx.FieldTypes.TryGetValue(fieldKey, out var ft2) ? ft2 : null);
+        // A class variable passed to a method of the project: its address (T** parameter).
+        if (IsUserMethodArg(a)) return "&" + expr;
         if (resolvedType != null && TypeRegistry.NeedsPointerSuffix(resolvedType))
             return expr;  // Ist bereits Pointer → direkt übergeben
 

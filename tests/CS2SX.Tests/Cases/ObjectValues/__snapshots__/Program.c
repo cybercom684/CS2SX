@@ -314,7 +314,7 @@ void ObjectValuesApp_OnInit(ObjectValuesApp* self)
     }
     CS2SX_LINE(56);
     const char* s = {0};
-    if (({ __auto_type _cs2sx_ps = (b); (CS2SX_Obj_Is(_cs2sx_ps, &CS2SX_Box_String)) ? (s = ((CS2SX_Box*)(_cs2sx_ps))->v.s, 1) : 0; }) && strlen(CS2SX_NN(s)) > 2)
+    if (({ __auto_type _cs2sx_ps = (b); (CS2SX_Obj_Is(_cs2sx_ps, &CS2SX_Box_String)) ? (s = ((CS2SX_Box*)(_cs2sx_ps))->v.s, 1) : 0; }) && CS2SX_Str16Len(CS2SX_NN(s)) > 2)
     {
         CS2SX_LINE(56);
         char* _sb12 = _cs2sx_next_buf();

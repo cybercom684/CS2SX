@@ -32,6 +32,12 @@ public class SaveGame
 
 public record Point(int X, int Y);
 
+public class Card
+{
+    [JsonConverter(typeof(JsonStringEnumConverter))] public Rank Rank { get; set; } = Rank.Silver;
+    public Rank Plain { get; set; } = Rank.Gold;
+}
+
 public struct Size
 {
     public int W { get; set; }
@@ -82,6 +88,13 @@ public class JsonApp : SwitchApp
         Console.WriteLine("list " + list.Count + " " + list[0].Length + " " + (list[1] == "ä€") + " " + (list[2] == null));   // list 3 3 True True
         Console.WriteLine("plain " + JsonSerializer.Serialize(42) + " " + JsonSerializer.Serialize("x") + " "
             + JsonSerializer.Serialize(new List<double> { 1.5, -2 }) + " " + JsonSerializer.Deserialize<int>(" 17 "));   // plain 42 "x" [1.5,-2] 17
+
+        // enums as names: JsonStringEnumConverter on a member or in the options
+        Console.WriteLine("enum " + JsonSerializer.Serialize(new Card()));                  // enum {"Rank":"Silver","Plain":2}
+        var named = new JsonSerializerOptions { Converters = { new JsonStringEnumConverter() } };
+        Console.WriteLine("enum2 " + JsonSerializer.Serialize(new Card(), named));          // enum2 {"Rank":"Silver","Plain":"Gold"}
+        var card = JsonSerializer.Deserialize<Card>("{\"Rank\":\"gold\",\"Plain\":0}", named)!;
+        Console.WriteLine("enum3 " + card.Rank + " " + card.Plain);                         // enum3 Gold Bronze
 
         // errors
         try { JsonSerializer.Deserialize<Item>("{\"Count\":\"x\"}"); }

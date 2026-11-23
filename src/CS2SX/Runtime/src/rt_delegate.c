@@ -300,13 +300,7 @@ static const char* box_str_double(void* self) { return Double_ToString(((CS2SX_B
 static const char* box_str_single(void* self) { return Float_ToString((float)((CS2SX_Box*)self)->v.d); }
 static const char* box_str_bool(void* self)   { return ((CS2SX_Box*)self)->v.i ? "True" : "False"; }
 static const char* box_str_string(void* self) { return ((CS2SX_Box*)self)->v.s; }
-static const char* box_str_char(void* self)
-{
-    char* s = CS2SX_StrAlloc(1);
-    s[0] = (char)((CS2SX_Box*)self)->v.i;
-    s[1] = 0;
-    return s;
-}
+static const char* box_str_char(void* self) { return CS2SX_CharStr((uint16_t)((CS2SX_Box*)self)->v.i); }
 
 const CS2SX_ClassInfo CS2SX_Box_String  = { "System.String",  NULL, box_str_string };
 const CS2SX_ClassInfo CS2SX_Box_Boolean = { "System.Boolean", NULL, box_str_bool };

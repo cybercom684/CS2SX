@@ -145,6 +145,56 @@ Point* Point_Retain(Point* self)
 const CS2SX_GcKind Point_GcKind = { offsetof(Point, _rc), CS2SX_GcLeaf, (CS2SX_FreeFn)Point_Free };
 const CS2SX_ClassInfo Point_ClassInfo = { "Point", NULL };
 
+void Card_Ctor(Card* self)
+{
+    CS2SX_TRACE("Card..ctor", "Program.cs");
+    self->f_Rank = Rank_Silver;
+    self->f_Plain = Rank_Gold;
+}
+
+Card* Card_New(void)
+{
+    Card* self = (Card*)calloc(1, sizeof(Card));
+    if (!self) return NULL;
+    self->_rc = 1;
+    self->_dtor = (void (*)(void*))Card__Destroy;
+    self->_gc = Card_Gc;
+    self->_class = &Card_ClassInfo;
+    Card_Ctor(self);
+    CS2SX_ReleaseLater(self, (CS2SX_FreeFn)Card_Free);
+    return self;
+}
+
+const CS2SX_ClassInfo Card_ClassInfo = { "Card", NULL };
+
+void Card_Gc(void* _self, CS2SX_GcVisit visit)
+{
+    Card* self = (Card*)_self; (void)self;
+}
+
+static void Card_GcDyn(void* self, CS2SX_GcVisit visit) { ((Card*)self)->_gc(self, visit); }
+const CS2SX_GcKind Card_GcKind = { offsetof(Card, _rc), Card_GcDyn, (CS2SX_FreeFn)Card_Free };
+
+void Card__Destroy(Card* self)
+{
+}
+
+void Card_Free(Card* self)
+{
+    if (!self) return;
+    Card* _o = (Card*)self;
+    if (--_o->_rc > 0) { CS2SX_GcSuspect(_o, &Card_GcKind); return; }
+    CS2SX_GcForget(_o);
+    _o->_dtor(_o);
+    free(_o);
+}
+
+Card* Card_Retain(Card* self)
+{
+    if (self) ((Card*)self)->_rc++;
+    return self;
+}
+
 // ── Struct: Size ────────────────────────────────────────
 int Size_Equals(Size a, Size b)
 {
@@ -161,7 +211,7 @@ void JsonApp_Init(JsonApp* self)
 void JsonApp_OnInit(JsonApp* self)
 {
     CS2SX_TRACE("JsonApp.OnInit", "Program.cs");
-    CS2SX_LINE(45);
+    CS2SX_LINE(51);
     SaveGame* _savegame_0 = SaveGame_New();
     CS2SX_STR_STORE(_savegame_0->f_Player, "Mia \"M\"");
     _savegame_0->f_Level = 7;
@@ -169,95 +219,95 @@ void JsonApp_OnInit(JsonApp* self)
     _savegame_0->f_Hard = 1;
     _savegame_0->f_Rank = Rank_Gold;
     SaveGame* g = _savegame_0;
-    CS2SX_LINE(46);
+    CS2SX_LINE(52);
     Item* _item_1 = Item_New();
     CS2SX_STR_STORE(_item_1->f_Name, "Schwert");
     _item_1->f_Count = 1;
     List_Item_Add(g->f_Items, _item_1);
-    CS2SX_LINE(47);
+    CS2SX_LINE(53);
     Item* _item_2 = Item_New();
     CS2SX_STR_STORE(_item_2->f_Name, "Trank");
     _item_2->f_Count = 3;
     List_Item_Add(g->f_Items, _item_2);
-    CS2SX_LINE(48);
+    CS2SX_LINE(54);
     g->f_Scores = (int*)CS2SX_ArrFromInit((int[]){ 10, 20 }, 2, sizeof(int));
-    CS2SX_LINE(49);
+    CS2SX_LINE(55);
     Dict_str_int_Set(g->f_Flags, "door", 1);
-    CS2SX_LINE(50);
+    CS2SX_LINE(56);
     const char* text = CS2SX_Json_S_SaveGame(g, NULL);
-    CS2SX_LINE(51);
+    CS2SX_LINE(57);
     const char* _ps_3 = text;
     printf("%s\n", _ps_3 ? _ps_3 : "");
-    CS2SX_LINE(54);
+    CS2SX_LINE(60);
     SaveGame* back = CS2SX_Json_D_SaveGame(text, NULL);
-    CS2SX_LINE(55);
+    CS2SX_LINE(61);
     char* _sb0 = _cs2sx_next_buf();
     _sb0 = CS2SX_Format(_sb0, "%s %d %s %s %s %d %s %d %d %s %s %s", CS2SX_NN(back)->f_Player, CS2SX_NN(back)->f_Level, Double_ToString(CS2SX_NN(back)->f_Time), CS2SX_BoolStr(CS2SX_NN(back)->f_Hard), Rank_ToString(CS2SX_NN(back)->f_Rank), CS2SX_NN(CS2SX_NN(back)->f_Items)->count, CS2SX_NN(List_Item_Get(CS2SX_NN(back)->f_Items, 1))->f_Name, CS2SX_AT(CS2SX_NN(back)->f_Scores, 1), Dict_str_int_Get(CS2SX_NN(back)->f_Flags, "door"), Float_ToString(CS2SX_NN(back)->f_Health), CS2SX_NN(back)->f_Secret, CS2SX_BoolStr((!(CS2SX_NN(back)->f_Best).has)));
     const char* _ps_4 = _sb0;
     printf("%s\n", _ps_4 ? _ps_4 : "");
-    CS2SX_LINE(60);
+    CS2SX_LINE(66);
     SaveGame* part = CS2SX_Json_D_SaveGame("{ \"Level\": 3, \"Unknown\": [1, {\"a\": null}], \"Best\": 9 }", NULL);
-    CS2SX_LINE(61);
+    CS2SX_LINE(67);
     char* _sb1 = _cs2sx_next_buf();
     _sb1 = CS2SX_Format(_sb1, "part %d %s %d %d", CS2SX_NN(part)->f_Level, CS2SX_NN(part)->f_Note, CS2SX_NN(part)->f_Best, CS2SX_NN(part)->f_Lives);
     const char* _ps_5 = _sb1;
     printf("%s\n", _ps_5 ? _ps_5 : "");
-    CS2SX_LINE(64);
+    CS2SX_LINE(70);
     CS2SX_JsonOptions* _cs2sx_jsonoptions_6 = CS2SX_JsonOptions_New();
     _cs2sx_jsonoptions_6->f_WriteIndented = 1;
     _cs2sx_jsonoptions_6->f_PropertyNamingPolicy = 1;
     _cs2sx_jsonoptions_6->f_IncludeFields = 1;
     CS2SX_JsonOptions* opts = _cs2sx_jsonoptions_6;
-    CS2SX_LINE(65);
+    CS2SX_LINE(71);
     Item* _item_7 = Item_New();
     CS2SX_STR_STORE(_item_7->f_Name, "Ring");
     _item_7->f_Count = 2;
     Item* item = _item_7;
-    CS2SX_LINE(66);
+    CS2SX_LINE(72);
     const char* _ps_8 = CS2SX_Json_S_Item(item, opts);
     printf("%s\n", _ps_8 ? _ps_8 : "");
-    CS2SX_LINE(71);
+    CS2SX_LINE(77);
     SaveGame* _savegame_9 = SaveGame_New();
     _savegame_9->f_Lives = 5;
     CS2SX_JsonOptions* _cs2sx_jsonoptions_10 = CS2SX_JsonOptions_New();
     _cs2sx_jsonoptions_10->f_IncludeFields = 1;
     const char* withFields = CS2SX_Json_S_SaveGame(_savegame_9, _cs2sx_jsonoptions_10);
-    CS2SX_LINE(72);
+    CS2SX_LINE(78);
     char* _sb2 = _cs2sx_next_buf();
     _sb2 = CS2SX_Format(_sb2, "fields %s", CS2SX_BoolStr(String_Contains(CS2SX_NN(withFields), "\"Lives\":5")));
     const char* _ps_11 = _sb2;
     printf("%s\n", _ps_11 ? _ps_11 : "");
-    CS2SX_LINE(73);
+    CS2SX_LINE(79);
     CS2SX_JsonOptions* _cs2sx_jsonoptions_12 = CS2SX_JsonOptions_New();
     _cs2sx_jsonoptions_12->f_PropertyNameCaseInsensitive = 1;
     Item* ci = CS2SX_Json_D_Item("{\"NAME\":\"Axt\",\"count\":4}", _cs2sx_jsonoptions_12);
-    CS2SX_LINE(74);
+    CS2SX_LINE(80);
     char* _sb3 = _cs2sx_next_buf();
     _sb3 = CS2SX_Format(_sb3, "ci %s %d", CS2SX_NN(ci)->f_Name, CS2SX_NN(ci)->f_Count);
     const char* _ps_13 = _sb3;
     printf("%s\n", _ps_13 ? _ps_13 : "");
-    CS2SX_LINE(77);
+    CS2SX_LINE(83);
     Point* p = CS2SX_Json_D_Point("{\"X\":4,\"Y\":-2}", NULL);
-    CS2SX_LINE(78);
+    CS2SX_LINE(84);
     char* _sb4 = _cs2sx_next_buf();
     _sb4 = CS2SX_Format(_sb4, "point %s %d", CS2SX_Json_S_Point(p, NULL), CS2SX_NN(p)->f_Y);
     const char* _ps_14 = _sb4;
     printf("%s\n", _ps_14 ? _ps_14 : "");
-    CS2SX_LINE(79);
+    CS2SX_LINE(85);
     Size s = CS2SX_Json_D_Size("{\"W\":3,\"H\":5}", NULL);
-    CS2SX_LINE(80);
+    CS2SX_LINE(86);
     char* _sb5 = _cs2sx_next_buf();
     _sb5 = CS2SX_Format(_sb5, "size %d", (s.W * s.H));
     const char* _ps_15 = _sb5;
     printf("%s\n", _ps_15 ? _ps_15 : "");
-    CS2SX_LINE(81);
+    CS2SX_LINE(87);
     List_str* list = CS2SX_Json_D_List_str("[\"a\\nb\", \"\\u00e4\\u20ac\", null]", NULL);
-    CS2SX_LINE(82);
+    CS2SX_LINE(88);
     char* _sb6 = _cs2sx_next_buf();
-    _sb6 = CS2SX_Format(_sb6, "list %d %d %s %s", CS2SX_NN(list)->count, strlen(CS2SX_NN(List_str_Get(list, 0))), CS2SX_BoolStr((CS2SX_strcmp_safe(List_str_Get(list, 1), "ä€") == 0)), CS2SX_BoolStr((List_str_Get(list, 2) == NULL)));
+    _sb6 = CS2SX_Format(_sb6, "list %d %d %s %s", CS2SX_NN(list)->count, CS2SX_Str16Len(CS2SX_NN(List_str_Get(list, 0))), CS2SX_BoolStr((CS2SX_strcmp_safe(List_str_Get(list, 1), "ä€") == 0)), CS2SX_BoolStr((List_str_Get(list, 2) == NULL)));
     const char* _ps_16 = _sb6;
     printf("%s\n", _ps_16 ? _ps_16 : "");
-    CS2SX_LINE(83);
+    CS2SX_LINE(89);
     List_double* _list_17 = List_double_New();
     List_double_Add(_list_17, 1.5);
     List_double_Add(_list_17, -2);
@@ -265,73 +315,94 @@ void JsonApp_OnInit(JsonApp* self)
     _sb7 = CS2SX_Format(_sb7, "plain %s %s %s %d", CS2SX_Json_S_int(42, NULL), CS2SX_Json_S_str("x", NULL), CS2SX_Json_S_List_double(_list_17, NULL), CS2SX_Json_D_int(" 17 ", NULL));
     const char* _ps_18 = _sb7;
     printf("%s\n", _ps_18 ? _ps_18 : "");
-    CS2SX_LINE(87);
-    {
-        CS2SX_ExFrame _exf_19;
-        CS2SX_ExPush(&_exf_19);
-        if (setjmp(_exf_19.buf) == 0)
-        {
-            CS2SX_LINE(87);
-            CS2SX_Json_D_Item("{\"Count\":\"x\"}", NULL);
-            CS2SX_ExPop(&_exf_19);
-        }
-        else
-        {
-            Exception* _exf_19_ex = _exf_19.ex;
-            if (CS2SX_Exc_Is(_exf_19_ex, &CS2SX_TI_JsonException))
-            {
-                CS2SX_LINE(88);
-                printf("error type\n");
-                Exception_Free(_exf_19_ex);
-            }
-            else CS2SX_Throw(_exf_19_ex);
-        }
-    }
-    CS2SX_LINE(89);
-    {
-        CS2SX_ExFrame _exf_20;
-        CS2SX_ExPush(&_exf_20);
-        if (setjmp(_exf_20.buf) == 0)
-        {
-            CS2SX_LINE(89);
-            CS2SX_Json_D_Item("{\"Count\":1", NULL);
-            CS2SX_ExPop(&_exf_20);
-        }
-        else
-        {
-            Exception* _exf_20_ex = _exf_20.ex;
-            if (CS2SX_Exc_Is(_exf_20_ex, &CS2SX_TI_JsonException))
-            {
-                CS2SX_LINE(90);
-                printf("error end\n");
-                Exception_Free(_exf_20_ex);
-            }
-            else CS2SX_Throw(_exf_20_ex);
-        }
-    }
-    CS2SX_LINE(91);
-    {
-        CS2SX_ExFrame _exf_21;
-        CS2SX_ExPush(&_exf_21);
-        if (setjmp(_exf_21.buf) == 0)
-        {
-            CS2SX_LINE(91);
-            CS2SX_Json_D_byte("300", NULL);
-            CS2SX_ExPop(&_exf_21);
-        }
-        else
-        {
-            Exception* _exf_21_ex = _exf_21.ex;
-            if (CS2SX_Exc_Is(_exf_21_ex, &CS2SX_TI_JsonException))
-            {
-                CS2SX_LINE(92);
-                printf("error range\n");
-                Exception_Free(_exf_21_ex);
-            }
-            else CS2SX_Throw(_exf_21_ex);
-        }
-    }
     CS2SX_LINE(93);
+    char* _sb8 = _cs2sx_next_buf();
+    _sb8 = CS2SX_Format(_sb8, "enum %s", CS2SX_Json_S_Card(Card_New(), NULL));
+    const char* _ps_19 = _sb8;
+    printf("%s\n", _ps_19 ? _ps_19 : "");
+    CS2SX_LINE(94);
+    CS2SX_JsonOptions* _cs2sx_jsonoptions_20 = CS2SX_JsonOptions_New();
+    _cs2sx_jsonoptions_20->f_StringEnums = 1;
+    CS2SX_JsonOptions* named = _cs2sx_jsonoptions_20;
+    CS2SX_LINE(95);
+    char* _sb9 = _cs2sx_next_buf();
+    _sb9 = CS2SX_Format(_sb9, "enum2 %s", CS2SX_Json_S_Card(Card_New(), named));
+    const char* _ps_21 = _sb9;
+    printf("%s\n", _ps_21 ? _ps_21 : "");
+    CS2SX_LINE(96);
+    Card* card = CS2SX_Json_D_Card("{\"Rank\":\"gold\",\"Plain\":0}", named);
+    CS2SX_LINE(97);
+    char* _sb10 = _cs2sx_next_buf();
+    _sb10 = CS2SX_Format(_sb10, "enum3 %s %s", Rank_ToString(CS2SX_NN(card)->f_Rank), Rank_ToString(CS2SX_NN(card)->f_Plain));
+    const char* _ps_22 = _sb10;
+    printf("%s\n", _ps_22 ? _ps_22 : "");
+    CS2SX_LINE(100);
+    {
+        CS2SX_ExFrame _exf_23;
+        CS2SX_ExPush(&_exf_23);
+        if (setjmp(_exf_23.buf) == 0)
+        {
+            CS2SX_LINE(100);
+            CS2SX_Json_D_Item("{\"Count\":\"x\"}", NULL);
+            CS2SX_ExPop(&_exf_23);
+        }
+        else
+        {
+            Exception* _exf_23_ex = _exf_23.ex;
+            if (CS2SX_Exc_Is(_exf_23_ex, &CS2SX_TI_JsonException))
+            {
+                CS2SX_LINE(101);
+                printf("error type\n");
+                Exception_Free(_exf_23_ex);
+            }
+            else CS2SX_Throw(_exf_23_ex);
+        }
+    }
+    CS2SX_LINE(102);
+    {
+        CS2SX_ExFrame _exf_24;
+        CS2SX_ExPush(&_exf_24);
+        if (setjmp(_exf_24.buf) == 0)
+        {
+            CS2SX_LINE(102);
+            CS2SX_Json_D_Item("{\"Count\":1", NULL);
+            CS2SX_ExPop(&_exf_24);
+        }
+        else
+        {
+            Exception* _exf_24_ex = _exf_24.ex;
+            if (CS2SX_Exc_Is(_exf_24_ex, &CS2SX_TI_JsonException))
+            {
+                CS2SX_LINE(103);
+                printf("error end\n");
+                Exception_Free(_exf_24_ex);
+            }
+            else CS2SX_Throw(_exf_24_ex);
+        }
+    }
+    CS2SX_LINE(104);
+    {
+        CS2SX_ExFrame _exf_25;
+        CS2SX_ExPush(&_exf_25);
+        if (setjmp(_exf_25.buf) == 0)
+        {
+            CS2SX_LINE(104);
+            CS2SX_Json_D_byte("300", NULL);
+            CS2SX_ExPop(&_exf_25);
+        }
+        else
+        {
+            Exception* _exf_25_ex = _exf_25.ex;
+            if (CS2SX_Exc_Is(_exf_25_ex, &CS2SX_TI_JsonException))
+            {
+                CS2SX_LINE(105);
+                printf("error range\n");
+                Exception_Free(_exf_25_ex);
+            }
+            else CS2SX_Throw(_exf_25_ex);
+        }
+    }
+    CS2SX_LINE(106);
     printf("done\n");
 }
 

@@ -1,0 +1,13 @@
+len 5 4 5
+index True 223 55357 e
+sub True True ell
+find 3 4 2 2
+case True True HELLO True True
+char True True True True True False True
+each 5 2
+pad 3 True [  ok]
+edit True True True
+array 5 True True True ----
+build True True True
+range ok
+done

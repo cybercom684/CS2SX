@@ -93,7 +93,7 @@ void StringsLongApp_OnFrame(StringsLongApp* self)
         const char* s = StringsLongApp_Repeat("0123456789", 500);
         CS2SX_LINE(36);
         char* _sb1 = _cs2sx_next_buf();
-        _sb1 = CS2SX_Format(_sb1, "concat %d %c", strlen(CS2SX_NN(s)), s[4999]);
+        _sb1 = CS2SX_Format(_sb1, "concat %d %s", CS2SX_Str16Len(CS2SX_NN(s)), CS2SX_CharStr(CS2SX_Str16At(s, 4999)));
         const char* _ps_0 = _sb1;
         printf("%s\n", _ps_0 ? _ps_0 : "");
         CS2SX_LINE(37);
@@ -102,7 +102,7 @@ void StringsLongApp_OnFrame(StringsLongApp* self)
         const char* wrapped = _sb2;
         CS2SX_LINE(38);
         char* _sb3 = _cs2sx_next_buf();
-        _sb3 = CS2SX_Format(_sb3, "interp %d %c", strlen(wrapped), wrapped[5001]);
+        _sb3 = CS2SX_Format(_sb3, "interp %d %s", CS2SX_Str16Len(wrapped), CS2SX_CharStr(CS2SX_Str16At(wrapped, 5001)));
         const char* _ps_1 = _sb3;
         printf("%s\n", _ps_1 ? _ps_1 : "");
         CS2SX_LINE(39);
@@ -111,7 +111,7 @@ void StringsLongApp_OnFrame(StringsLongApp* self)
         const char* formatted = _sb4;
         CS2SX_LINE(40);
         char* _sb5 = _cs2sx_next_buf();
-        _sb5 = CS2SX_Format(_sb5, "format %d %c", strlen(CS2SX_NN(formatted)), formatted[5001]);
+        _sb5 = CS2SX_Format(_sb5, "format %d %s", CS2SX_Str16Len(CS2SX_NN(formatted)), CS2SX_CharStr(CS2SX_Str16At(formatted, 5001)));
         const char* _ps_2 = _sb5;
         printf("%s\n", _ps_2 ? _ps_2 : "");
         CS2SX_LINE(42);
@@ -128,7 +128,7 @@ void StringsLongApp_OnFrame(StringsLongApp* self)
         const char* huge = _sb6;
         CS2SX_LINE(47);
         char* _sb7 = _cs2sx_next_buf();
-        _sb7 = CS2SX_Format(_sb7, "huge %d %c", strlen(CS2SX_NN(huge)), huge[89999]);
+        _sb7 = CS2SX_Format(_sb7, "huge %d %s", CS2SX_Str16Len(CS2SX_NN(huge)), CS2SX_CharStr(CS2SX_Str16At(huge, 89999)));
         const char* _ps_3 = _sb7;
         printf("%s\n", _ps_3 ? _ps_3 : "");
         CS2SX_LINE(50);
@@ -141,11 +141,11 @@ void StringsLongApp_OnFrame(StringsLongApp* self)
         List_str* parts = _list_4;
         CS2SX_LINE(52);
         char* _sb8 = _cs2sx_next_buf();
-        _sb8 = CS2SX_Format(_sb8, "%s%s", String_Join(",", parts), CS2SX_RepeatChar('x', 3000));
+        _sb8 = CS2SX_Format(_sb8, "%s%s", String_Join(",", parts), CS2SX_CharRepeat('x', 3000));
         const char* joined = _sb8;
         CS2SX_LINE(53);
         char* _sb9 = _cs2sx_next_buf();
-        _sb9 = CS2SX_Format(_sb9, "methods %d %d %d", strlen(CS2SX_NN(up)), strlen(CS2SX_NN(joined)), strlen(CS2SX_NN(CS2SX_TrimChars(CS2SX_NN(s), (const char[]){ '9', 0 }, 2))));
+        _sb9 = CS2SX_Format(_sb9, "methods %d %d %d", CS2SX_Str16Len(CS2SX_NN(up)), CS2SX_Str16Len(CS2SX_NN(joined)), CS2SX_Str16Len(CS2SX_NN(CS2SX_TrimChars(CS2SX_NN(s), (const char[]){ '9', 0 }, 2))));
         const char* _ps_5 = _sb9;
         printf("%s\n", _ps_5 ? _ps_5 : "");
         CS2SX_LINE(55);
@@ -194,7 +194,7 @@ void StringsLongApp_OnFrame(StringsLongApp* self)
     {
         CS2SX_LINE(72);
         char* _sb18 = _cs2sx_next_buf();
-        _sb18 = CS2SX_Format(_sb18, "kept %d %c", strlen(CS2SX_NN(self->f_kept)), self->f_kept[5000]);
+        _sb18 = CS2SX_Format(_sb18, "kept %d %s", CS2SX_Str16Len(CS2SX_NN(self->f_kept)), CS2SX_CharStr(CS2SX_Str16At(self->f_kept, 5000)));
         const char* _ps_6 = _sb18;
         printf("%s\n", _ps_6 ? _ps_6 : "");
         CS2SX_LINE(73);
@@ -203,7 +203,7 @@ void StringsLongApp_OnFrame(StringsLongApp* self)
         const char* _ps_7 = _sb19;
         printf("%s\n", _ps_7 ? _ps_7 : "");
         CS2SX_LINE(75);
-        const char* _ps_8 = (strlen(CS2SX_NN(noise)) > 0 ? "done" : "?");
+        const char* _ps_8 = (CS2SX_Str16Len(CS2SX_NN(noise)) > 0 ? "done" : "?");
         printf("%s\n", _ps_8 ? _ps_8 : "");
     }
 }

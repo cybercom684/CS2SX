@@ -111,7 +111,7 @@ void StringFieldsApp_OnFrame(StringFieldsApp* self)
             _sb6 = CS2SX_Format(_sb6, "junk %d %d", i, i * i);
             const char* junk = _sb6;
             CS2SX_LINE(37);
-            len += strlen(junk);
+            len += CS2SX_Str16Len(junk);
         }
         CS2SX_LINE(39);
         char* _sb7 = _cs2sx_next_buf();

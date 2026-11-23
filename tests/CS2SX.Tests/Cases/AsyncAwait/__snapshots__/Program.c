@@ -1767,7 +1767,7 @@ void Sequence_Async_cs2sx_run(Sequence_Async* self)
     const char* _ps_1 = _sb0;
     printf("%s\n", _ps_1 ? _ps_1 : "");
     CS2SX_LINE(69);
-    if (strlen(CS2SX_NN(self->f_a)) > 3)
+    if (CS2SX_Str16Len(CS2SX_NN(self->f_a)) > 3)
     {
         {
             CS2SX_LINE(71);

@@ -44,6 +44,17 @@ public static class JsonLowering
             var source = model.SyntaxTree.GetText().ToString();
             var e = edits[file];
 
+            // Converters = { new JsonStringEnumConverter() } → StringEnums = true (also .Converters.Add(…))
+            foreach (var asg in root.DescendantNodes().OfType<AssignmentExpressionSyntax>())
+                if (asg.Left is IdentifierNameSyntax { Identifier.Text: "Converters" } && asg.Parent is InitializerExpressionSyntax
+                    && asg.Right is InitializerExpressionSyntax list && list.Expressions.Count > 0 && list.Expressions.All(IsStringEnumConverterNew))
+                    e.Replace(asg.SpanStart, asg.Span.Length, "StringEnums = true");
+            foreach (var call in root.DescendantNodes().OfType<InvocationExpressionSyntax>())
+                if (call.Expression is MemberAccessExpressionSyntax { Name.Identifier.Text: "Add", Expression: MemberAccessExpressionSyntax { Name.Identifier.Text: "Converters" } conv }
+                    && call.ArgumentList.Arguments.Count == 1 && IsStringEnumConverterNew(call.ArgumentList.Arguments[0].Expression))
+                    e.Replace(call.SpanStart, call.Span.Length,
+                        e.Render(source, conv.Expression.SpanStart, conv.Expression.Span.End, all: false) + ".StringEnums = true");
+
             // JsonSerializerOptions → CS2SX_JsonOptions, JsonNamingPolicy.CamelCase → 1
             foreach (var n in root.DescendantNodes().OfType<SimpleNameSyntax>())
             {
@@ -104,6 +115,11 @@ public static class JsonLowering
         return result;
     }
 
+    private static bool IsStringEnumConverterNew(ExpressionSyntax e) =>
+        e is ObjectCreationExpressionSyntax oc
+        && (oc.ArgumentList == null || oc.ArgumentList.Arguments.Count == 0)
+        && oc.Type.ToString() is "JsonStringEnumConverter" or "System.Text.Json.Serialization.JsonStringEnumConverter";
+
     private static bool IsNsQualifier(ExpressionSyntax e, SemanticModel model) =>
         model.GetSymbolInfo(e).Symbol is INamespaceSymbol;
 
@@ -157,7 +173,7 @@ public static class JsonLowering
 
     // ── Per-type code ───────────────────────────────────────────────────────
 
-    private sealed record Member(string Name, string Json, string Camel, ITypeSymbol Type, bool Field, bool CanSet, bool InitOnly);
+    private sealed record Member(string Name, string Json, string Camel, ITypeSymbol Type, bool Field, bool CanSet, bool InitOnly, bool StringEnum = false);
 
     private sealed class Generator
     {
@@ -257,10 +273,15 @@ public static class JsonLowering
                     }
                     if (mt == null || !names.Add(s.Name)) continue;
                     var json = Attr(s, "JsonPropertyNameAttribute")?.ConstructorArguments.FirstOrDefault().Value as string;
-                    list.Add(new Member(s.Name, json ?? s.Name, json ?? Camel(s.Name), mt, field, canSet, initOnly));
+                    list.Add(new Member(s.Name, json ?? s.Name, json ?? Camel(s.Name), mt, field, canSet, initOnly, IsStringEnumConverter(s)));
                 }
             return list;
         }
+
+        /// [JsonConverter(typeof(JsonStringEnumConverter))] on a member or an enum type.
+        public static bool IsStringEnumConverter(ISymbol s) =>
+            Attr(s, "JsonConverterAttribute") is { } a && a.ConstructorArguments.FirstOrDefault().Value is INamedTypeSymbol c
+            && c.Name == "JsonStringEnumConverter";
 
         /// JsonNamingPolicy.CamelCase: the leading capitals become small ("URLName" → "urlName").
         private static string Camel(string name)
@@ -344,8 +365,13 @@ public static class JsonLowering
             if (t.SpecialType == SpecialType.System_UInt32) return "sb.Append((long)v);";
             if (IsInteger(t)) return "sb.Append((int)v);";
             if (t.TypeKind == TypeKind.Enum)
-                return ((INamedTypeSymbol)t).EnumUnderlyingType!.SpecialType is SpecialType.System_Int64 or SpecialType.System_UInt64 or SpecialType.System_UInt32
+            {
+                var number = ((INamedTypeSymbol)t).EnumUnderlyingType!.SpecialType is SpecialType.System_Int64 or SpecialType.System_UInt64 or SpecialType.System_UInt32
                     ? "sb.Append((long)v);" : "sb.Append((int)v);";
+                // JsonStringEnumConverter (on the enum, or in the options): the name.
+                return IsStringEnumConverter(t) ? "CS2SX_JsonW.Str(sb, v.ToString());"
+                    : $"if (o != null && o.StringEnums) CS2SX_JsonW.Str(sb, v.ToString()); else {number}";
+            }
             if (IsNullableValue(t))
                 return $"if (v.HasValue) W_{Need(Arg(t, 0))}(sb, v.Value, o, d); else sb.Append(\"null\");";
             var guard = "if (v == null) { sb.Append(\"null\"); return; } if (d > 64) throw new JsonException(\"JSON: zu tief verschachtelt (mehr als 64 Ebenen) — enthält das Objekt sich selbst?\"); ";
@@ -364,7 +390,10 @@ public static class JsonLowering
             foreach (var m in Members((INamedTypeSymbol)t))
             {
                 var name = m.Json == m.Camel ? Lit(m.Json) : $"camel ? {Lit(m.Camel)} : {Lit(m.Json)}";
-                var write = $"CS2SX_JsonW.Key(sb, o, d, n == 0, {name}); n++; W_{Need(m.Type)}(sb, v.{m.Name}, o, d + 1);";
+                var value = m.StringEnum && m.Type.TypeKind == TypeKind.Enum
+                    ? $"CS2SX_JsonW.Str(sb, v.{m.Name}.ToString());"
+                    : $"W_{Need(m.Type)}(sb, v.{m.Name}, o, d + 1);";
+                var write = $"CS2SX_JsonW.Key(sb, o, d, n == 0, {name}); n++; {value}";
                 b.Append(m.Field ? $"if (fields) {{ {write} }} " : write + " ");
             }
             b.Append("CS2SX_JsonW.End(sb, o, d, n > 0, '}');");
@@ -384,6 +413,16 @@ public static class JsonLowering
             if (IsInteger(t) || t.TypeKind == TypeKind.Enum)
             {
                 var under = t.TypeKind == TypeKind.Enum ? ((INamedTypeSymbol)t).EnumUnderlyingType! : t;
+                var byName = "";
+                if (t.TypeKind == TypeKind.Enum)
+                {
+                    var names = new StringBuilder();
+                    foreach (var f in t.GetMembers().OfType<IFieldSymbol>().Where(f => f.HasConstantValue))
+                        names.Append($"if (p == {Lit(f.Name.ToLowerInvariant())}) acc |= (long){T}.{f.Name}; else ");
+                    byName = "if (r.IsStr()) { string[] parts = r.Str().Split(','); long acc = 0; "
+                           + "for (int i = 0; i < parts.Length; i++) { string p = parts[i].Trim().ToLower(); "
+                           + names + $"throw r.Err(\"unbekannter Wert für {T}\"); }} return ({T})acc; }} ";
+                }
                 if (under.SpecialType == SpecialType.System_UInt64) return $"return ({T})r.ULng();";
                 var (lo, hi) = under.SpecialType switch
                 {
@@ -395,7 +434,7 @@ public static class JsonLowering
                     SpecialType.System_Byte => ("0L", "255L"),
                     _ => ("-9223372036854775807L - 1L", "9223372036854775807L"),
                 };
-                return $"long x = r.Lng(); if (x < {lo} || x > {hi}) throw r.Err(\"Zahl zu groß für {Text(under)}\"); return ({T})x;";
+                return byName + $"long x = r.Lng(); if (x < {lo} || x > {hi}) throw r.Err(\"Zahl zu groß für {Text(under)}\"); return ({T})x;";
             }
             if (IsNullableValue(t)) return $"if (r.Null()) return null; return R_{Need(Arg(t, 0))}(r, o, d);";
             var guard = (t.IsReferenceType ? "if (r.Null()) return null!; " : "if (r.Null()) throw r.Err(\"null für " + T + "\"); ")
@@ -470,6 +509,7 @@ public class CS2SX_JsonOptions
     public bool PropertyNameCaseInsensitive;
     public bool IncludeFields;
     public int PropertyNamingPolicy;
+    public bool StringEnums;
 }
 public static class CS2SX_JsonW
 {
@@ -477,11 +517,12 @@ public static class CS2SX_JsonW
     {
         if (s == null) { sb.Append(""null""); return; }
         sb.Append('""');
-        int len = s.Length;
-        for (int i = 0; i < len; i++)
+        char hi = (char)0;
+        foreach (char c in s)
         {
-            char c = s[i];
             int code = (int)c;
+            if (hi != (char)0) { sb.Append(new string(new char[] { hi, c })); hi = (char)0; continue; }
+            if (code >= 0xD800 && code <= 0xDBFF) { hi = c; continue; }
             if (c == '""') sb.Append(""\\\"""");
             else if (c == '\\') sb.Append(""\\\\"");
             else if (c == '\n') sb.Append(""\\n"");
@@ -529,11 +570,11 @@ public static class CS2SX_JsonW
 }
 public sealed class CS2SX_JsonR
 {
-    private string s;
+    private char[] s;
     private int p;
     private int len;
     private bool ci;
-    public CS2SX_JsonR(string text, bool caseInsensitive) { s = text; p = 0; len = text.Length; ci = caseInsensitive; }
+    public CS2SX_JsonR(string text, bool caseInsensitive) { s = text.ToCharArray(); p = 0; len = s.Length; ci = caseInsensitive; }
     public JsonException Err(string what) { return new JsonException(""JSON: "" + what + "" (Zeichen "" + p + "")""); }
     private void Ws() { while (p < len && (s[p] == ' ' || s[p] == '\n' || s[p] == '\r' || s[p] == '\t')) p++; }
     private char Peek()
@@ -573,6 +614,7 @@ public sealed class CS2SX_JsonR
         return true;
     }
     public bool Null() { Peek(); return Word(""null""); }
+    public bool IsStr() { return Peek() == '""'; }
     public bool Bool()
     {
         Peek();
@@ -608,10 +650,9 @@ public sealed class CS2SX_JsonR
     }
     private static void Utf8(StringBuilder sb, int cp)
     {
-        if (cp < 0x80) sb.Append((char)cp);
-        else if (cp < 0x800) { sb.Append((char)(0xC0 | (cp >> 6))); sb.Append((char)(0x80 | (cp & 0x3F))); }
-        else if (cp < 0x10000) { sb.Append((char)(0xE0 | (cp >> 12))); sb.Append((char)(0x80 | ((cp >> 6) & 0x3F))); sb.Append((char)(0x80 | (cp & 0x3F))); }
-        else { sb.Append((char)(0xF0 | (cp >> 18))); sb.Append((char)(0x80 | ((cp >> 12) & 0x3F))); sb.Append((char)(0x80 | ((cp >> 6) & 0x3F))); sb.Append((char)(0x80 | (cp & 0x3F))); }
+        if (cp < 0x10000) { sb.Append((char)cp); return; }
+        int v = cp - 0x10000;
+        sb.Append(new string(new char[] { (char)(0xD800 + (v >> 10)), (char)(0xDC00 + (v & 0x3FF)) }));
     }
     public string Str()
     {
@@ -619,9 +660,9 @@ public sealed class CS2SX_JsonR
         p++;
         int start = p;
         while (p < len && s[p] != '""' && s[p] != '\\') p++;
-        if (p < len && s[p] == '""') { string plain = s.Substring(start, p - start); p++; return plain; }
+        if (p < len && s[p] == '""') { string plain = new string(s, start, p - start); p++; return plain; }
         var sb = new StringBuilder();
-        sb.Append(s.Substring(start, p - start));
+        sb.Append(new string(s, start, p - start));
         while (true)
         {
             if (p >= len) throw Err(""Text ohne schließendes Anführungszeichen"");
@@ -672,7 +713,7 @@ public sealed class CS2SX_JsonR
         }
         if (p == start || p == start + 1 && s[start] == '-') throw Err(""Zahl erwartet"");
         if (whole && frac) throw Err(""ganze Zahl erwartet"");
-        return s.Substring(start, p - start);
+        return new string(s, start, p - start);
     }
     public long Lng() { return long.Parse(Number(true)); }
     public ulong ULng() { return ulong.Parse(Number(true)); }

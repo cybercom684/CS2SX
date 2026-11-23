@@ -657,7 +657,9 @@ public sealed class ExpressionWriter : IExpressionWriter
     private List<string> WriteArguments(SeparatedSyntaxList<ArgumentSyntax> args)
     {
         return args
-            .Select(a => a.Expression is null ? string.Empty : Write(a.Expression))
+            .Select(a => a.Expression is null ? string.Empty
+                : !a.RefKindKeyword.IsKind(SyntaxKind.None) ? _dispatcher.BuildArg(a)
+                : Write(a.Expression))
             .Where(s => !string.IsNullOrEmpty(s))
             .ToList();
     }
@@ -721,7 +723,9 @@ public sealed class ExpressionWriter : IExpressionWriter
         if (lit.Token.IsKind(SyntaxKind.StringLiteralToken))
             return "\"" + StringEscaper.EscapeRaw(lit.Token.ValueText) + "\"";
         if (lit.Token.IsKind(SyntaxKind.CharacterLiteralToken))
-            return "'" + StringEscaper.EscapeChar(lit.Token.ValueText) + "'";
+            return lit.Token.Value is char ch && ch > 0x7E
+                ? "((u16)0x" + ((int)ch).ToString("X4") + ")"
+                : "'" + StringEscaper.EscapeChar(lit.Token.ValueText) + "'";
         return lit.Token.IsKind(SyntaxKind.NumericLiteralToken)
             ? CNumericLiteral(lit.Token.Text)
             : lit.Token.Text;
@@ -2024,6 +2028,8 @@ public sealed class ExpressionWriter : IExpressionWriter
         }
 
         // User-defined indexer setter → ClassName_set(obj, key, value)
+        if (IndexerOwner(elemLeft) is { } owner)
+            return AccessorAssignment(owner + "_get", owner + "_set", "((" + owner + "*)" + obj + ")", key, op, right);
         var objTypeName = (lt ?? ft ?? "").TrimEnd('*').Trim();
         if (!string.IsNullOrEmpty(objTypeName) && _ctx.IndexerClasses.Contains(objTypeName))
             return AccessorAssignment(objTypeName + "_get", objTypeName + "_set", obj, key, op, right);
@@ -2297,12 +2303,13 @@ public sealed class ExpressionWriter : IExpressionWriter
         if (prop == "Length")
         {
             if (IsStringExpr(mem.Expression) || IsStringType(mem.Expression))
-                return "strlen(" + obj + ")";
+                return "CS2SX_Str16Len(" + obj + ")";
             var rk2 = mem.Expression.ToString();
             var rkey2 = rk2.TrimStart('_');
-            if ((_ctx.LocalTypes.TryGetValue(rk2, out var rlt) && rlt is "string" or "char[]" or "const char*")
-             || (_ctx.FieldTypes.TryGetValue(rkey2, out var rft) && rft is "string" or "char[]" or "const char*"))
-                return "strlen(" + obj + ")";
+            if (((_ctx.LocalTypes.TryGetValue(rk2, out var rlt) && rlt is "string" or "const char*")
+              || (_ctx.FieldTypes.TryGetValue(rkey2, out var rft) && rft is "string" or "const char*"))
+                && !ArrayModel.IsArrayExpr(mem.Expression, _ctx))
+                return "CS2SX_Str16Len(" + obj + ")";
             // Arrays: compile-time length if known in this method, params companion
             // count, otherwise the runtime length header (works for fields, parameters,
             // return values — anything).
@@ -2722,17 +2729,20 @@ public sealed class ExpressionWriter : IExpressionWriter
             {
                 var ch    = Write(a[0].Expression);
                 var count = Write(a[1].Expression);
-                return "CS2SX_RepeatChar(" + ch + ", " + count + ")";
+                return "CS2SX_CharRepeat(" + ch + ", " + count + ")";
             }
             if (a.Count == 3)
             {
                 var arr   = Write(a[0].Expression);
                 var start = Write(a[1].Expression);
                 var count = Write(a[2].Expression);
-                return "CS2SX_SubstrFromChars(" + arr + ", " + start + ", " + count + ")";
+                return "CS2SX_CharsStr(" + arr + ", " + start + ", " + count + ")";
             }
             if (a.Count == 1)
-                return Write(a[0].Expression); // new string(existingCharPtr)
+            {
+                var arr = Write(a[0].Expression);
+                return "({ const u16* _cs2sx_ca = (" + arr + "); CS2SX_CharsStr(_cs2sx_ca, 0, CS2SX_ArrLen(_cs2sx_ca)); })";
+            }
         }
 
         if (TypeRegistry.IsStringBuilder(typeName))
@@ -2914,6 +2924,14 @@ public sealed class ExpressionWriter : IExpressionWriter
             _ctx.Out.WriteLine(_ctx.Tab + cTypeName + "* " + tmp + " = " + newExpr + ";");
             foreach (var expr in initializer.Expressions)
             {
+                // Collection initializer of a class of the project: `new Bag { 4, 5 }` → Bag_Add(tmp, 4) …,
+                // `{ [k] = v }` → Bag_set(tmp, k, v).
+                if (expr is not AssignmentExpressionSyntax || expr is AssignmentExpressionSyntax { Left: ImplicitElementAccessSyntax })
+                {
+                    if (WriteUserCollectionElement(expr, tmp) is { } call)
+                        _ctx.Out.WriteLine(_ctx.Tab + call + ";");
+                    continue;
+                }
                 if (expr is not AssignmentExpressionSyntax asgn) continue;
                 var propName = asgn.Left.ToString().Trim();
                 var propVal = Write(asgn.Right);
@@ -3165,6 +3183,50 @@ public sealed class ExpressionWriter : IExpressionWriter
         return left;
     }
 
+    /// One element of a collection initializer on a class of the project: its Add
+    /// method (or indexer setter for `[k] = v`) called on tmp.
+    private string? WriteUserCollectionElement(ExpressionSyntax element, string tmp)
+    {
+        if (_ctx.SemanticModel == null) return null;
+        try
+        {
+            if (element is AssignmentExpressionSyntax { Left: ImplicitElementAccessSyntax iea } kv)
+            {
+                if (_ctx.SemanticModel.GetSymbolInfo(iea).Symbol is not IPropertySymbol { IsIndexer: true } ix) return null;
+                var owner = ix.ContainingType.Name;
+                var keys = string.Join(", ", iea.ArgumentList.Arguments.Select(a => Write(a.Expression)));
+                return $"{owner}_set(({owner}*){tmp}, {keys}, {Write(kv.Right)})";
+            }
+            if (Microsoft.CodeAnalysis.CSharp.CSharpExtensions.GetCollectionInitializerSymbolInfo(_ctx.SemanticModel, element).Symbol
+                is not IMethodSymbol add || !TranspilerContext.IsUserCode(add.ContainingType)) return null;
+            var values = element is InitializerExpressionSyntax complex
+                ? complex.Expressions.Select(Write).ToList()
+                : new List<string> { Write(element) };
+            var name = CSharpToC.BuildCMethodName(add.ContainingType.Name, add.Name, values.Count, _ctx.OverloadedMethods, add);
+            return $"{name}(({add.ContainingType.Name}*){tmp}, {string.Join(", ", values)})";
+        }
+        catch { return null; }
+    }
+
+    private bool IsCSharpString(ExpressionSyntax e)
+    {
+        try { return _ctx.SemanticModel?.GetTypeInfo(e).Type?.SpecialType == SpecialType.System_String; }
+        catch { return false; }
+    }
+
+    /// The class of the project whose indexer (this[…]) `elem` calls, or null.
+    private string? IndexerOwner(ElementAccessExpressionSyntax elem)
+    {
+        try
+        {
+            if (_ctx.SemanticModel?.GetSymbolInfo(elem).Symbol is IPropertySymbol { IsIndexer: true } p
+                && TranspilerContext.IsUserCode(p.ContainingType) && p.ContainingType.TypeKind == TypeKind.Class)
+                return p.ContainingType.Name;
+        }
+        catch { }
+        return null;
+    }
+
     private static bool IsBaseOf(INamedTypeSymbol baseType, INamedTypeSymbol derived)
     {
         for (var t = derived.BaseType; t != null; t = t.BaseType)
@@ -3299,9 +3361,15 @@ public sealed class ExpressionWriter : IExpressionWriter
         }
 
         // User-defined indexer (this[T]) → ClassName_get(obj, index)
+        if (IndexerOwner(elem) is { } indexerOwner)
+            return indexerOwner + "_get((" + indexerOwner + "*)" + objExpr + ", " + index + ")";
         var objTypeName = (lt ?? ft ?? "").TrimEnd('*').Trim();
         if (!string.IsNullOrEmpty(objTypeName) && _ctx.IndexerClasses.Contains(objTypeName))
             return objTypeName + "_get(" + objExpr + ", " + index + ")";
+
+        // s[i] on a string: its i-th character (UTF-16 unit, like .NET).
+        if (elem.ArgumentList.Arguments.Count == 1 && IsCSharpString(elem.Expression))
+            return "CS2SX_Str16At(" + objExpr + ", " + index + ")";
 
         // C# arrays are bounds-checked (IndexOutOfRange / NullReference), see CS2SX_AT.
         if (IsSingleDimArray(elem.Expression) && !IsRuntimeFixedArray(elem.Expression))

@@ -347,7 +347,7 @@ void StringBuilder__grow(StringBuilder* sb, int needed);
 
 StringBuilder* StringBuilder_AppendStr(StringBuilder* sb, const char* s);
 
-StringBuilder* StringBuilder_AppendChar(StringBuilder* sb, char c);
+StringBuilder* StringBuilder_AppendChar(StringBuilder* sb, uint16_t c);
 
 StringBuilder* StringBuilder_AppendInt(StringBuilder* sb, int val);
 
@@ -410,7 +410,7 @@ static inline StringBuilder* StringBuilder_AppendLineDouble(StringBuilder* sb, d
     return sb;
 }
 
-static inline StringBuilder* StringBuilder_AppendLineChar(StringBuilder* sb, char c)
+static inline StringBuilder* StringBuilder_AppendLineChar(StringBuilder* sb, uint16_t c)
 {
     StringBuilder_AppendChar(sb, c);
     StringBuilder_AppendChar(sb, '\n');
@@ -517,27 +517,40 @@ const char* String_Substring(const char* s, int start, int length);
 
 const char* String_SubstringFrom(const char* s, int start);
 
-static inline int String_IndexOf(const char* s, const char* sub)
-{
-    if (!s || !sub) return -1;
-    const char* p = strstr(s, sub);
-    return p ? (int)(p - s) : -1;
-}
+// ── C# strings and chars over UTF-8 (rt_str16.c) ─────────────────────────────
+// A C# char is a UTF-16 code unit (uint16_t); Length, s[i], Substring, IndexOf,
+// Pad… count those, like .NET ("Größe".Length == 5).
+typedef struct { const char* p; uint16_t low; } CS2SX_Str16It;   // foreach (char c in s)
+int CS2SX_Str16Len(const char* s);
+int CS2SX_Str16Offset(const char* s, int units);
+int CS2SX_Str16Index(const char* s, int bytes);
+uint16_t CS2SX_Str16At(const char* s, int index);
+int CS2SX_Str16Next(CS2SX_Str16It* it, uint16_t* out);
+uint16_t* CS2SX_Str16ToArray(const char* s);
+const char* CS2SX_CharStr(uint16_t c);
+const char* CS2SX_CharsStr(const uint16_t* chars, int start, int count);
+const char* CS2SX_CharRepeat(uint16_t c, int count);
+uint16_t CS2SX_CharUpper(uint16_t c);
+uint16_t CS2SX_CharLower(uint16_t c);
+int CS2SX_CharIsLetter(uint16_t c);
+int CS2SX_CharIsUpper(uint16_t c);
+int CS2SX_CharIsLower(uint16_t c);
+int CS2SX_CharIsDigit(uint16_t c);
+int CS2SX_CharIsWhiteSpace(uint16_t c);
 
-static inline int String_IndexOfChar(const char* s, char c)
-{
-    if (!s) return -1;
-    const char* p = strchr(s, c);
-    return p ? (int)(p - s) : -1;
-}
+int String_IndexOf(const char* s, const char* sub);
+int String_IndexOfChar(const char* s, uint16_t c);
+const char* String_Insert(const char* s, int index, const char* value);
+const char* String_Remove(const char* s, int start, int count);
+const char* String_RemoveFrom(const char* s, int start);
 
 int String_LastIndexOf(const char* s, const char* sub);
 
 const char* String_Replace(const char* s, const char* from, const char* to);
 
-const char* String_PadLeft(const char* s, int totalWidth, char padChar);
+const char* String_PadLeft(const char* s, int totalWidth, uint16_t padChar);
 
-const char* String_PadRight(const char* s, int totalWidth, char padChar);
+const char* String_PadRight(const char* s, int totalWidth, uint16_t padChar);
 
 static inline int String_CompareTo(const char* a, const char* b)
 {
@@ -1043,13 +1056,14 @@ static inline int          List_str_Count(List_str* l) { return l ? l->count : 0
 void List_str_Insert(List_str* l, int idx, const char* val);
 static inline void         List_str_Set(List_str* l, int i, const char* val) {
     CS2SX_ListCheck(l ? l->count : -1, i);
-    free(l->data[i]);
-    l->data[i] = val ? _cs2sx_heap_strdup(val) : NULL; }
+    char* old = l->data[i];
+    l->data[i] = val ? _cs2sx_heap_strdup(val) : NULL;
+    CS2SX_ReleaseLater(old, free); }   // a string read before stays valid this frame
 
 static inline void List_str_Clear(List_str* l)
 {
     if (!l) return;
-    for (int i = 0; i < l->count; i++) { free(l->data[i]); l->data[i] = NULL; }
+    for (int i = 0; i < l->count; i++) { CS2SX_ReleaseLater(l->data[i], free); l->data[i] = NULL; }
     l->count = 0;
 }
 
@@ -1647,7 +1661,7 @@ static inline int CS2SX_Path_IsPathRooted(const char* path)
 
 const char* CS2SX_Path_ChangeExtension(const char* path, const char* ext);
 
-int String_LastIndexOfChar(const char* s, char c);
+int String_LastIndexOfChar(const char* s, uint16_t c);
 
 #define CS2SX_RETURN_BUF_SIZE 512
 

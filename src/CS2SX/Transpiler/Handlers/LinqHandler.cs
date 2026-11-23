@@ -155,7 +155,9 @@ public sealed class LinqHandler : InvocationHandlerBase
             : colType[..^2].Trim();
         var cInner = TypeRegistry.ListElementName(inner);
         var cInnerType = inner == "string" ? "const char*" : TypeRegistry.MapType(inner);
-        var isPrim = TypeRegistry.IsPrimitive(inner) || TypeRegistry.IsUserDefinedEnum(inner);   // enums are values
+        var isPrim = TypeRegistry.IsPrimitive(inner) || TypeRegistry.IsUserDefinedEnum(inner)   // enums and structs are values
+                  || TypeRegistry.IsUserStruct(inner);
+        var isStructElem = TypeRegistry.IsUserStruct(inner);
         var elemPtr = (isPrim || inner == "string") ? "" : "*";
 
         // A list a call returns (list.Sum(x => …) on GetItems()): evaluated once, not
@@ -311,7 +313,7 @@ public sealed class LinqHandler : InvocationHandlerBase
                         var retVar = ctx.NextTmp("first");
                         var foundVar = ctx.NextTmp("found");
                         var fillLine = isPrim || inner == "string"
-                            ? $"{cInnerType} {retVar} = 0;"
+                            ? $"{cInnerType} {retVar} = {(isStructElem ? "{0}" : "0")};"
                             : $"{cInnerType}* {retVar} = NULL;";
                         ctx.WriteLine(fillLine);
                         ctx.WriteLine($"int {foundVar} = 0;");
@@ -334,7 +336,7 @@ public sealed class LinqHandler : InvocationHandlerBase
                         var countExpr0 = listCount.Replace("_idx", "0");
                         var retVar = ctx.NextTmp("first");
                         var fillLine = isPrim || inner == "string"
-                            ? $"{cInnerType} {retVar} = 0;"
+                            ? $"{cInnerType} {retVar} = {(isStructElem ? "{0}" : "0")};"
                             : $"{cInnerType}* {retVar} = NULL;";
                         ctx.WriteLine(fillLine);
                         ctx.WriteLine($"if ({countExpr0} > 0) {{ {retVar} = {listGet.Replace("_idx", "0")}; }}");
@@ -349,7 +351,7 @@ public sealed class LinqHandler : InvocationHandlerBase
             case "FirstOrDefault":
             case "SingleOrDefault":
                 {
-                    var defaultVal = isPrim ? "0" : "NULL";
+                    var defaultVal = isStructElem ? "(" + cInnerType + "){0}" : isPrim ? "0" : "NULL";
                     if (lambdaArg != null)
                     {
                         var predFn = MakeLifter().LiftLambda(lambdaArg, elementTypeHint: inner, isPredicate: true);
@@ -377,7 +379,7 @@ public sealed class LinqHandler : InvocationHandlerBase
             case "LastOrDefault":
                 {
                     bool isStrict = methodName == "Last";
-                    var defaultVal = isPrim ? "0" : "NULL";
+                    var defaultVal = isStructElem ? "(" + cInnerType + "){0}" : isPrim ? "0" : "NULL";
                     if (lambdaArg != null)
                     {
                         // Last(predicate): scan full list, keep last match
@@ -422,7 +424,7 @@ public sealed class LinqHandler : InvocationHandlerBase
                 {
                     var idxArg = args.Count > 0 ? args[0] : "0";
                     var countExpr = listCount.Replace("_idx", idxArg);
-                    var defaultVal = isPrim ? "0" : "NULL";
+                    var defaultVal = isStructElem ? "(" + cInnerType + "){0}" : isPrim ? "0" : "NULL";
                     result = "(" + idxArg + " >= 0 && " + idxArg + " < " + countExpr + " ? "
                            + listGet.Replace("_idx", idxArg) + " : " + defaultVal + ")";
                     return true;
@@ -805,7 +807,7 @@ public sealed class LinqHandler : InvocationHandlerBase
             case "DefaultIfEmpty":
                 {
                     // list.DefaultIfEmpty([defaultVal]) → wenn leer, Liste mit einem Default-Element zurückgeben
-                    var defaultVal = args.Count > 0 ? args[0] : (isPrim ? "0" : "NULL");
+                    var defaultVal = args.Count > 0 ? args[0] : (isStructElem ? "(" + cInnerType + "){0}" : isPrim ? "0" : "NULL");
                     var outVar = ctx.NextTmp("die");
                     var countExprDie = listCount.Replace("_idx", "0");
                     ctx.WriteLine($"List_{cInner}* {outVar} = List_{cInner}_New();");

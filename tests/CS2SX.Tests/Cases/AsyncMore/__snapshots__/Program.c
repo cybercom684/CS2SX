@@ -2173,7 +2173,7 @@ void Loops_Async_cs2sx_run(Loops_Async* self)
                         CS2SX_Task_Check(CS2SX_NN(self->f_cs2sx_a4));
                     }
                     CS2SX_LINE(89);
-                    self->f_sum += strlen(CS2SX_NN(CS2SX_NN(self->f_r)->f_Name));
+                    self->f_sum += CS2SX_Str16Len(CS2SX_NN(CS2SX_NN(self->f_r)->f_Name));
                     CS2SX_ExPop(&_exf_1);
                 }
                 else

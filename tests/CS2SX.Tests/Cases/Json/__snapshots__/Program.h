@@ -70,6 +70,25 @@ void Point_Free(Point* self);
 Point* Point_Retain(Point* self);
 extern const CS2SX_ClassInfo Point_ClassInfo;
 
+struct Card
+{
+    int _rc;
+    void (*_dtor)(void* self);   // __Destroy of the dynamic type
+    void (*_gc)(void* self, CS2SX_GcVisit visit);   // _Gc of the dynamic type
+    const CS2SX_ClassInfo* _class;   // run-time type (x is T)
+    Rank f_Rank;
+    Rank f_Plain;
+};
+
+Card* Card_New(void);
+void Card_Ctor(Card* self);
+
+void Card__Destroy(Card* self);
+extern const CS2SX_ClassInfo Card_ClassInfo;
+void Card_Gc(void* self, CS2SX_GcVisit visit);
+extern const CS2SX_GcKind Card_GcKind;
+void Card_Free(Card* self);
+Card* Card_Retain(Card* self);
 // C# value-type struct: Size
 typedef struct Size {
     int W;

@@ -177,7 +177,7 @@ void GameKitApp_OnInit(GameKitApp* self)
     CS2SX_SaveData_Write("note", "zeile 1\nzeile 2");
     CS2SX_LINE(56);
     char* _sb6 = _cs2sx_next_buf();
-    _sb6 = CS2SX_Format(_sb6, "save %d %s", strlen(CS2SX_NN(CS2SX_SaveData_Read("note"))), CS2SX_BoolStr(!CS2SX_File_Exists("/switch/cs2sx_data/note.txt")));
+    _sb6 = CS2SX_Format(_sb6, "save %d %s", CS2SX_Str16Len(CS2SX_NN(CS2SX_SaveData_Read("note"))), CS2SX_BoolStr(!CS2SX_File_Exists("/switch/cs2sx_data/note.txt")));
     const char* _ps_7 = _sb6;
     printf("%s\n", _ps_7 ? _ps_7 : "");
     CS2SX_LINE(59);

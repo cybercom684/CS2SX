@@ -13,7 +13,7 @@ public sealed class StringMethodHandler : InvocationHandlerBase
         "string.Contains",      "string.StartsWith",
         "string.EndsWith",      "string.Format",
         "string.Concat",        "string.Join",
-        "string.Split",         "string.Compare",
+        "string.Split",         "string.Compare",       "string.CompareOrdinal", "String.CompareOrdinal",
         "String.IsNullOrEmpty", "String.IsNullOrWhiteSpace",
         "String.Format",        "String.Concat",
         "String.Join",          "String.Split",
@@ -42,7 +42,7 @@ public sealed class StringMethodHandler : InvocationHandlerBase
         "ToString", "Trim", "TrimStart", "TrimEnd",
         "ToUpper", "ToUpperInvariant", "ToLower", "ToLowerInvariant", "Replace", "Substring",
         "IndexOf", "LastIndexOf", "PadLeft", "PadRight",
-        "Split", "CompareTo", "ToCharArray",
+        "Split", "CompareTo", "ToCharArray", "Insert", "Remove",
     };
 
     public override bool TryHandle(InvocationExpressionSyntax inv, string calleeStr,
@@ -67,7 +67,9 @@ public sealed class StringMethodHandler : InvocationHandlerBase
             // and their methods (e.g. Navigator.Replace) must NOT be treated as string ops.
             // Exception: ToString() is valid on any type — int/float/enum receivers must
             // reach BuildToString() instead of falling through to invalid C `expr->ToString()`.
-            if (type == null && ctx.SemanticModel != null)
+            // (Also when a type is known: a class of the project with a Contains/Replace/…
+            // method is not a string.)
+            if (ctx.SemanticModel != null && (type == null || type is not ("string" or "string?" or "char[]" or "const char*")))
             {
                 try
                 {
@@ -174,6 +176,9 @@ public sealed class StringMethodHandler : InvocationHandlerBase
                     ? "String_PadRight(" + ArgAt(args, 0) + ", " + ArgAt(args, 1) + ", " + ArgAt(args, 2) + ")"
                     : "String_PadRight(" + ArgAt(args, 0) + ", " + ArgAt(args, 1) + ", ' ')",
 
+            "string.CompareOrdinal" or "String.CompareOrdinal" when args.Count == 2
+                => "CS2SX_strcmp_safe(" + ArgAt(args, 0) + ", " + ArgAt(args, 1) + ")",
+
             "string.CompareTo" or "String.CompareTo"
                 => "String_CompareTo(" + ArgAt(args, 0) + ", " + ArgAt(args, 1) + ")",
 
@@ -224,7 +229,7 @@ public sealed class StringMethodHandler : InvocationHandlerBase
             SpecialType.System_Double => ("%s", "Double_ToString(X)"),
             SpecialType.System_Single => ("%s", "Float_ToString(X)"),
             SpecialType.System_Boolean => ("%s", "CS2SX_BoolStr(X)"),
-            SpecialType.System_Char => ("%c", "(char)(X)"),
+            SpecialType.System_Char => ("%s", "CS2SX_CharStr(X)"),
             _ => (null, null),
         };
         if (spec == null) return null;
@@ -232,7 +237,7 @@ public sealed class StringMethodHandler : InvocationHandlerBase
         var at = array ? "_jl[_ji]" : "_jl->data[_ji]";
         var count = array ? "CS2SX_ArrLen(_jl)" : "(_jl ? _jl->count : 0)";
         return $"({{ __auto_type _jl = ({ArgAt(args, 1)}); int _jn = {count}; "
-             + $"CS2SX_JOIN_EACH({ArgAt(args, 0)}, _jn, \"{spec}\", {item!.Replace("X", at)}); }})";
+             + $"CS2SX_JOIN_EACH({ArgAt(args, 0)}, _jn, \"{spec}\", {item!.Replace("(X)", "(" + at + ")")}); }})";
     }
 
     private static string WarnUnhandledString(
@@ -339,7 +344,13 @@ public sealed class StringMethodHandler : InvocationHandlerBase
                 ? "String_PadRight(" + receiver + ", " + ArgAt(args, 0) + ", ' ')"
                 : "String_PadRight(" + receiver + ", " + ArgAt(args, 0) + ", " + ArgAt(args, 1) + ")",
 
-            "ToCharArray" => receiver + " /* ToCharArray — const char* is already a char array in C */",
+            "ToCharArray" => "CS2SX_Str16ToArray(" + receiver + ")",
+
+            "Insert" when args.Count == 2 => "String_Insert(" + receiver + ", " + ArgAt(args, 0) + ", " + ArgAt(args, 1) + ")",
+
+            "Remove" => args.Count == 2
+                ? "String_Remove(" + receiver + ", " + ArgAt(args, 0) + ", " + ArgAt(args, 1) + ")"
+                : "String_RemoveFrom(" + receiver + ", " + ArgAt(args, 0) + ")",
 
             _ => WarnUnhandledString(inv, methodName, ctx, args),
         };
@@ -373,6 +384,8 @@ public sealed class StringMethodHandler : InvocationHandlerBase
 
         if (recvType is "object" or "object?")
             return "CS2SX_Obj_ToString(" + receiver + ")";
+        if (recvType is "char" or "u16")
+            return "CS2SX_CharStr(" + receiver + ")";
         // Every user enum has a name function (_forward.h, BuildPipeline).
         if (members != null || CS2SX.Core.TypeRegistry.IsUserDefinedEnum(enumName))
             return enumName + "_ToString(" + receiver + ")";

@@ -20,7 +20,7 @@ void StringsApp_OnInit(StringsApp* self)
     printf("Hello %s, score=%d, ratio=%s\n", name, score, Float_ToString(ratio));
     CS2SX_LINE(12);
     char* _sb0 = _cs2sx_next_buf();
-    _sb0 = CS2SX_Format(_sb0, "%s %s %d", String_ToUpper(name), String_ToLower(name), strlen(name));
+    _sb0 = CS2SX_Format(_sb0, "%s %s %d", String_ToUpper(name), String_ToLower(name), CS2SX_Str16Len(name));
     const char* _ps_0 = _sb0;
     printf("%s\n", _ps_0 ? _ps_0 : "");
     CS2SX_LINE(13);

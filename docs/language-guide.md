@@ -215,7 +215,11 @@ string getrimmt = "  hallo  ".Trim();
 string ersetzt = name.Replace("Switch", "NX");
 ```
 
-> **Hinweis:** Interpolierte Strings sind auf 1023 Zeichen begrenzt. Feldzuweisungen kopieren sie dauerhaft, lokale Variablen gelten für den laufenden Frame, siehe [Grenzen](advanced/limitations.md#strings-länge-und-lebensdauer).
+Strings zählen Zeichen wie in .NET, auch bei Umlauten und anderen Schriften: `"Größe".Length` ist 5, `s[2]` ist `'ö'`, `Substring`, `IndexOf`, `PadLeft`/`PadRight`, `Insert`, `Remove`, `ToCharArray` und `foreach (char c in s)` arbeiten mit Zeichen. `ToUpper`/`ToLower` und `char.IsLetter`, `char.IsUpper`, `char.ToUpper` & Co. kennen lateinische, griechische und kyrillische Buchstaben. Ein `char` ist wie in .NET ein UTF-16-Zeichen; ein Emoji zählt als zwei. Intern bleiben Strings UTF-8: `s[i]` ist bei reinem ASCII-Text sofort da, bei Umlauten davor muss der Text bis zur Stelle gelesen werden. Wer sehr lange Texte Zeichen für Zeichen durchgeht, nimmt `foreach (char c in s)` oder einmal `s.ToCharArray()`.
+
+> **Hinweis:** Strings sind nicht in der Länge begrenzt. Feldzuweisungen kopieren sie dauerhaft, lokale Variablen gelten für den laufenden Frame, siehe [Grenzen](advanced/limitations.md#strings-länge-und-lebensdauer).
+>
+> Bis 0.8 zählten `Length`, `s[i]` und `Substring` Bytes (ein `ö` waren zwei). Wer damit gerechnet hat, etwa beim Abschneiden von Text auf eine Breite, bekommt jetzt die richtigen Werte; Code, der nur ASCII verarbeitet, verhält sich gleich.
 
 ---
 
@@ -252,6 +256,34 @@ if (scores.TryGetValue("Alice", out int s))
 foreach (var kv in scores)
     Console.WriteLine($"{kv.Key}: {kv.Value}");
 ```
+
+### SortedDictionary, SortedSet, PriorityQueue, LinkedList
+
+```csharp
+var rangliste = new SortedDictionary<string, int> { ["mia"] = 30, ["anna"] = 50 };
+foreach (var (name, punkte) in rangliste) Console.WriteLine(name + " " + punkte);   // nach Namen sortiert
+
+var gesehen = new SortedSet<int> { 5, 1, 9 };              // 1, 5, 9 — doppelte Werte zählen einmal
+int kleinster = gesehen.Min;
+
+var offen = new PriorityQueue<Feld, float>();              // kleinste Priorität zuerst (z. B. für A*)
+offen.Enqueue(start, 0);
+while (offen.TryDequeue(out var feld, out var kosten)) { … }
+
+var kette = new LinkedList<Gegner>();
+var knoten = kette.AddLast(boss);
+kette.AddBefore(knoten, wache);
+for (var n = kette.First; n != null; n = n.Next) n.Value.Update();
+```
+
+| Typ | Was geht |
+|---|---|
+| `SortedDictionary<K, V>` | Indexer, `Add`, `TryAdd`, `TryGetValue`, `ContainsKey`, `ContainsValue`, `Remove`, `Clear`, `Count`, `Keys`, `Values`, `foreach` (auch `var (k, v)`), LINQ |
+| `SortedSet<T>` | `Add`, `Remove`, `Contains`, `Min`, `Max`, `Count`, `Clear`, `UnionWith`, `ExceptWith`, `IntersectWith`, `foreach`, LINQ, `string.Join` |
+| `PriorityQueue<E, P>` | `Enqueue`, `Dequeue`, `Peek`, `TryDequeue`, `TryPeek`, `Count`, `Clear` |
+| `LinkedList<T>` | `AddFirst`, `AddLast`, `AddBefore`, `AddAfter`, `Remove`, `RemoveFirst`, `RemoveLast`, `Find`, `FindLast`, `Contains`, `First`, `Last`, `Count`, `Clear`, Knoten mit `Value`, `Next`, `Previous`, `foreach`, LINQ |
+
+Schlüssel und Prioritäten werden wie in .NET verglichen: Zahlen, Enums, `char`, `bool` und Typen mit `IComparable<T>`. Strings vergleicht CS2SX ordinal (Zeichencode, also `"B"` vor `"a"`), .NET dagegen nach der Kultur. Eigene Vergleicher im Konstruktor gehen nicht. Was nicht unterstützt wird, meldet der Build mit Zeile und Hinweis.
 
 ### Arrays
 
@@ -521,6 +553,21 @@ int x = Hilfe.Clamp(150, 0, 100); // → 100
 ```
 
 ---
+
+## Indexer
+
+Eigene Klassen können einen Indexer haben, auch mit einem `string` als Schlüssel oder geerbt:
+
+```csharp
+public class Inventar
+{
+    private readonly Dictionary<string, int> _anzahl = new Dictionary<string, int>();
+    public int this[string name] { get => _anzahl.ContainsKey(name) ? _anzahl[name] : 0; set => _anzahl[name] = value; }
+}
+
+var inv = new Inventar { ["Trank"] = 2 };
+inv["Trank"] += 1;
+```
 
 ## Properties
 

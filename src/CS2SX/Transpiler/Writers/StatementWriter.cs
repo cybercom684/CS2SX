@@ -17,6 +17,7 @@ public sealed class StatementWriter
     }
     public void Write(StatementSyntax stmt)
     {
+        _ctx.DeclaredOutVars.Clear();   // only for the condition of the if being written
         // C# line for exception stack traces — only for statements in a block (an
         // unbraced `if (x) stmt;` must not end up guarding just this update).
         if (stmt is not (BlockSyntax or EmptyStatementSyntax or LocalFunctionStatementSyntax or LabeledStatementSyntax)
@@ -168,7 +169,7 @@ public sealed class StatementWriter
                 continue;
             }
 
-            if (declType is "string" or "var"
+            if (false && declType is "string" or "var"
                 && v.Initializer?.Value is ObjectCreationExpressionSyntax strNew
                 && strNew.Type.ToString() == "string"
                 && strNew.ArgumentList?.Arguments.Count == 2)
@@ -846,11 +847,7 @@ public sealed class StatementWriter
     {
         if (TryExtractOutVarFromCondition(ifStmt.Condition, out var outVarDecls))
             foreach (var (varName, varType) in outVarDecls)
-            {
-                var cType = TypeRegistry.MapType(varType);
-                _ctx.WriteLine(cType + " " + varName + " = 0;");
-                _ctx.LocalTypes[varName] = varType;
-            }
+                DeclareOutVar(ifStmt.Condition, varName, varType);
 
         if (ifStmt.Condition is IsPatternExpressionSyntax isPattern)
         {
@@ -873,6 +870,24 @@ public sealed class StatementWriter
             _ctx.WriteLine("else");
             WriteBlockOrStmt(ifStmt.Else.Statement);
         }
+    }
+
+    /// Declares an `out var` of an if condition with its real type (semantic model).
+    private void DeclareOutVar(ExpressionSyntax condition, string varName, string varType)
+    {
+        try
+        {
+            var desig = condition.DescendantNodesAndSelf().OfType<SingleVariableDesignationSyntax>()
+                .FirstOrDefault(d => d.Identifier.Text == varName);
+            if (desig != null && _ctx.SemanticModel?.GetDeclaredSymbol(desig) is ILocalSymbol local)
+                varType = TranspilerContext.FormatTypeSymbol(local.Type);
+        }
+        catch { }
+        var cType = TypeRegistry.MapType(varType);
+        var needsPtr = !cType.EndsWith("*") && TypeRegistry.NeedsPointerSuffix(varType);
+        _ctx.WriteLine(cType + (needsPtr ? "*" : "") + " " + varName + (needsPtr ? " = NULL;" : " = {0};"));
+        _ctx.LocalTypes[varName] = varType;
+        _ctx.DeclaredOutVars.Add(varName);
     }
 
     private static bool TryExtractOutVarFromCondition(
@@ -983,11 +998,7 @@ public sealed class StatementWriter
     {
         if (TryExtractOutVarFromCondition(ifStmt.Condition, out var outVarDecls))
             foreach (var (varName, varType) in outVarDecls)
-            {
-                var cType = TypeRegistry.MapType(varType);
-                _ctx.WriteLine(cType + " " + varName + " = 0;");
-                _ctx.LocalTypes[varName] = varType;
-            }
+                DeclareOutVar(ifStmt.Condition, varName, varType);
 
         if (ifStmt.Condition is IsPatternExpressionSyntax isPattern)
         {
@@ -1035,13 +1046,22 @@ public sealed class StatementWriter
         string init;
         if (forStmt.Declaration != null)
         {
-            var tName = TypeRegistry.MapType(forStmt.Declaration.Type.ToString().Trim());
+            // The declared type — `var` and classes too (for (var n = list.First; …), for (Node n = …)).
+            var csType = forStmt.Declaration.Type.ToString().Trim();
+            try
+            {
+                if (_ctx.SemanticModel?.GetTypeInfo(forStmt.Declaration.Type).Type is { } ft and not IErrorTypeSymbol)
+                    csType = TranspilerContext.FormatTypeSymbol(ft);
+            }
+            catch { }
+            var tName = TypeRegistry.MapType(csType);
+            if (!tName.EndsWith("*") && TypeRegistry.NeedsPointerSuffix(csType)) tName += "*";
             var vars = string.Join(", ", forStmt.Declaration.Variables.Select(v =>
             {
                 var ie = v.Initializer != null
                     ? " = " + _expr.Write(v.Initializer.Value)
                     : "";
-                _ctx.LocalTypes[v.Identifier.Text] = forStmt.Declaration.Type.ToString().Trim();
+                _ctx.LocalTypes[v.Identifier.Text] = csType;
                 return v.Identifier + ie;
             }));
             init = tName + " " + vars;
@@ -1117,6 +1137,23 @@ public sealed class StatementWriter
                       $"Im generierten C wurde ein #error eingefügt.",
                       colRaw);
             _ctx.WriteLine($"#error \"CS2SX: foreach({varName} in {colRaw}) — collection type unknown. Declare '{colRaw}' with an explicit type.\"");
+            return;
+        }
+
+        if (isString && colType == "string")
+        {
+            var it = _ctx.NextTmp("chars");
+            var cvar = _ctx.NextTmp("ch");
+            _ctx.WriteLine($"CS2SX_Str16It {it} = {{ {colExpr}, 0 }};");
+            _ctx.WriteLine($"for (u16 {cvar}; CS2SX_Str16Next(&{it}, &{cvar}); )");
+            _ctx.WriteLine("{");
+            _ctx.Indent();
+            _ctx.WriteLine($"u16 {varName} = {cvar};");
+            _ctx.LocalTypes[varName] = "char";
+            if (forEach.Statement is BlockSyntax cb) foreach (var st in cb.Statements) Write(st);
+            else Write(forEach.Statement);
+            _ctx.Dedent();
+            _ctx.WriteLine("}");
             return;
         }
 

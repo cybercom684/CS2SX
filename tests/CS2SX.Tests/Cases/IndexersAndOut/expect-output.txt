@@ -1,0 +1,10 @@
+index 5 9 2 3
+grid xy-
+derived 7
+out 5 5 True 5
+ref 21 mine
+class out ring
+missing False True
+True
+for 14
+done

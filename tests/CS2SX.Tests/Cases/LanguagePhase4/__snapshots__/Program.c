@@ -283,7 +283,7 @@ int LanguagePhase4App_Parse(const char* s)
 {
     CS2SX_TRACE("LanguagePhase4App.Parse", "Program.cs");
     CS2SX_LINE(52);
-    if (strlen(CS2SX_NN(s)) == 0)
+    if (CS2SX_Str16Len(CS2SX_NN(s)) == 0)
     {
         CS2SX_LINE(52);
         CS2SX_Throw((Exception*)(ParseError_New("empty", 0)));
@@ -301,7 +301,7 @@ int LanguagePhase4App_Parse(const char* s)
         CS2SX_Throw((Exception*)(CS2SX_Exc_New(&CS2SX_TI_InvalidOperationException, "bad state", NULL, NULL)));
     }
     CS2SX_LINE(55);
-    return strlen(CS2SX_NN(s));
+    return CS2SX_Str16Len(CS2SX_NN(s));
 }
 
 const char* LanguagePhase4App_Classify(const char* s)

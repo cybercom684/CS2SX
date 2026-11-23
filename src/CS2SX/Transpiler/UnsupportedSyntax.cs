@@ -27,6 +27,11 @@ internal static class UnsupportedSyntax
             foreach (var node in root.DescendantNodes())
                 if (ObjectProblem(node, model) is { } why) error(node, why);
 
+        // SortedDictionary / SortedSet / PriorityQueue / LinkedList uses that are not lowered.
+        if (model != null)
+            foreach (var (node, message) in CS2SX.Build.CollectionLowering.Problems(root, model))
+                error(node, message);
+
         // JsonSerializer calls that could not be turned into generated code (JsonLowering).
         if (model != null)
             foreach (var (node, message) in CS2SX.Build.JsonLowering.Problems(root, model))

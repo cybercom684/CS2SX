@@ -97,7 +97,7 @@ static int _lambda_6(void* _env, const char* x)
 {
     CS2SX_TRACE("GenericNestedApp.<lambda>", "Program.cs");
     (void)_env;
-    return strlen(CS2SX_NN(x));
+    return CS2SX_Str16Len(CS2SX_NN(x));
 }
 
 static CS2SX_Delegate _dg_6 = CS2SX_DELEGATE_STATIC(_lambda_6);
@@ -106,7 +106,7 @@ static int _lambda_7(void* _env, const char* x)
 {
     CS2SX_TRACE("GenericNestedApp.<lambda>", "Program.cs");
     (void)_env;
-    return strlen(CS2SX_NN(x));
+    return CS2SX_Str16Len(CS2SX_NN(x));
 }
 
 static CS2SX_Delegate _dg_7 = CS2SX_DELEGATE_STATIC(_lambda_7);
@@ -115,7 +115,7 @@ static int _lambda_8(void* _env, const char* x)
 {
     CS2SX_TRACE("GenericNestedApp.<lambda>", "Program.cs");
     (void)_env;
-    return strlen(CS2SX_NN(x));
+    return CS2SX_Str16Len(CS2SX_NN(x));
 }
 
 static CS2SX_Delegate _dg_8 = CS2SX_DELEGATE_STATIC(_lambda_8);

@@ -556,7 +556,7 @@ CS2SX_Iter* IteratorsApp_Wait(int frames)
 
 static double _lambda_0(const char* w)
 {
-    return strlen(CS2SX_NN(w));
+    return CS2SX_Str16Len(CS2SX_NN(w));
 }
 
 void IteratorsApp_OnInit(IteratorsApp* self)

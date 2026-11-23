@@ -267,6 +267,8 @@ public sealed class CSharpToC : CSharpSyntaxWalker
             foreach (var prop in node.Members.OfType<PropertyDeclarationSyntax>())
                 if (!PropertyWriter.IsAutoProperty(prop))
                     PropertyWriter.WriteSignatures(prop, node.Identifier.Text, _ctx.Out);
+            foreach (var ix in node.Members.OfType<IndexerDeclarationSyntax>())
+                VisitIndexerDeclaration(ix);   // this[…]: T_get / T_set
 
             if (_interfaceExpander != null)
             {
@@ -294,6 +296,8 @@ public sealed class CSharpToC : CSharpSyntaxWalker
             foreach (var prop in node.Members.OfType<PropertyDeclarationSyntax>())
                 if (!PropertyWriter.IsAutoProperty(prop))
                     PropertyWriter.WriteImplementations(prop, node.Identifier.Text, _ctx, _exprWriter, _stmtWriter);
+            foreach (var ix in node.Members.OfType<IndexerDeclarationSyntax>())
+                VisitIndexerDeclaration(ix);
 
             if (!isStaticClass
                 && !string.IsNullOrEmpty(baseType)
@@ -2422,6 +2426,9 @@ public sealed class CSharpToC : CSharpSyntaxWalker
         {
             if (csType == "string")
                 return $"const char** {p.Identifier}";
+            // ref/out of a class: the caller's variable (a pointer) is changed.
+            if (!isPrim && !cType.EndsWith("*") && TypeRegistry.NeedsPointerSuffix(csType))
+                return $"{cType}** {p.Identifier}";
             return $"{cType}* {p.Identifier}";
         }
 

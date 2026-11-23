@@ -141,7 +141,7 @@ void LanguageSugarApp_OnInit(LanguageSugarApp* self)
     for (int _ri_9 = 0; _ri_9 < ((3)) - ((1)); _ri_9++)
         List_int_Add(_rng_7, List_int_Get(nums, _rs_8 + _ri_9));
     char* _sb4 = _cs2sx_next_buf();
-    _sb4 = CS2SX_Format(_sb4, "slices %s %s %s %c %d %d %d", String_Substring(s, (1), ((3)) - ((1))), String_Substring(s, strlen(s) - (2), (strlen(s)) - (strlen(s) - (2))), String_Substring(s, 0, ((2)) - (0)), s[strlen(s) - (1)], CS2SX_NN(_rng_7)->count, List_int_Get(nums, nums->count - (1)), CS2SX_AT(arr, 3 - (1)));
+    _sb4 = CS2SX_Format(_sb4, "slices %s %s %s %s %d %d %d", String_Substring(s, (1), ((3)) - ((1))), String_Substring(s, CS2SX_Str16Len(s) - (2), (CS2SX_Str16Len(s)) - (CS2SX_Str16Len(s) - (2))), String_Substring(s, 0, ((2)) - (0)), CS2SX_CharStr(CS2SX_Str16At(s, CS2SX_Str16Len(s) - (1))), CS2SX_NN(_rng_7)->count, List_int_Get(nums, nums->count - (1)), CS2SX_AT(arr, 3 - (1)));
     const char* _ps_10 = _sb4;
     printf("%s\n", _ps_10 ? _ps_10 : "");
     CS2SX_LINE(51);

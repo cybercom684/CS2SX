@@ -11,6 +11,9 @@ point {"X":4,"Y":-2} -2
 size 15
 list 3 3 True True
 plain 42 "x" [1.5,-2] 17
+enum {"Rank":"Silver","Plain":2}
+enum2 {"Rank":"Silver","Plain":"Gold"}
+enum3 Gold Bronze
 error type
 error end
 error range

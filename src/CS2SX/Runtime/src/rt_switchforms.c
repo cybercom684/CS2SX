@@ -334,13 +334,17 @@ StringBuilder* StringBuilder_AppendStr(StringBuilder* sb, const char* s)
     return sb;
 }
 
-StringBuilder* StringBuilder_AppendChar(StringBuilder* sb, char c)
+StringBuilder* StringBuilder_AppendChar(StringBuilder* sb, uint16_t c)
 {
     if (!sb) return sb;
-    StringBuilder__grow(sb, 1);
-    sb->buf[sb->length++] = c;
-    sb->buf[sb->length] = '\0';
-    return sb;
+    if (c < 0x80)
+    {
+        StringBuilder__grow(sb, 1);
+        sb->buf[sb->length++] = (char)c;
+        sb->buf[sb->length] = '\0';
+        return sb;
+    }
+    return StringBuilder_AppendStr(sb, CS2SX_CharStr(c));   // UTF-8
 }
 
 StringBuilder* StringBuilder_AppendInt(StringBuilder* sb, int val)
@@ -466,59 +470,10 @@ const char* String_TrimEnd(const char* s)
     return buf;
 }
 
-const char* String_ToUpper(const char* s)
-{
-    if (!s) return "";
-    int len = (int)strlen(s);
-    char* buf = CS2SX_StrAlloc((size_t)len);
-    for (int i = 0; i < len; i++) buf[i] = (char)toupper((unsigned char)s[i]);
-    buf[len] = '\0';
-    return buf;
-}
 
-const char* String_ToLower(const char* s)
-{
-    if (!s) return "";
-    int len = (int)strlen(s);
-    char* buf = CS2SX_StrAlloc((size_t)len);
-    for (int i = 0; i < len; i++) buf[i] = (char)tolower((unsigned char)s[i]);
-    buf[len] = '\0';
-    return buf;
-}
 
-const char* String_Substring(const char* s, int start, int length)
-{
-    if (!s) CS2SX_ThrowNullRef();
-    int slen = (int)strlen(s);
-    // C#: startIndex in [0, Length], length >= 0, startIndex + length <= Length
-    if (start < 0 || start > slen) CS2SX_ThrowArgOutOfRange("startIndex");
-    if (length < 0 || length > slen - start) CS2SX_ThrowArgOutOfRange("length");
-    char* buf = CS2SX_StrAlloc((size_t)length);
-    memcpy(buf, s + start, length);
-    buf[length] = '\0';
-    return buf;
-}
 
-const char* String_SubstringFrom(const char* s, int start)
-{
-    if (!s) CS2SX_ThrowNullRef();
-    int slen = (int)strlen(s);
-    if (start < 0 || start > slen) CS2SX_ThrowArgOutOfRange("startIndex");
-    if (start == slen) return "";
-    char* buf = CS2SX_StrAlloc((size_t)(slen - start));
-    memcpy(buf, s + start, (size_t)(slen - start) + 1);
-    return buf;
-}
 
-int String_LastIndexOf(const char* s, const char* sub)
-{
-    if (!s || !sub) return -1;
-    int sublen = (int)strlen(sub);
-    int slen = (int)strlen(s);
-    for (int i = slen - sublen; i >= 0; i--)
-        if (strncmp(s + i, sub, sublen) == 0) return i;
-    return -1;
-}
 
 const char* String_Replace(const char* s, const char* from, const char* to)
 {
@@ -546,31 +501,7 @@ const char* String_Replace(const char* s, const char* from, const char* to)
     return buf;
 }
 
-const char* String_PadLeft(const char* s, int totalWidth, char padChar)
-{
-    if (!s) s = "";
-    int len = (int)strlen(s);
-    int pad = totalWidth - len;
-    if (pad < 0) pad = 0;
-    char* buf = CS2SX_StrAlloc((size_t)(pad + len));
-    memset(buf, padChar, pad);
-    memcpy(buf + pad, s, len);
-    buf[pad + len] = '\0';
-    return buf;
-}
 
-const char* String_PadRight(const char* s, int totalWidth, char padChar)
-{
-    if (!s) s = "";
-    int len = (int)strlen(s);
-    int pad = totalWidth - len;
-    if (pad < 0) pad = 0;
-    char* buf = CS2SX_StrAlloc((size_t)(pad + len));
-    memcpy(buf, s, len);
-    memset(buf + len, padChar, pad);
-    buf[len + pad] = '\0';
-    return buf;
-}
 
 /// s.Trim(chars) (mode 3), TrimStart (1), TrimEnd (2): removes the given characters.
 const char* CS2SX_TrimChars(const char* s, const char* chars, int mode)
@@ -641,7 +572,8 @@ const char** CS2SX_StrArr_FromList(List_str* l)
 void List_str_Remove(List_str* l, int idx)
 {
     CS2SX_ListCheck(l ? l->count : -1, idx);
-    free(l->data[idx]);
+    // A string just read from the list stays valid for the rest of the frame (C#).
+    CS2SX_ReleaseLater(l->data[idx], free);
     for (int _i = idx; _i < l->count - 1; _i++) l->data[_i] = l->data[_i + 1];
     l->count--;
 }
@@ -1654,14 +1586,6 @@ const char* CS2SX_Path_ChangeExtension(const char* path, const char* ext)
     return buf;
 }
 
-int String_LastIndexOfChar(const char* s, char c)
-{
-    if (!s) return -1;
-    const char* last = NULL;
-    for (const char* p = s; *p; p++)
-        if (*p == c) last = p;
-    return last ? (int)(last - s) : -1;
-}
 
 void Form_InitFocus(Form* form)
 {

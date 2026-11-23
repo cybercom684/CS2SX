@@ -1,0 +1,6 @@
+# One substring per line: an error CS2SX must report for Program.cs.
+Program.cs(15): Dieser Konstruktor von SortedSet wird nicht unterstützt
+Program.cs(16): Der Typ Cell kann nicht verglichen werden
+Program.cs(18): PriorityQueue.UnorderedItems wird nicht unterstützt
+Program.cs(20): SortedDictionary.Comparer wird nicht unterstützt
+Program.cs(21): Ein SortedDictionary kann hier nicht als IEnumerable<KeyValuePair<string, int>> verwendet werden

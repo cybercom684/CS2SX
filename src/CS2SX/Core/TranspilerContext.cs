@@ -31,6 +31,14 @@ public sealed class TranspilerContext
         get;
     }
 
+    /// `out var x` variables already declared in front of an if statement
+    /// (StatementWriter): the argument only passes their address.
+    public HashSet<string> DeclaredOutVars { get; } = new(StringComparer.Ordinal);
+
+    /// `out var` arguments already declared (a call may be written more than once
+    /// while handlers try it).
+    public HashSet<Microsoft.CodeAnalysis.SyntaxNode> DeclaredOutArgs { get; } = new();
+
     // ── Roslyn Semantic Model ─────────────────────────────────────────────────
 
     public SemanticModel? SemanticModel

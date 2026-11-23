@@ -21,7 +21,7 @@ public static class TypeRegistry
         ["float"] = "float",
         ["double"] = "double",
         ["bool"] = "int",
-        ["char"] = "char",
+        ["char"] = "u16",   // a UTF-16 code unit, like .NET (strings are UTF-8, see rt_str16.c)
         ["void"] = "void",
         ["string"] = "const char*",
         ["object"] = "void*",

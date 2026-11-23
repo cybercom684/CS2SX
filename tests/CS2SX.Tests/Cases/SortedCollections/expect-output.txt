@@ -1,0 +1,20 @@
+anna=50 ben=20 mia=35 zoe=10
+True True False 3
+zoe 10
+missing False 0
+top anna
+keys anna,mia,zoe best anna
+lit abc
+dup
+nokey
+set 4 1 9 1,3,5,9
+True False True True
+where 3,4,5
+apple fig pear
+urgent1 mid3 low5 later9
+empty
+job a 2
+1 15 2 25 4 1 25
+back 252151 True 43
+left 15,2
+done
