@@ -73,8 +73,8 @@ internal static class UnsupportedSyntax
         LabeledStatementSyntax l =>
             $"Sprungmarken ({l.Identifier.Text}:) werden nicht unterstützt — mit Schleifen oder einer Methode umbauen.",
 
-        YieldStatementSyntax =>
-            "yield return wird nicht unterstützt — die Werte in einer List<T> sammeln und zurückgeben.",
+        // Iterators that could not be lowered (IteratorLowering) — the reason.
+        YieldStatementSyntax y => CS2SX.Build.IteratorLowering.YieldMessage(y, model),
 
         StackAllocArrayCreationExpressionSyntax =>
             "stackalloc/Span<T> wird nicht unterstützt — ein normales Array verwenden: new int[n].",

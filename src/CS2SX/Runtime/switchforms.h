@@ -1100,6 +1100,10 @@ static inline const char* String_JoinArr(const char* sep, const char** arr)
     return String_Join(sep, &view);
 }
 
+/// string.Join over numbers, bools or chars: ITEM is the value of item _ji, printed
+/// with fmt; the result is valid until the next frame (like String_Join's).
+#define CS2SX_JOIN_EACH(sep, n, fmt, ITEM) ({                                             List_str _jv = { (char**)malloc(sizeof(char*) * ((n) > 0 ? (n) : 1)), (n), (n) };       for (int _ji = 0; _ji < (n); _ji++) {                                                     char _jt[48]; snprintf(_jt, sizeof _jt, fmt, ITEM);                                   char* _jc = CS2SX_StrAlloc(strlen(_jt)); strcpy(_jc, _jt); _jv.data[_ji] = _jc;     }                                                                                     const char* _jr = String_Join(sep, &_jv); free(_jv.data); _jr; })
+
 // FIX: String_Split legt Heap-Kopien an (via List_str_Add) statt Pool-Slots.
 // Kein static-Buffer mehr — kein Aliasing bei verschachtelten Aufrufen.
 List_str* String_Split(const char* s, const char* sep);

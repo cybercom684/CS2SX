@@ -19,12 +19,12 @@ Für diese Konstrukte gibt es keine Übersetzung nach C. `cs2sx build` und `cs2s
 | Collection-Ausdrücke mit `..spread` oder für andere Typen als Array/List/HashSet | `new List<int>(…)` |
 | `delegate`-Typen mit `ref`/`out`/`params` oder generisch | `Action<…>`, `Func<…>` |
 | `goto`, Sprungmarken | Schleifen, `break`/`continue` |
-| `yield return` | Werte in einer `List<T>` sammeln |
+| `yield` in Lambdas/lokalen Funktionen mit Zugriff auf lokale Variablen, nicht-generisches `IEnumerable`; bei `IEnumerator<T>`: `yield` in `try`/`using`, in generischen Klassen | Methode der Klasse, `IEnumerable<T>`, `try` in eine eigene Methode |
 | `new object()`, `dynamic` | eigene Klasse, konkreter Typ |
 | `stackalloc`, `Span<T>`, `unsafe`, Zeiger | normale Arrays |
 | `GetType()` (außer bei Exceptions) | `is`/`switch` auf den Typ (prüfen den echten Typ zur Laufzeit) |
 
-Unterstützt (CS2SX schreibt es vor dem Übersetzen um): lokale Funktionen ohne Zugriff auf lokale Variablen der Methode, `[1, 2, 3]` für Arrays/List/HashSet, `with` bei Records, `foreach (var i in 0..10)`, `s[1..3]`/`s[^1]`/`list[2..]`, eigene `delegate`-Typen, generische Methoden (auch `virtual`/`abstract`/`override` und in Interfaces) und generische Structs (`struct Pair<T>`).
+Unterstützt (CS2SX schreibt es vor dem Übersetzen um): lokale Funktionen ohne Zugriff auf lokale Variablen der Methode, `[1, 2, 3]` für Arrays/List/HashSet, `with` bei Records, `foreach (var i in 0..10)`, `s[1..3]`/`s[^1]`/`list[2..]`, eigene `delegate`-Typen, generische Methoden (auch `virtual`/`abstract`/`override` und in Interfaces) und generische Structs (`struct Pair<T>`). Iteratoren mit `yield return` und `yield break`, siehe [Sprachunterstützung → Iteratoren](../language-guide.md#iteratoren-yield-return).
 
 ---
 

@@ -158,6 +158,18 @@ public sealed class LinqHandler : InvocationHandlerBase
         var isPrim = TypeRegistry.IsPrimitive(inner);
         var elemPtr = (isPrim || inner == "string") ? "" : "*";
 
+        // A list a call returns (list.Sum(x => …) on GetItems()): evaluated once, not
+        // on every pass of the loop the operators below write.
+        if (TypeRegistry.IsList(colType) && mem.Expression is InvocationExpressionSyntax or ObjectCreationExpressionSyntax
+            && !System.Text.RegularExpressions.Regex.IsMatch(sourceExpr, @"^[A-Za-z_][A-Za-z0-9_]*$")
+            && (inv.ArgumentList.Arguments.Count > 0 || methodName is "Sum" or "Min" or "Max" or "Average"))
+        {
+            var src = ctx.NextTmp("src");
+            ctx.WriteLine($"__auto_type {src} = {sourceExpr};");
+            ctx.LocalTypes[src] = colType;
+            sourceExpr = src;
+        }
+
         var listGet = TypeRegistry.IsList(colType)
             ? $"List_{cInner}_Get({sourceExpr}, _idx)"
             : sourceExpr + "[_idx]";
@@ -475,9 +487,14 @@ public sealed class LinqHandler : InvocationHandlerBase
                         var projFn = MakeLifter().LiftLambda(lambdaArg, hintType: $"Func<{inner},double>", elementTypeHint: inner);
                         var idxVar = ctx.NextTmp("i");
                         var sumVar = ctx.NextTmp("sum");
-                        ctx.WriteLine($"double {sumVar} = 0.0;");
+                        // The sum has the type of the selector's result (int for x => x.Length).
+                        var sumCs = ctx.SemanticModel?.GetTypeInfo(inv).Type is { SpecialType: not SpecialType.None } st
+                            ? TranspilerContext.FormatTypeSymbol(st) : "double";
+                        var sumC = TypeRegistry.MapType(sumCs);
+                        ctx.WriteLine($"{sumC} {sumVar} = 0;");
                         ctx.WriteLine($"for (int {idxVar} = 0; {idxVar} < {listCount.Replace("_idx", idxVar)}; {idxVar}++)");
-                        ctx.WriteLine($"  {sumVar} += (double){projFn}({listGet.Replace("_idx", idxVar)});");
+                        ctx.WriteLine($"  {sumVar} += ({sumC}){projFn}({listGet.Replace("_idx", idxVar)});");
+                        ctx.LocalTypes[sumVar] = sumCs;
                         result = sumVar;
                     }
                     else

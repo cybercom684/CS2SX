@@ -293,6 +293,60 @@ LINQ-Abfragen werden inline zu C-Schleifen expandiert — kein IQueryable, keine
 
 ---
 
+## Iteratoren (yield return)
+
+Eine Methode mit `yield return` liefert ihre Werte nacheinander. Was dabei passiert, hängt vom Rückgabetyp ab.
+
+**`IEnumerable<T>`:** Der Rumpf läuft beim Aufruf ganz durch und sammelt die Werte in einer Liste. `foreach`, LINQ und `string.Join` funktionieren damit wie gewohnt, auch rekursiv und in Eigenschaften:
+
+```csharp
+IEnumerable<int> Gerade(int max)
+{
+    for (int i = 0; i <= max; i += 2) yield return i;
+}
+
+public IEnumerable<Gegner> Lebende
+{
+    get { foreach (var g in _gegner) if (g.Leben > 0) yield return g; }
+}
+
+int summe = Gerade(10).Sum();
+```
+
+> Weil die Werte sofort gesammelt werden, darf ein `IEnumerable<T>`-Iterator nicht endlos laufen (`while (true) yield return …` hängt). Dafür `IEnumerator<T>` verwenden.
+
+**`IEnumerator<T>` und `IEnumerator`:** Der Rumpf läuft schrittweise, bei jedem `MoveNext()` bis zum nächsten `yield return`. Lokale Variablen behalten dazwischen ihren Wert. So lassen sich Abläufe über mehrere Frames schreiben (Coroutines):
+
+```csharp
+private IEnumerator? _intro;
+
+private IEnumerator Intro()
+{
+    _text = "3";
+    for (int i = 0; i < 60; i++) yield return null;   // 60 Frames warten
+    _text = "Los!";
+}
+
+public override void OnInit() { _intro = Intro(); }
+
+public override void OnFrame()
+{
+    if (_intro != null && !_intro.MoveNext()) _intro = null;   // ein Schritt pro Frame
+}
+```
+
+Mit `IEnumerator<T>` liefert jeder Schritt einen Wert in `Current`, zum Beispiel die Anzahl der Frames, die der Ablauf warten will. `yield break` beendet einen Iterator, danach gibt `MoveNext()` immer `false` zurück. Jeder Aufruf der Methode erzeugt einen eigenen, unabhängigen Ablauf.
+
+Bei `IEnumerator<T>` und `IEnumerator` lehnt der Build ab, mit Zeile und Hinweis:
+- `yield` in `try` oder `using`
+- Methoden in Structs oder generischen Klassen
+- `out var` und Mustervariablen, die über ein `yield return` hinweg gebraucht werden
+- beim nicht-generischen `IEnumerator` andere Werte als `null`
+
+`yield` in Lambdas und in lokalen Funktionen, die lokale Variablen der Methode benutzen, geht nicht.
+
+---
+
 ## Lambdas und Delegates
 
 ```csharp

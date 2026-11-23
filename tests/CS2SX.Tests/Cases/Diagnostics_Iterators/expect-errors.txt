@@ -1,0 +1,6 @@
+# One substring per line: an error CS2SX must report for Program.cs.
+Program.cs(13): yield in einem try-Block wird bei IEnumerator nicht unterstützt
+Program.cs(20): Das nicht-generische IEnumerator kann nur null liefern
+Program.cs(25): Das nicht-generische IEnumerable wird nicht unterstützt
+Program.cs(32): Die Variable n (out var, Muster oder Zerlegung) behält ihren Wert nicht über ein yield return
+Program.cs(39): yield in einer lokalen Funktion oder einem Lambda wird nicht unterstützt

@@ -14,7 +14,7 @@ public class Diagnostics_UnsupportedApp : SwitchApp
 {
     private int _count;
 
-    private static IEnumerable<int> Gen() { yield return 1; }
+    // (yield return is supported now: see Iterators)
     private static Punkt Make() => new Punkt(0, 0);
 
     public override void OnInit()

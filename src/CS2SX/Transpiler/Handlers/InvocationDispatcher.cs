@@ -149,7 +149,11 @@ public sealed class InvocationDispatcher
         // async state machines (Build/AsyncLowering): resuming jumps to the label
         // after the suspension it stopped at. Jumping into loops and blocks is fine
         // in C; every C# local of the method is a field of the state machine.
-        if (calleeStr is "CS2SX_Async.Begin" && args.Count == 1 && int.TryParse(args[0], out var resumePoints))
+        // Iterator state machines (Build/IteratorLowering): Return(k) stores the
+        // state and ends MoveNext() with true; the next call jumps behind it.
+        if (calleeStr is "CS2SX_Yield.Return" && args.Count == 1)
+            return $"self->f_cs2sx_state = {args[0]}; return true; _cs2sx_r{args[0]}_0: self->f_cs2sx_state = 0";
+        if (calleeStr is "CS2SX_Async.Begin" or "CS2SX_Yield.Begin" && args.Count == 1 && int.TryParse(args[0], out var resumePoints))
         {
             var sb = new System.Text.StringBuilder("switch (self->f_cs2sx_state) {");
             for (int k = 1; k <= resumePoints; k++) sb.Append($" case {k}: goto _cs2sx_r{k}_0;");

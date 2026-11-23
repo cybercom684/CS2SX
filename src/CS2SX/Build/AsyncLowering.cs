@@ -30,9 +30,9 @@ namespace CS2SX.Build;
 /// first source file. Every replacement keeps the number of lines.
 public static class AsyncLowering
 {
-    private sealed record Edit(int Start, int Length, string Text, int Prio, int Seq, bool StatementLevel);
+    internal sealed record Edit(int Start, int Length, string Text, int Prio, int Seq, bool StatementLevel);
 
-    private sealed class Edits
+    internal sealed class Edits
     {
         public readonly List<Edit> List = new();
         private int _seq;
@@ -61,7 +61,7 @@ public static class AsyncLowering
     }
 
     // Insert order at one position: closing braces first, then what opens.
-    private const int PrioAwaitClose = 0, PrioLoopClose = 1, PrioLoopOpen = 2, PrioAwaitOpen = 3, PrioResult = 4, PrioMethod = 5, PrioName = 6;
+    internal const int PrioAwaitClose = 0, PrioLoopClose = 1, PrioLoopOpen = 2, PrioAwaitOpen = 3, PrioResult = 4, PrioMethod = 5, PrioName = 6;
 
     public static List<string> Rewrite(IReadOnlyList<string> files, string outDir)
     {

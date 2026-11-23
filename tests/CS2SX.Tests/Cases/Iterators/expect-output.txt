@@ -1,0 +1,19 @@
+evens 0,2,4,8,10,1000
+big 100
+words 6
+tree 1 2 3 4 6 7
+lazy 0
+blink:012
+run 0 10 20 -1 3
+after False
+over x! y! stop!
+over2 q?end
+caps ABBCCC
+indep 10 0
+co 1 0
+co 2 10
+frame:01
+co 3 -1
+waited 4
+co done 4
+done

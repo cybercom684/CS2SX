@@ -130,7 +130,7 @@ public static class FormatStringBuilder
     /// Inferiert den Format-Specifier für einen Interpolations-Ausdruck.
     /// Behandelt ternäre Ausdrücke korrekt indem beide Zweige geprüft werden.
     /// </summary>
-    private static string InferHoleSpecifier(
+    internal static string InferHoleSpecifier(
         Microsoft.CodeAnalysis.SyntaxNode expr,
         TranspilerContext ctx)
     {

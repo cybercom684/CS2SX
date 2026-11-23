@@ -183,6 +183,9 @@ public sealed class StringMethodHandler : InvocationHandlerBase
             "string.Concat" or "String.Concat"
                 => HandleStringConcat(args, ctx),
 
+            "string.Join" or "String.Join" when JoinOfValues(inv, ctx, args) is { } joined
+                => joined,
+
             "string.Join" or "String.Join"
                 => inv.ArgumentList.Arguments.Count > 1
                    && ArrayModel.IsArrayExpr(inv.ArgumentList.Arguments[1].Expression, ctx)
@@ -198,6 +201,40 @@ public sealed class StringMethodHandler : InvocationHandlerBase
 
     // Unhandled static/instance string method: warn loudly instead of silently
     // returning the first argument (which compiles but is wrong at runtime).
+    /// string.Join(sep, numbers) — a List&lt;T&gt;, IEnumerable&lt;T&gt; or array of numbers,
+    /// bools or chars: every item is formatted as C# shows it ("1.5", "True").
+    private static string? JoinOfValues(InvocationExpressionSyntax inv, TranspilerContext ctx, List<string> args)
+    {
+        if (inv.ArgumentList.Arguments.Count != 2 || ctx.SemanticModel == null) return null;
+        var coll = ctx.SemanticModel.GetTypeInfo(inv.ArgumentList.Arguments[1].Expression).Type;
+        ITypeSymbol? elem = coll switch
+        {
+            IArrayTypeSymbol a => a.ElementType,
+            INamedTypeSymbol { Name: "List" or "IEnumerable" or "IList" or "IReadOnlyList" or "ICollection" or "IReadOnlyCollection", TypeArguments.Length: 1 } n
+                when n.ContainingNamespace?.ToDisplayString() == "System.Collections.Generic" => n.TypeArguments[0],
+            _ => null,
+        };
+        if (elem == null) return null;
+        var (spec, item) = elem.SpecialType switch
+        {
+            SpecialType.System_Int32 or SpecialType.System_Int16 or SpecialType.System_SByte => ("%d", "(int)(X)"),
+            SpecialType.System_UInt32 or SpecialType.System_UInt16 or SpecialType.System_Byte => ("%u", "(unsigned)(X)"),
+            SpecialType.System_Int64 => ("%lld", "(long long)(X)"),
+            SpecialType.System_UInt64 => ("%llu", "(unsigned long long)(X)"),
+            SpecialType.System_Double => ("%s", "Double_ToString(X)"),
+            SpecialType.System_Single => ("%s", "Float_ToString(X)"),
+            SpecialType.System_Boolean => ("%s", "CS2SX_BoolStr(X)"),
+            SpecialType.System_Char => ("%c", "(char)(X)"),
+            _ => (null, null),
+        };
+        if (spec == null) return null;
+        bool array = coll is IArrayTypeSymbol;
+        var at = array ? "_jl[_ji]" : "_jl->data[_ji]";
+        var count = array ? "CS2SX_ArrLen(_jl)" : "(_jl ? _jl->count : 0)";
+        return $"({{ __auto_type _jl = ({ArgAt(args, 1)}); int _jn = {count}; "
+             + $"CS2SX_JOIN_EACH({ArgAt(args, 0)}, _jn, \"{spec}\", {item!.Replace("X", at)}); }})";
+    }
+
     private static string WarnUnhandledString(
         InvocationExpressionSyntax inv, string name,
         TranspilerContext ctx, List<string> args)

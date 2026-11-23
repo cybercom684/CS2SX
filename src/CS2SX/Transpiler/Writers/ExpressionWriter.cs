@@ -55,6 +55,16 @@ public sealed class ExpressionWriter : IExpressionWriter
         return ApplyNullableConversion(expr, code);
     }
 
+    /// What `s += x` appends: a string as it is (null → ""), a number, char or bool
+    /// in its own format — the same as in "…" + x.
+    private (string spec, string code) AppendedPiece(ExpressionSyntax expr, string code)
+    {
+        var csType = TypeInferrer.InferCSharpType(expr, _ctx);
+        var spec = csType == "string" ? "%s" : FormatStringBuilder.InferHoleSpecifier(expr, _ctx);
+        if (spec == "%s") return ("%s", code + " ? " + code + " : \"\"");
+        return FormatArg.Adapt(csType, spec, code);
+    }
+
     private string? TryWritePropertySetter(AssignmentExpressionSyntax assign, string op, string right)
     {
         if (_ctx.SemanticModel == null) return null;
@@ -90,7 +100,8 @@ public sealed class ExpressionWriter : IExpressionWriter
             if (p.Type.SpecialType == SpecialType.System_String && binOp == "+")
             {
                 var buf = _ctx.NextStringBuf();
-                _ctx.Out.WriteLine(_ctx.Tab + buf + " = CS2SX_Format(" + buf + ", \"%s%s\", " + Call(getter, null) + ", " + right + ");");
+                var (spec, piece) = AppendedPiece(assign.Right, right);
+                _ctx.Out.WriteLine(_ctx.Tab + buf + " = CS2SX_Format(" + buf + ", \"%s" + spec + "\", " + Call(getter, null) + ", " + piece + ");");
                 return Call(setter, buf);
             }
             return Call(setter, "(" + Call(getter, null) + " " + binOp + " (" + right + "))");
@@ -1034,8 +1045,9 @@ public sealed class ExpressionWriter : IExpressionWriter
             if (op == "+=")
             {
                 var buf = _ctx.NextStringBuf();
-                _ctx.Out.WriteLine(_ctx.Tab + buf + " = CS2SX_Format(" + buf + ", \"%s%s\", "
-                    + target + " ? " + target + " : \"\", " + right + " ? " + right + " : \"\");");
+                var (spec, piece) = AppendedPiece(assign.Right, right);
+                _ctx.Out.WriteLine(_ctx.Tab + buf + " = CS2SX_Format(" + buf + ", \"%s" + spec + "\", "
+                    + target + " ? " + target + " : \"\", " + piece + ");");
                 value = buf;
             }
             return "CS2SX_STR_STORE(" + target + ", " + value + ")";
@@ -1101,10 +1113,11 @@ public sealed class ExpressionWriter : IExpressionWriter
         {
             var leftStr = Write(assign.Left);
             var buf = _ctx.NextStringBuf();
+            var (spec, piece) = AppendedPiece(assign.Right, right);
             _ctx.Out.WriteLine(_ctx.Tab
-                + buf + " = CS2SX_Format(" + buf + ", \"%s%s\", "
+                + buf + " = CS2SX_Format(" + buf + ", \"%s" + spec + "\", "
                 + leftStr + " ? " + leftStr + " : \"\", "
-                + right + " ? " + right + " : \"\");");
+                + piece + ");");
             return leftStr + " = " + buf;
         }
 
