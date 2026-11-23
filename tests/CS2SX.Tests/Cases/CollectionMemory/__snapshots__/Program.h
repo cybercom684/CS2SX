@@ -15,6 +15,8 @@ Inventory* Inventory_New(List_str* Items, int Slots);
 void Inventory_Free(Inventory* self);
 Inventory* Inventory_Retain(Inventory* self);
 extern const CS2SX_ClassInfo Inventory_ClassInfo;
+int Inventory_Equals(Inventory* a, Inventory* b);
+const char* Inventory_ToString(Inventory* self);
 
 struct Bag
 {

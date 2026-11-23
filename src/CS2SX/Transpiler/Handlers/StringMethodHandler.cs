@@ -303,6 +303,9 @@ public sealed class StringMethodHandler : InvocationHandlerBase
 
         return methodName switch
         {
+            // 3.14159.ToString("F2"), n.ToString("D3"), x.ToString("N0") — like $"{x:F2}"
+            "ToString" when NumberFormat(inv, mem, ctx) is { } fmt
+                => FormatArg.WithFormat(recvType, fmt, receiver)?.Code ?? receiver,
             "ToString" => BuildToString(mem.Expression, receiver, recvType, ctx),
             "Contains" => "String_Contains(" + receiver + ", " + ArgAt(args, 0) + ")",
             "StartsWith" => "String_StartsWith(" + receiver + ", " + ArgAt(args, 0) + ")",
@@ -386,6 +389,8 @@ public sealed class StringMethodHandler : InvocationHandlerBase
             return "CS2SX_Obj_ToString(" + receiver + ")";
         if (recvType is "char" or "u16")
             return "CS2SX_CharStr(" + receiver + ")";
+        if (CS2SX.Core.TypeRegistry.IsRecordClass(recvType))
+            return recvType.Trim().TrimEnd('?') + "_ToString(" + receiver + ")";
         // Every user enum has a name function (_forward.h, BuildPipeline).
         if (members != null || CS2SX.Core.TypeRegistry.IsUserDefinedEnum(enumName))
             return enumName + "_ToString(" + receiver + ")";
@@ -566,7 +571,9 @@ public sealed class StringMethodHandler : InvocationHandlerBase
                         var baseSpec = TypeInferrer.FormatSpecifier(argExpr, ctx);
                         var spec = baseSpec;
                         var code = argCodes[argIdx];
-                        if (fmtSpec != null)
+                        if (fmtSpec != null && FormatArg.WithFormat(TypeInferrer.InferCSharpType(argExpr, ctx), fmtSpec, code) is { } formatted)
+                            (spec, code) = formatted;
+                        else if (fmtSpec != null)
                             spec = MapFormatSpecifier(fmtSpec, baseSpec);
                         else
                             (spec, code) = FormatArg.Adapt(TypeInferrer.InferCSharpType(argExpr, ctx), spec, code);
@@ -594,6 +601,21 @@ public sealed class StringMethodHandler : InvocationHandlerBase
 
     // Maps .NET format specifiers to printf format strings.
     // fmtSpec is the text after the colon in {0:F2}, baseSpec is the inferred %d/%f/%s etc.
+    /// The printf format for number.ToString("F2") & Co., or null.
+    private static string? NumberFormat(InvocationExpressionSyntax inv, MemberAccessExpressionSyntax mem, TranspilerContext ctx)
+    {
+        if (inv.ArgumentList.Arguments.Count != 1
+            || inv.ArgumentList.Arguments[0].Expression is not LiteralExpressionSyntax lit
+            || !lit.Token.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.StringLiteralToken)) return null;
+        try
+        {
+            var t = ctx.SemanticModel?.GetTypeInfo(mem.Expression).Type;
+            if (t == null || t.SpecialType is < SpecialType.System_SByte or > SpecialType.System_Double) return null;
+        }
+        catch { return null; }
+        return lit.Token.ValueText;
+    }
+
     internal static string MapFormatSpecifier(string fmtSpec, string baseSpec)
     {
         if (string.IsNullOrEmpty(fmtSpec)) return baseSpec;

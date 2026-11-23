@@ -463,6 +463,11 @@ static inline const char* UInt_ToString(unsigned int val)
 /// NaN, Infinity. Also used for doubles in string concatenation and interpolation.
 const char* Float_ToString(float val);
 const char* Double_ToString(double val);
+/// number.ToString(format), $"{x:F2}", string.Format("{0:N0}") — .NET's numeric
+/// formats with the invariant culture (rt_number.c).
+const char* CS2SX_FmtD(double v, const char* fmt);
+const char* CS2SX_FmtI(long long v, int bits, const char* fmt);
+const char* CS2SX_FmtU(unsigned long long v, int bits, const char* fmt);
 #define CS2SX_BoolStr(b) ((b) ? "True" : "False")
 
 static inline const char* Long_ToString(long long val)

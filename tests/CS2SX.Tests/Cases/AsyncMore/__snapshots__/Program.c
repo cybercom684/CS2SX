@@ -2183,7 +2183,7 @@ void Loops_Async_cs2sx_run(Loops_Async* self)
                 }
                 {
                     CS2SX_LINE(90);
-                    (self->f_r != NULL ? (void)(Resource_Dispose(self->f_r), self->f_r = NULL) : (void)0);
+                    (self->f_r != NULL ? (void)(Resource_Dispose((Resource*)self->f_r), self->f_r = NULL) : (void)0);
                 }
                 if (_exf_1_pending) CS2SX_Throw(_exf_1_pending);
             }

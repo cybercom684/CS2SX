@@ -245,6 +245,11 @@ public static class TypeRegistry
     }
     public static bool IsUserStruct(string csType) => s_userStructTypes.Contains(csType.Trim());
 
+    // `record` classes: value equality (T_Equals) and "T { A = 1 }" (T_ToString).
+    private static readonly HashSet<string> s_recordClasses = new(StringComparer.Ordinal);
+    public static void RegisterRecordClass(string name) => s_recordClasses.Add(name);
+    public static bool IsRecordClass(string csType) => s_recordClasses.Contains(csType.Trim().TrimEnd('?'));
+
     // User classes, including nested ones. A nested class is emitted under its simple
     // name, so `Outer.Inner` (in syntax-derived type strings) maps to `Inner`.
     private static HashSet<string> s_userClassNames = new(StringComparer.Ordinal);

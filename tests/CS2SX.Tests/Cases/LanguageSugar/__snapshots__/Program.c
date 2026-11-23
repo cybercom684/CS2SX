@@ -1,6 +1,22 @@
 #include <stdlib.h>
 #include "Program.h"
 
+int Punkt_Equals(Punkt* a, Punkt* b)
+{
+    if (a == b) return 1;
+    if (!a || !b) return 0;
+    if (!(a->f_X == b->f_X)) return 0;
+    if (!(a->f_Y == b->f_Y)) return 0;
+    return 1;
+}
+
+const char* Punkt_ToString(Punkt* self)
+{
+    if (!self) return "";
+    char* buf = _cs2sx_next_buf();
+    return CS2SX_Format(buf, "Punkt { X = %d, Y = %d }", self->f_X, self->f_Y);
+}
+
 Punkt* Punkt_New(int X, int Y)
 {
     Punkt* self = (Punkt*)calloc(1, sizeof(Punkt));

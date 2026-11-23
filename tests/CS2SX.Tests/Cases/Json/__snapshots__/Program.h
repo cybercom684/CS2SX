@@ -69,6 +69,8 @@ Point* Point_New(int X, int Y);
 void Point_Free(Point* self);
 Point* Point_Retain(Point* self);
 extern const CS2SX_ClassInfo Point_ClassInfo;
+int Point_Equals(Point* a, Point* b);
+const char* Point_ToString(Point* self);
 
 struct Card
 {

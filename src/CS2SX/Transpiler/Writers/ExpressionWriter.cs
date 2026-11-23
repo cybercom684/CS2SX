@@ -787,6 +787,10 @@ public sealed class ExpressionWriter : IExpressionWriter
         if ((op == "/" || op == "%") && NeedsZeroDivisorCheck(bin))
             return (op == "/" ? "CS2SX_IDIV(" : "CS2SX_IMOD(") + left + ", " + right + ")";
 
+        if ((op == "==" || op == "!=") && !IsNullLiteral(bin.Left) && !IsNullLiteral(bin.Right)
+            && RecordName(bin.Left) is { } recL && RecordName(bin.Right) == recL)
+            return (op == "!=" ? "!" : "") + recL + "_Equals(" + left + ", " + right + ")";
+
         if (op == "==" || op == "!=")
         {
             bool lIsStr = IsStringExpr(bin.Left) || IsStringType(bin.Left);
@@ -947,9 +951,20 @@ public sealed class ExpressionWriter : IExpressionWriter
                     var recvType2 = ResolveReceiverType(receiverRaw2, condAccess.Expression as ExpressionSyntax);
                     if (recvType2 == null)
                         recvType2 = _ctx.GetSemanticType(condAccess.Expression);
-                    var cleanType2 = recvType2?.TrimEnd('*').Trim();
+                    var cleanType2 = recvType2?.TrimEnd('*').Trim().TrimEnd('?');
+                    IMethodSymbol? ownMethod = null;
+                    try { ownMethod = _ctx.SemanticModel?.GetSymbolInfo(inv).Symbol as IMethodSymbol; } catch { }
 
-                    if (cleanType2 != null && _ctx.VTableTypes.Contains(cleanType2))
+                    if (ownMethod != null && TranspilerContext.IsUserCode(ownMethod.ContainingType)
+                        && ownMethod.ContainingType.TypeKind == TypeKind.Class && !ownMethod.IsVirtual && !ownMethod.IsAbstract
+                        && !ownMethod.IsOverride && !ownMethod.IsStatic)
+                    {
+                        // x?.Method(…) on a class of the project: its C function (overload suffix included)
+                        var owner = ownMethod.ContainingType.Name;
+                        var cName = CSharpToC.BuildCMethodName(owner, methodName, inv.ArgumentList.Arguments.Count, _ctx.OverloadedMethods, ownMethod);
+                        accessExpr = cName + "((" + owner + "*)" + receiver + (argStr.Length > 0 ? ", " + argStr : "") + ")";
+                    }
+                    else if (cleanType2 != null && _ctx.VTableTypes.Contains(cleanType2))
                     {
                         var vtArgs2 = argStr.Length > 0 ? receiver + ", " + argStr : receiver;
                         accessExpr = receiver + "->vtable->" + methodName + "(" + vtArgs2 + ")";
@@ -2338,7 +2353,8 @@ public sealed class ExpressionWriter : IExpressionWriter
             }
             catch { }
         }
-        if (prop == "Length" && IsStringBuilderExpr(mem.Expression)) return obj + "->length";
+        if (prop == "Length" && IsStringBuilderExpr(mem.Expression))   // characters, like .NET
+            return "({ StringBuilder* _cs2sx_sbl = CS2SX_NN(" + obj + "); _cs2sx_sbl->buf ? CS2SX_Str16Len(_cs2sx_sbl->buf) : 0; })";
         if (prop == "HasValue" && IsNullableExpr(mem.Expression)) return NullableHandler.WriteHasValue(obj);
         if (prop == "Value" && IsNullableExpr(mem.Expression)) return NullableHandler.WriteGetValue(obj);
         if (prop is "Keys" or "Values" && IsDictExpr(mem.Expression)) return obj;
@@ -2747,6 +2763,9 @@ public sealed class ExpressionWriter : IExpressionWriter
 
         if (TypeRegistry.IsStringBuilder(typeName))
         {
+            // new StringBuilder("text") starts with the text; new StringBuilder(64) is a capacity.
+            if (argList?.Arguments.Count > 0 && _ctx.SemanticModel?.GetTypeInfo(argList.Arguments[0].Expression).Type?.SpecialType == SpecialType.System_String)
+                return "StringBuilder_AppendStr(StringBuilder_New(256), " + Write(argList.Arguments[0].Expression) + ")";
             var cap = argList?.Arguments.Count > 0
                 ? Write(argList.Arguments[0].Expression)
                 : "256";
@@ -2823,6 +2842,14 @@ public sealed class ExpressionWriter : IExpressionWriter
                         var k = Write(pair.Expressions[0]);
                         var v = Write(pair.Expressions[1]);
                         _ctx.Out.WriteLine(_ctx.Tab + "Dict_" + cKey + "_" + cVal + "_Add(" + tmp + ", " + k + ", " + v + ");");
+                    }
+                    // { ["k"] = v } — the indexer form (was dropped without a word)
+                    else if (elem is AssignmentExpressionSyntax { Left: ImplicitElementAccessSyntax iea } kv
+                             && iea.ArgumentList.Arguments.Count == 1)
+                    {
+                        var k = Write(iea.ArgumentList.Arguments[0].Expression);
+                        var v = Write(kv.Right);
+                        _ctx.Out.WriteLine(_ctx.Tab + "Dict_" + cKey + "_" + cVal + "_Set(" + tmp + ", " + k + ", " + v + ");");
                     }
                 }
                 return tmp;
@@ -3212,6 +3239,17 @@ public sealed class ExpressionWriter : IExpressionWriter
     {
         try { return _ctx.SemanticModel?.GetTypeInfo(e).Type?.SpecialType == SpecialType.System_String; }
         catch { return false; }
+    }
+
+    /// The record class an expression has (value equality: T_Equals), or null.
+    internal string? RecordName(ExpressionSyntax e)
+    {
+        try
+        {
+            return _ctx.SemanticModel?.GetTypeInfo(e).Type is INamedTypeSymbol { IsRecord: true, TypeKind: TypeKind.Class } r
+                   && TranspilerContext.IsUserCode(r) ? r.Name : null;
+        }
+        catch { return null; }
     }
 
     /// The class of the project whose indexer (this[…]) `elem` calls, or null.

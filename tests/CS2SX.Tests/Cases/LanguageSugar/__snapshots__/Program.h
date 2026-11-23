@@ -15,6 +15,8 @@ Punkt* Punkt_New(int X, int Y);
 void Punkt_Free(Punkt* self);
 Punkt* Punkt_Retain(Punkt* self);
 extern const CS2SX_ClassInfo Punkt_ClassInfo;
+int Punkt_Equals(Punkt* a, Punkt* b);
+const char* Punkt_ToString(Punkt* self);
 
 struct LanguageSugarApp
 {

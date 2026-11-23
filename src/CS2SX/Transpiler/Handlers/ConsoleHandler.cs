@@ -130,7 +130,9 @@ public sealed class ConsoleHandler : InvocationHandlerBase
                         var cT = TypeRegistry.MapType(csT);
                         var spec = GetFormatSpecifier(csT, cT);
                         var code = argExprs[idx];
-                        if (fmtSpec != null)
+                        if (fmtSpec != null && FormatArg.WithFormat(csT, fmtSpec, code) is { } formatted)
+                            (spec, code) = formatted;
+                        else if (fmtSpec != null)
                             spec = StringMethodHandler.MapFormatSpecifier(fmtSpec, spec);
                         else
                             (spec, code) = FormatArg.Adapt(csT, spec, code);

@@ -1,0 +1,10 @@
+eq True False False True False
+str Pair { X = 1, Y = 2 } Pair { X = 2, Y = 1 }
+Hero { Name = Mia, Level = 3, Element = Ice, Pos = Pair { X = 1, Y = 2 }, Ready = True }
+hero True False
+fmt 3.14 007 1,234,567 0.5
+dict 2 2 kalt
+sb 6 True
+deck 8 314
+cond -1 10 n5 -
+done

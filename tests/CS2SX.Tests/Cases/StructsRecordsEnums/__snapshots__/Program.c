@@ -25,12 +25,28 @@ int Point_Equals(Point a, Point b)
     return memcmp(&a, &b, sizeof(Point)) == 0;
 }
 
+int Score_Equals(Score* a, Score* b)
+{
+    if (a == b) return 1;
+    if (!a || !b) return 0;
+    if (!(CS2SX_strcmp_safe(a->f_Player, b->f_Player) == 0)) return 0;
+    if (!(a->f_Points == b->f_Points)) return 0;
+    return 1;
+}
+
+const char* Score_ToString(Score* self)
+{
+    if (!self) return "";
+    char* buf = _cs2sx_next_buf();
+    return CS2SX_Format(buf, "Score { Player = %s, Points = %d }", (self->f_Player ? self->f_Player : ""), self->f_Points);
+}
+
 Score* Score_New(const char* Player, int Points)
 {
     Score* self = (Score*)calloc(1, sizeof(Score));
     if (!self) return NULL;
     self->_rc = 1;
-    self->f_Player = Player;
+    CS2SX_STR_STORE(self->f_Player, Player);
     self->f_Points = Points;
     CS2SX_ReleaseLater(self, (CS2SX_FreeFn)Score_Free);
     return self;
@@ -40,6 +56,7 @@ void Score_Free(Score* self)
 {
     if (!self) return;
     if (--self->_rc > 0) return;
+    CS2SX_StrDrop(self->f_Player); self->f_Player = NULL;
     free(self);
 }
 

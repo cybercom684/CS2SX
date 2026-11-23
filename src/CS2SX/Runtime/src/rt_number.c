@@ -245,3 +245,175 @@ int CS2SX_Bool_TryParse(const char* s, int* out_val)
     if (out_val) *out_val = ok ? v : 0;
     return ok;
 }
+
+// ── number.ToString(format) / $"{x:F2}" / string.Format("{0:N0}") ─────────────
+// .NET's standard numeric formats with the invariant culture ('.' decimal point,
+// ',' group separator): F, N, D, X/x, E/e, P, C, R, G, and simple custom formats
+// such as "0.00", "0.##", "#,##0", "000". The result lives until the next frame.
+
+static char* fmt_out(const char* s)
+{
+    size_t n = strlen(s);
+    char* buf = CS2SX_StrAlloc(n);
+    memcpy(buf, s, n + 1);
+    return buf;
+}
+
+/// digits (no sign) with ',' every three places
+static void group_digits(const char* digits, char* out)
+{
+    int n = (int)strlen(digits), o = 0;
+    for (int i = 0; i < n; i++)
+    {
+        out[o++] = digits[i];
+        int left = n - 1 - i;
+        if (left > 0 && left % 3 == 0) out[o++] = ',';
+    }
+    out[o] = 0;
+}
+
+/// v with `decimals` places, optionally grouped; minInt: at least that many integer digits
+static void fixed_text(double v, int decimals, int grouped, int minInt, char* out)
+{
+    char tmp[400];
+    int neg = v < 0;
+    snprintf(tmp, sizeof tmp, "%.*f", decimals, neg ? -v : v);
+    char* dot = strchr(tmp, '.');
+    char fp[120] = "";
+    if (dot) { *dot = 0; snprintf(fp, sizeof fp, "%s", dot + 1); }
+    char padded[400];
+    int len = (int)strlen(tmp);
+    if (len < minInt) { int z = minInt - len; memset(padded, '0', z); memcpy(padded + z, tmp, len + 1); }
+    else memcpy(padded, tmp, len + 1);
+    char g[540];
+    if (grouped) group_digits(padded, g); else snprintf(g, sizeof g, "%s", padded);
+    int isZero = 1;
+    for (const char* p = padded; *p; p++) if (*p != '0') isZero = 0;
+    for (const char* p = fp; *p; p++) if (*p != '0') isZero = 0;
+    sprintf(out, "%s%s%s%s", neg && !isZero ? "-" : "", g, decimals > 0 ? "." : "", decimals > 0 ? fp : "");
+}
+
+static int parse_precision(const char* fmt, int def)
+{
+    if (!fmt[1]) return def;
+    int p = atoi(fmt + 1);
+    return p < 0 ? def : p > 99 ? 99 : p;
+}
+
+/// Custom format "0.00", "#,##0.##", "000": integer zeros, grouping, decimals.
+static const char* custom_format(double v, const char* fmt)
+{
+    const char* dot = strchr(fmt, '.');
+    int minInt = 0, grouped = 0, minDec = 0, maxDec = 0;
+    for (const char* p = fmt; *p && p != dot; p++)
+    {
+        if (*p == '0') minInt++;
+        if (*p == ',') grouped = 1;
+    }
+    if (dot)
+        for (const char* p = dot + 1; *p; p++)
+        {
+            if (*p == '0') { minDec++; maxDec++; }
+            else if (*p == '#') maxDec++;
+        }
+    char out[640];
+    fixed_text(v, maxDec, grouped, minInt, out);
+    char* d = strchr(out, '.');   // drop optional (#) trailing zeros
+    if (d)
+    {
+        int have = (int)strlen(d + 1);
+        while (have > minDec && d[have] == '0') d[have--] = 0;
+        if (have == 0) *d = 0;
+    }
+    return fmt_out(out);
+}
+
+/// E format: d.dddE+ddd (at least three exponent digits, like .NET)
+static const char* exp_format(double v, int prec, char e)
+{
+    char tmp[64];
+    snprintf(tmp, sizeof tmp, "%.*e", prec, v);
+    char* ep = strchr(tmp, 'e');
+    if (!ep) return fmt_out(tmp);
+    char sign = ep[1];
+    int ex = atoi(ep + 2);
+    *ep = 0;
+    char out[96];
+    snprintf(out, sizeof out, "%s%c%c%03d", tmp, e, sign == '-' ? '-' : '+', ex);
+    return fmt_out(out);
+}
+
+const char* CS2SX_FmtD(double v, const char* fmt)
+{
+    if (!fmt || !*fmt) return Double_ToString(v);
+    char kind = fmt[0];
+    int standard = isalpha((unsigned char)kind) && (!fmt[1] || isdigit((unsigned char)fmt[1]));
+    if (!standard) return custom_format(v, fmt);
+    if (isnan(v)) return "NaN";
+    if (isinf(v)) return v > 0 ? "Infinity" : "-Infinity";
+    char out[640];
+    switch (kind)
+    {
+        case 'F': case 'f': fixed_text(v, parse_precision(fmt, 2), 0, 1, out); return fmt_out(out);
+        case 'N': case 'n': fixed_text(v, parse_precision(fmt, 2), 1, 1, out); return fmt_out(out);
+        case 'P': case 'p': fixed_text(v * 100.0, parse_precision(fmt, 2), 1, 1, out); strcat(out, " %"); return fmt_out(out);
+        case 'C': case 'c':
+        {
+            char num[640];
+            fixed_text(v < 0 ? -v : v, parse_precision(fmt, 2), 1, 1, num);
+            snprintf(out, sizeof out, "%s\xC2\xA4%s", v < 0 ? "-" : "", num);   /* the invariant currency sign */
+            return fmt_out(out);
+        }
+        case 'E': case 'e': return exp_format(v, parse_precision(fmt, 6), kind);
+        case 'D': case 'd': case 'X': case 'x': return CS2SX_FmtI((long long)v, 64, fmt);
+        case 'G': case 'g':
+            if (!fmt[1]) return Double_ToString(v);
+            snprintf(out, sizeof out, "%.*G", parse_precision(fmt, 15), v);
+            return fmt_out(out);
+        default: return Double_ToString(v);
+    }
+}
+
+const char* CS2SX_FmtI(long long v, int bits, const char* fmt)
+{
+    if (!fmt || !*fmt) return Long_ToString(v);
+    char kind = fmt[0];
+    char out[160];
+    switch (kind)
+    {
+        case 'D': case 'd':
+        {
+            int prec = parse_precision(fmt, 0);
+            unsigned long long mag = v < 0 ? 0ULL - (unsigned long long)v : (unsigned long long)v;
+            snprintf(out, sizeof out, "%s%0*llu", v < 0 ? "-" : "", prec, mag);
+            return fmt_out(out);
+        }
+        case 'X': case 'x':
+        {
+            unsigned long long u = (unsigned long long)v;
+            if (bits < 64) u &= (1ULL << bits) - 1;   // negative values: two's complement of the type
+            snprintf(out, sizeof out, kind == 'X' ? "%0*llX" : "%0*llx", parse_precision(fmt, 0), u);
+            return fmt_out(out);
+        }
+        case 'G': case 'g': case 'R': case 'r':
+            if (!fmt[1]) return Long_ToString(v);
+            break;
+    }
+    return CS2SX_FmtD((double)v, fmt);
+}
+
+const char* CS2SX_FmtU(unsigned long long v, int bits, const char* fmt)
+{
+    if (!fmt || !*fmt) return ULong_ToString(v);
+    char kind = fmt[0];
+    char out[160];
+    if (kind == 'D' || kind == 'd') { snprintf(out, sizeof out, "%0*llu", parse_precision(fmt, 0), v); return fmt_out(out); }
+    if (kind == 'X' || kind == 'x')
+    {
+        if (bits < 64) v &= (1ULL << bits) - 1;
+        snprintf(out, sizeof out, kind == 'X' ? "%0*llX" : "%0*llx", parse_precision(fmt, 0), v);
+        return fmt_out(out);
+    }
+    if ((kind == 'G' || kind == 'g' || kind == 'R' || kind == 'r') && !fmt[1]) return ULong_ToString(v);
+    return CS2SX_FmtD((double)v, fmt);
+}

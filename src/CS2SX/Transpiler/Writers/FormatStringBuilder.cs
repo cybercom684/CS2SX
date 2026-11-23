@@ -103,7 +103,10 @@ public static class FormatStringBuilder
                     ? StringMethodHandler.MapFormatSpecifier(fmtClause, baseSpec)
                     : baseSpec;
                 var argCode = writeExpr(hole.Expression);
-                if (fmtClause == null && baseSpec != "%s")
+                if (fmtClause != null
+                    && FormatArg.WithFormat(TypeInferrer.InferCSharpType(hole.Expression, ctx), fmtClause, argCode) is { } formatted)
+                    (specifier, argCode) = formatted;
+                else if (fmtClause == null && baseSpec != "%s")
                     (specifier, argCode) = FormatArg.Adapt(
                         TypeInferrer.InferCSharpType(hole.Expression, ctx), specifier, argCode);
 

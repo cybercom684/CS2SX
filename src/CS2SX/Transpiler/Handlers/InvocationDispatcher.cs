@@ -190,6 +190,14 @@ public sealed class InvocationDispatcher
             };
             if (test != null) return test;
         }
+        // ReferenceEquals(a, b) / object.ReferenceEquals: the same object
+        if (calleeStr is "ReferenceEquals" or "object.ReferenceEquals" or "Object.ReferenceEquals" && args.Count == 2)
+            return "((const void*)(" + args[0] + ") == (const void*)(" + args[1] + "))";
+        // record.Equals(other): value equality
+        if (inv.Expression is MemberAccessExpressionSyntax { Name.Identifier.Text: "Equals" } eqm && args.Count == 1
+            && _ctx.SemanticModel?.GetTypeInfo(eqm.Expression).Type is INamedTypeSymbol { IsRecord: true, TypeKind: TypeKind.Class } rec
+            && TranspilerContext.IsUserCode(rec))
+            return rec.Name + "_Equals(" + _writeExpr(eqm.Expression) + ", " + args[0] + ")";
         if (calleeStr is "GC.Collect") return "((void)CS2SX_GcCollect())";
         if (calleeStr is "GC.WaitForPendingFinalizers") return "((void)0)";
 

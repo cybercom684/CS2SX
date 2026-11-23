@@ -76,6 +76,19 @@ var p = new Punkt { X = 10, Y = 20 };
 
 Structs werden direkt zu C-Structs — kein Heap, kein Freiräumen nötig.
 
+### Records
+
+```csharp
+public record Gegner(string Name, int Leben) { public bool Boss { get; init; } }
+
+var a = new Gegner("Ork", 30);
+bool gleich = a == new Gegner("Ork", 30);   // true: Records vergleichen ihre Werte
+Console.WriteLine(a);                       // Gegner { Name = Ork, Leben = 30, Boss = False }
+var b = a with { Leben = 10 };
+```
+
+`==`, `!=` und `Equals` vergleichen alle Werte, `ToString()` zeigt sie wie in .NET (eine eigene `ToString`-Methode im Record gewinnt).
+
 ### Vererbung
 
 ```csharp
@@ -202,6 +215,8 @@ string name = "Switch";
 Console.WriteLine($"Hallo {name}!");
 Console.WriteLine($"Leben: {leben:D3}");     // → "Leben: 007"
 Console.WriteLine($"Wert: {pi:F2}");         // → "Wert: 3.14"
+Console.WriteLine(punkte.ToString("N0"));    // → "1,234,567" (Tausender mit Komma)
+Console.WriteLine($"{farbe:X6} {anteil:P1} {wert:0.00}");
 Console.WriteLine($"{name,10}");             // rechts ausrichten
 Console.WriteLine($"{name,-10}");            // links ausrichten
 
@@ -214,6 +229,8 @@ string[] teile = name.Split(',');
 string getrimmt = "  hallo  ".Trim();
 string ersetzt = name.Replace("Switch", "NX");
 ```
+
+Formatangaben (`F2`, `N0`, `D3`, `X4`, `E`, `P`, `C`, `R` und eigene wie `0.00` oder `#,##0`) gelten in `$"{x:F2}"`, `string.Format` und `x.ToString("F2")` gleich, mit der invarianten Kultur (Punkt als Dezimaltrenner, Komma für Tausender).
 
 Strings zählen Zeichen wie in .NET, auch bei Umlauten und anderen Schriften: `"Größe".Length` ist 5, `s[2]` ist `'ö'`, `Substring`, `IndexOf`, `PadLeft`/`PadRight`, `Insert`, `Remove`, `ToCharArray` und `foreach (char c in s)` arbeiten mit Zeichen. `ToUpper`/`ToLower` und `char.IsLetter`, `char.IsUpper`, `char.ToUpper` & Co. kennen lateinische, griechische und kyrillische Buchstaben. Ein `char` ist wie in .NET ein UTF-16-Zeichen; ein Emoji zählt als zwei. Intern bleiben Strings UTF-8: `s[i]` ist bei reinem ASCII-Text sofort da, bei Umlauten davor muss der Text bis zur Stelle gelesen werden. Wer sehr lange Texte Zeichen für Zeichen durchgeht, nimmt `foreach (char c in s)` oder einmal `s.ToCharArray()`.
 

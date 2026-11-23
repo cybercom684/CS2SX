@@ -42,7 +42,7 @@ public static class IteratorLowering
         var sem = new SemanticModelBuilder(files);
         var edits = files.ToDictionary(f => f, _ => new Edits());
         var iterTypes = new SortedDictionary<string, string>(StringComparer.Ordinal);   // CS2SX_Iter_int → int
-        int lazy = 0, eager = 0;
+        int lazy = 0, eager = 0, ownLoops = 0;
         bool any = false;
 
         foreach (var file in files)
@@ -53,6 +53,7 @@ public static class IteratorLowering
             var e = edits[file];
 
             any |= RenameEnumeratorTypes(root, model, e, iterTypes);
+            any |= LowerOwnEnumerables(root, model, source, e, ref ownLoops);
 
             bool needsList = false;
             foreach (var body in root.DescendantNodes().OfType<BlockSyntax>())
@@ -108,6 +109,54 @@ public static class IteratorLowering
         }
         Log.Info($"yield: {lazy} enumerator(s), {eager} collected sequence(s)");
         return result;
+    }
+
+    // ── foreach over a class of the project with GetEnumerator() ────────────
+
+    /// foreach (var x in deck) where deck's class has GetEnumerator() returning an
+    /// IEnumerator&lt;T&gt; (usually written with yield return) → a MoveNext/Current loop.
+    /// The explicit `IEnumerator IEnumerable.GetEnumerator()` C# needs for the
+    /// interface is dropped (it would be a second C function of the same name).
+    private static bool LowerOwnEnumerables(SyntaxNode root, SemanticModel model, string source, Edits e, ref int count)
+    {
+        bool any = false;
+        foreach (var m in root.DescendantNodes().OfType<MethodDeclarationSyntax>())
+        {
+            if (m.ExplicitInterfaceSpecifier == null || m.Identifier.Text != "GetEnumerator") continue;
+            if (model.GetSymbolInfo(m.ExplicitInterfaceSpecifier.Name).Symbol is not INamedTypeSymbol { Name: "IEnumerable" } i
+                || i.ContainingNamespace?.ToDisplayString() is not ("System.Collections" or "System.Collections.Generic")) continue;
+            var lines = source.Substring(m.FullSpan.Start, m.FullSpan.Length).Count(c => c == '\n');
+            e.Replace(m.FullSpan.Start, m.FullSpan.Length, new string('\n', lines));
+            any = true;
+        }
+        foreach (var fe in root.DescendantNodes().OfType<ForEachStatementSyntax>())
+        {
+            if (model.GetTypeInfo(fe.Expression).Type is not INamedTypeSymbol { TypeKind: TypeKind.Class } t
+                || !CS2SX.Core.TranspilerContext.IsUserCode(t)) continue;
+            var get = t.GetMembers("GetEnumerator").OfType<IMethodSymbol>()
+                .FirstOrDefault(x => x.Parameters.Length == 0 && !x.IsStatic && x.ExplicitInterfaceImplementations.Length == 0);
+            if (get == null || !IsEnumeratorOrLowered(get.ReturnType)) continue;
+            if (fe.Ancestors().OfType<MethodDeclarationSyntax>().FirstOrDefault() is { } host
+                && host.Body != null && Yields(fe, host).Any()) continue;   // inside a lazy iterator: its own lowering
+            int n = ++count;
+            var en = "cs2sx_en" + n;
+            var expr = e.Render(source, fe.Expression.SpanStart, fe.Expression.Span.End, all: false);
+            e.Replace(fe.ForEachKeyword.SpanStart, fe.CloseParenToken.Span.End - fe.ForEachKeyword.SpanStart,
+                $"{{ var {en} = ({expr}).GetEnumerator(); while ({en}.MoveNext())");
+            var assign = $"var {fe.Identifier.Text} = {en}.Current; ";
+            if (fe.Statement is BlockSyntax block)
+            {
+                e.Insert(block.OpenBraceToken.Span.End, " " + assign, PrioLoopOpen);
+                e.Insert(fe.Span.End, " }", PrioLoopClose);
+            }
+            else
+            {
+                e.Insert(fe.Statement.SpanStart, "{ " + assign, PrioLoopOpen);
+                e.Insert(fe.Statement.Span.End, " } }", PrioLoopClose);
+            }
+            any = true;
+        }
+        return any;
     }
 
     // ── Kinds of iterators ──────────────────────────────────────────────────
@@ -305,7 +354,7 @@ public static class IteratorLowering
     }
 
     private static IEnumerable<YieldStatementSyntax> Yields(SyntaxNode scope, SyntaxNode member) =>
-        scope.DescendantNodes().OfType<YieldStatementSyntax>().Where(y => !InNested(y, member));
+        scope.DescendantNodesAndSelf().OfType<YieldStatementSyntax>().Where(y => !InNested(y, member));   // (and Self: `foreach (…) yield return x;`)
 
     private static bool IsListOrArray(ITypeSymbol? t) =>
         t is IArrayTypeSymbol { Rank: 1 }

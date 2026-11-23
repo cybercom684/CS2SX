@@ -36,6 +36,8 @@ Score* Score_New(const char* Player, int Points);
 void Score_Free(Score* self);
 Score* Score_Retain(Score* self);
 extern const CS2SX_ClassInfo Score_ClassInfo;
+int Score_Equals(Score* a, Score* b);
+const char* Score_ToString(Score* self);
 
 struct StructsRecordsEnumsApp
 {

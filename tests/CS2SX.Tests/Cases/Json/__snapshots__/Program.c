@@ -118,6 +118,22 @@ SaveGame* SaveGame_Retain(SaveGame* self)
     return self;
 }
 
+int Point_Equals(Point* a, Point* b)
+{
+    if (a == b) return 1;
+    if (!a || !b) return 0;
+    if (!(a->f_X == b->f_X)) return 0;
+    if (!(a->f_Y == b->f_Y)) return 0;
+    return 1;
+}
+
+const char* Point_ToString(Point* self)
+{
+    if (!self) return "";
+    char* buf = _cs2sx_next_buf();
+    return CS2SX_Format(buf, "Point { X = %d, Y = %d }", self->f_X, self->f_Y);
+}
+
 Point* Point_New(int X, int Y)
 {
     Point* self = (Point*)calloc(1, sizeof(Point));

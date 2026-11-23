@@ -555,7 +555,7 @@ void RuntimeExceptionsApp_OnInit(RuntimeExceptionsApp* self)
     const char* _ps_29 = _sb4;
     printf("%s\n", _ps_29 ? _ps_29 : "");
     CS2SX_LINE(64);
-    printf("%.2f %s\n", 3.14159, CS2SX_BoolStr(0));
+    printf("%s %s\n", CS2SX_FmtD((double)(3.14159), "F2"), CS2SX_BoolStr(0));
     CS2SX_LINE(65);
     printf("done\n");
 }

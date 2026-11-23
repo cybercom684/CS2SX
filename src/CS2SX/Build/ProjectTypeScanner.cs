@@ -54,6 +54,7 @@ public static class ProjectTypeScanner
                         break;
 
                     case RecordDeclarationSyntax recCls:
+                        TypeRegistry.RegisterRecordClass(recCls.Identifier.Text);
                         classes[recCls.Identifier.Text] = (recCls.BaseList?.Types.FirstOrDefault()?.Type.ToString(),
                             recCls.TypeParameterList != null);
                         break;

@@ -1,6 +1,22 @@
 #include <stdlib.h>
 #include "Program.h"
 
+int Inventory_Equals(Inventory* a, Inventory* b)
+{
+    if (a == b) return 1;
+    if (!a || !b) return 0;
+    if (!(a->f_Items == b->f_Items)) return 0;
+    if (!(a->f_Slots == b->f_Slots)) return 0;
+    return 1;
+}
+
+const char* Inventory_ToString(Inventory* self)
+{
+    if (!self) return "";
+    char* buf = _cs2sx_next_buf();
+    return CS2SX_Format(buf, "Inventory { Items = %s, Slots = %d }", "List<string>", self->f_Slots);
+}
+
 Inventory* Inventory_New(List_str* Items, int Slots)
 {
     Inventory* self = (Inventory*)calloc(1, sizeof(Inventory));

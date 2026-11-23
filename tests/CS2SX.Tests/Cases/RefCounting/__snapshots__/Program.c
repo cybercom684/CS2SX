@@ -258,6 +258,22 @@ Holder* Holder_Retain(Holder* self)
     return self;
 }
 
+int Pair_Equals(Pair* a, Pair* b)
+{
+    if (a == b) return 1;
+    if (!a || !b) return 0;
+    if (!(a->f_First == b->f_First)) return 0;
+    if (!(a->f_Weight == b->f_Weight)) return 0;
+    return 1;
+}
+
+const char* Pair_ToString(Pair* self)
+{
+    if (!self) return "";
+    char* buf = _cs2sx_next_buf();
+    return CS2SX_Format(buf, "Pair { First = %s, Weight = %d }", (self->f_First ? CS2SX_Obj_ToString((void*)self->f_First) : ""), self->f_Weight);
+}
+
 Pair* Pair_New(Node* First, int Weight)
 {
     Pair* self = (Pair*)calloc(1, sizeof(Pair));

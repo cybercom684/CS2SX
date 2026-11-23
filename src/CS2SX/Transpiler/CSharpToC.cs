@@ -1960,6 +1960,82 @@ public sealed class CSharpToC : CSharpSyntaxWalker
 
     // ── Records ───────────────────────────────────────────────────────────────
 
+    /// The members a record compares and prints: its positional parameters, then the
+    /// fields and auto-properties of its body (instance only).
+    private List<(string csType, string name)> RecordMembers(RecordDeclarationSyntax node)
+    {
+        var list = new List<(string, string)>();
+        foreach (var p in node.ParameterList?.Parameters ?? default)
+            list.Add((_ctx.ResolveAlias(p.Type?.ToString().Trim() ?? "int"), p.Identifier.Text));
+        foreach (var field in node.Members.OfType<FieldDeclarationSyntax>()
+                     .Where(f => !f.Modifiers.Any(m => m.IsKind(SyntaxKind.StaticKeyword) || m.IsKind(SyntaxKind.ConstKeyword))))
+            foreach (var v in field.Declaration.Variables)
+                list.Add((_ctx.ResolveAlias(field.Declaration.Type.ToString().Trim()), v.Identifier.Text.TrimStart('_')));
+        foreach (var prop in node.Members.OfType<PropertyDeclarationSyntax>()
+                     .Where(p => !p.Modifiers.Any(m => m.IsKind(SyntaxKind.StaticKeyword)) && PropertyWriter.IsAutoProperty(p)))
+            list.Add((_ctx.ResolveAlias(prop.Type.ToString().Trim()), prop.Identifier.Text.TrimStart('_')));
+        return list;
+    }
+
+    /// record equality (like C#: every member) and ToString ("Pair { X = 1, Y = 2 }").
+    private void WriteRecordValueFunctions(RecordDeclarationSyntax node, string name)
+    {
+        var members = RecordMembers(node);
+        _ctx.Out.WriteLine($"int {name}_Equals({name}* a, {name}* b)");
+        _ctx.Out.WriteLine("{");
+        _ctx.Out.WriteLine("    if (a == b) return 1;");
+        _ctx.Out.WriteLine("    if (!a || !b) return 0;");
+        foreach (var (csType, field) in members)
+        {
+            var t = csType.TrimEnd('?');
+            var cmp = t == "string" ? $"CS2SX_strcmp_safe(a->f_{field}, b->f_{field}) == 0"
+                : TypeRegistry.IsRecordClass(t) ? $"{t}_Equals(a->f_{field}, b->f_{field})"
+                : TypeRegistry.IsUserStruct(t) && !NullableHandler.IsNullable(csType) ? $"{t}_Equals(a->f_{field}, b->f_{field})"
+                : NullableHandler.IsNullable(csType) && TypeRegistry.IsNullableValueType(csType)
+                    ? $"(a->f_{field}.has == b->f_{field}.has && (!a->f_{field}.has || a->f_{field}.value == b->f_{field}.value))"
+                : $"a->f_{field} == b->f_{field}";
+            _ctx.Out.WriteLine($"    if (!({cmp})) return 0;");
+        }
+        _ctx.Out.WriteLine("    return 1;");
+        _ctx.Out.WriteLine("}");
+        _ctx.Out.WriteLine();
+
+        if (node.Members.OfType<MethodDeclarationSyntax>().Any(m => m.Identifier.Text == "ToString" && m.ParameterList.Parameters.Count == 0))
+            return;   // the record's own ToString
+        var fmt = new System.Text.StringBuilder(name + " { ");
+        var args = new List<string>();
+        for (int i = 0; i < members.Count; i++)
+        {
+            var (csType, field) = members[i];
+            var t = csType.TrimEnd('?');
+            var code = "self->f_" + field;
+            string spec;
+            if (t == "string") { spec = "%s"; code = $"({code} ? {code} : \"\")"; }
+            else if (TypeRegistry.IsRecordClass(t)) { spec = "%s"; code = $"({code} ? {t}_ToString({code}) : \"\")"; }
+            else if (NullableHandler.IsNullable(csType) && TypeRegistry.IsNullableValueType(csType))
+            {
+                var inner = NullableHandler.GetInnerType(csType);
+                var (s2, c2) = Writers.FormatArg.Adapt(inner, TypeRegistry.FormatSpecifier(TypeRegistry.MapType(inner)), code + ".value");
+                spec = "%s";
+                code = $"({code}.has ? ({{ char* _cs2sx_nv = _cs2sx_next_buf(); CS2SX_Format(_cs2sx_nv, \"{s2}\", {c2}); }}) : \"\")";
+            }
+            else if (TypeRegistry.IsPrimitive(t) || TypeRegistry.IsUserDefinedEnum(t))
+                (spec, code) = Writers.FormatArg.Adapt(t, TypeRegistry.FormatSpecifier(TypeRegistry.MapType(t)), code);
+            else if (TypeRegistry.ArcRoot(t) != null && !TypeRegistry.IsUserStruct(t)) { spec = "%s"; code = $"({code} ? CS2SX_Obj_ToString((void*){code}) : \"\")"; }
+            else { spec = "%s"; code = "\"" + t + "\""; }
+            fmt.Append(field + " = " + spec + (i < members.Count - 1 ? ", " : " "));
+            args.Add(code);
+        }
+        fmt.Append('}');
+        _ctx.Out.WriteLine($"const char* {name}_ToString({name}* self)");
+        _ctx.Out.WriteLine("{");
+        _ctx.Out.WriteLine("    if (!self) return \"\";");
+        _ctx.Out.WriteLine("    char* buf = _cs2sx_next_buf();");
+        _ctx.Out.WriteLine($"    return CS2SX_Format(buf, \"{fmt}\"{string.Concat(args.Select(a => ", " + a))});");
+        _ctx.Out.WriteLine("}");
+        _ctx.Out.WriteLine();
+    }
+
     public override void VisitRecordDeclaration(RecordDeclarationSyntax node)
     {
         // record class → heap-allocated reference type (calloc + _rc ref-counting)
@@ -2052,6 +2128,9 @@ public sealed class CSharpToC : CSharpSyntaxWalker
                 _ctx.Out.WriteLine($"{name}* {name}_Retain({name}* self);");
                 if (TypeRegistry.ArcRoot(name) != null)
                     _ctx.Out.WriteLine($"extern const CS2SX_ClassInfo {name}_ClassInfo;");
+                _ctx.Out.WriteLine($"int {name}_Equals({name}* a, {name}* b);");
+                if (!node.Members.OfType<MethodDeclarationSyntax>().Any(m => m.Identifier.Text == "ToString" && m.ParameterList.Parameters.Count == 0))
+                    _ctx.Out.WriteLine($"const char* {name}_ToString({name}* self);");
             }
 
             // Method signatures from body
@@ -2082,6 +2161,7 @@ public sealed class CSharpToC : CSharpSyntaxWalker
         }
         else
         {
+            WriteRecordValueFunctions(node, name);
             // record class: heap-allocated, reference-counted
             _ctx.Out.WriteLine($"{name}* {name}_New({BuildRecordParamList(paramFields)})");
             _ctx.Out.WriteLine("{");
@@ -2094,13 +2174,34 @@ public sealed class CSharpToC : CSharpSyntaxWalker
                 // The record's Free releases class-typed members, so it takes a reference.
                 var arcRoot = TypeRegistry.ArcRoot(csType.TrimEnd('?'));
                 var collPrefix = Arc.CollectionPrefix(csType);
-                _ctx.WriteLine(arcRoot != null
+                _ctx.WriteLine(csType.TrimEnd('?') == "string"
+                    ? $"CS2SX_STR_STORE(self->f_{fieldName}, {fieldName});"   // its own copy, like a class field
+                    : arcRoot != null
                     ? $"self->f_{fieldName} = CS2SX_RETAIN({arcRoot}, {fieldName});"
                     : collPrefix != null
                         ? $"self->f_{fieldName} = {collPrefix}_Retain({fieldName});"   // freed with the record
                         : Arc.RcValue(csType) is { } recRc
                             ? $"self->f_{fieldName} = {fieldName}; {recRc.retain}(self->f_{fieldName});"
                             : $"self->f_{fieldName} = {fieldName};");
+            }
+            // Initializers of the body's auto-properties and fields: `public bool Ready { get; init; } = true;`
+            foreach (var member in node.Members)
+            {
+                (string csType, string field, ExpressionSyntax value)? init = member switch
+                {
+                    PropertyDeclarationSyntax { Initializer: { } pi } prop when PropertyWriter.IsAutoProperty(prop)
+                        && !prop.Modifiers.Any(m => m.IsKind(SyntaxKind.StaticKeyword))
+                        => (prop.Type.ToString().Trim(), prop.Identifier.Text.TrimStart('_'), pi.Value),
+                    FieldDeclarationSyntax fd when !fd.Modifiers.Any(m => m.IsKind(SyntaxKind.StaticKeyword) || m.IsKind(SyntaxKind.ConstKeyword))
+                        && fd.Declaration.Variables.Count == 1 && fd.Declaration.Variables[0].Initializer is { } fi
+                        => (fd.Declaration.Type.ToString().Trim(), fd.Declaration.Variables[0].Identifier.Text.TrimStart('_'), fi.Value),
+                    _ => null,
+                };
+                if (init is not { } iv) continue;
+                var value = _exprWriter.Write(iv.value);
+                _ctx.WriteLine(iv.csType.TrimEnd('?') == "string"
+                    ? $"CS2SX_STR_STORE(self->f_{iv.field}, {value});"
+                    : $"self->f_{iv.field} = {value};");
             }
             // The initial reference belongs to the current frame (see T_New).
             if (TypeRegistry.ArcRoot(name) != null)
@@ -2119,6 +2220,11 @@ public sealed class CSharpToC : CSharpSyntaxWalker
             foreach (var (csType, fieldName) in paramFields)
             {
                 var fieldExpr = $"self->f_{fieldName}";
+                if (csType.TrimEnd('?') == "string")
+                {
+                    _ctx.WriteLine($"CS2SX_StrDrop({fieldExpr}); {fieldExpr} = NULL;");
+                    continue;
+                }
                 if (Arc.RcValue(csType) is { } recFree)
                 {
                     _ctx.WriteLine($"if ({fieldExpr}) {{ {recFree.free}({fieldExpr}); {fieldExpr} = NULL; }}");

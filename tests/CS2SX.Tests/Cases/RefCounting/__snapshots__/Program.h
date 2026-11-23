@@ -101,6 +101,8 @@ Pair* Pair_New(Node* First, int Weight);
 void Pair_Free(Pair* self);
 Pair* Pair_Retain(Pair* self);
 extern const CS2SX_ClassInfo Pair_ClassInfo;
+int Pair_Equals(Pair* a, Pair* b);
+const char* Pair_ToString(Pair* self);
 
 struct RefCountingApp
 {
