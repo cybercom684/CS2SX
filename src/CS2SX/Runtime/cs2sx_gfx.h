@@ -124,6 +124,15 @@ int  Graphics_MeasureTextHeight(int scale);
 
 void Graphics_DrawTexture(Texture* tex, int x, int y);
 void Graphics_DrawTextureScaled(Texture* tex, int x, int y, int dw, int dh);
+/// Part of a texture (a sprite-sheet frame) at (x, y), w × h (-1: as in the sheet),
+/// turned clockwise by `rotation` degrees around its center, multiplied by
+/// `tint` (0xFFFFFFFF: unchanged; its alpha fades it), mirrored with flipX/flipY.
+void Graphics_DrawTextureRegion(Texture* tex, int sx, int sy, int sw, int sh, int x, int y, int w, int h,
+                                float rotation, u32 tint, int flipX, int flipY);
+/// The whole texture with the same options.
+void Graphics_DrawTextureEx(Texture* tex, int x, int y, int w, int h,
+                            float rotation, u32 tint, int flipX, int flipY);
+void Graphics_DrawTextureAlpha(Texture* tex, int x, int y, u8 alpha);
 void Graphics_DrawTextureCentered(Texture* tex, int rx, int ry, int rw, int rh);
 void Graphics_DrawTextureCenteredScaled(Texture* tex, int rx, int ry, int rw, int rh, int tw, int th);
 void Graphics_BlitPhysical(Texture* tex, int x, int y);              // physical, 1:1

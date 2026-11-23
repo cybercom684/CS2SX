@@ -70,6 +70,7 @@ public sealed class InvocationDispatcher
             new CharHandler(),
             new RandomHandler(),
             new FileHandler(),
+            new BinaryIoHandler(),
             new ParseHandler(),
             new ColorHandler(),
             new StringBuilderHandler(),
@@ -430,6 +431,10 @@ public sealed class InvocationDispatcher
         catch { return rawArgs; }
     }
 
+    private static string WithPoint(string number) =>
+        number.Contains('.') || number.Contains('E') || number.Contains('e') || number.Contains("Infinity") || number.Contains("NaN")
+            ? number : number + ".0";
+
     private static string FormatDefaultValue(object? value, Microsoft.CodeAnalysis.ITypeSymbol type)
     {
         if (value == null) return "NULL";
@@ -437,8 +442,9 @@ public sealed class InvocationDispatcher
         {
             bool b   => b ? "1" : "0",
             string s => "\"" + s.Replace("\\", "\\\\").Replace("\"", "\\\"") + "\"",
-            float f  => f.ToString("G", System.Globalization.CultureInfo.InvariantCulture) + "f",
-            double d => d.ToString("G", System.Globalization.CultureInfo.InvariantCulture),
+            // (a C float literal needs a point: 0f is not valid C, 0.0f is)
+            float f  => WithPoint(f.ToString("R", System.Globalization.CultureInfo.InvariantCulture)) + "f",
+            double d => WithPoint(d.ToString("R", System.Globalization.CultureInfo.InvariantCulture)),
             _        => value.ToString() ?? "0",
         };
     }

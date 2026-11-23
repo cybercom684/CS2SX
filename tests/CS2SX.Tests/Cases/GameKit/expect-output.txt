@@ -1,0 +1,11 @@
+size 27
+42 True 1.5 hallo 7 123456789012
+rest 3 3 27
+mem -2 3.25
+again -2
+bytes 3
+missing ok
+save 15 True
+points 0 3
+players True False 0
+done

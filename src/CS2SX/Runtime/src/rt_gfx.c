@@ -1032,6 +1032,62 @@ void Graphics_DrawTextureScaled(Texture* tex, int x, int y, int dw, int dh)
     tex_quad(gfx_tex_slot(tex), (float)x, (float)y, (float)dw, (float)dh, 0, 0, 1, 1, 0xFFFFFFFFu);
 }
 
+// A textured quad turned by `degrees` (clockwise) around its center; u0 > u1 or
+// v0 > v1 mirror it.
+static void tex_quad_rot(int slot, float x, float y, float w, float h,
+                         float u0, float v0, float u1, float v1, u32 c, float degrees)
+{
+    if (w <= 0 || h <= 0) return;
+    if (degrees == 0.0f) { tex_quad(slot, x, y, w, h, u0, v0, u1, v1, c); return; }
+    GfxVtx* v = gfx_begin(slot, 6);
+    if (!v) return;
+    float a = degrees * 0.0174532925f, cs = cosf(a), sn = sinf(a);
+    float cx = x + w * 0.5f, cy = y + h * 0.5f, hw = w * 0.5f, hh = h * 0.5f;
+    float px[4], py[4];
+    const float ox[4] = { -hw, hw, hw, -hw }, oy[4] = { -hh, -hh, hh, hh };
+    for (int i = 0; i < 4; i++)
+    {
+        px[i] = cx + ox[i] * cs - oy[i] * sn;
+        py[i] = cy + ox[i] * sn + oy[i] * cs;
+    }
+    vtx(v + 0, px[0], py[0], u0, v0, c);
+    vtx(v + 1, px[1], py[1], u1, v0, c);
+    vtx(v + 2, px[3], py[3], u0, v1, c);
+    vtx(v + 3, px[1], py[1], u1, v0, c);
+    vtx(v + 4, px[2], py[2], u1, v1, c);
+    vtx(v + 5, px[3], py[3], u0, v1, c);
+}
+
+void Graphics_DrawTextureRegion(Texture* tex, int sx, int sy, int sw, int sh, int x, int y, int w, int h,
+                                float rotation, u32 tint, int flipX, int flipY)
+{
+    if (!tex || tex->f_Width <= 0 || tex->f_Height <= 0 || sw <= 0 || sh <= 0) return;
+    if (w < 0) w = sw;
+    if (h < 0) h = sh;
+    float iw = 1.0f / (float)tex->f_Width, ih = 1.0f / (float)tex->f_Height;
+    float u0 = (float)sx * iw, u1 = (float)(sx + sw) * iw;
+    float v0 = (float)sy * ih, v1 = (float)(sy + sh) * ih;
+    if (flipX) { float t = u0; u0 = u1; u1 = t; }
+    if (flipY) { float t = v0; v0 = v1; v1 = t; }
+    tex_quad_rot(gfx_tex_slot(tex), (float)x, (float)y, (float)w, (float)h, u0, v0, u1, v1, tint, rotation);
+}
+
+void Graphics_DrawTextureEx(Texture* tex, int x, int y, int w, int h,
+                            float rotation, u32 tint, int flipX, int flipY)
+{
+    if (!tex) return;
+    Graphics_DrawTextureRegion(tex, 0, 0, tex->f_Width, tex->f_Height,
+                               x, y, w < 0 ? tex->f_Width : w, h < 0 ? tex->f_Height : h,
+                               rotation, tint, flipX, flipY);
+}
+
+void Graphics_DrawTextureAlpha(Texture* tex, int x, int y, u8 alpha)
+{
+    if (tex && alpha)
+        tex_quad(gfx_tex_slot(tex), (float)x, (float)y, (float)tex->f_Width, (float)tex->f_Height,
+                 0, 0, 1, 1, with_alpha(0xFFFFFFFFu, alpha));
+}
+
 void Graphics_DrawTexture(Texture* tex, int x, int y)
 {
     if (tex) Graphics_DrawTextureScaled(tex, x, y, tex->f_Width, tex->f_Height);

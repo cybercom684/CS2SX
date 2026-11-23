@@ -26,6 +26,12 @@ public sealed class FileHandler : InvocationHandlerBase
             ["File.CopyStep"] = "CS2SX_File_CopyStep",
             ["File.CopyEnd"] = "CS2SX_File_CopyEnd",
             ["File.Rename"] = "CS2SX_File_Rename",
+            ["File.ReadAllBytes"] = "CS2SX_File_ReadAllBytes",
+            ["File.WriteAllBytes"] = "CS2SX_File_WriteAllBytes",
+            ["File.AppendAllBytes"] = "CS2SX_File_AppendAllBytes",
+            ["File.OpenRead"] = "CS2SX_File_OpenRead",
+            ["File.Create"] = "CS2SX_File_Create",
+            ["File.OpenWrite"] = "CS2SX_File_OpenWrite",
 
             ["CS2SX.Switch.File.ReadAllText"] = "CS2SX_File_ReadAllText",
             ["CS2SX.Switch.File.WriteAllText"] = "CS2SX_File_WriteAllText",

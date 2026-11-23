@@ -373,7 +373,8 @@ Die Laufzeitbibliothek wirft dieselben Exceptions wie .NET:
 | `dict[key]` ohne den Schlüssel · `Add` mit vorhandenem Schlüssel | `KeyNotFoundException` · `ArgumentException` |
 | `Pop`/`Peek`/`Dequeue` auf leerem Stack/Queue · `First`/`Single`/`Last`/`Min`/`Max`/`Average` auf leerer Folge | `InvalidOperationException` |
 | Ganzzahl-Division oder `%` durch 0 | `DivideByZeroException` |
-| `File.ReadAllText`/`ReadAllLines`/`Copy` auf nicht vorhandene Datei | `FileNotFoundException` |
+| `File.ReadAllText`/`ReadAllLines`/`ReadAllBytes`/`OpenRead`/`Copy` auf nicht vorhandene Datei | `FileNotFoundException` |
+| `BinaryReader.ReadInt32` & Co. am Dateiende | `EndOfStreamException` |
 
 `TryParse`, `TryGetValue`, `FirstOrDefault` usw. werfen nicht und sind für erwartbare Fehlschläge der günstigere Weg.
 
@@ -476,7 +477,49 @@ if (!Directory.Exists("/switch/MeineApp"))
 
 if (File.Exists("/switch/MeineApp/save.txt"))
     File.Delete("/switch/MeineApp/save.txt");
+
+// Bytes
+byte[] daten = File.ReadAllBytes("/switch/MeineApp/level.bin");
+File.WriteAllBytes("/switch/MeineApp/kopie.bin", daten);
+File.AppendAllBytes("/switch/MeineApp/log.bin", new byte[] { 1, 2 });
 ```
+
+### Binäre Dateien: BinaryWriter / BinaryReader
+
+Für Spielstände und eigene Dateiformate. Das Format ist dasselbe wie in .NET (Little Endian, Strings mit vorangestellter Länge), Dateien vom PC lassen sich also direkt lesen.
+
+```csharp
+using (var w = new BinaryWriter(File.Create("/switch/MeineApp/stand.dat")))
+{
+    w.Write(_level);        // int
+    w.Write(_name);         // string
+    w.Write(_leben > 0);    // bool
+    w.Write(_position);     // float
+}
+
+using (var r = new BinaryReader(File.OpenRead("/switch/MeineApp/stand.dat")))
+{
+    _level = r.ReadInt32();
+    _name = r.ReadString();
+    bool lebt = r.ReadBoolean();
+    _position = r.ReadSingle();
+}
+
+// im Speicher
+var ms = new MemoryStream();
+new BinaryWriter(ms).Write(42);
+byte[] bytes = ms.ToArray();
+var leser = new BinaryReader(new MemoryStream(bytes));
+```
+
+| | |
+|---|---|
+| Öffnen | `File.OpenRead(pfad)`, `File.Create(pfad)` (neu/leeren), `File.OpenWrite(pfad)` (ohne Leeren), `new MemoryStream()`, `new MemoryStream(bytes)` |
+| Stream | `Read`, `ReadByte`, `Write`, `WriteByte`, `Seek`, `Position` (lesen und setzen), `Length`, `Flush`, `ToArray` (MemoryStream), `Dispose` |
+| BinaryWriter | `Write(…)` für `byte`, `sbyte`, `bool`, `short`, `ushort`, `int`, `uint`, `long`, `ulong`, `float`, `double`, `string`, `byte[]`, `(byte[], index, count)` |
+| BinaryReader | `ReadByte`, `ReadSByte`, `ReadBoolean`, `ReadInt16`/`UInt16`, `ReadInt32`/`UInt32`, `ReadInt64`/`UInt64`, `ReadSingle`, `ReadDouble`, `ReadString`, `ReadBytes(n)`, `BaseStream` |
+
+`Dispose` (oder das Ende eines `using`) schließt die Datei; `Dispose` von Reader oder Writer schließt auch den Stream. Liest ein `ReadInt32` & Co. über das Dateiende hinaus, kommt eine `EndOfStreamException`.
 
 > Pfade auf der Switch beginnen immer mit `/switch/`. Erstelle deinen App-Ordner in `OnInit()`.
 

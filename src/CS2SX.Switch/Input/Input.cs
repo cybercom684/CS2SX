@@ -57,4 +57,25 @@ public static class Input
 
     /// Rechter Analogstick.
     public static StickPos GetStickRight() => new StickPos();
+
+    // ── Several players ──────────────────────────────────────────────────────
+    // player: 0 … 7 for players 1 … 8 of the console (player 0 also reads the
+    // controllers attached in handheld mode). The methods without a player read
+    // every controller together.
+
+    public static bool IsDown(int player, NpadButton button) => false;
+    public static bool IsHeld(int player, NpadButton button) => false;
+    public static bool IsUp(int player, NpadButton button) => false;
+    public static StickPos GetStickLeft(int player) => new StickPos();
+    public static StickPos GetStickRight(int player) => new StickPos();
+
+    /// Whether a controller is connected for this player.
+    public static bool IsConnected(int player) => false;
+
+    /// Number of players with a connected controller.
+    public static int ConnectedCount() => 0;
+
+    /// Opens the console's controller screen, where players connect and order
+    /// their controllers. Returns the number of players afterwards (-1: failed).
+    public static int ShowControllerSupport(int minPlayers = 1, int maxPlayers = 4) => 0;
 }

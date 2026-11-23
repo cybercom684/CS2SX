@@ -194,8 +194,44 @@ Graphics.DrawTextureCenteredScaled(tex, rx, ry, rw, rh, tw, th);
 | `Graphics.DrawTextureCentered(tex, rx, ry, rw, rh)` | Zentriert in Bounding-Box |
 | `Graphics.DrawTextureScaled(tex, x, y, tw, th)` | Skaliert auf tw × th Pixel |
 | `Graphics.DrawTextureCenteredScaled(tex, rx, ry, rw, rh, tw, th)` | Skaliert + zentriert |
+| `Graphics.DrawTextureRegion(tex, sx, sy, sw, sh, x, y, w, h, rotation, tint, flipX, flipY)` | Ausschnitt (Sprite-Sheet), optional gedreht, eingefärbt, gespiegelt |
+| `Graphics.DrawTextureEx(tex, x, y, w, h, rotation, tint, flipX, flipY)` | Ganze Textur mit denselben Möglichkeiten |
+| `Graphics.DrawTextureAlpha(tex, x, y, alpha)` | Halbtransparent (0–255) |
 
 > `null`-Check empfohlen: `if (tex != null) Graphics.DrawTexture(tex, x, y);`
+
+### Sprites: Ausschnitte, Drehen, Spiegeln, Einfärben
+
+Ein Sprite-Sheet oder Tileset ist eine Textur mit vielen gleich großen Bildern. `DrawTextureRegion` zeichnet nur einen Ausschnitt daraus:
+
+```csharp
+Texture sheet = Graphics.LoadImage("romfs:/held.png");   // 4 Bilder à 32×32 nebeneinander
+int bild = (_frame / 8) % 4;                              // Animation: alle 8 Frames weiter
+
+// Ausschnitt (bild * 32, 0, 32, 32) an (x, y) in Originalgröße
+Graphics.DrawTextureRegion(sheet, bild * 32, 0, 32, 32, x, y);
+
+// doppelt so groß, gespiegelt (läuft nach links)
+Graphics.DrawTextureRegion(sheet, bild * 32, 0, 32, 32, x, y, 64, 64, flipX: true);
+
+// um 45° gedreht, rot eingefärbt und halb durchsichtig
+Graphics.DrawTextureRegion(sheet, 0, 0, 32, 32, x, y, rotation: 45, tint: Color.RGBA(255, 80, 80, 128));
+
+// die ganze Textur mit denselben Möglichkeiten
+Graphics.DrawTextureEx(tex, x, y, rotation: _winkel, flipY: true);
+Graphics.DrawTextureAlpha(tex, x, y, 100);                // nur Transparenz, 0–255
+```
+
+| Parameter | Bedeutung |
+|---|---|
+| `sx, sy, sw, sh` | Ausschnitt in der Textur (Pixel) |
+| `x, y` | Position auf dem Bildschirm (linke obere Ecke vor dem Drehen) |
+| `w, h` | Größe auf dem Bildschirm, `-1` = wie der Ausschnitt |
+| `rotation` | Grad im Uhrzeigersinn, um die Mitte |
+| `tint` | wird mit den Pixeln multipliziert: Weiß = unverändert, der Alphawert blendet aus |
+| `flipX`, `flipY` | waagerecht / senkrecht spiegeln |
+
+Die Texturen werden ohne Glättung abgetastet: Pixel-Art bleibt scharf, und benachbarte Bilder im Sheet färben nicht ab.
 
 Texturen werden beim ersten Zeichnen automatisch auf die GPU geladen (auch wenn sie schon in
 `OnInit` erzeugt wurden). Änderst du später `tex.Pixels`, mache die Änderung mit

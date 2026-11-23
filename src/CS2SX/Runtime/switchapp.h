@@ -272,6 +272,64 @@ static inline CS2SX_StickPos CS2SX_Input_GetStickRight(PadState* pad)
 static inline CS2SX_StickPos _cs2sx_get_stick_left(void) { return CS2SX_Input_GetStickLeft(&g_cs2sx_pad); }
 static inline CS2SX_StickPos _cs2sx_get_stick_right(void) { return CS2SX_Input_GetStickRight(&g_cs2sx_pad); }
 
+// ── Several players (Input.IsDown(player, button), …) ───────────────────────────
+// Player 0 … 7 = player 1 … 8 of the console; player 0 also reads the handheld
+// controllers. Input.IsDown(button) without a player reads all of them together.
+#define CS2SX_MAX_PLAYERS 8
+extern PadState g_cs2sx_pads[CS2SX_MAX_PLAYERS];
+extern u64      g_cs2sx_pDown[CS2SX_MAX_PLAYERS], g_cs2sx_pHeld[CS2SX_MAX_PLAYERS], g_cs2sx_pUp[CS2SX_MAX_PLAYERS];
+
+static inline int CS2SX_PlayerOk(int p) { return p >= 0 && p < CS2SX_MAX_PLAYERS; }
+static inline int CS2SX_Input_DownOf(int p, u64 b) { return CS2SX_PlayerOk(p) && (g_cs2sx_pDown[p] & b) != 0; }
+static inline int CS2SX_Input_HeldOf(int p, u64 b) { return CS2SX_PlayerOk(p) && (g_cs2sx_pHeld[p] & b) != 0; }
+static inline int CS2SX_Input_UpOf(int p, u64 b)   { return CS2SX_PlayerOk(p) && (g_cs2sx_pUp[p] & b) != 0; }
+static inline CS2SX_StickPos CS2SX_Input_StickLeftOf(int p)
+{
+    CS2SX_StickPos none = { 0, 0 };
+    return CS2SX_PlayerOk(p) ? CS2SX_Input_GetStickLeft(&g_cs2sx_pads[p]) : none;
+}
+static inline CS2SX_StickPos CS2SX_Input_StickRightOf(int p)
+{
+    CS2SX_StickPos none = { 0, 0 };
+    return CS2SX_PlayerOk(p) ? CS2SX_Input_GetStickRight(&g_cs2sx_pads[p]) : none;
+}
+static inline int CS2SX_Input_IsConnected(int p) { return CS2SX_PlayerOk(p) && padIsConnected(&g_cs2sx_pads[p]); }
+static inline int CS2SX_Input_ConnectedCount(void)
+{
+    int n = 0;
+    for (int i = 0; i < CS2SX_MAX_PLAYERS; i++) n += padIsConnected(&g_cs2sx_pads[i]) ? 1 : 0;
+    return n;
+}
+
+/// The console's controller screen (assign controllers to players). Returns the
+/// number of players afterwards, or -1 when it could not be shown.
+static inline int CS2SX_Input_ShowControllerSupport(int minPlayers, int maxPlayers)
+{
+    HidLaControllerSupportArg arg;
+    hidLaCreateControllerSupportArg(&arg);
+    if (maxPlayers < 1) maxPlayers = 1;
+    if (maxPlayers > CS2SX_MAX_PLAYERS) maxPlayers = CS2SX_MAX_PLAYERS;
+    if (minPlayers < 0) minPlayers = 0;
+    if (minPlayers > maxPlayers) minPlayers = maxPlayers;
+    arg.hdr.player_count_min = (s8)minPlayers;
+    arg.hdr.player_count_max = (s8)maxPlayers;
+    arg.hdr.enable_single_mode = maxPlayers == 1;
+    HidLaControllerSupportResultInfo info = { 0 };
+    if (R_FAILED(hidLaShowControllerSupport(&info, &arg))) return -1;
+    return info.player_count;
+}
+
+static inline void CS2SX_Input_UpdatePlayers(void)
+{
+    for (int i = 0; i < CS2SX_MAX_PLAYERS; i++)
+    {
+        padUpdate(&g_cs2sx_pads[i]);
+        g_cs2sx_pDown[i] = padGetButtonsDown(&g_cs2sx_pads[i]);
+        g_cs2sx_pHeld[i] = padGetButtons(&g_cs2sx_pads[i]);
+        g_cs2sx_pUp[i]   = padGetButtonsUp(&g_cs2sx_pads[i]);
+    }
+}
+
 static inline int CS2SX_StickNorm(int raw)
 {
     if (raw < 0)raw = -raw;
@@ -354,8 +412,11 @@ static inline void SwitchApp_Run(SwitchApp* self)
     psmInitialize(); // battery service — must stay open for the app lifetime
 
     PadState pad;
-    padConfigureInput(1, HidNpadStyleSet_NpadStandard);
+    padConfigureInput(CS2SX_MAX_PLAYERS, HidNpadStyleSet_NpadStandard);
     padInitializeDefault(&pad);
+    padInitialize(&g_cs2sx_pads[0], HidNpadIdType_No1, HidNpadIdType_Handheld);
+    for (int i = 1; i < CS2SX_MAX_PLAYERS; i++)
+        padInitialize(&g_cs2sx_pads[i], (HidNpadIdType)(HidNpadIdType_No1 + i));
 
     // The text console is up before OnInit, so Console.WriteLine there is visible.
     // An app that calls Graphics.Init() in OnInit switches to the GPU afterwards.
@@ -392,6 +453,7 @@ static inline void SwitchApp_Run(SwitchApp* self)
         g_cs2sx_kDown = self->kDown;
         g_cs2sx_kHeld = self->kHeld;
         g_cs2sx_kUp   = padGetButtonsUp(&pad);
+        CS2SX_Input_UpdatePlayers();
 
         if (use_gfx)
         {

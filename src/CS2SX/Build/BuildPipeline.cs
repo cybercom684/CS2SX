@@ -109,7 +109,7 @@ public sealed class BuildPipeline
 
             var switchformsCPath = Path.Combine(_buildDir, "switchforms.c");
             // RomFS is only mounted when the build embeds one (romfs/ exists).
-            WriteSwitchformsC(switchformsCPath, hasRomfs: Directory.Exists(Path.Combine(_projectDir, "romfs")));
+            WriteSwitchformsC(switchformsCPath, hasRomfs: Directory.Exists(Path.Combine(_projectDir, "romfs")), appName: _config.Name);
 
             sPrepare.Progress = 100;
             sPrepare.Status = StageStatus.Done;
@@ -1258,7 +1258,7 @@ public sealed class BuildPipeline
         return null;
     }
 
-    private static void WriteSwitchformsC(string path, bool hasRomfs)
+    private static void WriteSwitchformsC(string path, bool hasRomfs, string appName)
     {
         using var w = new StreamWriter(path, append: false, encoding: Encoding.UTF8);
         w.WriteLine("#include \"_forward.h\"");
@@ -1269,7 +1269,13 @@ public sealed class BuildPipeline
         w.WriteLine("u64          g_cs2sx_kDown = 0;");
         w.WriteLine("u64          g_cs2sx_kHeld = 0;");
         w.WriteLine("u64          g_cs2sx_kUp   = 0;");
+        w.WriteLine("PadState     g_cs2sx_pads[CS2SX_MAX_PLAYERS];");
+        w.WriteLine("u64          g_cs2sx_pDown[CS2SX_MAX_PLAYERS], g_cs2sx_pHeld[CS2SX_MAX_PLAYERS], g_cs2sx_pUp[CS2SX_MAX_PLAYERS];");
         w.WriteLine("int          g_cs2sx_want_exit = 0;");
+        // SaveData keeps each app's values in a folder of its own (sdmc:/switch/cs2sx_data/<app>/).
+        var saveName = new string((appName ?? "app").Select(c => char.IsLetterOrDigit(c) || c is '_' or '-' or '.' ? c : '_').ToArray());
+        if (saveName.Length == 0) saveName = "app";
+        w.WriteLine($"const char*  g_cs2sx_app_name = \"{saveName}\";");
         w.WriteLine($"int          g_cs2sx_has_romfs = {(hasRomfs ? 1 : 0)};");   // romfs/ embedded in the .nro   // set by CS2SX_App_Quit / LaunchNro
         // CS2SX_TEST_OUTPUT=1: stdout is mirrored to svcOutputDebugString, which
         // emulators log as guest output — the runtime tests read it from there.

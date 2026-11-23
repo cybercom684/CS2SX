@@ -35,6 +35,11 @@ public sealed class GraphicsExtHandler : InvocationHandlerBase
             ["Graphics.DrawTextShadow"] = "Graphics_DrawTextShadow",
             ["Graphics.DrawGrid"] = "Graphics_DrawGrid",
             ["Graphics.DrawPolygon"] = "Graphics_DrawPolygon",
+
+            // Sprites: regions of a texture, turned, tinted, mirrored, faded
+            ["Graphics.DrawTextureRegion"] = "Graphics_DrawTextureRegion",
+            ["Graphics.DrawTextureEx"] = "Graphics_DrawTextureEx",
+            ["Graphics.DrawTextureAlpha"] = "Graphics_DrawTextureAlpha",
         };
 
     public override bool TryHandle(InvocationExpressionSyntax inv, string calleeStr,

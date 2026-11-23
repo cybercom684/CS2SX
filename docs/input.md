@@ -133,6 +133,33 @@ int stärkeY = left.NormY;
 
 ---
 
+## Mehrere Spieler
+
+Ohne Spielernummer lesen `IsDown`, `IsHeld`, `IsUp` und die Sticks alle Controller zusammen, für Einzelspieler-Spiele das Richtige. Für lokalen Mehrspieler bekommt jede Methode die Spielernummer `0` … `7` (Spieler 1 … 8 der Konsole) vorangestellt; Spieler `0` liest auch die angesteckten Joy-Con im Handheld-Modus.
+
+```csharp
+// Einmal am Anfang: die Controller-Auswahl der Switch (Spieler verbinden und sortieren)
+int spieler = Input.ShowControllerSupport(minPlayers: 2, maxPlayers: 4);
+
+for (int p = 0; p < 4; p++)
+{
+    if (!Input.IsConnected(p)) continue;
+    if (Input.IsDown(p, NpadButton.A)) Springen(p);
+    StickPos stick = Input.GetStickLeft(p);
+    _x[p] += stick.x / 4000;
+}
+```
+
+| Methode | Beschreibung |
+|---|---|
+| `Input.IsDown(player, button)`, `IsHeld`, `IsUp` | wie oben, für einen Spieler |
+| `Input.GetStickLeft(player)`, `GetStickRight(player)` | Sticks eines Spielers |
+| `Input.IsConnected(player)` → `bool` | Ist für den Spieler ein Controller verbunden? |
+| `Input.ConnectedCount()` → `int` | Anzahl verbundener Spieler |
+| `Input.ShowControllerSupport(minPlayers = 1, maxPlayers = 4)` → `int` | Controller-Auswahl der Konsole öffnen (blockierend); liefert die Anzahl der Spieler danach, `-1` bei Fehler |
+
+---
+
 ## Touch-Screen
 
 ```csharp

@@ -12,6 +12,20 @@ public static class File
     public static string ReadAllText(string path) => "";
     public static string[] ReadAllLines(string path) => System.Array.Empty<string>();
     public static void WriteAllText(string path, string content) { }
+
+    /// The whole file as bytes (FileNotFoundException when it is missing).
+    public static byte[] ReadAllBytes(string path) => System.Array.Empty<byte>();
+    /// Creates or replaces the file with these bytes.
+    public static void WriteAllBytes(string path, byte[] bytes) { }
+    /// Adds the bytes at the end of the file (creates it when needed).
+    public static void AppendAllBytes(string path, byte[] bytes) { }
+
+    /// Opens a file for reading (FileNotFoundException when it is missing).
+    public static FileStream OpenRead(string path) => null!;
+    /// Creates or empties a file for writing (and reading).
+    public static FileStream Create(string path) => null!;
+    /// Opens or creates a file for writing, without emptying it.
+    public static FileStream OpenWrite(string path) => null!;
     public static void AppendAllText(string path, string content) { }
     public static bool Exists(string path) => false;
     public static void Delete(string path) { }

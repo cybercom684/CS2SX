@@ -78,6 +78,21 @@ public static class Graphics
     public static void DrawTextureScaled(Texture tex, int x, int y, int tw, int th) { }
     public static void DrawTextureCenteredScaled(Texture tex, int rx, int ry, int rw, int rh, int tw, int th) { }
 
+    /// Draws part of a texture — one frame of a sprite sheet or one tile of a
+    /// tile set: the rectangle (sx, sy, sw, sh) of the texture at (x, y).
+    /// w/h: size on screen (-1: as in the texture). rotation: degrees clockwise
+    /// around the center. tint: multiplied with the pixels (Color.RGBA(255, 255,
+    /// 255, 128) draws half transparent, white leaves it unchanged). flipX/flipY: mirrored.
+    public static void DrawTextureRegion(Texture tex, int sx, int sy, int sw, int sh, int x, int y,
+        int w = -1, int h = -1, float rotation = 0, uint tint = 0xFFFFFFFF, bool flipX = false, bool flipY = false) { }
+
+    /// The whole texture with the options of DrawTextureRegion.
+    public static void DrawTextureEx(Texture tex, int x, int y, int w = -1, int h = -1,
+        float rotation = 0, uint tint = 0xFFFFFFFF, bool flipX = false, bool flipY = false) { }
+
+    /// The texture faded: alpha 0 (invisible) … 255 (opaque).
+    public static void DrawTextureAlpha(Texture tex, int x, int y, byte alpha) { }
+
     // Erweiterte Primitiven
     public static void DrawTriangle(int x0, int y0, int x1, int y1, int x2, int y2, uint color) { }
     public static void FillTriangle(int x0, int y0, int x1, int y1, int x2, int y2, uint color) { }

@@ -4,7 +4,9 @@
 //
 // For NRO homebrew (no real title ID) all saves go to the SD card via the
 // libnx sdmc devoptab (fopen), which commits to the SD reliably:
-//   sdmc:/switch/cs2sx_data/<key>.txt
+//   sdmc:/switch/cs2sx_data/<app>/<key>.txt   (<app>: the project name)
+// Values saved before 0.7.1 lie in sdmc:/switch/cs2sx_data/<key>.txt; Read falls
+// back to them until the app writes the key again.
 //
 // IMPORTANT: Read/Write do NOT gate on _cs2sx_save_mounted. That flag is a
 // per-translation-unit static, so a Mount() call in one .c file did not make
@@ -21,12 +23,16 @@
 #define CS2SX_SAVE_BUFSZ 512
 
 extern bool _cs2sx_save_mounted;
+extern const char* g_cs2sx_app_name;
 extern char _cs2sx_save_rbuf[CS2SX_SAVE_BUFSZ];
 
 static inline void _cs2sx_save_ensure_dir(void)
 {
+    char dir[256];
     mkdir("sdmc:/switch", 0777);
     mkdir(CS2SX_SAVE_DIR, 0777);
+    snprintf(dir, sizeof dir, CS2SX_SAVE_DIR "/%s", g_cs2sx_app_name);
+    mkdir(dir, 0777);
 }
 
 static inline int CS2SX_SaveData_Mount(void)

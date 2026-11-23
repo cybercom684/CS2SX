@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -28,11 +28,23 @@ public sealed class InputExtHandler : InvocationHandlerBase
             // Wir generieren einen direkten Funktionsaufruf mit Dummy-Pad-Arg
             // der durch den Runtime-Wrapper aufgelöst wird.
             case "Input.GetStickLeft":
-                result = "_cs2sx_get_stick_left()";
+                result = args.Count == 1 ? "CS2SX_Input_StickLeftOf(" + args[0] + ")" : "_cs2sx_get_stick_left()";
                 return true;
 
             case "Input.GetStickRight":
-                result = "_cs2sx_get_stick_right()";
+                result = args.Count == 1 ? "CS2SX_Input_StickRightOf(" + args[0] + ")" : "_cs2sx_get_stick_right()";
+                return true;
+
+            case "Input.IsConnected":
+                result = "CS2SX_Input_IsConnected(" + ArgAt(args, 0) + ")";
+                return true;
+
+            case "Input.ConnectedCount":
+                result = "CS2SX_Input_ConnectedCount()";
+                return true;
+
+            case "Input.ShowControllerSupport":
+                result = "CS2SX_Input_ShowControllerSupport(" + JoinArgs(args) + ")";
                 return true;
 
             case "Input.GetTouch":

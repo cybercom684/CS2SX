@@ -55,6 +55,49 @@ public sealed class ExpressionWriter : IExpressionWriter
         return ApplyNullableConversion(expr, code);
     }
 
+    private string? TryWritePropertySetter(AssignmentExpressionSyntax assign, string op, string right)
+    {
+        if (_ctx.SemanticModel == null) return null;
+        IPropertySymbol? p;
+        try { p = _ctx.SemanticModel.GetSymbolInfo(assign.Left).Symbol as IPropertySymbol; }
+        catch { return null; }
+        if (p == null || p.IsIndexer || p.SetMethod == null) return null;
+        if (p.DeclaringSyntaxReferences.FirstOrDefault()?.GetSyntax() is not PropertyDeclarationSyntax pd
+            || PropertyWriter.IsAutoProperty(pd))
+            return null;
+        if (p.ContainingType is not { } owner || owner.TypeKind == TypeKind.Interface) return null;
+
+        string? receiver = null;
+        if (!p.IsStatic)
+        {
+            if (assign.Left is MemberAccessExpressionSyntax ma)
+                receiver = NullCheck.Wrap(ma.Expression, Write(ma.Expression), _ctx);
+            else if (assign.Left is IdentifierNameSyntax)
+                receiver = "self";
+            else return null;
+            if (TranspilerContext.IsUserCode(owner) && owner.TypeKind == TypeKind.Class)
+                receiver = "(" + owner.Name + "*)" + receiver;
+        }
+        var setter = owner.Name + "_set_" + p.Name;
+        var getter = owner.Name + "_get_" + p.Name;
+        string Call(string fn, string? arg) =>
+            fn + "(" + string.Join(", ", new[] { receiver, arg }.Where(x => x != null)) + ")";
+
+        if (op == "=") return Call(setter, right);
+        if (op.Length >= 2 && op.EndsWith("=") && op != "==" && op != "??=")
+        {
+            var binOp = op[..^1];
+            if (p.Type.SpecialType == SpecialType.System_String && binOp == "+")
+            {
+                var buf = _ctx.NextStringBuf();
+                _ctx.Out.WriteLine(_ctx.Tab + buf + " = CS2SX_Format(" + buf + ", \"%s%s\", " + Call(getter, null) + ", " + right + ");");
+                return Call(setter, buf);
+            }
+            return Call(setter, "(" + Call(getter, null) + " " + binOp + " (" + right + "))");
+        }
+        return null;
+    }
+
     private IMethodSymbol? InvokedMethod(InvocationExpressionSyntax inv)
     {
         try { return _ctx.SemanticModel?.GetSymbolInfo(inv).Symbol as IMethodSymbol; }
@@ -976,6 +1019,11 @@ public sealed class ExpressionWriter : IExpressionWriter
     {
         var op = assign.OperatorToken.Text;
         var right = Write(assign.Right);
+
+        // A property with its own setter (not an auto-property): call it —
+        // T_set_P(obj, value); `p.X += v` reads with T_get_P first.
+        if (TryWritePropertySetter(assign, op, right) is { } setterCall)
+            return setterCall;
 
         // String field/property of a class: it owns a marked heap copy; the previous
         // copy is freed at the next frame (CS2SX_STR_STORE).
@@ -2426,6 +2474,16 @@ public sealed class ExpressionWriter : IExpressionWriter
             }
             catch { }
         }
+
+        // A struct of the Switch API returned by a call (Input.GetStickLeft(1).x): a value.
+        try
+        {
+            if (mem.Expression is InvocationExpressionSyntax
+                && _ctx.SemanticModel?.GetTypeInfo(mem.Expression).Type is INamedTypeSymbol { TypeKind: TypeKind.Struct } apiStruct
+                && apiStruct.ContainingNamespace?.ToDisplayString() == "CS2SX.Switch")
+                return obj + "." + prop;
+        }
+        catch { }
 
         if (receiverType != null
             && !TypeRegistry.IsLibNxStruct(receiverType)

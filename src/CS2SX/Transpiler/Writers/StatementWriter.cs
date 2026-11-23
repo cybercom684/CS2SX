@@ -157,14 +157,14 @@ public sealed class StatementWriter
                 _ctx.WriteLine(TypeRegistry.MapType(declType) + " " + v.Identifier + si + ";");
                 _ctx.LocalTypes[v.Identifier.Text] = declType;
                 if (isUsingDecl)
-                    ScheduleUsingVarCleanup(v.Identifier.Text, declType);
+                    ScheduleUsingVarCleanup(v, declType);
                 continue;
             }
 
             if (NullableHandler.IsNullable(declType))
             {
                 WriteNullableLocal(v, declType);
-                if (isUsingDecl) ScheduleUsingVarCleanup(v.Identifier.Text, declType);
+                if (isUsingDecl) ScheduleUsingVarCleanup(v, declType);
                 continue;
             }
 
@@ -186,7 +186,7 @@ public sealed class StatementWriter
                 var initVal = _expr.Write(v.Initializer.Value);
                 _ctx.WriteLine("List_str* " + v.Identifier + " = " + initVal + ";");
                 _ctx.LocalTypes[v.Identifier.Text] = "List<string>";
-                if (isUsingDecl) ScheduleUsingVarCleanup(v.Identifier.Text, "List<string>");
+                if (isUsingDecl) ScheduleUsingVarCleanup(v, "List<string>");
                 continue;
             }
 
@@ -312,7 +312,7 @@ public sealed class StatementWriter
                 registeredType = declType;
             _ctx.LocalTypes[v.Identifier.Text] = registeredType;
 
-            if (isUsingDecl) ScheduleUsingVarCleanup(v.Identifier.Text, registeredType);
+            if (isUsingDecl) ScheduleUsingVarCleanup(v, registeredType);
         }
     }
 
@@ -345,35 +345,35 @@ public sealed class StatementWriter
 
     // Schedules a cleanup action for a "using var" declaration.
     // These are flushed (LIFO) before each return statement.
-    private void ScheduleUsingVarCleanup(string varName, string csType)
+    /// The C call of `Dispose()` on the variable (the C# method of its type or a base
+    /// class; the runtime types' T_Dispose), or null when the type has none.
+    private string? DisposeCall(ITypeSymbol? type, string varName, bool isValueType)
     {
-        string cleanup;
-        if (TypeRegistry.IsStringBuilder(csType))
-            cleanup = $"if ({varName}) StringBuilder_Free({varName});";
-        else if (TypeRegistry.IsList(csType))
+        if (type == null || type is IErrorTypeSymbol) return null;
+        IMethodSymbol? dispose = null;
+        for (var b = type; b != null && dispose == null; b = b.BaseType)
+            dispose = b.GetMembers("Dispose").OfType<IMethodSymbol>()
+                .FirstOrDefault(m => m.Parameters.Length == 0 && !m.IsStatic);
+        if (dispose == null) return null;
+        var owner = dispose.ContainingType;
+        var arg = isValueType ? "&" + varName : varName;
+        if (TranspilerContext.IsUserCode(owner))
         {
-            var inner = TypeRegistry.GetListInnerType(csType) ?? "int";
-            var cInner = inner == "string" ? "str" : TypeRegistry.MapType(inner);
-            cleanup = $"if ({varName}) List_{cInner}_Free({varName});";
+            var cName = CSharpToC.BuildCMethodName(owner.Name, "Dispose", 0, _ctx.OverloadedMethods, dispose);
+            return cName + "(" + (isValueType ? arg : "(" + owner.Name + "*)" + varName) + ")";
         }
-        else if (TypeRegistry.IsDictionary(csType))
-        {
-            var types = TypeRegistry.GetDictionaryTypes(csType);
-            if (types.HasValue)
-            {
-                var ck = types.Value.key == "string" ? "str" : TypeRegistry.MapType(types.Value.key);
-                var cv = types.Value.val == "string" ? "str" : TypeRegistry.MapType(types.Value.val);
-                cleanup = $"if ({varName}) Dict_{ck}_{cv}_Free({varName});";
-            }
-            else cleanup = $"/* using var {varName}: free manually */";
-        }
-        else if (TypeRegistry.IsDisposable(csType))
-            cleanup = $"if ({varName}) {csType}_Dispose({varName});";
-        else if (!TypeRegistry.IsPrimitive(csType) && csType != "string"
-                 && TypeRegistry.NeedsPointerSuffix(csType))
-            cleanup = $"if ({varName}) {TypeRegistry.MapType(csType)}_Free({varName});";
-        else
-            return; // primitives don't need cleanup
+        var cType = TypeRegistry.MapType(TranspilerContext.FormatTypeSymbol(type)).TrimEnd('*').Trim();
+        return cType + "_Dispose(" + arg + ")";
+    }
+    private void ScheduleUsingVarCleanup(VariableDeclaratorSyntax v, string csType)
+    {
+        // `using var x = …;` calls Dispose() at the end of the block — nothing else.
+        var varName = v.Identifier.Text;
+        ITypeSymbol? t = null;
+        try { t = (_ctx.SemanticModel?.GetDeclaredSymbol(v) as ILocalSymbol)?.Type; }
+        catch { }
+        if (t == null || DisposeCall(t, varName, t.IsValueType) is not { } call) return;
+        var cleanup = t.IsValueType ? call + ";" : $"if ({varName}) {call};";
         _ctx.PendingUsingVarCleanups.Push(cleanup);
     }
 
@@ -1769,7 +1769,11 @@ public sealed class StatementWriter
         {
             foreach (var varDecl in usingStmt.Declaration.Variables)
             {
+                ITypeSymbol? usingTypeSym = null;
+                try { usingTypeSym = _ctx.SemanticModel?.GetTypeInfo(usingStmt.Declaration.Type).Type; } catch { }
                 var typeName = usingStmt.Declaration.Type.ToString().Trim();
+                if (typeName == "var" && usingTypeSym != null && usingTypeSym is not IErrorTypeSymbol)
+                    typeName = TranspilerContext.FormatTypeSymbol(usingTypeSym);
                 var varName = varDecl.Identifier.Text;
                 var isValueType = TypeRegistry.IsLibNxStruct(typeName)
                                || TypeRegistry.IsPrimitive(typeName);
@@ -1781,67 +1785,27 @@ public sealed class StatementWriter
                 _ctx.WriteLine(cType + ptr + " " + varName + " = " + initStr + ";");
                 _ctx.LocalTypes[varName] = typeName;
 
-                // Build dispose action
-                if (TypeRegistry.IsDisposable(typeName))
-                {
-                    var disposeCall = isValueType
-                        ? typeName + "_Dispose(&" + varName + ")"
-                        : typeName + "_Dispose(" + varName + ")";
-                    disposeActions.Add("if (" + varName + ") " + disposeCall + ";");
-                }
-                else if (TypeRegistry.IsStringBuilder(typeName))
-                {
-                    disposeActions.Add("if (" + varName + ") StringBuilder_Free(" + varName + ");");
-                }
-                else if (TypeRegistry.IsList(typeName))
-                {
-                    var inner = TypeRegistry.GetListInnerType(typeName) ?? "int";
-                    var cInner = inner == "string" ? "str" : TypeRegistry.MapType(inner);
-                    disposeActions.Add("if (" + varName + ") List_" + cInner + "_Free(" + varName + ");");
-                }
-                else if (TypeRegistry.IsDictionary(typeName))
-                {
-                    var types = TypeRegistry.GetDictionaryTypes(typeName)!.Value;
-                    var ck = types.key == "string" ? "str" : TypeRegistry.MapType(types.key);
-                    var cv = types.val == "string" ? "str" : TypeRegistry.MapType(types.val);
-                    disposeActions.Add("if (" + varName + ") Dict_" + ck + "_" + cv + "_Free(" + varName + ");");
-                }
-                else if (TypeRegistry.IsStack(typeName))
-                {
-                    var inner = TypeRegistry.GetStackInnerType(typeName) ?? "int";
-                    var cInner = inner == "string" ? "str" : TypeRegistry.MapType(inner);
-                    disposeActions.Add("if (" + varName + ") Stack_" + cInner + "_Free(" + varName + ");");
-                }
-                else if (TypeRegistry.IsQueue(typeName))
-                {
-                    var inner = TypeRegistry.GetQueueInnerType(typeName) ?? "int";
-                    var cInner = inner == "string" ? "str" : TypeRegistry.MapType(inner);
-                    disposeActions.Add("if (" + varName + ") Queue_" + cInner + "_Free(" + varName + ");");
-                }
-                else if (TypeRegistry.IsHashSet(typeName))
-                {
-                    var inner = TypeRegistry.GetHashSetInnerType(typeName) ?? "int";
-                    var cInner = inner == "string" ? "str" : TypeRegistry.MapType(inner);
-                    disposeActions.Add("if (" + varName + ") HashSet_" + cInner + "_Free(" + varName + ");");
-                }
-                else if (typeName == "Stopwatch")
-                {
-                    disposeActions.Add("if (" + varName + ") CS2SX_Stopwatch_Free(" + varName + ");");
-                }
-                else if (!isValueType && TypeRegistry.NeedsPointerSuffix(typeName))
-                {
-                    // Generic Dispose convention: TypeName_Free(ptr)
-                    disposeActions.Add("if (" + varName + ") " + cType + "_Free(" + varName + ");");
-                }
+                // `using` calls Dispose() at the end — nothing else: what the variable
+                // holds belongs to the frame (or a field) like any local.
+                if (DisposeCall(usingTypeSym, varName, isValueType) is { } disposeCall)
+                    disposeActions.Add(isValueType ? disposeCall + ";" : "if (" + varName + ") " + disposeCall + ";");
             }
-
             if (usingStmt.Statement != null)
                 Write(usingStmt.Statement);
         }
         else if (usingStmt.Expression != null)
         {
             var exprCode = _expr.Write(usingStmt.Expression);
-            _ctx.WriteLine("/* using(" + exprCode + ") */");
+            ITypeSymbol? exprType = null;
+            try { exprType = _ctx.SemanticModel?.GetTypeInfo(usingStmt.Expression).Type; } catch { }
+            var tmpUsing = _ctx.NextTmp("using");
+            if (exprType != null && DisposeCall(exprType, tmpUsing, exprType.IsValueType) is { } exprDispose)
+            {
+                _ctx.WriteLine("__auto_type " + tmpUsing + " = " + exprCode + ";");
+                disposeActions.Add(exprType.IsValueType ? exprDispose + ";" : "if (" + tmpUsing + ") " + exprDispose + ";");
+            }
+            else
+                _ctx.WriteLine("(void)(" + exprCode + ");");
             if (usingStmt.Statement != null)
                 Write(usingStmt.Statement);
         }

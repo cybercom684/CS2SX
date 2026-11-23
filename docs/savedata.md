@@ -2,7 +2,9 @@
 
 ## Save Data (Konfiguration speichern)
 
-Ein einfacher Schlüssel-Wert-Speicher auf der SD-Karte — ideal für Einstellungen, Highscores oder den zuletzt geöffneten Pfad. Jeder Schlüssel landet als Datei unter `sdmc:/switch/cs2sx_data/<key>.txt`.
+Ein einfacher Schlüssel-Wert-Speicher auf der SD-Karte — ideal für Einstellungen, Highscores oder den zuletzt geöffneten Pfad. Jede App hat einen eigenen Ordner (der Projektname), jeder Schlüssel landet als Datei unter `sdmc:/switch/cs2sx_data/<App>/<key>.txt`. Zwei Apps mit demselben Schlüssel stören sich also nicht.
+
+> Bis 0.7.0 lagen alle Apps gemeinsam in `sdmc:/switch/cs2sx_data/<key>.txt`. `Read` findet solche alten Werte weiterhin, bis die App den Schlüssel neu schreibt.
 
 ```csharp
 SaveData.Mount();                          // einmal beim Start
@@ -18,14 +20,12 @@ int.TryParse(hs, out score);               // selbst in int wandeln
 | Methode | Beschreibung |
 |---|---|
 | `SaveData.Mount()` → `bool` | Speicher vorbereiten (Verzeichnis anlegen). Einmal beim Start aufrufen. |
-| `SaveData.Read(key)` → `string` | Wert lesen — gibt **eine Zeile** (≤ 512 Zeichen) zurück, `""` wenn der Schlüssel fehlt. |
+| `SaveData.Read(key)` → `string` | Wert lesen (beliebig lang, auch mehrzeilig), `""` wenn der Schlüssel fehlt. |
 | `SaveData.Write(key, value)` | Wert schreiben (legt das Verzeichnis bei Bedarf an). |
 | `SaveData.Commit()` | Schreibvorgänge auf die SD-Karte flushen. |
 | `SaveData.Unmount()` | Speicher freigeben (optional, beim App-Ende). |
 
-> **Werte sind einzeilige Strings.** Für Zahlen/Booleans selbst serialisieren (`value.ToString()`) und beim Lesen parsen. Mehrere Felder kannst du mit einem Trennzeichen in **einen** Schlüssel packen (z.B. `"label\tpfad"`) und nach dem Lesen splitten.
-
-> `Read` liefert genau **eine** `fgets`-Zeile (max. 512 Zeichen). Für längere Daten mehrere Schlüssel verwenden.
+> **Werte sind Strings.** Für Zahlen/Booleans selbst serialisieren (`value.ToString()`) und beim Lesen parsen. Mehrere Felder kannst du mit einem Trennzeichen in **einen** Schlüssel packen (z.B. `"label\tpfad"`) und nach dem Lesen splitten. Für größere Spielstände eignet sich eine eigene Datei mit `BinaryWriter`/`BinaryReader` (siehe [Sprachunterstützung → Datei-I/O](language-guide.md#datei-io)).
 
 ---
 

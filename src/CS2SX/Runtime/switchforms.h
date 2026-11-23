@@ -1293,6 +1293,100 @@ int CS2SX_Dir_Create(const char* path);
 
 const char* CS2SX_File_ReadAllText(const char* path);
 
+// ── Binary files (src/rt_binio.c) ────────────────────────────────────────────
+// byte[] is a header array (CS2SX_ArrNew). FileStream and MemoryStream are one
+// C type, Stream: a file or a growing buffer. BinaryReader/BinaryWriter use the
+// .NET format (little endian, strings with a 7-bit encoded length, UTF-8).
+u8*  CS2SX_File_ReadAllBytes(const char* path);
+void CS2SX_File_WriteAllBytes(const char* path, const u8* data);
+void CS2SX_File_AppendAllBytes(const char* path, const u8* data);
+
+typedef struct Stream
+{
+    FILE*  fp;
+    u8*    mem;
+    size_t len, cap, pos;
+    int    canRead, canWrite, closed;
+} Stream;
+// FileStream / MemoryStream: the same data. The functions take any of the three
+// (void*), so a FileStream* goes where C# expects a Stream.
+typedef struct FileStream FileStream;
+typedef struct MemoryStream MemoryStream;
+struct FileStream { Stream s; };
+struct MemoryStream { Stream s; };
+
+FileStream* CS2SX_File_OpenRead(const char* path);
+FileStream* CS2SX_File_Create(const char* path);
+FileStream* CS2SX_File_OpenWrite(const char* path);
+MemoryStream* CS2SX_MemoryStream_From(const u8* data);   // NULL: empty, for writing
+/// new MemoryStream() / new MemoryStream(bytes)
+static inline MemoryStream* MemoryStream_New_0(void) { return CS2SX_MemoryStream_From(NULL); }
+static inline MemoryStream* MemoryStream_New_1(const u8* data) { return CS2SX_MemoryStream_From(data); }
+int       Stream_Read(void* s, u8* buffer, int offset, int count);
+int       Stream_ReadByte(void* s);
+void      Stream_Write(void* s, const u8* buffer, int offset, int count);
+void      Stream_WriteByte(void* s, u8 value);
+long long Stream_get_Length(void* s);
+long long Stream_get_Position(void* s);
+void      Stream_set_Position(void* s, long long value);
+long long Stream_Seek(void* s, long long offset, int origin);
+void      Stream_Flush(void* s);
+void      Stream_Close(void* s);
+u8*       Stream_ToArray(void* s);
+void      Stream_Dispose(void* s);
+// The same functions under the names of the derived classes.
+#define CS2SX_STREAM_ALIASES(T)                                                              \
+    static inline int       T##_Read(void* s, u8* b, int o, int c) { return Stream_Read(s, b, o, c); } \
+    static inline int       T##_ReadByte(void* s) { return Stream_ReadByte(s); }                \
+    static inline void      T##_Write(void* s, const u8* b, int o, int c) { Stream_Write(s, b, o, c); } \
+    static inline void      T##_WriteByte(void* s, u8 v) { Stream_WriteByte(s, v); }            \
+    static inline long long T##_get_Length(void* s) { return Stream_get_Length(s); }            \
+    static inline long long T##_get_Position(void* s) { return Stream_get_Position(s); }        \
+    static inline void      T##_set_Position(void* s, long long v) { Stream_set_Position(s, v); } \
+    static inline long long T##_Seek(void* s, long long o, int origin) { return Stream_Seek(s, o, origin); } \
+    static inline void      T##_Flush(void* s) { Stream_Flush(s); }                             \
+    static inline void      T##_Close(void* s) { Stream_Close(s); }                             \
+    static inline u8*       T##_ToArray(void* s) { return Stream_ToArray(s); }                  \
+    static inline void      T##_Dispose(void* s) { Stream_Dispose(s); }
+CS2SX_STREAM_ALIASES(FileStream)
+CS2SX_STREAM_ALIASES(MemoryStream)
+typedef struct BinaryReader { Stream* f_BaseStream; } BinaryReader;
+typedef struct BinaryWriter { Stream* f_BaseStream; } BinaryWriter;
+BinaryReader* BinaryReader_New(void* input);
+u8                 BinaryReader_ReadByte(BinaryReader* r);
+s8                 BinaryReader_ReadSByte(BinaryReader* r);
+int                BinaryReader_ReadBoolean(BinaryReader* r);
+short              BinaryReader_ReadInt16(BinaryReader* r);
+unsigned short     BinaryReader_ReadUInt16(BinaryReader* r);
+int                BinaryReader_ReadInt32(BinaryReader* r);
+unsigned int       BinaryReader_ReadUInt32(BinaryReader* r);
+long long          BinaryReader_ReadInt64(BinaryReader* r);
+unsigned long long BinaryReader_ReadUInt64(BinaryReader* r);
+float              BinaryReader_ReadSingle(BinaryReader* r);
+double             BinaryReader_ReadDouble(BinaryReader* r);
+u8*                BinaryReader_ReadBytes(BinaryReader* r, int count);
+const char*        BinaryReader_ReadString(BinaryReader* r);
+void               BinaryReader_Dispose(BinaryReader* r);
+#define BinaryReader_Close BinaryReader_Dispose
+BinaryWriter* BinaryWriter_New(void* output);
+void BinaryWriter_WriteByte(BinaryWriter* w, u8 v);
+void BinaryWriter_WriteSByte(BinaryWriter* w, s8 v);
+void BinaryWriter_WriteBoolean(BinaryWriter* w, int v);
+void BinaryWriter_WriteInt16(BinaryWriter* w, short v);
+void BinaryWriter_WriteUInt16(BinaryWriter* w, unsigned short v);
+void BinaryWriter_WriteInt32(BinaryWriter* w, int v);
+void BinaryWriter_WriteUInt32(BinaryWriter* w, unsigned int v);
+void BinaryWriter_WriteInt64(BinaryWriter* w, long long v);
+void BinaryWriter_WriteUInt64(BinaryWriter* w, unsigned long long v);
+void BinaryWriter_WriteSingle(BinaryWriter* w, float v);
+void BinaryWriter_WriteDouble(BinaryWriter* w, double v);
+void BinaryWriter_WriteBytes(BinaryWriter* w, const u8* data);
+void BinaryWriter_WriteBytesRange(BinaryWriter* w, const u8* data, int index, int count);
+void BinaryWriter_WriteString(BinaryWriter* w, const char* s);
+void BinaryWriter_Flush(BinaryWriter* w);
+void BinaryWriter_Dispose(BinaryWriter* w);
+#define BinaryWriter_Close BinaryWriter_Dispose
+
 // ============================================================================
 // NSP (PFS0) inspector — parses the container header WITHOUT decryption (no keys
 // needed). Exposes the file list, total content size, ticket presence and a

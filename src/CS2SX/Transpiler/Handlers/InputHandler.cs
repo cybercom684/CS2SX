@@ -12,6 +12,19 @@ public sealed class InputHandler : InvocationHandlerBase
         if (calleeStr is not ("Input.IsDown" or "Input.IsHeld" or "Input.IsUp"))
             return NotHandled(out result);
 
+        // Input.IsDown(player, button): one player's controller.
+        if (args.Count == 2)
+        {
+            var pb = TypeRegistry.MapEnum(ArgAt(args, 1));
+            result = calleeStr switch
+            {
+                "Input.IsDown" => "CS2SX_Input_DownOf(" + ArgAt(args, 0) + ", " + pb + ")",
+                "Input.IsHeld" => "CS2SX_Input_HeldOf(" + ArgAt(args, 0) + ", " + pb + ")",
+                _              => "CS2SX_Input_UpOf(" + ArgAt(args, 0) + ", " + pb + ")",
+            };
+            return true;
+        }
+
         var btn = TypeRegistry.MapEnum(ArgAt(args, 0));
         result = calleeStr switch
         {
