@@ -26,10 +26,13 @@ namespace CS2SX.Build;
 /// IComparable&lt;T&gt;); strings ordinally. Every replacement keeps the number of lines.
 public static class CollectionLowering
 {
-    private enum Kind { SortedDictionary, SortedSet, PriorityQueue, LinkedList, LinkedListNode }
+    private enum Kind { SortedDictionary, SortedSet, PriorityQueue, LinkedList, LinkedListNode, Grouping }
 
     private static Kind? KindOf(ITypeSymbol? t) =>
-        t is INamedTypeSymbol n && n.ContainingNamespace?.ToDisplayString() == "System.Collections.Generic"
+        t is INamedTypeSymbol { Name: "IGrouping", TypeArguments.Length: 2 } g
+            && g.ContainingNamespace?.ToDisplayString() == "System.Linq"
+            ? Kind.Grouping
+        : t is INamedTypeSymbol n && n.ContainingNamespace?.ToDisplayString() == "System.Collections.Generic"
             ? (n.Name, n.TypeArguments.Length) switch
             {
                 ("SortedDictionary", 2) => Kind.SortedDictionary,
@@ -48,11 +51,12 @@ public static class CollectionLowering
         [Kind.PriorityQueue] = new() { "Count", "Enqueue", "Dequeue", "Peek", "TryDequeue", "TryPeek", "Clear" },
         [Kind.LinkedList] = new() { "Count", "First", "Last", "AddFirst", "AddLast", "AddBefore", "AddAfter", "Remove", "RemoveFirst", "RemoveLast", "Find", "FindLast", "Contains", "Clear" },
         [Kind.LinkedListNode] = new() { "Value", "Next", "Previous", "List" },
+        [Kind.Grouping] = new() { "Key" },
     };
 
     public static List<string> Rewrite(IReadOnlyList<string> files, string outDir)
     {
-        if (!files.Any(f => Regex.IsMatch(File.ReadAllText(f), @"\b(SortedDictionary|SortedSet|PriorityQueue|LinkedList)\b")))
+        if (!files.Any(f => Regex.IsMatch(File.ReadAllText(f), @"\b(SortedDictionary|SortedSet|PriorityQueue|LinkedList|GroupBy)\b")))
             return files.ToList();
 
         var sem = new SemanticModelBuilder(files);
@@ -101,6 +105,38 @@ public static class CollectionLowering
                 }
             }
 
+            // list.GroupBy(x => key) → CS2SX_IGrouping_K_T.By(list, x => key): a list of groups
+            // (Key, Items), in the order the keys first appear, like .NET.
+            foreach (var inv in root.DescendantNodes().OfType<InvocationExpressionSyntax>())
+            {
+                if (inv.Expression is not MemberAccessExpressionSyntax gma || inv.ArgumentList.Arguments.Count != 1) continue;
+                if (model.GetSymbolInfo(inv).Symbol is not IMethodSymbol { Name: "GroupBy", IsExtensionMethod: true } gb
+                    || gb.ContainingType?.ToDisplayString() != "System.Linq.Enumerable") continue;
+                if (gb.ReturnType is not INamedTypeSymbol { TypeArguments.Length: 1 } ret
+                    || ret.TypeArguments[0] is not INamedTypeSymbol groupT || KindOf(groupT) != Kind.Grouping) continue;
+                var srcType = model.GetTypeInfo(gma.Expression).Type;
+                var src = e.Render(source, gma.Expression.SpanStart, gma.Expression.Span.End, all: false);
+                if (srcType is not INamedTypeSymbol { Name: "List", TypeArguments.Length: 1 }) src = "(" + src + ").ToList()";
+                var sel = e.Render(source, inv.ArgumentList.Arguments[0].SpanStart, inv.ArgumentList.Arguments[0].Span.End, all: false);
+                var glines = new string('\n', source.Substring(inv.SpanStart, inv.Span.Length).Count(c => c == '\n'));
+                e.Replace(inv.SpanStart, inv.Span.Length, $"{gen.Name(groupT)}.By({src}, {sel}){glines}");
+                any = true;
+            }
+            // A group used as a sequence (g.Count(), foreach (var x in g), string.Join(",", g)) is its Items.
+            foreach (var x in root.DescendantNodes().OfType<ExpressionSyntax>())
+            {
+                if (KindOf(model.GetTypeInfo(x).Type) != Kind.Grouping) continue;
+                if (x is TypeSyntax && model.GetSymbolInfo(x).Symbol is ITypeSymbol) continue;      // `var`, a type name
+                if (x.Parent is MemberAccessExpressionSyntax pm && pm.Name == x) continue;          // name part of a.B
+                if (x.Parent is MemberAccessExpressionSyntax km && km.Expression == x
+                    && km.Name.Identifier.Text == "Key") continue;
+                if (x.Parent is ParenthesizedExpressionSyntax) continue;
+                if (x.Parent is AssignmentExpressionSyntax asg && asg.Left == x) continue;
+                if (x.Parent is ArgumentSyntax or EqualsValueClauseSyntax or ReturnStatementSyntax or ArrowExpressionClauseSyntax
+                    && model.GetTypeInfo(x).ConvertedType is INamedTypeSymbol ct && KindOf(ct) == Kind.Grouping) continue;   // passed on as a group
+                e.Insert(x.Span.End, ".Items", PrioName, statementLevel: false);
+            }
+
             // LINQ on them: through a List copy.
             foreach (var ma in root.DescendantNodes().OfType<MemberAccessExpressionSyntax>())
             {
@@ -128,6 +164,7 @@ public static class CollectionLowering
             foreach (var fe in root.DescendantNodes().OfType<CommonForEachStatementSyntax>())
             {
                 if (model.GetTypeInfo(fe.Expression).Type is not INamedTypeSymbol t || KindOf(t) is not { } kind) continue;
+                if (kind == Kind.Grouping) continue;   // its .Items, above
                 int n = ++loops;
                 string c = "cs2sx_fc" + n, i = "cs2sx_fi" + n;
                 var expr = e.Render(source, fe.Expression.SpanStart, fe.Expression.Span.End, all: false);
@@ -235,6 +272,7 @@ public static class CollectionLowering
                     if (KindOf(ti.Type) is not { } kind || ti.ConvertedType == null
                         || SymbolEqualityComparer.Default.Equals(ti.Type, ti.ConvertedType)) break;
                     if (ti.ConvertedType.SpecialType == SpecialType.System_Object) break;
+                    if (kind == Kind.Grouping) break;   // used through its Items
                     if (kind is Kind.SortedSet or Kind.LinkedList && IsEnumerableOf(ti.ConvertedType) == true) break;
                     yield return (x, $"Ein {ti.Type!.Name} kann hier nicht als {ti.ConvertedType.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat)} verwendet werden — den Typ direkt verwenden (oder .ToList()).");
                     break;
@@ -334,6 +372,7 @@ public static class CollectionLowering
                     Kind.SortedSet => SortedSet(name, t),
                     Kind.PriorityQueue => PriorityQueue(name, t),
                     Kind.LinkedList => LinkedList(name, t),
+                    Kind.Grouping => Grouping(name, t),
                     _ => LinkedListNode(name, t),
                 }).Append('\n');
             }
@@ -594,6 +633,31 @@ public class @L
     public List<@T> ToList() { var l = new List<@T>(); for (var n = _first; n != null; n = n.next) l.Add(n.Value); return l; }
     public @T[] ToArray() { var l = ToList(); var a = new @T[l.Count]; for (int i = 0; i < a.Length; i++) a[i] = l[i]; return a; }
 }", ("@L", name), ("@Node", node), ("@T", Text(e)), ("@EQ", EqualsCode(e, "n.Value", "value")));
+        }
+
+        private string Grouping(string name, INamedTypeSymbol t)
+        {
+            var (k, e) = (t.TypeArguments[0], t.TypeArguments[1]);
+            return Fill(@"
+public class @N
+{
+    public @K Key = @DEF;
+    public List<@T> Items = new List<@T>();
+    public static List<@N> By(List<@T> src, Func<@T, @K> key)
+    {
+        var groups = new List<@N>();
+        for (int i = 0; i < src.Count; i++)
+        {
+            var item = src[i];
+            var k = key(item);
+            @N? g = null;
+            for (int j = 0; j < groups.Count; j++) if (@EQ) { g = groups[j]; break; }
+            if (g == null) { g = new @N(); g.Key = k; groups.Add(g); }
+            g.Items.Add(item);
+        }
+        return groups;
+    }
+}", ("@N", name), ("@K", Text(k)), ("@T", Text(e)), ("@DEF", Default(k)), ("@EQ", EqualsCode(k, "groups[j].Key", "k")));
         }
 
         private string LinkedListNode(string name, INamedTypeSymbol t)

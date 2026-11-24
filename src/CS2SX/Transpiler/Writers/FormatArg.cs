@@ -38,11 +38,23 @@ internal static class FormatArg
             // An enum shows its member name ("Gold", "Read, Write" for [Flags]).
             "object" or "object?" => ("%s", "CS2SX_Obj_ToString(" + code + ")"),
             "char" => ("%s", "CS2SX_CharStr(" + code + ")"),
+            "StringBuilder" or "StringBuilder?" or "System.Text.StringBuilder" => ("%s", "StringBuilder_ToString(" + code + ")"),
             _ when CS2SX.Core.TypeRegistry.IsRecordClass(csType) => ("%s", csType.Trim().TrimEnd('?') + "_ToString(" + code + ")"),
             _ when CS2SX.Core.TypeRegistry.IsUserDefinedEnum(csType) => ("%s", csType + "_ToString(" + code + ")"),
             _ when ObjectString(csType, code) is { } s => ("%s", s),
+            _ when NullableString(csType, code) is { } n => ("%s", n),
             _ => (spec, code),
         };
+
+    /// int? / double? / enum? in a string: the value as it would show, null → "".
+    private static string? NullableString(string csType, string code)
+    {
+        var t = csType.Trim();
+        if (!t.EndsWith('?') || !CS2SX.Core.TypeRegistry.IsNullableValueType(t)) return null;
+        var inner = t[..^1];
+        var (s, c) = Adapt(inner, CS2SX.Core.TypeRegistry.FormatSpecifier(CS2SX.Core.TypeRegistry.MapType(inner)), "_nv.value");
+        return "({ __auto_type _nv = (" + code + "); _nv.has ? (const char*)CS2SX_Format(_cs2sx_next_buf(), \"" + s + "\", " + c + ") : \"\"; })";
+    }
 
     /// A user class or struct as a string, as .NET shows it: its (virtual) ToString()
     /// override, else the type name. Objects: null → "". Null for other types.

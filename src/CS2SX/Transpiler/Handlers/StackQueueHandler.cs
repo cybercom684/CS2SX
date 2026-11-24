@@ -31,10 +31,10 @@ namespace CS2SX.Transpiler.Handlers;
 public sealed class StackQueueHandler : InvocationHandlerBase
 {
     private static readonly HashSet<string> s_stackMethods = new(StringComparer.Ordinal)
-        { "Push", "Pop", "Peek", "Clear" };
+        { "Push", "Pop", "Peek", "Clear", "TryPop", "TryPeek" };
 
     private static readonly HashSet<string> s_queueMethods = new(StringComparer.Ordinal)
-        { "Enqueue", "Dequeue", "Peek", "Clear" };
+        { "Enqueue", "Dequeue", "Peek", "Clear", "TryDequeue", "TryPeek" };
 
     private static readonly HashSet<string> s_hashSetMethods = new(StringComparer.Ordinal)
         { "Add", "Contains", "Remove", "Clear", "UnionWith", "IntersectWith", "ExceptWith" };
@@ -57,6 +57,12 @@ public sealed class StackQueueHandler : InvocationHandlerBase
 
         if (collType == null) return NotHandled(out result);
 
+        // TryPop(out _) / TryDequeue(out _): no target to store the item into.
+        if (method.StartsWith("Try", StringComparison.Ordinal) && inv.ArgumentList.Arguments.Count == 1
+            && inv.ArgumentList.Arguments[0].Expression is IdentifierNameSyntax { Identifier.Text: "_" }
+                or DeclarationExpressionSyntax { Designation: DiscardDesignationSyntax })
+            args = new List<string>();
+
         // NOTE: writeExpr(mem.Expression) is intentionally deferred into each branch below.
         // Evaluating it here unconditionally would cause side effects (e.g. Stack.Pop() called
         // multiple times) when the handler is tried for non-matching types like IScreen.
@@ -75,6 +81,8 @@ public sealed class StackQueueHandler : InvocationHandlerBase
                 "Pop"   => prefix + "_Pop(" + objStr + ")",
                 "Peek"  => prefix + "_Peek(" + objStr + ")",
                 "Clear" => prefix + "_Clear(" + objStr + ")",
+                "TryPop" => TryTake(prefix + "_Pop", objStr, args),
+                "TryPeek" => TryTake(prefix + "_Peek", objStr, args),
                 _       => objStr + "->" + method + "()"
             };
             return true;
@@ -94,6 +102,8 @@ public sealed class StackQueueHandler : InvocationHandlerBase
                 "Dequeue" => prefix + "_Dequeue(" + objStr + ")",
                 "Peek"    => prefix + "_Peek("    + objStr + ")",
                 "Clear"   => prefix + "_Clear("   + objStr + ")",
+                "TryDequeue" => TryTake(prefix + "_Dequeue", objStr, args),
+                "TryPeek" => TryTake(prefix + "_Peek", objStr, args),
                 _         => objStr + "->" + method + "()"
             };
             return true;
@@ -122,4 +132,10 @@ public sealed class StackQueueHandler : InvocationHandlerBase
 
         return NotHandled(out result);
     }
+
+    /// TryPop / TryPeek / TryDequeue(out x): false on an empty collection, else x = the item.
+    private static string TryTake(string take, string obj, List<string> args) =>
+        "({ __auto_type _tc = (" + obj + "); int _tok = _tc && _tc->count > 0; "
+        + (args.Count > 0 ? "if (_tok) *(" + args[0] + ") = " + take + "(_tc); " : "if (_tok) (void)" + take + "(_tc); ")
+        + "_tok; })";
 }

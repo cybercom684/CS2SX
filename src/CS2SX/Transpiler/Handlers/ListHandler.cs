@@ -22,6 +22,7 @@ public sealed class ListHandler : InvocationHandlerBase
         "Add", "Clear", "RemoveAt", "Remove", "Contains", "Insert",
         "Sort", "IndexOf", "Reverse", "ForEach",
         "FindAll", "TrueForAll", "ConvertAll", "Find", "Exists", "GetRange",
+        "FindIndex", "FindLastIndex", "RemoveAll", "AddRange", "InsertRange",
     };
 
     public override bool TryHandle(InvocationExpressionSyntax inv, string calleeStr,
@@ -118,7 +119,35 @@ public sealed class ListHandler : InvocationHandlerBase
             return true;
         }
 
-        if (method is "FindAll" or "Find" or "Exists" or "TrueForAll" or "ConvertAll")
+        // list.AddRange(other) / list.InsertRange(index, other): a list or an array;
+        // the source's count is read first, so list.AddRange(list) doubles it.
+        if (method is "AddRange" or "InsertRange" && args.Count == (method == "AddRange" ? 1 : 2))
+        {
+            var srcArg = inv.ArgumentList.Arguments[^1].Expression;
+            var srcType = ctx.SemanticModel?.GetTypeInfo(srcArg).Type;
+            var src = ctx.NextTmp("ars");
+            var n = ctx.NextTmp("arn");
+            var i = ctx.NextTmp("ari");
+            ctx.WriteLine($"__auto_type {src} = {args[^1]};");
+            bool array = srcType is IArrayTypeSymbol;
+            ctx.WriteLine(array ? $"int {n} = CS2SX_ArrLen({src});" : $"int {n} = {src} ? {src}->count : 0;");
+            var item = array ? $"{src}[{i}]" : $"{src}->data[{i}]";
+            if (method == "AddRange")
+            {
+                ctx.WriteLine($"for (int {i} = 0; {i} < {n}; {i}++) {cList}_Add({listExpr}, {item});");
+            }
+            else
+            {
+                var at = ctx.NextTmp("ara");
+                ctx.WriteLine($"int {at} = {args[0]};");
+                ctx.WriteLine($"for (int {i} = 0; {i} < {n}; {i}++) {cList}_Insert({listExpr}, {at} + {i}, {item});");
+            }
+            result = "";
+            return true;
+        }
+
+        if (method is "FindAll" or "Find" or "Exists" or "TrueForAll" or "ConvertAll"
+            or "FindIndex" or "FindLastIndex" or "RemoveAll")
         {
             if (inv.ArgumentList.Arguments.Count == 0)
             {
@@ -131,7 +160,9 @@ public sealed class ListHandler : InvocationHandlerBase
 
             var lifter = new LambdaLifter(ctx, new ExpressionWriter(ctx));
             lifter.SetStatementWriter(new StatementWriter(ctx, new ExpressionWriter(ctx)));
-            var predFn = lifter.LiftLambda(lambdaNode, elementTypeHint: inner, isPredicate: true);
+            // ConvertAll lifts its own (projecting) function below.
+            var predFn = method == "ConvertAll" ? ""
+                : lifter.LiftLambda(lambdaNode, elementTypeHint: inner, isPredicate: true);
 
             var cInnerType = inner == "string" ? "const char*" : TypeRegistry.MapType(inner);
             var isPrim = TypeRegistry.IsPrimitive(inner);
@@ -144,6 +175,29 @@ public sealed class ListHandler : InvocationHandlerBase
                 ctx.WriteLine($"int {retVar} = 0;");
                 ctx.WriteLine($"for (int {idxVar} = 0; {idxVar} < {listExpr}->count; {idxVar}++)");
                 ctx.WriteLine($"    if ({predFn}({listExpr}->data[{idxVar}])) {{ {retVar} = 1; break; }}");
+                result = retVar;
+                return true;
+            }
+
+            if (method is "FindIndex" or "FindLastIndex" && inv.ArgumentList.Arguments.Count == 1)
+            {
+                var retVar = ctx.NextTmp("fix");
+                ctx.WriteLine($"int {retVar} = -1;");
+                ctx.WriteLine(method == "FindIndex"
+                    ? $"for (int {idxVar} = 0; {idxVar} < {listExpr}->count; {idxVar}++)"
+                    : $"for (int {idxVar} = {listExpr}->count - 1; {idxVar} >= 0; {idxVar}--)");
+                ctx.WriteLine($"    if ({predFn}({listExpr}->data[{idxVar}])) {{ {retVar} = {idxVar}; break; }}");
+                result = retVar;
+                return true;
+            }
+
+            if (method == "RemoveAll")
+            {
+                // Back to front, so removing does not skip the next element; returns the count.
+                var retVar = ctx.NextTmp("ra");
+                ctx.WriteLine($"int {retVar} = 0;");
+                ctx.WriteLine($"for (int {idxVar} = {listExpr}->count - 1; {idxVar} >= 0; {idxVar}--)");
+                ctx.WriteLine($"    if ({predFn}({listExpr}->data[{idxVar}])) {{ {cList}_Remove({listExpr}, {idxVar}); {retVar}++; }}");
                 result = retVar;
                 return true;
             }
@@ -222,9 +276,12 @@ public sealed class ListHandler : InvocationHandlerBase
             "Sort" => cList + "_Sort(" + listExpr + ")",
             "Reverse" => cList + "_Reverse(" + listExpr + ")",
             "IndexOf" => cList + "_IndexOf(" + listExpr + ", " + JoinArgs(args) + ")",
-            _ => listExpr + "->" + method + "(" + JoinArgs(args) + ")",
+            _ => null!,
         };
-        return true;
+        if (result != null) return true;
+        // Not translated: the call falls through and is reported on the C# line,
+        // instead of emitting list->Method() for GCC to fail on.
+        return NotHandled(out result);
     }
 
     private static void UpcastElement(ExpressionSyntax arg, List<string> args, int index, TranspilerContext ctx)

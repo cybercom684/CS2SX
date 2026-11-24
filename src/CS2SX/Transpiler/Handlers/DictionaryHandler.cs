@@ -12,7 +12,7 @@ public sealed class DictionaryHandler : InvocationHandlerBase
     private static readonly HashSet<string> s_methods = new(StringComparer.Ordinal)
     {
         "Add", "Remove", "ContainsKey", "TryGetValue", "Clear",
-        "ContainsValue", "TryAdd",
+        "ContainsValue", "TryAdd", "GetValueOrDefault",
     };
 
     public override bool TryHandle(InvocationExpressionSyntax inv, string calleeStr,
@@ -135,14 +135,25 @@ public sealed class DictionaryHandler : InvocationHandlerBase
             return true;
         }
 
+        // d.GetValueOrDefault(key[, fallback]): the value, else default(V) / the fallback.
+        if (method == "GetValueOrDefault" && args.Count is 1 or 2)
+        {
+            var fallback = args.Count == 2 ? $"_gv = ({args[1]}); " : "";
+            result = $"({{ __auto_type _gd = ({dictExpr}); __auto_type _gk = ({args[0]}); "
+                   + $"__typeof__({cDict}_Get(_gd, _gk)) _gv = {{0}}; {fallback}"
+                   + $"if ({cDict}_ContainsKey(_gd, _gk)) _gv = {cDict}_Get(_gd, _gk); _gv; }})";
+            return true;
+        }
+
         result = method switch
         {
             "Add" => cDict + "_Add(" + dictExpr + ", " + ArgAt(args, 0) + ", " + ArgAt(args, 1) + ")",
             "Remove" => cDict + "_Remove(" + dictExpr + ", " + ArgAt(args, 0) + ")",
             "ContainsKey" => cDict + "_ContainsKey(" + dictExpr + ", " + ArgAt(args, 0) + ")",
             "Clear" => cDict + "_Clear(" + dictExpr + ")",
-            _ => dictExpr + "->" + method + "(" + JoinArgs(args) + ")",
+            _ => null!,
         };
-        return true;
+        if (result != null) return true;
+        return NotHandled(out result);   // reported on the C# line, not dict->Method()
     }
 }

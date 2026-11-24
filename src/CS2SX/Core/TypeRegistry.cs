@@ -402,8 +402,14 @@ public static class TypeRegistry
             {
                 var kType = inner[..comma].Trim();
                 var vType = inner[(comma + 1)..].Trim();
-                var cKey = MapListInnerType(kType);
-                var cVal = MapListInnerType(vType);
+                // A list value is List_X in the name (Dict_str_List_int), as the
+                // dictionary functions and _generics.h name it.
+                static string Part(string t) => t.StartsWith("List<", StringComparison.Ordinal) && t.EndsWith('>')
+                                                && t.IndexOf('<', 5) < 0
+                    ? "List_" + MapListInnerType(t[5..^1].Trim())
+                    : MapListInnerType(t);
+                var cKey = Part(kType);
+                var cVal = Part(vType);
                 return $"Dict_{cKey}_{cVal}*";
             }
         }

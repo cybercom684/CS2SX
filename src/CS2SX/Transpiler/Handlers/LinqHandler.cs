@@ -164,8 +164,20 @@ public sealed class LinqHandler : InvocationHandlerBase
 
         // A list a call returns (list.Sum(x => …) on GetItems()): evaluated once, not
         // on every pass of the loop the operators below write.
-        if (TypeRegistry.IsList(colType) && mem.Expression is InvocationExpressionSyntax or ObjectCreationExpressionSyntax
-            && !System.Text.RegularExpressions.Regex.IsMatch(sourceExpr, @"^[A-Za-z_][A-Za-z0-9_]*$")
+        // An array expression (new[] { 1, 2 }.Distinct(), GetScores().Where(…)) likewise:
+        // the loops below read it many times.
+        bool simpleSource = System.Text.RegularExpressions.Regex.IsMatch(sourceExpr, @"^[A-Za-z_][A-Za-z0-9_]*$");
+        if (colType.EndsWith("[]") && !simpleSource
+            && mem.Expression is InvocationExpressionSyntax or ArrayCreationExpressionSyntax
+                or ImplicitArrayCreationExpressionSyntax or CollectionExpressionSyntax)
+        {
+            var src = ctx.NextTmp("src");
+            ctx.WriteLine($"__auto_type {src} = {sourceExpr};");
+            ctx.LocalTypes[src] = colType;
+            sourceExpr = src;
+        }
+        else if (TypeRegistry.IsList(colType) && mem.Expression is InvocationExpressionSyntax or ObjectCreationExpressionSyntax
+            && !simpleSource
             && (inv.ArgumentList.Arguments.Count > 0 || methodName is "Sum" or "Min" or "Max" or "Average"))
         {
             var src = ctx.NextTmp("src");
@@ -705,11 +717,11 @@ public sealed class LinqHandler : InvocationHandlerBase
 
                         // Build the key chain: ThenBy extends the source's OrderBy chain
                         // so the comparison is composite (primary, then secondary, ...).
-                        var chain = new List<(string KeyFn, bool Desc)>();
+                        var chain = new List<(string KeyFn, bool Desc, bool Str)>();
                         bool isThen = methodName.StartsWith("ThenBy", StringComparison.Ordinal);
                         if (isThen && ctx.OrderKeyChains.TryGetValue(sourceExpr, out var prev))
                             chain.AddRange(prev);
-                        chain.Add((keyFn, descending));
+                        chain.Add((keyFn, descending, keyType == "string"));
 
                         // Composite "data[j] should come after tmp" test: compare keys in
                         // order; the first differing key decides, ties fall through (stable).
@@ -719,6 +731,13 @@ public sealed class LinqHandler : InvocationHandlerBase
                             for (int k = chain.Count - 1; k >= 0; k--)
                             {
                                 var kf = chain[k].KeyFn;
+                                if (chain[k].Str)
+                                {
+                                    // Text keys by content (ordinal), not by pointer.
+                                    var c = $"CS2SX_strcmp_safe({kf}({a}), {kf}({b}))";
+                                    expr = $"({c} != 0 ? ({c} {(chain[k].Desc ? "<" : ">")} 0) : {expr})";
+                                    continue;
+                                }
                                 var gt = chain[k].Desc
                                     ? $"{kf}({a}) < {kf}({b})"
                                     : $"{kf}({a}) > {kf}({b})";

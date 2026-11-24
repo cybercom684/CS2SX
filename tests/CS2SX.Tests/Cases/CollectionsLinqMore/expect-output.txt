@@ -1,0 +1,21 @@
+sort 8,5,3,1 2 1
+rm 1
+lst 9,9,5,3,1,7 n9,n9,n5,n3,n1,n7
+grp 0:3,2:1,1:2
+g2 ab+de 4
+g1 c 1
+ord c,a,b c,b,a
+hs 2 True False
+st y1TruexFalse
+q q1 False
+d 3 [] 51
+jag 2 3 2
+eq True False True
+sb >heLLLLo! 9
+p 0 3
+n 4 []
+t x2
+pr TrueFalse
+cat abab xy
+lq 3,1,2 3,3,2 3
+done

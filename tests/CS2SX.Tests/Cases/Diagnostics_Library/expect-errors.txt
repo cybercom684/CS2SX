@@ -1,0 +1,5 @@
+# One substring per line: an error CS2SX must report for Program.cs.
+Program.cs(12): 'List.TrimExcess'
+Program.cs(14): 'Stack.TrimExcess'
+Program.cs(15): 'List.BinarySearch'
+Program.cs(16): 'String.Normalize'

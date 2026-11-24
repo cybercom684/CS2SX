@@ -489,7 +489,7 @@ public sealed class InvocationDispatcher
             var owner = m.ContainingType?.OriginalDefinition.ToDisplayString();
             return owner is "System.Collections.Generic.List<T>" or "System.Array"
                 && m.Name is "ForEach" or "Sort" or "Find" or "FindAll" or "Exists"
-                    or "TrueForAll" or "ConvertAll" or "FindIndex";
+                    or "TrueForAll" or "ConvertAll" or "FindIndex" or "FindLastIndex" or "RemoveAll";
         }
         catch { return false; }
     }

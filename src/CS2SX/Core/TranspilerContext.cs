@@ -162,7 +162,7 @@ public sealed class TranspilerContext
     // LINQ OrderBy/ThenBy: result-var → ordered key chain (C key-fn name, descending).
     // Lets ThenBy build a composite comparator instead of re-sorting by the
     // secondary key alone (which would destroy the primary ordering).
-    public Dictionary<string, List<(string KeyFn, bool Desc)>> OrderKeyChains { get; }
+    public Dictionary<string, List<(string KeyFn, bool Desc, bool Str)>> OrderKeyChains { get; }
         = new(StringComparer.Ordinal);
 
     // ── Methoden-Kontext ──────────────────────────────────────────────────────
@@ -526,7 +526,8 @@ public sealed class TranspilerContext
         }
 
         if (type is INamedTypeSymbol listType
-            && (listType.Name is "List" or "IReadOnlyList" or "IList" or "IEnumerable" or "ICollection")
+            && (listType.Name is "List" or "IReadOnlyList" or "IList" or "IEnumerable" or "ICollection"
+                or "IOrderedEnumerable" or "IReadOnlyCollection")
             && listType.TypeArguments.Length == 1)
             return "List<" + FormatTypeSymbol(listType.TypeArguments[0]) + ">";
 

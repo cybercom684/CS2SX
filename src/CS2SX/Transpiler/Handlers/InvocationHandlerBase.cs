@@ -137,7 +137,8 @@ public abstract class InvocationHandlerBase : IInvocationHandler
         var types = TypeRegistry.GetDictionaryTypes(dictType)!.Value;
         var cKey = types.key == "string" ? "str" : TypeRegistry.MapType(types.key);
         var cVal = types.val == "string" ? "str" : TypeRegistry.MapType(types.val);
-        return "Dict_" + cKey + "_" + cVal;
+        // A collection value (List<int> → List_int*) is named without the pointer.
+        return "Dict_" + cKey + "_" + cVal.TrimEnd('*').Trim();
     }
 
     // ── Fail-Hilfsmethode ─────────────────────────────────────────────────

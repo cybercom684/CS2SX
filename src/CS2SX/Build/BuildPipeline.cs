@@ -1092,6 +1092,32 @@ public sealed class BuildPipeline
             }
         }
 
+        // The type of a tuple literal from its elements' syntax: literals and `new T(…)`.
+        static string? LiteralTupleType(TupleExpressionSyntax te)
+        {
+            if (te.Parent is AssignmentExpressionSyntax { Left: TupleExpressionSyntax } ) return null;   // deconstruction
+            var types = new List<string>();
+            foreach (var a in te.Arguments)
+            {
+                string? t = a.Expression switch
+                {
+                    LiteralExpressionSyntax l when Microsoft.CodeAnalysis.CSharpExtensions.IsKind(l, SyntaxKind.StringLiteralExpression) => "string",
+                    LiteralExpressionSyntax l when Microsoft.CodeAnalysis.CSharpExtensions.IsKind(l, SyntaxKind.CharacterLiteralExpression) => "char",
+                    LiteralExpressionSyntax l when Microsoft.CodeAnalysis.CSharpExtensions.IsKind(l, SyntaxKind.TrueLiteralExpression) || Microsoft.CodeAnalysis.CSharpExtensions.IsKind(l, SyntaxKind.FalseLiteralExpression) => "bool",
+                    LiteralExpressionSyntax l when Microsoft.CodeAnalysis.CSharpExtensions.IsKind(l, SyntaxKind.NumericLiteralExpression) => l.Token.Value switch
+                    {
+                        int => "int", long => "long", double => "double", float => "float", uint => "uint", ulong => "ulong", _ => null,
+                    },
+                    InterpolatedStringExpressionSyntax => "string",
+                    ObjectCreationExpressionSyntax oc when oc.Type is IdentifierNameSyntax => oc.Type.ToString(),
+                    _ => null,
+                };
+                if (t == null) return null;
+                types.Add(t);
+            }
+            return types.Count >= 2 ? "(" + string.Join(", ", types) + ")" : null;
+        }
+
         // Tuple types ((int, string) → _Tuple2_int_str) are value structs used in
         // signatures, locals and fields of any file: define each once, here.
         var tupleTypes = new SortedSet<string>(StringComparer.Ordinal);
@@ -1102,6 +1128,9 @@ public sealed class BuildPipeline
                 var root = Microsoft.CodeAnalysis.CSharp.CSharpSyntaxTree.ParseText(File.ReadAllText(f)).GetRoot();
                 foreach (var tt in root.DescendantNodes().OfType<TupleTypeSyntax>())
                     tupleTypes.Add(tt.ToString());
+                // var t = (name: "x", v: 2): a tuple literal whose element types show.
+                foreach (var te in root.DescendantNodes().OfType<TupleExpressionSyntax>())
+                    if (LiteralTupleType(te) is { } lt) tupleTypes.Add(lt);
             }
             catch { }
         }

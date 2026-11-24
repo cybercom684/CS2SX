@@ -260,7 +260,15 @@ punkte.Sort((a, b) => b - a);  // absteigend
 
 // ForEach
 punkte.ForEach(p => Console.WriteLine(p));
+
+// Suchen, Bereiche, Entfernen
+int i = punkte.FindIndex(p => p > 15);      // auch FindLastIndex, Find, FindAll, Exists, TrueForAll
+punkte.AddRange(new[] { 30, 40 });           // aus Liste oder Array; auch InsertRange(index, …)
+int weg = punkte.RemoveAll(p => p > 35);     // Anzahl der entfernten
+var texte = punkte.ConvertAll(p => "#" + p);
 ```
+
+`Stack<T>`, `Queue<T>` und `HashSet<T>` gehen mit Zahlen, Strings, Enums und eigenen Klassen (`HashSet<string>` vergleicht den Inhalt); `TryPop`, `TryPeek` und `TryDequeue` funktionieren auch mit `out _`. Dictionary-Werte dürfen Listen sein (`Dictionary<string, List<int>>`), `GetValueOrDefault(key[, ersatz])` liefert den Wert oder den Standardwert.
 
 ### Dictionary\<K, V\>
 
@@ -358,6 +366,10 @@ bool hatGerade = zahlen.Any(n => n % 2 == 0);
 int erst = zahlen.First(n => n > 3);
 
 var sortiert = zahlen.OrderByDescending(n => n).ToList();
+var nachName = spieler.OrderBy(s => s.Level).ThenBy(s => s.Name).ToList();   // Text-Schlüssel nach Inhalt
+
+foreach (var gruppe in spieler.GroupBy(s => s.Team))                          // Gruppen in der Reihenfolge ihres ersten Auftretens
+    Console.WriteLine(gruppe.Key + ": " + gruppe.Count() + " / " + gruppe.Sum(s => s.Punkte));
 ```
 
 LINQ-Abfragen werden inline zu C-Schleifen expandiert — kein IQueryable, keine Lazy Evaluation. `ToArray()` liefert ein echtes Array (`int[] a = liste.ToArray();`, `a.Length`), `Min`/`Max` mit Selektor den Typ des Selektors (`Max(x => x * 3)` über `int` ist ein `int`).

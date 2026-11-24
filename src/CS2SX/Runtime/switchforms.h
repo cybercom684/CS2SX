@@ -417,11 +417,12 @@ static inline StringBuilder* StringBuilder_AppendLineChar(StringBuilder* sb, uin
     return sb;
 }
 
-static inline void StringBuilder_Clear(StringBuilder* sb)
+static inline StringBuilder* StringBuilder_Clear(StringBuilder* sb)
 {
-    if (!sb) return;
+    if (!sb) return sb;
     sb->buf[0] = '\0';
     sb->length = 0;
+    return sb;
 }
 
 static inline const char* StringBuilder_ToString(StringBuilder* sb)
@@ -436,9 +437,10 @@ static inline int StringBuilder_IndexOf(StringBuilder* sb, const char* sub)
     return p ? (int)(p - sb->buf) : -1;
 }
 
-void StringBuilder_Insert(StringBuilder* sb, int index, const char* s);
+/// Insert / Replace return the builder, so calls chain like in .NET.
+StringBuilder* StringBuilder_Insert(StringBuilder* sb, int index, const char* s);
 
-void StringBuilder_Replace(StringBuilder* sb, const char* from, const char* to);
+StringBuilder* StringBuilder_Replace(StringBuilder* sb, const char* from, const char* to);
 
 // ============================================================================
 // String helpers
@@ -983,7 +985,10 @@ CS2SX_QUEUE_DEFINE(double)
 // HashSet<T> — unique array (suitable for small-to-medium sets)
 // ============================================================================
 
-#define CS2SX_HASHSET_DEFINE_EX(N, E, KEEP, DROP)                                                   \
+#define CS2SX_HASHSET_DEFINE_EX(N, E, KEEP, DROP) CS2SX_HASHSET_DEFINE_EQ(N, E, KEEP, DROP, CS2SX_VAL_EQ)
+#define CS2SX_VAL_EQ(a, b) ((a) == (b))
+#define CS2SX_STR_EQ(a, b) (strcmp((a) ? (a) : "", (b) ? (b) : "") == 0 && (!(a)) == (!(b)))
+#define CS2SX_HASHSET_DEFINE_EQ(N, E, KEEP, DROP, EQ)                                               \
 typedef struct { E* data; int count; int capacity; int _rc; } HashSet_##N;                                   \
 static inline void HashSet_##N##_Free(HashSet_##N* s);                                        \
 static inline HashSet_##N* HashSet_##N##_Retain(HashSet_##N* s) { if (s) s->_rc++; return s; }        \
@@ -993,7 +998,7 @@ static inline HashSet_##N* HashSet_##N##_New(void) {                            
     s->data = (E*)malloc(8 * sizeof(E)); s->count = 0; s->capacity = 8; s->_rc = 1; CS2SX_ReleaseLater(s, (CS2SX_FreeFn)HashSet_##N##_Free); return s; }                \
 static inline int HashSet_##N##_Contains(HashSet_##N* s, E val) {                                   \
     if (!s) CS2SX_ThrowNullRef();                                                                    \
-    for (int _i = 0; _i < s->count; _i++) if (s->data[_i] == val) return 1; return 0; }            \
+    for (int _i = 0; _i < s->count; _i++) if (EQ(s->data[_i], val)) return 1; return 0; }          \
 static inline int HashSet_##N##_Add(HashSet_##N* s, E val) {                                        \
     if (!s) CS2SX_ThrowNullRef();                                                                    \
     if (HashSet_##N##_Contains(s, val)) return 0;                                                    \
@@ -1003,7 +1008,7 @@ static inline int HashSet_##N##_Add(HashSet_##N* s, E val) {                    
     s->data[s->count++] = KEEP(val); return 1; }                                                     \
 static inline int HashSet_##N##_Remove(HashSet_##N* s, E val) {                                     \
     if (!s) CS2SX_ThrowNullRef();                                                                    \
-    for (int _i = 0; _i < s->count; _i++) if (s->data[_i] == val) {                                 \
+    for (int _i = 0; _i < s->count; _i++) if (EQ(s->data[_i], val)) {                               \
         E _v = s->data[_i];                                                                          \
         for (int _j = _i; _j < s->count-1; _j++) s->data[_j] = s->data[_j+1];                      \
         s->count--; DROP(_v); return 1; } return 0; }                                                 \

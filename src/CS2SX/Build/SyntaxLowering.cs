@@ -29,6 +29,7 @@ public static class SyntaxLowering
         static bool Candidate(SyntaxNode n) => n is LocalFunctionStatementSyntax or CollectionExpressionSyntax
             or WithExpressionSyntax or RangeExpressionSyntax or DelegateDeclarationSyntax
             or AnonymousFunctionExpressionSyntax
+            or GenericNameSyntax { Identifier.Text: "Predicate" or "Comparison" }
             || n.IsKind(SyntaxKind.IndexExpression);
         if (!files.Any(f => CSharpSyntaxTree.ParseText(File.ReadAllText(f)).GetRoot()
                 .DescendantNodes().Any(Candidate)))
@@ -66,6 +67,18 @@ public static class SyntaxLowering
                     && delegateTypes.TryGetValue(t, out var func)
                     && id.Parent is not DelegateDeclarationSyntax)
                     list.Add(new Edit(id.SpanStart, id.Span.Length, func));
+
+            // Predicate<T> → Func<T, bool>, Comparison<T> → Func<T, T, int>: one delegate model.
+            foreach (var gn in root.DescendantNodes().OfType<GenericNameSyntax>())
+                if (gn.Identifier.Text is "Predicate" or "Comparison"
+                    && model.GetSymbolInfo(gn).Symbol is INamedTypeSymbol { ContainingNamespace.Name: "System" } bcl
+                    && bcl.IsGenericType && DelegateAsFunc(bcl.ConstructedFrom) is null
+                    && bcl.DelegateInvokeMethod is { } inv)
+                {
+                    var parts = inv.Parameters.Select(pa => Display(pa.Type)).Append(Display(inv.ReturnType));
+                    list.Add(new Edit(gn.SpanStart, gn.Span.Length, "Func<" + string.Join(", ", parts) + ">"));
+                    lowered++;
+                }
 
             lowered += LowerLocalFunctions(root, model, list, inserts, file);
             lowered += BoxMutatedCaptures(root, model, list, refTypes);

@@ -395,43 +395,48 @@ StringBuilder* StringBuilder_AppendDouble(StringBuilder* sb, double val)
     return sb;
 }
 
-void StringBuilder_Insert(StringBuilder* sb, int index, const char* s)
+StringBuilder* StringBuilder_Insert(StringBuilder* sb, int index, const char* s)
 {
-    if (!sb || !s || index < 0 || index > sb->length) return;
+    if (!sb) CS2SX_ThrowNullRef();
+    if (index < 0 || index > sb->length) CS2SX_ThrowArgOutOfRange("index");
+    if (!s) return sb;
     int len = (int)strlen(s);
     StringBuilder__grow(sb, len);
     memmove(sb->buf + index + len, sb->buf + index, sb->length - index + 1);
     memcpy(sb->buf + index, s, len);
     sb->length += len;
+    return sb;
 }
 
-void StringBuilder_Replace(StringBuilder* sb, const char* from, const char* to)
+StringBuilder* StringBuilder_Replace(StringBuilder* sb, const char* from, const char* to)
 {
-    if (!sb || !from || !to) return;
-    char tmp[2048];
+    if (!sb) CS2SX_ThrowNullRef();
+    if (!from) CS2SX_ThrowArgNull("oldValue");
+    if (!*from) CS2SX_ThrowNew(&CS2SX_TI_ArgumentException, "String cannot be of zero length.");
+    if (!to) to = "";
     int fromlen = (int)strlen(from);
     int tolen = (int)strlen(to);
-    int out = 0;
-    char* s = sb->buf;
-    while (*s && out < (int)sizeof(tmp) - 2)
+    // Count first, then build the result in one allocation (no length limit).
+    int hits = 0;
+    for (const char* p = strstr(sb->buf, from); p; p = strstr(p + fromlen, from)) hits++;
+    if (hits == 0) return sb;
+    int outLen = sb->length + hits * (tolen - fromlen);
+    char* tmp = (char*)malloc((size_t)outLen + 1);
+    if (!tmp) CS2SX_ThrowNew(&CS2SX_TI_OutOfMemoryException, NULL);
+    char* o = tmp;
+    const char* s = sb->buf;
+    for (const char* p = strstr(s, from); p; p = strstr(s, from))
     {
-        if (strncmp(s, from, fromlen) == 0)
-        {
-            int copy = tolen;
-            if (out + copy > (int)sizeof(tmp) - 2) copy = (int)sizeof(tmp) - 2 - out;
-            memcpy(tmp + out, to, copy);
-            out += copy;
-            s += fromlen;
-        }
-        else
-        {
-            tmp[out++] = *s++;
-        }
+        memcpy(o, s, (size_t)(p - s)); o += p - s;
+        memcpy(o, to, (size_t)tolen); o += tolen;
+        s = p + fromlen;
     }
-    tmp[out] = '\0';
-    sb->length = out;
-    StringBuilder__grow(sb, out + 1);
-    memcpy(sb->buf, tmp, out + 1);
+    strcpy(o, s);
+    if (outLen > sb->length) StringBuilder__grow(sb, outLen - sb->length);
+    memcpy(sb->buf, tmp, (size_t)outLen + 1);
+    sb->length = outLen;
+    free(tmp);
+    return sb;
 }
 
 const char* String_Trim(const char* s)
@@ -518,7 +523,7 @@ const char* CS2SX_TrimChars(const char* s, const char* chars, int mode)
 
 int String_EqualsIgnoreCase(const char* a, const char* b)
 {
-    if (!a || !b) return 0;
+    if (!a || !b) return a == b;   // null equals only null
     while (*a && *b)
     {
         if (tolower((unsigned char)*a) != tolower((unsigned char)*b)) return 0;

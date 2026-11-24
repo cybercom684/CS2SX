@@ -916,7 +916,21 @@ public sealed class ExpressionWriter : IExpressionWriter
     {
         var receiver = Write(condAccess.Expression);
         string accessExpr;
-        if (condAccess.WhenNotNull is MemberBindingExpressionSyntax memberBinding)
+        // list?.Count, text?.Length, array?.Length: the C forms of these properties.
+        ITypeSymbol? bindRecv = null;
+        if (condAccess.WhenNotNull is MemberBindingExpressionSyntax)
+            try { bindRecv = _ctx.SemanticModel?.GetTypeInfo(condAccess.Expression).Type; } catch { }
+        if (condAccess.WhenNotNull is MemberBindingExpressionSyntax { Name.Identifier.Text: "Count" }
+            && bindRecv is INamedTypeSymbol { Name: "List" or "Stack" or "Queue" or "HashSet" or "Dictionary" }
+            && !TranspilerContext.IsUserCode(bindRecv))
+            accessExpr = receiver + "->count";
+        else if (condAccess.WhenNotNull is MemberBindingExpressionSyntax { Name.Identifier.Text: "Length" }
+                 && bindRecv?.SpecialType == SpecialType.System_String)
+            accessExpr = "CS2SX_Str16Len(" + receiver + ")";
+        else if (condAccess.WhenNotNull is MemberBindingExpressionSyntax { Name.Identifier.Text: "Length" }
+                 && bindRecv is IArrayTypeSymbol)
+            accessExpr = "CS2SX_ArrLen(" + receiver + ")";
+        else if (condAccess.WhenNotNull is MemberBindingExpressionSyntax memberBinding)
             accessExpr = receiver + "->" + (StoredMemberPath(condAccess.Expression, memberBinding)
                                             ?? memberBinding.Name.Identifier.Text);
         else if (condAccess.WhenNotNull is InvocationExpressionSyntax inv
@@ -1510,7 +1524,18 @@ public sealed class ExpressionWriter : IExpressionWriter
                          || inv.Expression is MemberAccessExpressionSyntax
             ? Write(inv.Expression)
             : calleeStr;
-        if (!IsSilentCall(calleeStr))
+        // A .NET library method without a translation: it does not exist in C, so
+        // GCC would fail on it (or worse, a macro of the same name would compile).
+        // Report it on the C# line instead.
+        if (InvokedMethod(inv) is { } bcl && IsDotNetLibrary(bcl))
+        {
+            var line = inv.GetLocation().GetLineSpan().StartLinePosition.Line + 1;
+            _ctx.Diagnostics.Error(_ctx.CurrentFile, line,
+                $"'{bcl.ContainingType.Name}.{bcl.Name}' ({bcl.ToDisplayString(SymbolDisplayFormat.CSharpShortErrorMessageFormat)}) "
+                + "wird nicht unterstützt — Alternativen in docs/advanced/limitations.md",
+                inv.ToString().Split('\n')[0].Trim());
+        }
+        else if (!IsSilentCall(calleeStr))
             _ctx.Warn(inv, $"unrecognized call '{calleeStr}' — passed through as-is; verify generated C compiles");
         return calleeCode + "(" + string.Join(", ", args) + ")";
     }
@@ -1831,6 +1856,18 @@ public sealed class ExpressionWriter : IExpressionWriter
     private string WriteNullCoalescingAssignment(AssignmentExpressionSyntax assign, string right)
     {
         var target = Write(assign.Left);
+        // int? n; n ??= 4 → a Nullable_T struct: test .has, wrap a plain value.
+        var leftType = _ctx.SemanticModel?.GetTypeInfo(assign.Left).Type;
+        if (leftType is INamedTypeSymbol { OriginalDefinition.SpecialType: SpecialType.System_Nullable_T })
+        {
+            var nullableC = TypeRegistry.MapType(TranspilerContext.FormatTypeSymbol(leftType));
+            var rightType = _ctx.SemanticModel?.GetTypeInfo(assign.Right).Type;
+            var value = rightType is INamedTypeSymbol { OriginalDefinition.SpecialType: SpecialType.System_Nullable_T }
+                ? right : "((" + nullableC + "){ " + right + ", 1 })";
+            _ctx.Out.WriteLine(_ctx.Tab + "if (!(" + target + ").has)");
+            _ctx.Out.WriteLine(_ctx.Tab + "    " + target + " = " + value + ";");
+            return target;
+        }
         _ctx.Out.WriteLine(_ctx.Tab + "if (" + target + " == NULL)");
         _ctx.Out.WriteLine(_ctx.Tab + "    " + target + " = " + right + ";");
         return target;
@@ -3035,7 +3072,10 @@ public sealed class ExpressionWriter : IExpressionWriter
         // An array created in an expression (field initializer, return, argument,
         // assignment) can outlive the current frame → always a heap array with header.
         // Elements are zero/NULL-initialised like in C#.
-        var elemC = ArrayModel.ElemCType(arr.Type.ElementType.ToString().Trim());
+        // Jagged new int[n][]: the elements are arrays themselves (int*).
+        var elemCs = arr.Type.ElementType.ToString().Trim()
+                     + string.Concat(arr.Type.RankSpecifiers.Skip(1).Select(r => "[" + new string(',', r.Rank - 1) + "]"));
+        var elemC = ArrayModel.ElemCType(elemCs);
         if (arr.Initializer != null && arr.Initializer.Expressions.Count > 0)
             return ArrayModel.FromInit(elemC, arr.Initializer.Expressions.Select(e => Write(e)).ToList());
         if (arr.Type.RankSpecifiers.Count > 0
@@ -3586,6 +3626,16 @@ public sealed class ExpressionWriter : IExpressionWriter
     }
 
     // Returns true for calls that should NOT generate a warning when unrecognized.
+    /// A method of the .NET class library (System.*), not of the project or the
+    /// CS2SX.Switch API.
+    private static bool IsDotNetLibrary(IMethodSymbol m)
+    {
+        var def = (m.ReducedFrom ?? m).OriginalDefinition;
+        if (def.Locations.Any(l => l.IsInSource)) return false;
+        var ns = def.ContainingNamespace?.ToDisplayString() ?? "";
+        return ns == "System" || ns.StartsWith("System.", StringComparison.Ordinal);
+    }
+
     private static bool IsSilentCall(string calleeStr)
     {
         if (calleeStr.StartsWith("CS2SX_", StringComparison.Ordinal)) return true;

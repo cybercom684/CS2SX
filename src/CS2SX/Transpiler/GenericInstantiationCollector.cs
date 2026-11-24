@@ -403,12 +403,19 @@ public sealed class GenericInstantiationCollector
     {
         var kind = gn.Identifier.Text;
         var args = gn.TypeArgumentList.Arguments.Select(a => a.ToString().Trim()).ToList();
-        if (args.Any(a => a.Contains('<') || a.Contains('(') || a.EndsWith('?'))) return;
+        // A list as a dictionary value (Dictionary<string, List<int>>) is fine; other
+        // nested generics, tuples and nullables are not.
+        static bool SimpleList(string a) =>
+            a.StartsWith("List<", StringComparison.Ordinal) && a.EndsWith('>') && a.IndexOf('<', 5) < 0;
+        if (args.Any(a => (a.Contains('<') && !SimpleList(a)) || a.Contains('(') || a.EndsWith('?'))) return;
         static bool IsUserType(string t) =>
             t == "object" || !TypeRegistry.IsPrimitive(t) && t != "string";   // object: counted values
+        // switchforms.h predefines Stack/Queue/HashSet only for int, float and double.
+        static bool Predefined(string t) => t is "int" or "float" or "double";
         switch (kind)
         {
-            case "Stack" or "Queue" or "HashSet" when args.Count == 1 && IsUserType(args[0]):
+            case "Stack" or "Queue" or "HashSet" when args.Count == 1 && (IsUserType(args[0]) || args[0] == "string")
+                                                     && !Predefined(args[0]) && !SimpleList(args[0]):
                 _userCollections.Add((kind, null, args[0]));
                 break;
             case "Dictionary" when args.Count == 2 && (IsUserType(args[0]) || IsUserType(args[1])):

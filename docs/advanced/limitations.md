@@ -8,6 +8,8 @@ Diese Seite beschreibt, was CS2SX nicht unterstützt und wie man die häufigsten
 
 Für diese Konstrukte gibt es keine Übersetzung nach C. `cs2sx build` und `cs2sx check` melden sie als Fehler mit Datei, Zeile und Workaround. Der C-Compiler läuft dann gar nicht erst.
 
+Dasselbe gilt für Methoden der .NET-Bibliothek ohne Übersetzung (`list.TrimExcess()`, `list.BinarySearch(x)`, `"x".Normalize()` …): Der Build meldet `'List.TrimExcess' (…) wird nicht unterstützt` auf der C#-Zeile, statt den Aufruf an den C-Compiler durchzureichen. Meist hilft eine Schleife oder eine der unterstützten Methoden aus der [Sprachunterstützung](../language-guide.md).
+
 | Konstrukt | Stattdessen |
 |---|---|
 | Ranges auf Arrays (`arr[1..3]`), `^` in `foreach`-Ranges, Ranges auf komplexen Ausdrücken | Schleife, `Substring`/`GetRange` auf einer Variable |

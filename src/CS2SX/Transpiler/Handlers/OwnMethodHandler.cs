@@ -244,6 +244,8 @@ public sealed class OwnMethodHandler : InvocationHandlerBase
         for (int i = result.Count; i < method.Parameters.Length; i++)
         {
             var param = method.Parameters[i];
+            // params with no arguments at the call: the dispatcher packed an empty array.
+            if (param.IsParams && i < alreadyBuiltArgs.Count) { result.Add(alreadyBuiltArgs[i]); break; }
             if (!param.IsOptional) break;
             result.Add(FormatDefaultValue(param));
         }

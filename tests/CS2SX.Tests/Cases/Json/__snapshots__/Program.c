@@ -265,7 +265,7 @@ void JsonApp_OnInit(JsonApp* self)
     SaveGame* part = CS2SX_Json_D_SaveGame("{ \"Level\": 3, \"Unknown\": [1, {\"a\": null}], \"Best\": 9 }", NULL);
     CS2SX_LINE(67);
     char* _sb1 = _cs2sx_next_buf();
-    _sb1 = CS2SX_Format(_sb1, "part %d %s %d %d", CS2SX_NN(part)->f_Level, CS2SX_NN(part)->f_Note, CS2SX_NN(part)->f_Best, CS2SX_NN(part)->f_Lives);
+    _sb1 = CS2SX_Format(_sb1, "part %d %s %s %d", CS2SX_NN(part)->f_Level, CS2SX_NN(part)->f_Note, ({ __auto_type _nv = (CS2SX_NN(part)->f_Best); _nv.has ? (const char*)CS2SX_Format(_cs2sx_next_buf(), "%d", _nv.value) : ""; }), CS2SX_NN(part)->f_Lives);
     const char* _ps_5 = _sb1;
     printf("%s\n", _ps_5 ? _ps_5 : "");
     CS2SX_LINE(70);

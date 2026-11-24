@@ -106,6 +106,10 @@ public sealed class LambdaLifter
         var retCs = isPredicate ? "bool"
             : hintType != null ? ExtractReturnType(hintType, parms.Count)
             : "void";
+        // Comparison<T>, Predicate<T>, own delegate types: the hint says nothing about
+        // the result, Roslyn does.
+        if (retCs == "void" && !isPredicate && SemanticReturnType(lambda) is { } semRet)
+            retCs = semRet;
 
         // FIX-1: Prelude in einem lokalen StringBuilder sammeln und dann
         // in _ctx.PendingLambdaPreludes eintragen — kein StringWriter-Rewrite.
@@ -127,6 +131,21 @@ public sealed class LambdaLifter
         }
 
         return name;
+    }
+
+    /// The lambda's return type as Roslyn binds it ((x, y) => y - x: int, x => "n" + x:
+    /// string) — for callers that give no delegate type. Null when unknown.
+    private string? SemanticReturnType(LambdaExpressionSyntax lambda)
+    {
+        if (_ctx.SemanticModel == null) return null;
+        try
+        {
+            if (_ctx.SemanticModel.GetSymbolInfo(lambda).Symbol is IMethodSymbol m
+                && m.ReturnType is not IErrorTypeSymbol)
+                return m.ReturnsVoid ? "void" : TranspilerContext.FormatTypeSymbol(m.ReturnType);
+        }
+        catch { }
+        return null;
     }
 
     // ── Delegate mode ────────────────────────────────────────────────────────

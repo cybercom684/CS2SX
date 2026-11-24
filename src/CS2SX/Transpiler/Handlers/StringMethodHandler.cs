@@ -18,6 +18,7 @@ public sealed class StringMethodHandler : InvocationHandlerBase
         "String.Format",        "String.Concat",
         "String.Join",          "String.Split",
         "String.Compare",
+        "string.Equals",        "String.Equals",
         "String.LastIndexOf",   "string.LastIndexOf",
         "String.IndexOf",       "string.IndexOf",
         "String.Substring",     "string.Substring",
@@ -122,6 +123,11 @@ public sealed class StringMethodHandler : InvocationHandlerBase
             "string.Compare" or "String.Compare"
                 => HandleStringCompare(inv, args),
 
+            // string.Equals(a, b[, StringComparison])
+            "string.Equals" or "String.Equals" when args.Count >= 2
+                => StringEquals(ArgAt(args, 0), ArgAt(args, 1),
+                    inv.ArgumentList.Arguments.Count > 2 ? inv.ArgumentList.Arguments[2].Expression.ToString() : null),
+
             "string.LastIndexOf" or "String.LastIndexOf"
                 => args.Count >= 2
                     ? "String_LastIndexOf(" + ArgAt(args, 0) + ", " + ArgAt(args, 1) + ")"
@@ -185,6 +191,14 @@ public sealed class StringMethodHandler : InvocationHandlerBase
             "string.Format" or "String.Format"
                 => HandleStringFormat(inv, ctx, writeExpr),
 
+            // string.Concat(strings): one collection of texts, joined without separator.
+            "string.Concat" or "String.Concat" when args.Count == 1
+                && ctx.SemanticModel?.GetTypeInfo(inv.ArgumentList.Arguments[0].Expression).Type is { } concatType
+                && concatType.SpecialType != SpecialType.System_String
+                => concatType is IArrayTypeSymbol
+                    ? "String_JoinArr(\"\", " + ArgAt(args, 0) + ")"
+                    : "String_Join(\"\", " + ArgAt(args, 0) + ")",
+
             "string.Concat" or "String.Concat"
                 => HandleStringConcat(args, ctx),
 
@@ -246,8 +260,10 @@ public sealed class StringMethodHandler : InvocationHandlerBase
         InvocationExpressionSyntax inv, string name,
         TranspilerContext ctx, List<string> args)
     {
-        ctx.Warn(inv, $"unsupported string method '{name}' — emitted a passthrough; "
-                    + "result will be wrong. Verify generated C.");
+        // An error, not a warning: the passthrough below would compile and be wrong.
+        ctx.Diagnostics.Error(ctx.CurrentFile, inv.GetLocation().GetLineSpan().StartLinePosition.Line + 1,
+            $"'string.{name}' wird nicht unterstützt — Alternativen in docs/advanced/limitations.md",
+            inv.ToString().Split('\n')[0].Trim());
         return args.Count > 0 ? args[0] : "\"\"";
     }
 
@@ -312,7 +328,8 @@ public sealed class StringMethodHandler : InvocationHandlerBase
             "Contains" => "String_Contains(" + receiver + ", " + ArgAt(args, 0) + ")",
             "StartsWith" => "String_StartsWith(" + receiver + ", " + ArgAt(args, 0) + ")",
             "EndsWith" => "String_EndsWith(" + receiver + ", " + ArgAt(args, 0) + ")",
-            "Equals" => "strcmp(" + receiver + ", " + ArgAt(args, 0) + ") == 0",
+            "Equals" => StringEquals(receiver, ArgAt(args, 0),
+                inv.ArgumentList.Arguments.Count > 1 ? inv.ArgumentList.Arguments[1].Expression.ToString() : null),
             // s.Trim('.') / s.TrimEnd('a', 'b'): the characters as a C string (CS2SX_TrimChars).
             "Trim" or "TrimStart" or "TrimEnd" when args.Count > 0
                 => "CS2SX_TrimChars(" + receiver + ", (const char[]){ " + string.Join(", ", args) + ", 0 }, " + (methodName == "Trim" ? "3" : methodName == "TrimStart" ? "1" : "2") + ")",
@@ -360,6 +377,12 @@ public sealed class StringMethodHandler : InvocationHandlerBase
             _ => WarnUnhandledString(inv, methodName, ctx, args),
         };
     }
+
+    /// a == b as text (null-safe); with an …IgnoreCase comparison, case-insensitive.
+    private static string StringEquals(string a, string b, string? comparison) =>
+        comparison != null && comparison.Contains("IgnoreCase")
+            ? "String_EqualsIgnoreCase(" + a + ", " + b + ")"
+            : "(CS2SX_strcmp_safe(" + a + ", " + b + ") == 0)";
 
     private static string BuildToString(
         Microsoft.CodeAnalysis.CSharp.Syntax.ExpressionSyntax receiverExpr,

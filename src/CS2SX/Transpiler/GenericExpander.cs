@@ -37,6 +37,18 @@ public sealed class GenericExpander
         {
             if (cs == "string") return ("str", "const char*", "CS2SX_STR_KEEP", "CS2SX_STR_DROP");
             if (cs == "object") return ("voidptr", "void*", "CS2SX_OBJ_KEEP", "CS2SX_OBJ_DROP");
+            // A list value: the collection holds a reference (List_X_Retain / _Free).
+            if (cs.StartsWith("List<", StringComparison.Ordinal) && TypeRegistry.GetListInnerType(cs) is { } li)
+            {
+                var ln = "List_" + TypeRegistry.ListElementName(li);
+                var lguard = "CS2SX_LISTHOOKS_" + ln;
+                sb.AppendLine($"#ifndef {lguard}");
+                sb.AppendLine($"#define {lguard}");
+                sb.AppendLine($"static inline {ln}* {ln}_CKeep({ln}* l) {{ return {ln}_Retain(l); }}");
+                sb.AppendLine($"static inline void {ln}_CDrop({ln}* l) {{ if (l) CS2SX_ReleaseLater(l, (CS2SX_FreeFn){ln}_Free); }}");
+                sb.AppendLine("#endif");
+                return (ln, ln + "*", ln + "_CKeep", ln + "_CDrop");
+            }
             if (TypeRegistry.IsPrimitive(cs) || TypeRegistry.IsUserDefinedEnum(cs))
             {
                 var c = TypeRegistry.MapType(cs);
@@ -86,7 +98,10 @@ public sealed class GenericExpander
                 var prefix = kind == "HashSet" ? "HashSet" : kind;
                 sb.AppendLine($"#ifndef CS2SX_{prefix}_{e.name}_DEFINED");
                 sb.AppendLine($"#define CS2SX_{prefix}_{e.name}_DEFINED");
-                sb.AppendLine($"CS2SX_{macro}_DEFINE_EX({e.name}, {e.cType}, {e.keep}, {e.drop})");
+                // HashSet<string> compares by content, not by pointer.
+                sb.AppendLine(kind == "HashSet" && elem == "string"
+                    ? $"CS2SX_HASHSET_DEFINE_EQ({e.name}, {e.cType}, {e.keep}, {e.drop}, CS2SX_STR_EQ)"
+                    : $"CS2SX_{macro}_DEFINE_EX({e.name}, {e.cType}, {e.keep}, {e.drop})");
                 var elemAt = kind == "Queue" ? "c->data[(c->head + _i) % c->capacity]" : "c->data[_i]";
                 if (TypeRegistry.ArcRoot(elem) is { } elemRoot)
                     sb.AppendLine($"CS2SX_GC_ELEMENTS({prefix}_{e.name}, {elemRoot}, {elemAt})");
