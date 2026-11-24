@@ -18,8 +18,10 @@
 // the struct by value. Structs are registered project-wide up front
 // (ProjectTypeScanner → TypeRegistry.IsUserStruct).
 //
-// Not supported: computed properties, multiple constructors (first one wins, with
-// a warning), interfaces other than IEquatable, boxing.
+//   int Len2 => X * X + Y * Y;           int Vec2_get_Len2(Vec2* self)   (computed, read-only)
+//
+// Not supported: multiple constructors (first one wins, with a warning), setters of
+// computed properties, interfaces other than IEquatable, boxing.
 // ============================================================================
 
 using CS2SX.Core;
@@ -57,6 +59,8 @@ public sealed class StructWriter
             _ctx.WriteLine(CtorSignature(ctor, name) + ";");
         foreach (var method in node.Members.OfType<MethodDeclarationSyntax>())
             _ctx.WriteLine(MethodSignature(method, name) + ";");
+        foreach (var prop in ComputedGetters(node))
+            _ctx.WriteLine(GetterSignature(prop, name) + ";");
         foreach (var op in node.Members.OfType<OperatorDeclarationSyntax>())
             _ctx.WriteLine(OperatorSignature(op, name) + ";");
         foreach (var conv in node.Members.OfType<ConversionOperatorDeclarationSyntax>())
@@ -104,6 +108,16 @@ public sealed class StructWriter
             _ctx.IsStaticMethod = isStatic;
             if (!isStatic) _ctx.LocalTypes["self"] = name + "*";
             WriteBody(method.Body, method.ExpressionBody, method.ReturnType.ToString().Trim() != "void");
+        }
+
+        foreach (var prop in ComputedGetters(node))
+        {
+            _ctx.ClearMethodContext();
+            _ctx.WriteLine(GetterSignature(prop, name));
+            _ctx.IsStaticMethod = false;
+            _ctx.LocalTypes["self"] = name + "*";
+            var get = prop.AccessorList?.Accessors.FirstOrDefault(a => a.IsKind(SyntaxKind.GetAccessorDeclaration));
+            WriteBody(get?.Body, prop.ExpressionBody ?? get?.ExpressionBody, hasReturn: true);
         }
 
         foreach (var op in node.Members.OfType<OperatorDeclarationSyntax>())
@@ -273,6 +287,15 @@ public sealed class StructWriter
         node.Members.OfType<ConstructorDeclarationSyntax>().Where(c => !IsStatic(c.Modifiers));
 
     private static bool IsStatic(SyntaxTokenList mods) => mods.Any(m => m.IsKind(SyntaxKind.StaticKeyword));
+
+    /// Instance properties with a getter body: `int Len2 => …`, `{ get { … } }`.
+    private static IEnumerable<PropertyDeclarationSyntax> ComputedGetters(TypeDeclarationSyntax node) =>
+        node.Members.OfType<PropertyDeclarationSyntax>().Where(p => !IsAutoProperty(p) && !IsStatic(p.Modifiers)
+            && (p.ExpressionBody != null || p.AccessorList?.Accessors.Any(a => a.IsKind(SyntaxKind.GetAccessorDeclaration)
+                && (a.Body != null || a.ExpressionBody != null)) == true));
+
+    private static string GetterSignature(PropertyDeclarationSyntax prop, string name) =>
+        MapReturnType(prop.Type.ToString().Trim()) + " " + name + "_get_" + prop.Identifier.Text + "(" + name + "* self)";
 
     private static bool IsAutoProperty(PropertyDeclarationSyntax prop) =>
         prop.AccessorList != null

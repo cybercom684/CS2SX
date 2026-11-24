@@ -26,7 +26,7 @@ namespace CS2SX.Build;
 /// IComparable&lt;T&gt;); strings ordinally. Every replacement keeps the number of lines.
 public static class CollectionLowering
 {
-    private enum Kind { SortedDictionary, SortedSet, PriorityQueue, LinkedList, LinkedListNode, Grouping }
+    private enum Kind { SortedDictionary, SortedSet, PriorityQueue, LinkedList, LinkedListNode, Grouping, DictLinq }
 
     private static Kind? KindOf(ITypeSymbol? t) =>
         t is INamedTypeSymbol { Name: "IGrouping", TypeArguments.Length: 2 } g
@@ -56,7 +56,7 @@ public static class CollectionLowering
 
     public static List<string> Rewrite(IReadOnlyList<string> files, string outDir)
     {
-        if (!files.Any(f => Regex.IsMatch(File.ReadAllText(f), @"\b(SortedDictionary|SortedSet|PriorityQueue|LinkedList|GroupBy)\b")))
+        if (!files.Any(f => Regex.IsMatch(File.ReadAllText(f), @"\b(SortedDictionary|SortedSet|PriorityQueue|LinkedList|GroupBy|Dictionary)\b")))
             return files.ToList();
 
         var sem = new SemanticModelBuilder(files);
@@ -122,6 +122,34 @@ public static class CollectionLowering
                 e.Replace(inv.SpanStart, inv.Span.Length, $"{gen.Name(groupT)}.By({src}, {sel}){glines}");
                 any = true;
             }
+            // LINQ on a Dictionary<K, V> (d.Select(kv => …), d.Where(…)): through a list of
+            // entries with Key and Value; d.Keys / d.Values as a sequence: through a list.
+            foreach (var x in root.DescendantNodes().OfType<ExpressionSyntax>())
+            {
+                var xt = model.GetTypeInfo(x).Type as INamedTypeSymbol;
+                bool linqReceiver = x.Parent is MemberAccessExpressionSyntax lr && lr.Expression == x
+                    && model.GetSymbolInfo(lr).Symbol is IMethodSymbol { IsExtensionMethod: true } lm
+                    && lm.ContainingType?.ToDisplayString() == "System.Linq.Enumerable";
+                bool joined = x.Parent is ArgumentSyntax { Parent: ArgumentListSyntax { Parent: InvocationExpressionSyntax ji } }
+                    && model.GetSymbolInfo(ji).Symbol is IMethodSymbol { Name: "Join" or "Concat", ContainingType.SpecialType: SpecialType.System_String };
+                if (!linqReceiver && !joined) continue;
+                if (xt is { Name: "Dictionary", TypeArguments.Length: 2 } dt
+                    && dt.ContainingNamespace?.ToDisplayString() == "System.Collections.Generic" && linqReceiver)
+                {
+                    var r = e.Render(source, x.SpanStart, x.Span.End, all: false);
+                    e.Replace(x.SpanStart, x.Span.Length, $"{gen.DictLinq(dt)}.Entries({r})");
+                    any = true;
+                }
+                else if (xt is { Name: "KeyCollection" or "ValueCollection", ContainingType: { Name: "Dictionary" } owner }
+                         && x is MemberAccessExpressionSyntax kv)
+                {
+                    var r = e.Render(source, kv.Expression.SpanStart, kv.Expression.Span.End, all: false);
+                    e.Replace(x.SpanStart, x.Span.Length,
+                        $"{gen.DictLinq(owner)}.{(xt.Name == "KeyCollection" ? "Keys" : "Values")}({r})");
+                    any = true;
+                }
+            }
+
             // A group used as a sequence (g.Count(), foreach (var x in g), string.Join(",", g)) is its Items.
             foreach (var x in root.DescendantNodes().OfType<ExpressionSyntax>())
             {
@@ -312,6 +340,18 @@ public static class CollectionLowering
             return shown.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat);
         }
 
+        /// Entries / Keys / Values of a Dictionary<K, V> as lists (LINQ on dictionaries).
+        public string DictLinq(INamedTypeSymbol dict)
+        {
+            var name = "CS2SX_DictLinq_" + string.Join("_", dict.TypeArguments.Select(a => Suffix(Text(a))));
+            if (!_types.ContainsKey(name))
+            {
+                _types[name] = (Kind.DictLinq, dict);
+                _todo.Enqueue(name);
+            }
+            return name;
+        }
+
         public string Name(INamedTypeSymbol t)
         {
             var kind = KindOf(t)!.Value;
@@ -373,6 +413,7 @@ public static class CollectionLowering
                     Kind.PriorityQueue => PriorityQueue(name, t),
                     Kind.LinkedList => LinkedList(name, t),
                     Kind.Grouping => Grouping(name, t),
+                    Kind.DictLinq => DictLinqClass(name, t),
                     _ => LinkedListNode(name, t),
                 }).Append('\n');
             }
@@ -633,6 +674,25 @@ public class @L
     public List<@T> ToList() { var l = new List<@T>(); for (var n = _first; n != null; n = n.next) l.Add(n.Value); return l; }
     public @T[] ToArray() { var l = ToList(); var a = new @T[l.Count]; for (int i = 0; i < a.Length; i++) a[i] = l[i]; return a; }
 }", ("@L", name), ("@Node", node), ("@T", Text(e)), ("@EQ", EqualsCode(e, "n.Value", "value")));
+        }
+
+        private string DictLinqClass(string name, INamedTypeSymbol t)
+        {
+            var (k, v) = (t.TypeArguments[0], t.TypeArguments[1]);
+            var entry = "CS2SX_Entry_" + name["CS2SX_DictLinq_".Length..];
+            return Fill(@"
+public class @E
+{
+    public @K Key;
+    public @V Value;
+    public @E(@K key, @V value) { Key = key; Value = value; }
+}
+public static class @N
+{
+    public static List<@E> Entries(Dictionary<@K, @V> d) { var l = new List<@E>(); foreach (var kv in d) l.Add(new @E(kv.Key, kv.Value)); return l; }
+    public static List<@K> Keys(Dictionary<@K, @V> d) { var l = new List<@K>(); foreach (var kv in d) l.Add(kv.Key); return l; }
+    public static List<@V> Values(Dictionary<@K, @V> d) { var l = new List<@V>(); foreach (var kv in d) l.Add(kv.Value); return l; }
+}", ("@N", name), ("@E", entry), ("@K", Text(k)), ("@V", Text(v)));
         }
 
         private string Grouping(string name, INamedTypeSymbol t)

@@ -16,6 +16,8 @@ namespace CS2SX.Build;
 ///   foreach (var i in a..b)              → for (int i = a; i &lt; b; i++)
 ///   s[a..b] / s[^n] / list[a..]          → Substring / Length - n / GetRange
 ///   delegate int Op(int a);              → Func&lt;int, int&gt; at every use
+///   interface I { string D() => …; }     → abstract in I, the body copied into every
+///                                          class that implements I without its own D
 ///
 /// Every replacement keeps the number of lines, so diagnostics point at the user's
 /// lines. What cannot be lowered (a local function using the method's locals, …)
@@ -30,6 +32,8 @@ public static class SyntaxLowering
             or WithExpressionSyntax or RangeExpressionSyntax or DelegateDeclarationSyntax
             or AnonymousFunctionExpressionSyntax
             or GenericNameSyntax { Identifier.Text: "Predicate" or "Comparison" }
+            or MethodDeclarationSyntax { Parent: InterfaceDeclarationSyntax, Body: not null }
+            or MethodDeclarationSyntax { Parent: InterfaceDeclarationSyntax, ExpressionBody: not null }
             || n.IsKind(SyntaxKind.IndexExpression);
         if (!files.Any(f => CSharpSyntaxTree.ParseText(File.ReadAllText(f)).GetRoot()
                 .DescendantNodes().Any(Candidate)))
@@ -55,6 +59,8 @@ public static class SyntaxLowering
                 lowered++;
             }
         }
+
+        lowered += LowerDefaultInterfaceMethods(files, sem, edits);
 
         foreach (var file in files)
         {
@@ -171,6 +177,72 @@ public static class SyntaxLowering
     {
         var span = node.Span;
         return new Edit(span.Start, span.Length, KeepLines(model, span, ""));
+    }
+
+    // ── default interface methods ───────────────────────────────────────────
+
+    /// An interface method with a body becomes abstract; each class that lists the
+    /// interface and has no implementation of its own gets the body as a public
+    /// method (on the line of its closing brace, so no line moves). Inside the body,
+    /// the interface's members are the class's members of the same name.
+    private static int LowerDefaultInterfaceMethods(IReadOnlyList<string> files, SemanticModelBuilder sem,
+        Dictionary<string, List<Edit>> edits)
+    {
+        int count = 0;
+        var defaults = new List<(IMethodSymbol sym, MethodDeclarationSyntax decl, string file, SemanticModel model)>();
+        foreach (var f in files)
+        {
+            if (sem.GetModel(f) is not { } model) continue;
+            foreach (var m in model.SyntaxTree.GetRoot().DescendantNodes().OfType<MethodDeclarationSyntax>())
+                if (m.Parent is InterfaceDeclarationSyntax && (m.Body != null || m.ExpressionBody != null)
+                    && !m.Modifiers.Any(x => x.IsKind(SyntaxKind.StaticKeyword) || x.IsKind(SyntaxKind.PrivateKeyword))
+                    && model.GetDeclaredSymbol(m) is { } sym)
+                    defaults.Add((sym, m, f, model));
+        }
+        if (defaults.Count == 0) return 0;
+
+        foreach (var f in files)
+        {
+            if (sem.GetModel(f) is not { } model) continue;
+            foreach (var cls in model.SyntaxTree.GetRoot().DescendantNodes().OfType<ClassDeclarationSyntax>())
+            {
+                if (model.GetDeclaredSymbol(cls) is not INamedTypeSymbol ct) continue;
+                var added = new StringBuilder();
+                foreach (var (sym, decl, _, _) in defaults)
+                {
+                    if (!ct.Interfaces.Contains(sym.ContainingType, SymbolEqualityComparer.Default)) continue;
+                    var impl = ct.FindImplementationForInterfaceMember(sym);
+                    if (impl != null && !SymbolEqualityComparer.Default.Equals(impl, sym)) continue;   // own implementation
+                    added.Append(' ').Append(OneLine(decl));
+                }
+                if (added.Length == 0) continue;
+                edits[f].Add(new Edit(cls.CloseBraceToken.SpanStart, 0, added.ToString() + " "));
+                count++;
+            }
+        }
+        foreach (var (_, decl, f, _) in defaults)
+        {
+            // `string D() => …;` / `string D() { … }` → `string D();`
+            var start = decl.ExpressionBody?.SpanStart ?? decl.Body!.SpanStart;
+            var end = decl.Span.End;
+            var removed = decl.SyntaxTree.GetText().ToString(Microsoft.CodeAnalysis.Text.TextSpan.FromBounds(start, end));
+            edits[f].Add(new Edit(start, end - start, ";" + new string('\n', removed.Count(c => c == '\n'))));
+            count++;
+        }
+        return count;
+    }
+
+    /// The method as `public …` on one line, without comments.
+    private static string OneLine(MethodDeclarationSyntax m)
+    {
+        var clean = m.ReplaceTrivia(m.DescendantTrivia(descendIntoTrivia: true).Where(t =>
+                t.IsKind(SyntaxKind.SingleLineCommentTrivia) || t.IsKind(SyntaxKind.MultiLineCommentTrivia)
+                || t.IsKind(SyntaxKind.SingleLineDocumentationCommentTrivia) || t.IsKind(SyntaxKind.EndOfLineTrivia)),
+            (_, _) => SyntaxFactory.Space);
+        var mods = string.Join(" ", clean.Modifiers.Where(x => !x.IsKind(SyntaxKind.PublicKeyword) && !x.IsKind(SyntaxKind.VirtualKeyword)).Select(x => x.Text));
+        var body = clean.Body != null ? clean.Body.ToString() : clean.ExpressionBody!.ToString() + ";";
+        return ("public " + mods + " " + clean.ReturnType + " " + clean.Identifier.Text + clean.TypeParameterList
+                + clean.ParameterList + clean.ConstraintClauses + " " + body).Replace("\r", " ").Replace("\n", " ");
     }
 
     // ── delegate types ──────────────────────────────────────────────────────

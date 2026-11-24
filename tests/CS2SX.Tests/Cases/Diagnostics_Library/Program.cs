@@ -3,7 +3,10 @@ using System.Collections.Generic;
 using System.Linq;
 
 // Methods of the .NET class library without a translation. CS2SX must report each
-// one on its C# line instead of passing it through to the C compiler.
+// one on its C# line instead of passing it through to the C compiler. An enum whose
+// C names collide with libnx (Perm_None) is reported too.
+public enum Perm { None, Read }
+
 public class Diagnostics_LibraryApp : SwitchApp
 {
     public override void OnInit()

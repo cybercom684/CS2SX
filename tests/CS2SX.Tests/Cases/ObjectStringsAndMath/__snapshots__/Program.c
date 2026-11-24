@@ -547,10 +547,8 @@ void ObjectStringsAndMathApp_OnInit(ObjectStringsAndMathApp* self)
     printf("%s\n", _ps_37 ? _ps_37 : "");
     CS2SX_LINE(85);
     char* _sb12 = _cs2sx_next_buf();
-    strftime(_sb12, CS2SX_STRBUF_SIZE, "%Y-%m-%d %H:%M:%S", _cs2sx_now());
-    char* _sb13 = _cs2sx_next_buf();
-    _sb13 = CS2SX_Format(_sb13, "date %s", CS2SX_BoolStr((CS2SX_Str16Len(CS2SX_NN(_sb12)) == 19)));
-    const char* _ps_38 = _sb13;
+    _sb12 = CS2SX_Format(_sb12, "date %s", CS2SX_BoolStr((CS2SX_Str16Len(CS2SX_NN(CS2SX_DT_ToString(CS2SX_DT_Now(), "yyyy-MM-dd HH:mm:ss"))) == 19)));
+    const char* _ps_38 = _sb12;
     printf("%s\n", _ps_38 ? _ps_38 : "");
     CS2SX_LINE(87);
     int big = INT_MAX;
@@ -563,9 +561,9 @@ void ObjectStringsAndMathApp_OnInit(ObjectStringsAndMathApp* self)
             CS2SX_LINE(88);
             int r = (CS2SX_CHECKED(add, int, big, 1));
             CS2SX_LINE(88);
-            char* _sb14 = _cs2sx_next_buf();
-            _sb14 = CS2SX_Format(_sb14, "no %d", r);
-            const char* _ps_40 = _sb14;
+            char* _sb13 = _cs2sx_next_buf();
+            _sb13 = CS2SX_Format(_sb13, "no %d", r);
+            const char* _ps_40 = _sb13;
             printf("%s\n", _ps_40 ? _ps_40 : "");
             CS2SX_ExPop(&_exf_39);
         }
@@ -595,9 +593,9 @@ void ObjectStringsAndMathApp_OnInit(ObjectStringsAndMathApp* self)
                 CS2SX_LINE(90);
                 t = CS2SX_CHECKED(add, int, t, 1);
                 CS2SX_LINE(90);
-                char* _sb15 = _cs2sx_next_buf();
-                _sb15 = CS2SX_Format(_sb15, "no %d", t);
-                const char* _ps_42 = _sb15;
+                char* _sb14 = _cs2sx_next_buf();
+                _sb14 = CS2SX_Format(_sb14, "no %d", t);
+                const char* _ps_42 = _sb14;
                 printf("%s\n", _ps_42 ? _ps_42 : "");
             }
             CS2SX_ExPop(&_exf_41);
@@ -625,9 +623,9 @@ void ObjectStringsAndMathApp_OnInit(ObjectStringsAndMathApp* self)
             CS2SX_LINE(93);
             int x = (CS2SX_CHECKED(add, int, l, 0));
             CS2SX_LINE(93);
-            char* _sb16 = _cs2sx_next_buf();
-            _sb16 = CS2SX_Format(_sb16, "no %d", x);
-            const char* _ps_44 = _sb16;
+            char* _sb15 = _cs2sx_next_buf();
+            _sb15 = CS2SX_Format(_sb15, "no %d", x);
+            const char* _ps_44 = _sb15;
             printf("%s\n", _ps_44 ? _ps_44 : "");
             CS2SX_ExPop(&_exf_43);
         }
@@ -655,9 +653,9 @@ void ObjectStringsAndMathApp_OnInit(ObjectStringsAndMathApp* self)
                 CS2SX_LINE(95);
                 int m = CS2SX_CHECKED(mul, int, big, 2);
                 CS2SX_LINE(95);
-                char* _sb17 = _cs2sx_next_buf();
-                _sb17 = CS2SX_Format(_sb17, "no %d", m);
-                const char* _ps_46 = _sb17;
+                char* _sb16 = _cs2sx_next_buf();
+                _sb16 = CS2SX_Format(_sb16, "no %d", m);
+                const char* _ps_46 = _sb16;
                 printf("%s\n", _ps_46 ? _ps_46 : "");
             }
             CS2SX_ExPop(&_exf_45);
@@ -669,18 +667,18 @@ void ObjectStringsAndMathApp_OnInit(ObjectStringsAndMathApp* self)
             {
                 OverflowException* e = (OverflowException*)_exf_45_ex;
                 CS2SX_LINE(96);
-                char* _sb18 = _cs2sx_next_buf();
-                _sb18 = CS2SX_Format(_sb18, "ovf4 %s", ((Exception*)(e))->f_Message);
-                const char* _ps_47 = _sb18;
+                char* _sb17 = _cs2sx_next_buf();
+                _sb17 = CS2SX_Format(_sb17, "ovf4 %s", ((Exception*)(e))->f_Message);
+                const char* _ps_47 = _sb17;
                 printf("%s\n", _ps_47 ? _ps_47 : "");
             }
             else CS2SX_Throw(_exf_45_ex);
         }
     }
     CS2SX_LINE(97);
-    char* _sb19 = _cs2sx_next_buf();
-    _sb19 = CS2SX_Format(_sb19, "unchecked %d %d", (big + 1), (CS2SX_CHECKED(sub, int, big, 1)));
-    const char* _ps_48 = _sb19;
+    char* _sb18 = _cs2sx_next_buf();
+    _sb18 = CS2SX_Format(_sb18, "unchecked %d %d", (big + 1), (CS2SX_CHECKED(sub, int, big, 1)));
+    const char* _ps_48 = _sb18;
     printf("%s\n", _ps_48 ? _ps_48 : "");
     CS2SX_LINE(98);
     printf("done\n");

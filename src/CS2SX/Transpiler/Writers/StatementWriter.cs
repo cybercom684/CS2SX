@@ -656,6 +656,9 @@ public sealed class StatementWriter
             // Tuples are value structs (_Tuple2_Item_int).
             if (semType != null && TypeRegistry.IsTuple(semType))
                 return (TypeRegistry.GetTupleStructName(semType), false);
+            // DateTime, TimeSpan: C values (Writers/DateTimeModel).
+            if (semType is "DateTime" or "TimeSpan" or "DayOfWeek")
+                return (TypeRegistry.MapType(semType), false);
             // T[] → element pointer (header array), e.g. `var parts = s.Split(',')`
             if (semType != null && semType.EndsWith("[]") && !semType.Contains(','))
                 return (ArrayModel.ElemCType(semType[..^2]), true);
@@ -669,7 +672,7 @@ public sealed class StatementWriter
             var cMapped = TypeRegistry.MapType(ocTypeName);
             if (cMapped.EndsWith("*"))
                 return (cMapped, false); // MapType already appended pointer
-            return (cMapped, !TypeRegistry.IsUserStruct(ocTypeName));
+            return (cMapped, !TypeRegistry.IsUserStruct(ocTypeName) && !TypeRegistry.IsLibNxStruct(ocTypeName));
         }
 
         if (v.Initializer?.Value is InvocationExpressionSyntax inv)

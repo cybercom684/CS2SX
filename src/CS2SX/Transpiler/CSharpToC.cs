@@ -1201,6 +1201,8 @@ public sealed class CSharpToC : CSharpSyntaxWalker
             bool isConst = field.Modifiers.Any(m => m.IsKind(SyntaxKind.ConstKeyword));
             bool isStatic = field.Modifiers.Any(m => m.IsKind(SyntaxKind.StaticKeyword));
             bool isReadOnly = field.Modifiers.Any(m => m.IsKind(SyntaxKind.ReadOnlyKeyword));
+            // static readonly without initializer: set in the static constructor — an ordinary static field in C.
+            if (isReadOnly && field.Declaration.Variables.All(v => v.Initializer == null)) isReadOnly = false;
 
             if (isConst || isReadOnly)
             {
@@ -1419,6 +1421,8 @@ public sealed class CSharpToC : CSharpSyntaxWalker
             bool isConst = field.Modifiers.Any(m => m.IsKind(SyntaxKind.ConstKeyword));
             bool isStatic = field.Modifiers.Any(m => m.IsKind(SyntaxKind.StaticKeyword));
             bool isReadOnly = field.Modifiers.Any(m => m.IsKind(SyntaxKind.ReadOnlyKeyword));
+            // static readonly without initializer: set in the static constructor — an ordinary static field in C.
+            if (isReadOnly && field.Declaration.Variables.All(v => v.Initializer == null)) isReadOnly = false;
 
             if (!isStatic && !isConst) continue;
 

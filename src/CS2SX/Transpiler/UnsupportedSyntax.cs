@@ -93,8 +93,36 @@ internal static class UnsupportedSyntax
     private const string SelfName =
         "Der Name self ist in Instanzmethoden vergeben (so heißt this im erzeugten C) — die Variable umbenennen.";
 
+    /// Identifiers of the libnx headers (Perm_None, Result_…): a C name of the program
+    /// that equals one of them does not compile. Read once; empty without devkitPro.
+    private static readonly Lazy<HashSet<string>> s_libnxNames = new(() =>
+    {
+        var names = new HashSet<string>(StringComparer.Ordinal);
+        var roots = new[] { Environment.GetEnvironmentVariable("DEVKITPRO"), @"C:\devkitPro", "/opt/devkitpro" };
+        foreach (var root in roots)
+        {
+            if (string.IsNullOrEmpty(root)) continue;
+            var dir = System.IO.Path.Combine(root, "libnx", "include");
+            if (!System.IO.Directory.Exists(dir)) continue;
+            foreach (var h in System.IO.Directory.EnumerateFiles(dir, "*.h", System.IO.SearchOption.AllDirectories))
+                foreach (System.Text.RegularExpressions.Match m in System.Text.RegularExpressions.Regex.Matches(
+                             System.IO.File.ReadAllText(h), @"\b[A-Za-z][A-Za-z0-9]*_[A-Za-z0-9_]+\b"))
+                    names.Add(m.Value);
+            break;
+        }
+        return names;
+    });
+
+    private static string? EnumNameClash(EnumMemberDeclarationSyntax em) =>
+        em.Parent is EnumDeclarationSyntax ed && s_libnxNames.Value.Contains(ed.Identifier.Text + "_" + em.Identifier.Text)
+            ? $"Der Enum-Wert {ed.Identifier.Text}.{em.Identifier.Text} heißt in C {ed.Identifier.Text}_{em.Identifier.Text} — "
+              + $"so heißt schon ein Wert in libnx. Den Enum umbenennen (z. B. {ed.Identifier.Text}Kind)."
+            : null;
+
     private static string? Check(SyntaxNode node, SemanticModel? model) => node switch
     {
+        EnumMemberDeclarationSyntax em when EnumNameClash(em) is { } clash => clash,
+
         VariableDeclaratorSyntax { Identifier.Text: "self", Parent.Parent: LocalDeclarationStatementSyntax } v
             when InInstanceMember(v) => SelfName,
         ParameterSyntax { Identifier.Text: "self" } p when InInstanceMember(p) => SelfName,

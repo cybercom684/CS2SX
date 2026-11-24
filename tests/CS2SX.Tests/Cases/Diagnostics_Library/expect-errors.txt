@@ -1,5 +1,6 @@
 # One substring per line: an error CS2SX must report for Program.cs.
-Program.cs(12): 'List.TrimExcess'
-Program.cs(14): 'Stack.TrimExcess'
-Program.cs(15): 'List.BinarySearch'
-Program.cs(16): 'String.Normalize'
+Program.cs(8): Der Enum-Wert Perm.None heißt in C Perm_None
+Program.cs(15): 'List.TrimExcess'
+Program.cs(17): 'Stack.TrimExcess'
+Program.cs(18): 'List.BinarySearch'
+Program.cs(19): 'String.Normalize'

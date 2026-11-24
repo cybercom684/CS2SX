@@ -1,0 +1,17 @@
+sq 4 [sq 4] 4
+circle 3 [round circle] 0
+title b
+repo 2 5 9 x
+box box7 7 7 s:q box2
+vec 25 True T1 12
+num -3.4028235E+38 5E-324 3.141592653589793 True 2147483647
+dict a=1,b=2 3 ab 1
+linq 1,4,9 1,1,2,2,3,3 6 3
+date 2024-03-01 Friday 61
+add 2024-01-01 00:00:15 02/29/2024 29 False 29
+span 29 29.00:00:00 True 00:01:30.5000000 1.02:03:04
+fmt Monday, 01 Jan 2024 12:59 AM 2023-12-31T23:59:30 12/31/2023 23:59:30 23:59:30 True
+timer 00:02 2024 True
+range
+file 3 True
+done

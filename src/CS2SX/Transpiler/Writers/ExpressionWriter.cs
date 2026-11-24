@@ -516,6 +516,16 @@ public sealed class ExpressionWriter : IExpressionWriter
     {
         var name = id.Identifier.Text;
 
+        // Len2 inside a struct whose property has a getter body: S_get_Len2(self).
+        if (id.Parent is not MemberAccessExpressionSyntax { Name: var nm } || nm != id)
+            if (_ctx.SemanticModel?.GetSymbolInfo(id).Symbol is IPropertySymbol { IsStatic: false } sp
+                && sp.ContainingType is { TypeKind: TypeKind.Struct } spt && TranspilerContext.IsUserCode(spt)
+                && sp.DeclaringSyntaxReferences.FirstOrDefault()?.GetSyntax() is PropertyDeclarationSyntax spd
+                && (spd.ExpressionBody != null || spd.AccessorList?.Accessors.Any(a => a.IsKind(SyntaxKind.GetAccessorDeclaration)
+                        && (a.Body != null || a.ExpressionBody != null)) == true)
+                && !(id.Parent is AssignmentExpressionSyntax sa && sa.Left == id))
+                return spt.Name + "_get_" + sp.Name + "(self)";
+
         var mapped = TypeRegistry.MapEnum(name);
         if (mapped != name) return mapped;
 
@@ -828,9 +838,9 @@ public sealed class ExpressionWriter : IExpressionWriter
         if (op is "+" or "-" or "*" && CheckedIntType(bin) is { } ckT)
             return "CS2SX_CHECKED(" + CheckedBuiltin(op) + ", " + ckT + ", " + left + ", " + right + ")";
 
-        // DateTime - DateTime → TimeSpan
-        if (op == "-" && leftCsType == "DateTime" && rightCsType == "DateTime")
-            return "CS2SX_DateTime_Subtract((time_t)" + left + ", (time_t)" + right + ")";
+        // DateTime - DateTime → TimeSpan, DateTime ± TimeSpan, TimeSpan comparisons
+        if (DateTimeModel.Binary(bin, left, right, _ctx.SemanticModel) is { } dtBin)
+            return dtBin;
 
         // TimeSpan + TimeSpan / TimeSpan - TimeSpan
         if (leftCsType == "TimeSpan" || rightCsType == "TimeSpan")
@@ -1088,6 +1098,12 @@ public sealed class ExpressionWriter : IExpressionWriter
     private string WriteAssignment(AssignmentExpressionSyntax assign)
     {
         var op = assign.OperatorToken.Text;
+
+        // named.Title = v on a value of a project interface: IFace_set_Title(named, v)
+        if (op == "=" && assign.Left is MemberAccessExpressionSyntax ifaceLeft && _ctx.SemanticModel != null
+            && _ctx.SemanticModel.GetSymbolInfo(ifaceLeft).Symbol is IPropertySymbol { IsStatic: false, SetMethod: not null } ip
+            && ip.ContainingType is { TypeKind: TypeKind.Interface, IsGenericType: false } ipt && TranspilerContext.IsUserCode(ipt))
+            return ipt.Name + "_set_" + ip.Name + "(" + Write(ifaceLeft.Expression) + ", " + Write(assign.Right) + ")";
 
         // checked { x += y; }: x = checked(x + y) — for plain variables and fields.
         if (op is "+=" or "-=" or "*=" && CheckedIntType(assign) is { } ckT
@@ -2155,6 +2171,9 @@ public sealed class ExpressionWriter : IExpressionWriter
 
     private string WriteMemberAccess(MemberAccessExpressionSyntax mem)
     {
+        if (StructGetterCall(mem) is { } structGet) return structGet;
+        if (DateTimeModel.Member(mem, _ctx.SemanticModel, n => Write(n)) is { } dtMember) return dtMember;
+        if (InterfaceGetterCall(mem) is { } ifaceGet) return ifaceGet;
         var full = mem.ToString();
 
         // string.* Konstanten
@@ -2381,6 +2400,9 @@ public sealed class ExpressionWriter : IExpressionWriter
             // return values — anything).
             if (ArrayModel.IsArrayExpr(mem.Expression, _ctx))
                 return ArrayModel.LengthOf(rk2, obj, _ctx);
+            // File.ReadAllLines(p).Length with `using System.IO` (ambiguous File): the API's type.
+            if (_ctx.GetSemanticNaturalType(mem.Expression) is { } natural && natural.EndsWith("[]"))
+                return ArrayModel.Length(obj);
         }
         if (prop == "Count" && IsListExpr(mem.Expression)) return obj + "->count";
         if (prop == "Count" && IsStackQueueHashSetExpr(mem.Expression)) return obj + "->count";
@@ -2616,6 +2638,14 @@ public sealed class ExpressionWriter : IExpressionWriter
     private static bool IsNumericTypeMember(MemberAccessExpressionSyntax mem, out string result)
     {
         var typeName = mem.Expression.ToString();
+        if (typeName.StartsWith("System.", StringComparison.Ordinal)) typeName = typeName[7..];
+        typeName = typeName switch
+        {
+            "Int32" => "int", "UInt32" => "uint", "Int64" => "long", "UInt64" => "ulong",
+            "Int16" => "short", "UInt16" => "ushort", "Byte" => "byte", "SByte" => "sbyte",
+            "Single" => "float", "Double" => "double", "Char" => "char",
+            _ => typeName,
+        };
         var memberName = mem.Name.Identifier.Text;
         result = (typeName, memberName) switch
         {
@@ -2631,13 +2661,27 @@ public sealed class ExpressionWriter : IExpressionWriter
             ("short", "MinValue") => "SHRT_MIN",
             ("byte", "MaxValue") => "255",
             ("byte", "MinValue") => "0",
+            ("sbyte", "MaxValue") => "127",
+            ("sbyte", "MinValue") => "(-128)",
+            ("ushort", "MaxValue") => "65535",
+            ("ushort", "MinValue") => "0",
+            ("char", "MaxValue") => "((uint16_t)0xFFFF)",
+            ("char", "MinValue") => "((uint16_t)0)",
+            // .NET MinValue is the most negative value (C's FLT_MIN/DBL_MIN are the
+            // smallest positive normal ones); Epsilon is the smallest positive value.
             ("float", "MaxValue") => "FLT_MAX",
-            ("float", "MinValue") => "FLT_MIN",
-            ("float", "Epsilon") => "FLT_EPSILON",
+            ("float", "MinValue") => "(-FLT_MAX)",
+            ("float", "Epsilon") => "__FLT_DENORM_MIN__",
             ("double", "MaxValue") => "DBL_MAX",
-            ("double", "MinValue") => "DBL_MIN",
-            ("Math", "PI") => "(float)M_PI",
-            ("Math", "E") => "(float)M_E",
+            ("double", "MinValue") => "(-DBL_MAX)",
+            ("double", "Epsilon") => "__DBL_DENORM_MIN__",
+            ("double", "NaN") => "((double)NAN)",
+            ("double", "PositiveInfinity") => "((double)INFINITY)",
+            ("double", "NegativeInfinity") => "(-(double)INFINITY)",
+            ("Math", "PI") => "M_PI",
+            ("Math", "E") => "M_E",
+            ("Math", "Tau") => "(2.0 * M_PI)",
+            ("MathF", "Tau") => "6.28318531f",
             ("MathF", "PI") => "3.14159265f",
             ("MathF", "E") => "2.71828182f",
             ("float", "NaN") => "NAN",
@@ -2776,6 +2820,10 @@ public sealed class ExpressionWriter : IExpressionWriter
         SyntaxNode? creation = null)
     {
         typeName = TypeRegistry.NestedToSimple(typeName);   // new Outer.Inner() → Inner_New()
+        if (creation != null && typeName is "DateTime" or "TimeSpan" or "System.DateTime" or "System.TimeSpan"
+            && DateTimeModel.Creation(_ctx.SemanticModel?.GetTypeInfo(creation).Type,
+                   argList?.Arguments.Select(a => Write(a.Expression)).ToList() ?? new List<string>()) is { } dtNew)
+            return dtNew;
         // new System.InvalidOperationException(…): the namespace is only qualification
         if (typeName.Contains('.') && !typeName.Contains('<') && creation != null && _ctx.SemanticModel != null)
         {
@@ -3626,6 +3674,48 @@ public sealed class ExpressionWriter : IExpressionWriter
     }
 
     // Returns true for calls that should NOT generate a warning when unrecognized.
+    /// shape.Area on a value of a project interface: IShape_get_Area(shape) — the
+    /// implementing class's getter through the vtable.
+    private string? InterfaceGetterCall(MemberAccessExpressionSyntax mem)
+    {
+        if (_ctx.SemanticModel == null) return null;
+        try
+        {
+            if (_ctx.SemanticModel.GetSymbolInfo(mem).Symbol is not IPropertySymbol { IsStatic: false, GetMethod: not null } p
+                || p.ContainingType is not { TypeKind: TypeKind.Interface } it || !TranspilerContext.IsUserCode(it)
+                || it.IsGenericType)
+                return null;
+            if (mem.Parent is AssignmentExpressionSyntax asg && asg.Left == mem) return null;
+            return it.Name + "_get_" + p.Name + "(" + Write(mem.Expression) + ")";
+        }
+        catch { return null; }
+    }
+
+    /// v.Len2 on a project struct whose property has a getter body: S_get_Len2(&v).
+    /// A receiver that is not a plain variable is copied first (it may be a call).
+    private string? StructGetterCall(MemberAccessExpressionSyntax mem)
+    {
+        if (_ctx.SemanticModel == null) return null;
+        try
+        {
+            if (_ctx.SemanticModel.GetSymbolInfo(mem).Symbol is not IPropertySymbol { IsStatic: false, GetMethod: not null } p
+                || p.ContainingType is not { TypeKind: TypeKind.Struct } st || !TranspilerContext.IsUserCode(st))
+                return null;
+            if (p.DeclaringSyntaxReferences.FirstOrDefault()?.GetSyntax() is not PropertyDeclarationSyntax decl) return null;
+            bool computed = decl.ExpressionBody != null
+                || decl.AccessorList?.Accessors.Any(a => a.IsKind(SyntaxKind.GetAccessorDeclaration) && (a.Body != null || a.ExpressionBody != null)) == true;
+            if (!computed) return null;
+            if (mem.Parent is AssignmentExpressionSyntax asg && asg.Left == mem) return null;
+            var fn = st.Name + "_get_" + p.Name;
+            if (mem.Expression is ThisExpressionSyntax) return fn + "(self)";
+            var recv = Write(mem.Expression);
+            return mem.Expression is IdentifierNameSyntax && _ctx.SemanticModel.GetSymbolInfo(mem.Expression).Symbol is ILocalSymbol or IParameterSymbol
+                ? (recv == "self" ? fn + "(self)" : fn + "(&" + recv + ")")
+                : "({ __auto_type _sg = (" + recv + "); " + fn + "(&_sg); })";
+        }
+        catch { return null; }
+    }
+
     /// A method of the .NET class library (System.*), not of the project or the
     /// CS2SX.Switch API.
     private static bool IsDotNetLibrary(IMethodSymbol m)

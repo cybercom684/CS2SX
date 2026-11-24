@@ -1845,6 +1845,34 @@ static inline CS2SX_TimeSpan CS2SX_TimeSpan_Add(CS2SX_TimeSpan a, CS2SX_TimeSpan
 { CS2SX_TimeSpan r; r.ticks = a.ticks + b.ticks; return r; }
 static inline CS2SX_TimeSpan CS2SX_TimeSpan_Sub(CS2SX_TimeSpan a, CS2SX_TimeSpan b)
 { CS2SX_TimeSpan r; r.ticks = a.ticks - b.ticks; return r; }
+/// new TimeSpan(days, hours, minutes, seconds, milliseconds)
+static inline CS2SX_TimeSpan CS2SX_TimeSpan_New(long long d, long long h, long long m, long long s, long long ms)
+{ CS2SX_TimeSpan r; r.ticks = d * CS2SX_TICKS_PER_DAY + h * CS2SX_TICKS_PER_HOUR + m * CS2SX_TICKS_PER_MIN
+                              + s * CS2SX_TICKS_PER_SEC + ms * CS2SX_TICKS_PER_MS; return r; }
+/// ts.ToString(): "[-][d.]hh:mm:ss[.fffffff]" like .NET.
+const char* CS2SX_TS_ToString(CS2SX_TimeSpan ts);
+
+// ── DateTime (src/rt_datetime.c) ──────────────────────────────────────────────
+// Ticks (100 ns) since 0001-01-01 00:00 like .NET's DateTime.Ticks: comparisons
+// are plain, a - b is a TimeSpan, a + span adds ticks.
+typedef long long CS2SX_DateTime;
+enum { CS2SX_DT_YEAR, CS2SX_DT_MONTH, CS2SX_DT_DAY, CS2SX_DT_HOUR, CS2SX_DT_MINUTE, CS2SX_DT_SECOND,
+       CS2SX_DT_MS, CS2SX_DT_DOW, CS2SX_DT_DOY };
+CS2SX_DateTime CS2SX_DT_New(int y, int mo, int d, int h, int mi, int s, int ms);
+CS2SX_DateTime CS2SX_DT_Now(void);
+CS2SX_DateTime CS2SX_DT_UtcNow(void);
+CS2SX_DateTime CS2SX_DT_Today(void);
+int CS2SX_DT_Part(CS2SX_DateTime t, int part);
+CS2SX_DateTime CS2SX_DT_AddTicks(CS2SX_DateTime t, long long ticks);
+/// AddDays/AddHours/…: value * unit ticks, rounded to whole milliseconds like .NET.
+CS2SX_DateTime CS2SX_DT_Add(CS2SX_DateTime t, double value, long long unit);
+CS2SX_DateTime CS2SX_DT_AddMonths(CS2SX_DateTime t, int months);
+int CS2SX_DT_IsLeapYear(int y);
+int CS2SX_DT_DaysInMonth(int y, int m);
+/// dt.ToString(format): .NET custom formats (yyyy MM dd HH mm ss fff tt …, 'literal')
+/// and the standard ones (d D f F g G m o s t T u y); NULL/"": "G".
+const char* CS2SX_DT_ToString(CS2SX_DateTime t, const char* fmt);
+const char* CS2SX_DayOfWeekName(int dow);
 
 // ── Regex (wraps POSIX regex.h) ───────────────────────────────────────────────
 typedef struct { char pattern[256]; } CS2SX_Regex;

@@ -14,15 +14,20 @@ namespace CS2SX.Build;
 ///   struct Pair&lt;T&gt; { public T A, B; public Pair(T a, T b) { … } }   Pair&lt;int&gt; p;
 ///   →  struct Pair_int { public int A, B; public Pair_int(int a, int b) { … } }   Pair_int p;
 ///
-/// Uses are renamed in place, the generic declaration is commented out line by
-/// line, and the specialisations follow it — line numbers of user code stay.
+/// Uses are renamed in place; the specialisations replace the generic declaration
+/// (on its first line, the rest blank) — line numbers of user code stay.
+///
+/// The same for generic interfaces (IRepo&lt;int&gt; → IRepo_int: C has no generic
+/// vtables) and generic classes that another class derives from (class IntBox :
+/// Box&lt;int&gt;): the derived class embeds a concrete base struct. Other generic
+/// classes are expanded later at the C level (GenericExpander).
 public static class GenericStructMonomorphizer
 {
     private sealed record Edit(int Start, int Length, string Text);
 
     private sealed class Decl
     {
-        public required StructDeclarationSyntax Syntax { get; init; }
+        public required TypeDeclarationSyntax Syntax { get; init; }
         public required INamedTypeSymbol Symbol { get; init; }
         public required SemanticModel Model { get; init; }
         public required string File { get; init; }
@@ -33,19 +38,37 @@ public static class GenericStructMonomorphizer
     public static List<string> Rewrite(IReadOnlyList<string> files, string outDir)
     {
         if (!files.Any(f => CSharpSyntaxTree.ParseText(File.ReadAllText(f)).GetRoot()
-                .DescendantNodes().OfType<StructDeclarationSyntax>().Any(s => s.TypeParameterList != null)))
+                .DescendantNodes().OfType<TypeDeclarationSyntax>().Any(s => s.TypeParameterList != null
+                    && s is StructDeclarationSyntax or InterfaceDeclarationSyntax or ClassDeclarationSyntax)))
             return files.ToList();
 
         var sem = new SemanticModelBuilder(files);
         var models = files.ToDictionary(f => f, f => sem.GetModel(f));
 
+        // Generic classes some class derives from.
+        var baseClasses = new HashSet<INamedTypeSymbol>(SymbolEqualityComparer.Default);
+        foreach (var (_, model) in models)
+        {
+            if (model == null) continue;
+            foreach (var c in model.SyntaxTree.GetRoot().DescendantNodes().OfType<ClassDeclarationSyntax>())
+                if (model.GetDeclaredSymbol(c) is INamedTypeSymbol { BaseType: { IsGenericType: true } bt }
+                    && bt.OriginalDefinition.Locations.Any(l => l.IsInSource))
+                    baseClasses.Add(bt.OriginalDefinition);
+        }
+
         var decls = new Dictionary<INamedTypeSymbol, Decl>(SymbolEqualityComparer.Default);
         foreach (var (file, model) in models)
         {
             if (model == null) continue;
-            foreach (var s in model.SyntaxTree.GetRoot().DescendantNodes().OfType<StructDeclarationSyntax>())
+            foreach (var s in model.SyntaxTree.GetRoot().DescendantNodes().OfType<TypeDeclarationSyntax>())
             {
                 if (s.TypeParameterList == null) continue;
+                if (s is ClassDeclarationSyntax && !(model.GetDeclaredSymbol(s) is INamedTypeSymbol cs && baseClasses.Contains(cs)))
+                    continue;
+                if (s is not (StructDeclarationSyntax or InterfaceDeclarationSyntax or ClassDeclarationSyntax)) continue;
+                // Generic methods in a generic interface: not supported (UnsupportedSyntax reports them).
+                if (s is InterfaceDeclarationSyntax && s.Members.OfType<MethodDeclarationSyntax>().Any(m => m.TypeParameterList != null))
+                    continue;
                 if (s.Ancestors().OfType<TypeDeclarationSyntax>().Any(t => t.TypeParameterList != null)) continue;
                 if (model.GetDeclaredSymbol(s) is INamedTypeSymbol sym)
                     decls[sym] = new Decl { Syntax = s, Symbol = sym, Model = model, File = file };
@@ -75,7 +98,8 @@ public static class GenericStructMonomorphizer
             if (model == null) continue;
             foreach (var gn in model.SyntaxTree.GetRoot().DescendantNodes().OfType<GenericNameSyntax>())
             {
-                if (gn.Ancestors().OfType<StructDeclarationSyntax>().Any(s => s.TypeParameterList != null)) continue;
+                if (gn.Ancestors().OfType<TypeDeclarationSyntax>().Any(s => s.TypeParameterList != null
+                        && decls.Values.Any(d => d.Syntax == s))) continue;
                 if (Target(gn, model, decls) is not var (decl, type) || decl == null) continue;
                 if (type.TypeArguments.Any(ContainsTypeParameter)) continue;
                 var spec = SpecFor(decl, type.TypeArguments.Select(Display).ToList());
@@ -83,28 +107,25 @@ public static class GenericStructMonomorphizer
             }
         }
 
-        // 2. Specialise (transitively), right after the generic declaration.
-        var inserts = new Dictionary<(string file, int pos), StringBuilder>();
+        // 2. Specialise (transitively).
+        var specTexts = new Dictionary<Decl, StringBuilder>();
         while (queue.Count > 0)
         {
             var spec = queue.Dequeue();
-            var text = Specialise(spec, decls, SpecFor);
-            var at = (spec.Decl.File, spec.Decl.Syntax.Span.End);
-            if (!inserts.TryGetValue(at, out var sb)) inserts[at] = sb = new StringBuilder();
-            sb.Append("\n// specialisation of ").Append(spec.Decl.Symbol.Name).Append('<')
-              .Append(string.Join(", ", spec.Args)).Append(">\n").Append(text).Append('\n');
+            if (!specTexts.TryGetValue(spec.Decl, out var sb)) specTexts[spec.Decl] = sb = new StringBuilder();
+            sb.Append(OneLine(Specialise(spec, decls, SpecFor))).Append(' ');
         }
-        foreach (var ((file, pos), sb) in inserts)
-            edits[file].Add(new Edit(pos, 0, sb.ToString()));
 
-        // 3. Comment out the generic declarations (same number of lines).
+        // 3. The specialisations replace the generic declaration, on its first line;
+        //    its other lines stay as blank lines. So the types keep their place (a base
+        //    class before the classes deriving from it) and no line of user code moves.
         foreach (var d in decls.Values)
         {
             var source = d.Model.SyntaxTree.GetText();
-            var first = source.Lines.GetLineFromPosition(d.Syntax.SpanStart).LineNumber;
-            var last = source.Lines.GetLineFromPosition(d.Syntax.Span.End).LineNumber;
-            for (int l = first; l <= last; l++)
-                edits[d.File].Add(new Edit(source.Lines[l].Start, 0, "// "));
+            var span = d.Syntax.Span;
+            var lines = source.ToString(span).Count(c => c == '\n');
+            var text = (specTexts.TryGetValue(d, out var sb) ? sb.ToString().TrimEnd() : "") + new string('\n', lines);
+            edits[d.File].Add(new Edit(span.Start, span.Length, text));
         }
 
         var result = new List<string>();
@@ -122,8 +143,20 @@ public static class GenericStructMonomorphizer
                 File.WriteAllText(target, text);
             result.Add(target);
         }
-        Log.Info($"Generic structs: {specs.Count} specialisation(s)");
+        Log.Info($"Generic types: {specs.Count} specialisation(s)");
         return result;
+    }
+
+    /// C# declarations on one line: comments dropped, line breaks as spaces.
+    private static string OneLine(string code)
+    {
+        var root = CSharpSyntaxTree.ParseText(code).GetRoot();
+        var clean = root.ReplaceTrivia(root.DescendantTrivia(descendIntoTrivia: true).Where(t =>
+                t.IsKind(SyntaxKind.SingleLineCommentTrivia) || t.IsKind(SyntaxKind.MultiLineCommentTrivia)
+                || t.IsKind(SyntaxKind.SingleLineDocumentationCommentTrivia) || t.IsKind(SyntaxKind.MultiLineDocumentationCommentTrivia)
+                || t.IsKind(SyntaxKind.EndOfLineTrivia)),
+            (_, _) => SyntaxFactory.Space);
+        return clean.ToFullString().Replace("\r", " ").Replace("\n", " ");
     }
 
     private static string Specialise(Spec spec, Dictionary<INamedTypeSymbol, Decl> decls,

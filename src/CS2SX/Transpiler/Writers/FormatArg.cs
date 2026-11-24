@@ -17,6 +17,7 @@ internal static class FormatArg
         return csType.Trim() switch
         {
             "double" or "float" or "decimal" => ("%s", $"CS2SX_FmtD((double)({code}), {f})"),
+            "DateTime" => ("%s", $"CS2SX_DT_ToString({code}, {f})"),
             "int" => ("%s", $"CS2SX_FmtI((long long)({code}), 32, {f})"),
             "long" => ("%s", $"CS2SX_FmtI((long long)({code}), 64, {f})"),
             "short" => ("%s", $"CS2SX_FmtI((long long)({code}), 16, {f})"),
@@ -39,6 +40,9 @@ internal static class FormatArg
             "object" or "object?" => ("%s", "CS2SX_Obj_ToString(" + code + ")"),
             "char" => ("%s", "CS2SX_CharStr(" + code + ")"),
             "StringBuilder" or "StringBuilder?" or "System.Text.StringBuilder" => ("%s", "StringBuilder_ToString(" + code + ")"),
+            "DateTime" => ("%s", "CS2SX_DT_ToString(" + code + ", NULL)"),
+            "TimeSpan" => ("%s", "CS2SX_TS_ToString(" + code + ")"),
+            "DayOfWeek" => ("%s", "CS2SX_DayOfWeekName(" + code + ")"),
             _ when CS2SX.Core.TypeRegistry.IsRecordClass(csType) => ("%s", csType.Trim().TrimEnd('?') + "_ToString(" + code + ")"),
             _ when CS2SX.Core.TypeRegistry.IsUserDefinedEnum(csType) => ("%s", csType + "_ToString(" + code + ")"),
             _ when ObjectString(csType, code) is { } s => ("%s", s),

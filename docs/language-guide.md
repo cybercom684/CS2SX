@@ -74,7 +74,7 @@ public struct Punkt
 var p = new Punkt { X = 10, Y = 20 };
 ```
 
-Structs werden direkt zu C-Structs — kein Heap, kein Freiräumen nötig.
+Structs werden direkt zu C-Structs — kein Heap, kein Freiräumen nötig. Berechnete Properties (`public int Laenge2 => X * X + Y * Y;`) gehen auch, von außen und innerhalb des Structs.
 
 ### Records
 
@@ -126,7 +126,7 @@ public class Box : IDrawable
 }
 ```
 
-Interfaces werden als VTable expandiert.
+Interfaces werden als VTable expandiert. Properties im Interface gehen (berechnet oder als Auto-Property `{ get; set; }` implementiert), ebenso Methoden mit Standard-Implementierung (`string Beschreibe() => Name + "!";`): Klassen ohne eigene Version bekommen die aus dem Interface. Generische Interfaces (`IRepo<int>`) funktionieren wie eigene Interfaces je Typ.
 
 ### Enums
 
@@ -541,6 +541,23 @@ string hex = Convert.ToString(255, 16); // → "ff" (Basis 2, 8, 10, 16)
 
 ---
 
+## Datum und Zeit
+
+```csharp
+var start = new DateTime(2024, 2, 28, 14, 30, 0);
+var spaeter = start.AddDays(2).AddHours(1);          // auch AddMonths, AddYears, AddMinutes …
+Console.WriteLine(spaeter.ToString("dd.MM.yyyy HH:mm"));   // 01.03.2024 15:30
+Console.WriteLine(spaeter.DayOfWeek);                 // Friday
+
+TimeSpan dauer = spaeter - start;                     // 2.01:00:00
+if (DateTime.Now - start > TimeSpan.FromMinutes(5)) { }
+Console.WriteLine($"{dauer.TotalHours} h, {DateTime.Today:yyyy-MM-dd}");
+```
+
+`DateTime` speichert wie .NET Ticks (100 ns seit 0001-01-01), Vergleiche und Rechnen mit `TimeSpan` gehen direkt. Formate wie in .NET mit invarianter Kultur: eigene (`yyyy MM dd HH mm ss fff tt`, `MMM`/`dddd` mit englischen Namen, `'Text'`) und Standardformate (`d D t T s o g G …`); `ToString()` ohne Format ergibt `MM/dd/yyyy HH:mm:ss`. `DateTime.Now` ist die Uhrzeit der Konsole, sekundengenau. Ungültige Daten (`new DateTime(2023, 2, 29)`) werfen `ArgumentOutOfRangeException`.
+
+---
+
 ## Generics
 
 ```csharp
@@ -565,7 +582,7 @@ string s = Max("Apfel", "Birne");   // → Max_str
 
 Generics werden zur Compilezeit expandiert, ähnlich wie C++ Templates: Für jeden verwendeten Typ entsteht eine eigene Kopie der Klasse bzw. Methode. Das gilt auch für generische Methoden, die andere generische Methoden aufrufen, und für generische Erweiterungsmethoden.
 
-Generische Methoden dürfen auch `virtual`/`abstract`/`override` sein oder in einem Interface stehen, und generische Structs (`struct Pair<T>`) funktionieren ebenso. Generische Methoden gehen auch in generischen Klassen und Structs (`class Box<T> { U Map<U>(Func<T, U> f) … }`). Nicht unterstützt sind generische Methoden in generischen Interfaces und generische Structs innerhalb generischer Typen. Der Build meldet sie mit Zeile und Hinweis.
+Klassen dürfen von einer generischen Klasse erben (`class ZahlBox : Box<int>`), auch mit `abstract`/`override`. Generische Methoden dürfen auch `virtual`/`abstract`/`override` sein oder in einem Interface stehen, und generische Structs (`struct Pair<T>`) funktionieren ebenso. Generische Methoden gehen auch in generischen Klassen und Structs (`class Box<T> { U Map<U>(Func<T, U> f) … }`). Nicht unterstützt sind generische Methoden in generischen Interfaces und generische Structs innerhalb generischer Typen. Der Build meldet sie mit Zeile und Hinweis.
 
 ---
 

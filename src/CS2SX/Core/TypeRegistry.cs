@@ -52,6 +52,8 @@ public static class TypeRegistry
         ["MotionState"] = "CS2SX_MotionState",
         ["Stopwatch"] = "CS2SX_Stopwatch",
         ["TimeSpan"] = "CS2SX_TimeSpan",
+        ["DateTime"] = "CS2SX_DateTime",
+        ["DayOfWeek"] = "int",
         ["Regex"] = "CS2SX_Regex",
         ["Random"] = "void*",  // opaque handle; methods dispatched by RandomHandler to CS2SX_Rand_* globals
         ["IntPtr"]  = "intptr_t",
@@ -85,6 +87,8 @@ public static class TypeRegistry
         "CS2SX_StickPos", "CS2SX_TouchState", "CS2SX_BatteryInfo", "CS2SX_TimeInfo", "CS2SX_MotionState",
         // libnx enum types (value types — no pointer suffix)
         "NpadButton", "HidNpadButton", "HidTouchState",
+        // .NET value types with a C value representation (Writers/DateTimeModel)
+        "DateTime", "TimeSpan", "DayOfWeek",
     };
 
     // ── Pointer-Typen ─────────────────────────────────────────────────────────

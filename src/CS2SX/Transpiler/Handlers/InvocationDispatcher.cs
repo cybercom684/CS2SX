@@ -233,6 +233,10 @@ public sealed class InvocationDispatcher
             catch { }
         }
 
+        // DateTime / TimeSpan methods (Writers/DateTimeModel)
+        if (DateTimeModel.Invocation(inv, args, _ctx.SemanticModel, n => _writeExpr(n)) is { } dtCall)
+            return dtCall;
+
         foreach (var handler in _handlers)
         {
             if (handler.TryHandle(inv, calleeStr, args, _ctx, _writeExpr, out var result))
@@ -348,9 +352,10 @@ public sealed class InvocationDispatcher
         ITypeSymbol? returnType = null;
         try { returnType = _ctx.SemanticModel?.GetTypeInfo(inv).Type; }
         catch { }
-        return returnType is IArrayTypeSymbol { ElementType.SpecialType: SpecialType.System_String }
-            ? "CS2SX_StrArr_FromList(" + result + ")"
-            : result;
+        // `using System.IO`: File/Directory are ambiguous, the type comes from the API candidate.
+        bool stringArray = returnType is IArrayTypeSymbol { ElementType.SpecialType: SpecialType.System_String }
+            || (returnType is null or IErrorTypeSymbol && _ctx.GetSemanticNaturalType(inv) == "string[]");
+        return stringArray ? "CS2SX_StrArr_FromList(" + result + ")" : result;
     }
 
     /// <summary>

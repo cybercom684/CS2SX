@@ -109,6 +109,9 @@ public sealed class FileHandler : InvocationHandlerBase
         if (!s_map.TryGetValue(calleeStr, out var cFunc))
             return NotHandled(out result);
 
+        // Directory.GetFiles(path): every file, pattern "*".
+        if (cFunc is "CS2SX_Dir_GetFiles" && args.Count == 1)
+            args = new List<string> { args[0], "\"*\"" };
         result = cFunc + "(" + JoinArgs(args) + ")";
         return true;
     }

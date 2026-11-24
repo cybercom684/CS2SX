@@ -25,6 +25,7 @@ Dasselbe gilt für Methoden der .NET-Bibliothek ohne Übersetzung (`list.TrimExc
 | `new object()`, `dynamic` | eigene Klasse, konkreter Typ |
 | `stackalloc`, `Span<T>`, `unsafe`, Zeiger | normale Arrays |
 | `GetType()` (außer bei Exceptions) | `is`/`switch` auf den Typ (prüfen den echten Typ zur Laufzeit) |
+| Enum-Werte, deren C-Name (`Enum_Wert`) es in libnx schon gibt, z. B. `enum Perm { None }` → `Perm_None` | den Enum umbenennen (`PermKind`) |
 
 Unterstützt (CS2SX schreibt es vor dem Übersetzen um): lokale Funktionen ohne Zugriff auf lokale Variablen der Methode, `[1, 2, 3]` für Arrays/List/HashSet, `with` bei Records, `foreach (var i in 0..10)`, `s[1..3]`/`s[^1]`/`list[2..]`, eigene `delegate`-Typen, generische Methoden (auch `virtual`/`abstract`/`override` und in Interfaces) und generische Structs (`struct Pair<T>`). Iteratoren mit `yield return` und `yield break`, siehe [Sprachunterstützung → Iteratoren](../language-guide.md#iteratoren-yield-return).
 

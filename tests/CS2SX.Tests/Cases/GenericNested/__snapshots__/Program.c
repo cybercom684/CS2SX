@@ -7,7 +7,7 @@ Pair_int Pair_int_New(int a)
 {
     Pair_int _self_value = {0};
     Pair_int* self = &_self_value;
-    CS2SX_LINE(49);
+    CS2SX_LINE(33);
     self->A = a;
     return _self_value;
 }
@@ -249,33 +249,33 @@ static CS2SX_Delegate _dg_20 = CS2SX_DELEGATE_STATIC(_lambda_20);
 void GenericNestedApp_OnInit(GenericNestedApp* self)
 {
     CS2SX_TRACE("GenericNestedApp.OnInit", "Program.cs");
-    CS2SX_LINE(64);
+    CS2SX_LINE(50);
     Box_int* n = Box_int_New(21);
-    CS2SX_LINE(65);
+    CS2SX_LINE(51);
     Box_str* s = Box_str_New("ab");
-    CS2SX_LINE(66);
+    CS2SX_LINE(52);
     char* _sb3 = _cs2sx_next_buf();
     _sb3 = CS2SX_Format(_sb3, "%d %s", Box_int_Map_int(n, (&_dg_2)), Box_int_Map_str(n, (&_dg_5)));
     const char* _ps_0 = _sb3;
     printf("%s\n", _ps_0 ? _ps_0 : "");
-    CS2SX_LINE(67);
+    CS2SX_LINE(53);
     char* _sb7 = _cs2sx_next_buf();
     _sb7 = CS2SX_Format(_sb7, "%d %s", Box_str_Map_int(s, (&_dg_8)), Box_str_Map_str(s, (&_dg_11)));
     const char* _ps_1 = _sb7;
     printf("%s\n", _ps_1 ? _ps_1 : "");
-    CS2SX_LINE(68);
+    CS2SX_LINE(54);
     char* _sb11 = _cs2sx_next_buf();
     _sb11 = CS2SX_Format(_sb11, "%s %d", CS2SX_BoolStr(Box_int_Is_str(n, "21", (&_dg_14))), Box_int_Pick_float(n, 1.5f));
     const char* _ps_2 = _sb11;
     printf("%s\n", _ps_2 ? _ps_2 : "");
-    CS2SX_LINE(69);
+    CS2SX_LINE(55);
     char* _sb12 = _cs2sx_next_buf();
     _sb12 = CS2SX_Format(_sb12, "%d %s", Box_int_Same(n), Box_str_Same(s));
     const char* _ps_3 = _sb12;
     printf("%s\n", _ps_3 ? _ps_3 : "");
-    CS2SX_LINE(70);
+    CS2SX_LINE(56);
     Pair_int pair = Pair_int_New(4);
-    CS2SX_LINE(71);
+    CS2SX_LINE(57);
     char* _sb16 = _cs2sx_next_buf();
     _sb16 = CS2SX_Format(_sb16, "%s %d", Pair_int_Map_str(&pair, (&_dg_17)), Pair_int_Map_int(&pair, (&_dg_20)));
     const char* _ps_4 = _sb16;

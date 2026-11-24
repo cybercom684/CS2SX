@@ -366,9 +366,9 @@ Pair_int Pair_int_New(int a, int b)
 {
     Pair_int _self_value = {0};
     Pair_int* self = &_self_value;
-    CS2SX_LINE(92);
+    CS2SX_LINE(80);
     self->A = a;
-    CS2SX_LINE(92);
+    CS2SX_LINE(80);
     self->B = b;
     return _self_value;
 }
@@ -388,9 +388,9 @@ Pair_str Pair_str_New(const char* a, const char* b)
 {
     Pair_str _self_value = {0};
     Pair_str* self = &_self_value;
-    CS2SX_LINE(101);
+    CS2SX_LINE(80);
     self->A = _cs2sx_heap_strdup(a);
-    CS2SX_LINE(101);
+    CS2SX_LINE(80);
     self->B = _cs2sx_heap_strdup(b);
     return _self_value;
 }
@@ -452,12 +452,12 @@ void GenericTypesApp_Init(GenericTypesApp* self)
 void GenericTypesApp_OnInit(GenericTypesApp* self)
 {
     CS2SX_TRACE("GenericTypesApp.OnInit", "Program.cs");
-    CS2SX_LINE(123);
+    CS2SX_LINE(98);
     List_IFormatter* _list_0 = List_IFormatter_New();
     List_IFormatter_Add(_list_0, Plain_as_IFormatter(Plain_New()));
     List_IFormatter_Add(_list_0, Bracket_as_IFormatter(Bracket_New()));
     List_IFormatter* formatters = _list_0;
-    CS2SX_LINE(124);
+    CS2SX_LINE(99);
     for (int _i_f = 0; _i_f < (int)(formatters->count); _i_f++)
     {
         IFormatter* f = List_IFormatter_Get(formatters, _i_f);
@@ -466,32 +466,32 @@ void GenericTypesApp_OnInit(GenericTypesApp* self)
         const char* _ps_1 = _sb0;
         printf("%s\n", _ps_1 ? _ps_1 : "");
     }
-    CS2SX_LINE(127);
+    CS2SX_LINE(102);
     Picker* p1 = (Picker*)(FirstPicker_New());
-    CS2SX_LINE(128);
+    CS2SX_LINE(103);
     Picker* p2 = (Picker*)(SecondPicker_New());
-    CS2SX_LINE(129);
+    CS2SX_LINE(104);
     char* _sb1 = _cs2sx_next_buf();
     _sb1 = CS2SX_Format(_sb1, "pick %d %d %s", p1->vtable->Pick_int(p1, 1, 2), p2->vtable->Pick_int(p2, 1, 2), p2->vtable->Pick_str(p2, "a", "b"));
     const char* _ps_2 = _sb1;
     printf("%s\n", _ps_2 ? _ps_2 : "");
-    CS2SX_LINE(130);
+    CS2SX_LINE(105);
     char* _sb2 = _cs2sx_next_buf();
     _sb2 = CS2SX_Format(_sb2, "echo %d %d", p1->vtable->Echo_int(p1, 5), p2->vtable->Echo_int(p2, 6));
     const char* _ps_3 = _sb2;
     printf("%s\n", _ps_3 ? _ps_3 : "");
-    CS2SX_LINE(132);
+    CS2SX_LINE(107);
     Pair_int pi = Pair_int_New(3, 4);
-    CS2SX_LINE(133);
+    CS2SX_LINE(108);
     Pair_str ps = ({ Pair_str _sv_4 = Pair_str_New("l", "r"); Pair_str_Swapped(&_sv_4); });
-    CS2SX_LINE(134);
+    CS2SX_LINE(109);
     char* _sb3 = _cs2sx_next_buf();
     _sb3 = CS2SX_Format(_sb3, "pair %d%d %s%s %d", pi.A, pi.B, ps.A, ps.B, Pair_int_Swapped(&pi).A);
     const char* _ps_5 = _sb3;
     printf("%s\n", _ps_5 ? _ps_5 : "");
-    CS2SX_LINE(136);
+    CS2SX_LINE(111);
     Slot_str_int slot = (Slot_str_int){ .Key = "hp", .Value = 30 };
-    CS2SX_LINE(137);
+    CS2SX_LINE(112);
     char* _sb4 = _cs2sx_next_buf();
     _sb4 = CS2SX_Format(_sb4, "slot %s=%d", slot.Key, slot.Value);
     const char* _ps_6 = _sb4;

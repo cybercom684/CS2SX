@@ -192,7 +192,7 @@ public sealed class InterfaceExpander
         // Properties als Getter/Setter Funktionszeiger
         foreach (var prop in iface.Members.OfType<PropertyDeclarationSyntax>())
         {
-            var retType = TypeRegistry.MapType(prop.Type.ToString().Trim());
+            var retType = PropCType(prop);
             var hasGet = prop.AccessorList?.Accessors
                 .Any(a => a.IsKind(SyntaxKind.GetAccessorDeclaration)) ?? false;
             var hasSet = prop.AccessorList?.Accessors
@@ -253,7 +253,32 @@ public sealed class InterfaceExpander
             sb.AppendLine();
         }
 
+        // Properties: iface.P → IFace_get_P(iface), iface.P = v → IFace_set_P(iface, v)
+        foreach (var prop in iface.Members.OfType<PropertyDeclarationSyntax>())
+        {
+            var pt = PropCType(prop);
+            var pn = prop.Identifier.Text;
+            if (prop.AccessorList?.Accessors.Any(a => a.IsKind(SyntaxKind.GetAccessorDeclaration)) == true)
+                sb.AppendLine($"static inline {pt} {ifaceName}_get_{pn}({ifaceName}* _iface) {{ return _iface->vtable->get_{pn}(_iface->obj); }}");
+            if (prop.AccessorList?.Accessors.Any(a => a.IsKind(SyntaxKind.SetAccessorDeclaration)) == true)
+                sb.AppendLine($"static inline void {ifaceName}_set_{pn}({ifaceName}* _iface, {pt} value) {{ _iface->vtable->set_{pn}(_iface->obj, value); }}");
+        }
+        sb.AppendLine();
+
         return sb.ToString();
+    }
+
+    private static bool IsAutoProperty(ClassDeclarationSyntax cls, string name) =>
+        cls.Members.OfType<PropertyDeclarationSyntax>().FirstOrDefault(p => p.Identifier.Text == name) is { } p
+        && p.ExpressionBody == null && p.AccessorList != null
+        && p.AccessorList.Accessors.All(a => a.Body == null && a.ExpressionBody == null);
+
+    /// C type of an interface property (a class or interface value is a pointer).
+    private static string PropCType(PropertyDeclarationSyntax prop)
+    {
+        var cs = prop.Type.ToString().Trim();
+        var c = TypeRegistry.MapType(cs);
+        return !c.EndsWith("*") && TypeRegistry.NeedsPointerSuffix(cs) ? c + "*" : c;
     }
 
     // ── vtable-Instanz für implementierende Klassen ────────────────────────────
@@ -322,6 +347,21 @@ public sealed class InterfaceExpander
                     .Any(a => a.IsKind(SyntaxKind.SetAccessorDeclaration)) ?? false;
                 bool propImpl = cls.Members.OfType<PropertyDeclarationSyntax>()
                     .Any(p => p.Identifier.Text == pName);
+
+                // An auto-property ({ get; set; }) is a field in C: small adapters read
+                // and store it for the vtable.
+                if (propImpl && IsAutoProperty(cls, pName))
+                {
+                    var pt = PropCType(prop);
+                    var field = $"(({className}*)self)->{TypeRegistry.MapProperty(pName)}";
+                    if (hasGet)
+                        sb.AppendLine($"static {pt} _cs2sx_{className}_{ifaceName}_get_{pName}(void* self) {{ return {field}; }}");
+                    if (hasSet)
+                        sb.AppendLine(prop.Type.ToString().Trim() is "string" or "string?"
+                            ? $"static void _cs2sx_{className}_{ifaceName}_set_{pName}(void* self, {pt} value) {{ CS2SX_STR_STORE({field}, value); }}"
+                            : $"static void _cs2sx_{className}_{ifaceName}_set_{pName}(void* self, {pt} value) {{ {field} = value; }}");
+                    sb.AppendLine();
+                }
 
                 if (hasGet && !propImpl)
                 {
@@ -417,10 +457,13 @@ public sealed class InterfaceExpander
                 bool propImpl = cls.Members.OfType<PropertyDeclarationSyntax>()
                     .Any(p => p.Identifier.Text == pName);
 
+                var pType = PropCType(prop);
+                var getFn = IsAutoProperty(cls, pName) ? $"_cs2sx_{className}_{ifaceName}_get_{pName}" : $"{className}_get_{pName}";
+                var setFn = IsAutoProperty(cls, pName) ? $"_cs2sx_{className}_{ifaceName}_set_{pName}" : $"{className}_set_{pName}";
                 if (hasGet)
-                    sb.AppendLine($"    .get_{pName} = {(propImpl ? $"{className}_get_{pName}" : $"_cs2sx_{className}_{ifaceName}_get_{pName}_not_impl")},");
+                    sb.AppendLine($"    .get_{pName} = {(propImpl ? $"({pType} (*)(void*)){getFn}" : $"_cs2sx_{className}_{ifaceName}_get_{pName}_not_impl")},");
                 if (hasSet)
-                    sb.AppendLine($"    .set_{pName} = {(propImpl ? $"{className}_set_{pName}" : $"_cs2sx_{className}_{ifaceName}_set_{pName}_not_impl")},");
+                    sb.AppendLine($"    .set_{pName} = {(propImpl ? $"(void (*)(void*, {pType})){setFn}" : $"_cs2sx_{className}_{ifaceName}_set_{pName}_not_impl")},");
             }
 
             sb.AppendLine("};");
