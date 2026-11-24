@@ -48,8 +48,7 @@ public sealed class StatementWriter
             case LockStatementSyntax lockStmt: WriteLock(lockStmt); break;
             case EmptyStatementSyntax: break;
             case CheckedStatementSyntax checkedStmt:
-                _ctx.Warn(checkedStmt, "checked/unchecked block — C has no overflow checking; body emitted as-is");
-                _ctx.WriteLine("/* checked/unchecked — no overflow checking in C */");
+                // The operators inside know their context (ExpressionWriter: CS2SX_CHECKED).
                 WriteBlockOrStmt(checkedStmt.Block);
                 break;
             case YieldStatementSyntax yield:

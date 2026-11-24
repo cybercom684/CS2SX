@@ -9,6 +9,7 @@
 
 #include "cs2sx_prelude.h"
 #include <time.h>
+#include <math.h>
 
 #define DT_MAX_TICKS 3155378975999999999LL   // DateTime.MaxValue (9999-12-31 23:59:59.9999999)
 
@@ -105,10 +106,13 @@ CS2SX_DateTime CS2SX_DT_AddTicks(CS2SX_DateTime t, long long ticks) { return che
 
 CS2SX_DateTime CS2SX_DT_Add(CS2SX_DateTime t, double value, long long unit)
 {
-    // .NET rounds the added amount to whole milliseconds (AddDays(0.5) = 12 h).
-    double ms = value * ((double)unit / CS2SX_TICKS_PER_MS);
-    long long whole = (long long)(ms + (ms >= 0 ? 0.5 : -0.5));
-    return checked_ticks(t + whole * CS2SX_TICKS_PER_MS);
+    // Like .NET 7+: whole units exactly, the fraction truncated to ticks.
+    if (value != value || value > 1e15 || value < -1e15)
+        CS2SX_ThrowNew(&CS2SX_TI_ArgumentOutOfRangeException,
+                       "The added or subtracted value results in an un-representable DateTime.");
+    double whole = value >= 0 ? floor(value) : ceil(value);
+    long long ticks = (long long)whole * unit + (long long)((value - whole) * (double)unit);
+    return checked_ticks(t + ticks);
 }
 
 CS2SX_DateTime CS2SX_DT_AddMonths(CS2SX_DateTime t, int months)
@@ -227,7 +231,13 @@ const char* CS2SX_DT_ToString(CS2SX_DateTime t, const char* fmt)
                 for (int k = 7; k > digits; k--) v /= 10;
                 char tmp[16];
                 snprintf(tmp, sizeof tmp, "%0*lld", digits, v);
-                if (c == 'F') { int len = (int)strlen(tmp); while (len > 0 && tmp[len - 1] == '0') tmp[--len] = '\0'; }
+                if (c == 'F')
+                {
+                    int len = (int)strlen(tmp);
+                    while (len > 0 && tmp[len - 1] == '0') tmp[--len] = '\0';
+                    // No digits left: the decimal point before them goes too, like .NET.
+                    if (len == 0 && n > 0 && out[n - 1] == '.') out[--n] = '\0';
+                }
                 put(out, &n, cap, tmp);
                 break;
             }

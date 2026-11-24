@@ -364,7 +364,7 @@ public sealed class ExpressionWriter : IExpressionWriter
             // x! (null-forgiving) only silences a compiler warning — no runtime effect.
             PostfixUnaryExpressionSyntax forgive
                 when forgive.IsKind(SyntaxKind.SuppressNullableWarningExpression) => Write(forgive.Operand),
-            PostfixUnaryExpressionSyntax post => Write(post.Operand) + post.OperatorToken.Text,
+            PostfixUnaryExpressionSyntax post => CheckedIncrement(post, post.Operand, postfix: true) ?? Write(post.Operand) + post.OperatorToken.Text,
             AssignmentExpressionSyntax assign => WriteAssignment(assign),
             MemberAccessExpressionSyntax mem => WriteMemberAccess(mem),
             InvocationExpressionSyntax inv => WriteInvocation(inv),
@@ -437,8 +437,25 @@ public sealed class ExpressionWriter : IExpressionWriter
         return replacement;
     }
 
+    /// checked { x++; } / ++x on an integer variable or field: OverflowException at the
+    /// type's limit instead of wrapping.
+    private string? CheckedIncrement(ExpressionSyntax node, ExpressionSyntax operand, bool postfix)
+    {
+        if (CheckedIntType(node) is not { } ckT) return null;
+        if (operand is not (IdentifierNameSyntax or MemberAccessExpressionSyntax { Expression: IdentifierNameSyntax or ThisExpressionSyntax }))
+            return null;
+        var op = node is PostfixUnaryExpressionSyntax po ? po.OperatorToken.Text : ((PrefixUnaryExpressionSyntax)node).OperatorToken.Text;
+        var fn = op == "++" ? "add" : "sub";
+        var target = Write(operand);
+        return postfix
+            ? $"({{ {ckT} _ckp = {target}; {target} = CS2SX_CHECKED({fn}, {ckT}, _ckp, 1); _ckp; }})"
+            : $"({target} = CS2SX_CHECKED({fn}, {ckT}, {target}, 1))";
+    }
+
     private string WritePrefixUnary(PrefixUnaryExpressionSyntax pre)
     {
+        if (pre.OperatorToken.Text is "++" or "--" && CheckedIncrement(pre, pre.Operand, postfix: false) is { } ckInc)
+            return ckInc;
         var operandExpr = Write(pre.Operand);
         var operandType = TypeInferrer.InferCSharpType(pre.Operand, _ctx);
         var overloaded = OperatorOverloadWriter.TryRewriteUnary(pre, operandType, operandExpr);
@@ -3538,6 +3555,7 @@ public sealed class ExpressionWriter : IExpressionWriter
                 Microsoft.CodeAnalysis.Operations.IBinaryOperation b => b.IsChecked,
                 Microsoft.CodeAnalysis.Operations.ICompoundAssignmentOperation c => c.IsChecked,
                 Microsoft.CodeAnalysis.Operations.IConversionOperation v => v.IsChecked,
+                Microsoft.CodeAnalysis.Operations.IIncrementOrDecrementOperation i => i.IsChecked,
                 _ => false,
             };
             if (!isChecked || operation!.Type is not { } t) return null;
@@ -3709,7 +3727,8 @@ public sealed class ExpressionWriter : IExpressionWriter
             var fn = st.Name + "_get_" + p.Name;
             if (mem.Expression is ThisExpressionSyntax) return fn + "(self)";
             var recv = Write(mem.Expression);
-            return mem.Expression is IdentifierNameSyntax && _ctx.SemanticModel.GetSymbolInfo(mem.Expression).Symbol is ILocalSymbol or IParameterSymbol
+            var recvSym = mem.Expression is IdentifierNameSyntax ? _ctx.SemanticModel.GetSymbolInfo(mem.Expression).Symbol : null;
+            return recvSym is ILocalSymbol or IParameterSymbol
                 ? (recv == "self" ? fn + "(self)" : fn + "(&" + recv + ")")
                 : "({ __auto_type _sg = (" + recv + "); " + fn + "(&_sg); })";
         }

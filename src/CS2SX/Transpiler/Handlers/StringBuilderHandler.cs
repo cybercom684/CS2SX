@@ -40,14 +40,25 @@ public sealed class StringBuilderHandler : InvocationHandlerBase
             "Clear" => "StringBuilder_Clear(" + sbExpr + ")",
             "ToString" => "StringBuilder_ToString(" + sbExpr + ")",
             "IndexOf" => "StringBuilder_IndexOf(" + sbExpr + ", " + ArgAt(args, 0) + ")",
-            "Insert" => "StringBuilder_Insert(" + sbExpr + ", " + ArgAt(args, 0) + ", " + ArgAt(args, 1) + ")",
-            "Replace" => "StringBuilder_Replace(" + sbExpr + ", " + ArgAt(args, 0) + ", " + ArgAt(args, 1) + ")",
+            "Insert" => "StringBuilder_Insert(" + sbExpr + ", " + ArgAt(args, 0) + ", " + AsText(inv, 1, args, ctx) + ")",
+            "Replace" => "StringBuilder_Replace(" + sbExpr + ", " + AsText(inv, 0, args, ctx) + ", " + AsText(inv, 1, args, ctx) + ")",
             "Append" => BuildAppend(sbExpr, inv, args, ctx),
             "AppendLine" => BuildAppendLine(sbExpr, inv, args, ctx),
             "AppendFormat" => BuildAppendFormat(sbExpr, inv, args, ctx),
             _ => sbExpr + "->" + method + "(" + JoinArgs(args) + ")",
         };
         return true;
+    }
+
+    /// Argument i as text: sb.Insert(0, 5), sb.Replace('a', 'b') take numbers and chars too.
+    private static string AsText(InvocationExpressionSyntax inv, int i, List<string> args, TranspilerContext ctx)
+    {
+        var code = ArgAt(args, i);
+        if (i >= inv.ArgumentList.Arguments.Count) return code;
+        var cs = TypeInferrer.InferCSharpType(inv.ArgumentList.Arguments[i].Expression, ctx);
+        if (cs is "string" or "string?") return code;
+        var (spec, c) = FormatArg.Adapt(cs, TypeRegistry.FormatSpecifier(TypeRegistry.MapType(cs)), code);
+        return spec == "%s" ? c : "(const char*)CS2SX_Format(_cs2sx_next_buf(), \"" + spec + "\", " + c + ")";
     }
 
     private static string BuildAppend(string sbExpr, InvocationExpressionSyntax inv,

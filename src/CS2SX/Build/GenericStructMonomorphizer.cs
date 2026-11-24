@@ -74,6 +74,20 @@ public static class GenericStructMonomorphizer
                     decls[sym] = new Decl { Syntax = s, Symbol = sym, Model = model, File = file };
             }
         }
+        // A generic class or interface that is also used with type parameters outside its
+        // own declaration (class Repo<T> : IRepo<T>) stays generic: the generic class
+        // using it is expanded later at the C level and needs the generic declaration.
+        foreach (var (_, model) in models)
+        {
+            if (model == null) continue;
+            foreach (var gn in model.SyntaxTree.GetRoot().DescendantNodes().OfType<GenericNameSyntax>())
+            {
+                if (Target(gn, model, decls) is not var (decl, type) || decl == null) continue;
+                if (decl.Syntax is StructDeclarationSyntax) continue;
+                if (gn.Ancestors().Contains(decl.Syntax)) continue;
+                if (type.TypeArguments.Any(ContainsTypeParameter)) decls.Remove(decl.Symbol);
+            }
+        }
         if (decls.Count == 0) return files.ToList();
 
         var edits = files.ToDictionary(f => f, _ => new List<Edit>());
@@ -156,7 +170,8 @@ public static class GenericStructMonomorphizer
                 || t.IsKind(SyntaxKind.SingleLineDocumentationCommentTrivia) || t.IsKind(SyntaxKind.MultiLineDocumentationCommentTrivia)
                 || t.IsKind(SyntaxKind.EndOfLineTrivia)),
             (_, _) => SyntaxFactory.Space);
-        return clean.ToFullString().Replace("\r", " ").Replace("\n", " ");
+        // Line breaks inside a multi-line string are its text and stay.
+        return clean.ToFullString();
     }
 
     private static string Specialise(Spec spec, Dictionary<INamedTypeSymbol, Decl> decls,

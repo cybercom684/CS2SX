@@ -430,11 +430,12 @@ static inline const char* StringBuilder_ToString(StringBuilder* sb)
     return sb ? sb->buf : "";
 }
 
+int CS2SX_Str16Index(const char* s, int bytes);
 static inline int StringBuilder_IndexOf(StringBuilder* sb, const char* sub)
 {
     if (!sb || !sub) return -1;
     const char* p = strstr(sb->buf, sub);
-    return p ? (int)(p - sb->buf) : -1;
+    return p ? CS2SX_Str16Index(sb->buf, (int)(p - sb->buf)) : -1;   // UTF-16 units like .NET
 }
 
 /// Insert / Replace return the builder, so calls chain like in .NET.

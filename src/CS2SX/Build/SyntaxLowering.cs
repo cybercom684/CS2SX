@@ -210,7 +210,10 @@ public static class SyntaxLowering
                 var added = new StringBuilder();
                 foreach (var (sym, decl, _, _) in defaults)
                 {
-                    if (!ct.Interfaces.Contains(sym.ContainingType, SymbolEqualityComparer.Default)) continue;
+                    // The class that first implements the interface (also through a derived
+                    // interface, class C : IB with IB : IA); its subclasses inherit the copy.
+                    if (!ct.AllInterfaces.Contains(sym.ContainingType, SymbolEqualityComparer.Default)) continue;
+                    if (ct.BaseType != null && ct.BaseType.AllInterfaces.Contains(sym.ContainingType, SymbolEqualityComparer.Default)) continue;
                     var impl = ct.FindImplementationForInterfaceMember(sym);
                     if (impl != null && !SymbolEqualityComparer.Default.Equals(impl, sym)) continue;   // own implementation
                     added.Append(' ').Append(OneLine(decl));
@@ -241,8 +244,10 @@ public static class SyntaxLowering
             (_, _) => SyntaxFactory.Space);
         var mods = string.Join(" ", clean.Modifiers.Where(x => !x.IsKind(SyntaxKind.PublicKeyword) && !x.IsKind(SyntaxKind.VirtualKeyword)).Select(x => x.Text));
         var body = clean.Body != null ? clean.Body.ToString() : clean.ExpressionBody!.ToString() + ";";
-        return ("public " + mods + " " + clean.ReturnType + " " + clean.Identifier.Text + clean.TypeParameterList
-                + clean.ParameterList + clean.ConstraintClauses + " " + body).Replace("\r", " ").Replace("\n", " ");
+        // Line breaks between tokens are gone with the trivia; those inside a multi-line
+        // string stay (they are its text).
+        return "public " + mods + " " + clean.ReturnType + " " + clean.Identifier.Text + clean.TypeParameterList
+                + clean.ParameterList + clean.ConstraintClauses + " " + body;
     }
 
     // ── delegate types ──────────────────────────────────────────────────────

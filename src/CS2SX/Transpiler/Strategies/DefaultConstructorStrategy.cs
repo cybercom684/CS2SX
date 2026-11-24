@@ -264,7 +264,9 @@ public sealed class DefaultConstructorStrategy : IConstructorStrategy
             var chain = string.Concat(Enumerable.Repeat("base.", hops));
             RcPath = !hasBase ? "" : runtimeBase ? null : chain;
 
-            BaseVTable = hasBase && !runtimeBase && ctx.VTableTypes.Contains(baseType);
+            // A base that only implements interfaces is in VTableTypes too, but has no
+            // class vtable: only hierarchies with virtual methods have a root.
+            BaseVTable = hasBase && !runtimeBase && ctx.VTableTypes.Contains(baseType) && ctx.VTableRoot.ContainsKey(name);
             OwnVTable = !hasBase && VTableBuilder.HasVirtualMethods(node);
             VTableType = ctx.VTableRoot.TryGetValue(name, out var vr) ? vr : baseType;
         }

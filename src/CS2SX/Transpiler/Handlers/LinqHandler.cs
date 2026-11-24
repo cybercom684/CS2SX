@@ -677,7 +677,14 @@ public sealed class LinqHandler : InvocationHandlerBase
                     var idxVar = ctx.NextTmp("i");
                     ctx.WriteLine($"{elemC}* {outVar} = {ArrayModel.NewHeap(elemC, listCount.Replace("_idx", "0"))};");
                     ctx.WriteLine($"for (int {idxVar} = 0; {idxVar} < {listCount.Replace("_idx", idxVar)}; {idxVar}++)");
-                    ctx.WriteLine($"  {outVar}[{idxVar}] = {listGet.Replace("_idx", idxVar)};");
+                    // The array owns its elements like any string[] / T[] (CS2SX_StrArr_FromList,
+                    // traced array fields): copies of the strings, a reference to each object.
+                    var item = listGet.Replace("_idx", idxVar);
+                    if (inner == "string")
+                        item = $"_cs2sx_heap_strdup({item})";
+                    else if (TypeRegistry.ArcRoot(inner) is { } itemRoot)
+                        item = $"({{ __auto_type _ti = ({item}); if (_ti) {itemRoot}_Retain(({itemRoot}*)_ti); _ti; }})";
+                    ctx.WriteLine($"  {outVar}[{idxVar}] = {item};");
                     result = outVar;
                     ctx.LocalTypes[outVar] = inner + "[]";
                     return true;

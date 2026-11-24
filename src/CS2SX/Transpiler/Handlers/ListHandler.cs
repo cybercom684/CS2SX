@@ -156,13 +156,21 @@ public sealed class ListHandler : InvocationHandlerBase
             }
 
             var lambdaNode = inv.ArgumentList.Arguments[0].Expression as LambdaExpressionSyntax;
-            if (lambdaNode == null) { result = listExpr; return true; }
 
-            var lifter = new LambdaLifter(ctx, new ExpressionWriter(ctx));
-            lifter.SetStatementWriter(new StatementWriter(ctx, new ExpressionWriter(ctx)));
-            // ConvertAll lifts its own (projecting) function below.
-            var predFn = method == "ConvertAll" ? ""
-                : lifter.LiftLambda(lambdaNode, elementTypeHint: inner, isPredicate: true);
+            // The callback as a call: a lambda is lifted to a function; a delegate value or
+            // a method group (list.FindAll(isEven)) is invoked through its delegate type.
+            Func<string, string> P;
+            if (lambdaNode != null)
+            {
+                var lifter = new LambdaLifter(ctx, new ExpressionWriter(ctx));
+                lifter.SetStatementWriter(new StatementWriter(ctx, new ExpressionWriter(ctx)));
+                // ConvertAll lifts its own (projecting) function below.
+                var predFn = method == "ConvertAll" ? ""
+                    : lifter.LiftLambda(lambdaNode, elementTypeHint: inner, isPredicate: true);
+                P = x => predFn + "(" + x + ")";
+            }
+            else
+                P = DelegateModel.InlineCallable(inv.ArgumentList.Arguments[0].Expression, ctx, inner, writeExpr);
 
             var cInnerType = inner == "string" ? "const char*" : TypeRegistry.MapType(inner);
             var isPrim = TypeRegistry.IsPrimitive(inner);
@@ -174,7 +182,7 @@ public sealed class ListHandler : InvocationHandlerBase
                 var retVar = ctx.NextTmp("ex");
                 ctx.WriteLine($"int {retVar} = 0;");
                 ctx.WriteLine($"for (int {idxVar} = 0; {idxVar} < {listExpr}->count; {idxVar}++)");
-                ctx.WriteLine($"    if ({predFn}({listExpr}->data[{idxVar}])) {{ {retVar} = 1; break; }}");
+                ctx.WriteLine($"    if ({P($"{listExpr}->data[{idxVar}]")}) {{ {retVar} = 1; break; }}");
                 result = retVar;
                 return true;
             }
@@ -186,7 +194,7 @@ public sealed class ListHandler : InvocationHandlerBase
                 ctx.WriteLine(method == "FindIndex"
                     ? $"for (int {idxVar} = 0; {idxVar} < {listExpr}->count; {idxVar}++)"
                     : $"for (int {idxVar} = {listExpr}->count - 1; {idxVar} >= 0; {idxVar}--)");
-                ctx.WriteLine($"    if ({predFn}({listExpr}->data[{idxVar}])) {{ {retVar} = {idxVar}; break; }}");
+                ctx.WriteLine($"    if ({P($"{listExpr}->data[{idxVar}]")}) {{ {retVar} = {idxVar}; break; }}");
                 result = retVar;
                 return true;
             }
@@ -197,7 +205,7 @@ public sealed class ListHandler : InvocationHandlerBase
                 var retVar = ctx.NextTmp("ra");
                 ctx.WriteLine($"int {retVar} = 0;");
                 ctx.WriteLine($"for (int {idxVar} = {listExpr}->count - 1; {idxVar} >= 0; {idxVar}--)");
-                ctx.WriteLine($"    if ({predFn}({listExpr}->data[{idxVar}])) {{ {cList}_Remove({listExpr}, {idxVar}); {retVar}++; }}");
+                ctx.WriteLine($"    if ({P($"{listExpr}->data[{idxVar}]")}) {{ {cList}_Remove({listExpr}, {idxVar}); {retVar}++; }}");
                 result = retVar;
                 return true;
             }
@@ -207,7 +215,7 @@ public sealed class ListHandler : InvocationHandlerBase
                 var retVar = ctx.NextTmp("tfa");
                 ctx.WriteLine($"int {retVar} = 1;");
                 ctx.WriteLine($"for (int {idxVar} = 0; {idxVar} < {listExpr}->count; {idxVar}++)");
-                ctx.WriteLine($"    if (!{predFn}({listExpr}->data[{idxVar}])) {{ {retVar} = 0; break; }}");
+                ctx.WriteLine($"    if (!{P($"{listExpr}->data[{idxVar}]")}) {{ {retVar} = 0; break; }}");
                 result = retVar;
                 return true;
             }
@@ -220,7 +228,7 @@ public sealed class ListHandler : InvocationHandlerBase
                     : $"{cInnerType}* {retVar} = NULL;";
                 ctx.WriteLine(fillLine);
                 ctx.WriteLine($"for (int {idxVar} = 0; {idxVar} < {listExpr}->count; {idxVar}++)");
-                ctx.WriteLine($"    if ({predFn}({listExpr}->data[{idxVar}])) {{ {retVar} = {listExpr}->data[{idxVar}]; break; }}");
+                ctx.WriteLine($"    if ({P($"{listExpr}->data[{idxVar}]")}) {{ {retVar} = {listExpr}->data[{idxVar}]; break; }}");
                 result = retVar;
                 return true;
             }
@@ -230,7 +238,7 @@ public sealed class ListHandler : InvocationHandlerBase
                 var outVar = ctx.NextTmp("fa");
                 ctx.WriteLine($"List_{cList[5..]}* {outVar} = {cList}_New();");
                 ctx.WriteLine($"for (int {idxVar} = 0; {idxVar} < {listExpr}->count; {idxVar}++)");
-                ctx.WriteLine($"    if ({predFn}({listExpr}->data[{idxVar}])) {cList}_Add({outVar}, {listExpr}->data[{idxVar}]);");
+                ctx.WriteLine($"    if ({P($"{listExpr}->data[{idxVar}]")}) {cList}_Add({outVar}, {listExpr}->data[{idxVar}]);");
                 ctx.LocalTypes[outVar] = "List<" + inner + ">";
                 result = outVar;
                 return true;
@@ -238,20 +246,28 @@ public sealed class ListHandler : InvocationHandlerBase
 
             if (method == "ConvertAll")
             {
-                // ConvertAll(x => expr) — Ergebnis-Typ aus Lambda inferieren
+                // ConvertAll<TOutput>: the output type from the call, else from the lambda body.
                 string projInner = "int";
-                if (lambdaNode is SimpleLambdaExpressionSyntax sl)
+                if (ctx.SemanticModel?.GetSymbolInfo(inv).Symbol is IMethodSymbol { TypeArguments.Length: 1 } cm)
+                    projInner = TranspilerContext.FormatTypeSymbol(cm.TypeArguments[0]);
+                else if (lambdaNode is SimpleLambdaExpressionSyntax sl)
                     projInner = TypeInferrer.InferCSharpType(sl.Body, ctx);
                 else if (lambdaNode is ParenthesizedLambdaExpressionSyntax pl)
                     projInner = TypeInferrer.InferCSharpType(pl.Body, ctx);
-                var cProj = projInner == "string" ? "str" : TypeRegistry.MapType(projInner);
-                var projLifter = new LambdaLifter(ctx, new ExpressionWriter(ctx));
-                projLifter.SetStatementWriter(new StatementWriter(ctx, new ExpressionWriter(ctx)));
-                var projFn = projLifter.LiftLambda(lambdaNode, elementTypeHint: inner);
+                var cProj = projInner == "string" ? "str" : TypeRegistry.ListElementName(projInner);
+                Func<string, string> proj;
+                if (lambdaNode != null)
+                {
+                    var projLifter = new LambdaLifter(ctx, new ExpressionWriter(ctx));
+                    projLifter.SetStatementWriter(new StatementWriter(ctx, new ExpressionWriter(ctx)));
+                    var projFn = projLifter.LiftLambda(lambdaNode, elementTypeHint: inner);
+                    proj = x => projFn + "(" + x + ")";
+                }
+                else proj = P;
                 var outVar = ctx.NextTmp("ca");
                 ctx.WriteLine($"List_{cProj}* {outVar} = List_{cProj}_New();");
                 ctx.WriteLine($"for (int {idxVar} = 0; {idxVar} < {listExpr}->count; {idxVar}++)");
-                ctx.WriteLine($"    List_{cProj}_Add({outVar}, {projFn}({listExpr}->data[{idxVar}]));");
+                ctx.WriteLine($"    List_{cProj}_Add({outVar}, {proj($"{listExpr}->data[{idxVar}]")});");
                 ctx.LocalTypes[outVar] = "List<" + projInner + ">";
                 result = outVar;
                 return true;

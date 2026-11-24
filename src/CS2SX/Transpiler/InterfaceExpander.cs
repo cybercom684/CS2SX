@@ -357,9 +357,16 @@ public sealed class InterfaceExpander
                     if (hasGet)
                         sb.AppendLine($"static {pt} _cs2sx_{className}_{ifaceName}_get_{pName}(void* self) {{ return {field}; }}");
                     if (hasSet)
-                        sb.AppendLine(prop.Type.ToString().Trim() is "string" or "string?"
-                            ? $"static void _cs2sx_{className}_{ifaceName}_set_{pName}(void* self, {pt} value) {{ CS2SX_STR_STORE({field}, value); }}"
-                            : $"static void _cs2sx_{className}_{ifaceName}_set_{pName}(void* self, {pt} value) {{ {field} = value; }}");
+                    {
+                        // Stored like any field: a copy of a string, a reference to an object
+                        // or collection (the previous one given up at the next frame).
+                        var pcs = prop.Type.ToString().Trim().TrimEnd('?');
+                        var store = pcs == "string" ? $"CS2SX_STR_STORE({field}, value)"
+                            : TypeRegistry.ArcRoot(pcs) is { } pr ? $"CS2SX_ARC_STORE({pr}, {field}, ({pt}){pr}_Retain(({pr}*)value))"
+                            : Arc.CollectionPrefix(pcs) is { } cp ? $"CS2SX_COLL_STORE({cp}, {field}, value)"
+                            : $"{field} = value";
+                        sb.AppendLine($"static void _cs2sx_{className}_{ifaceName}_set_{pName}(void* self, {pt} value) {{ {store}; }}");
+                    }
                     sb.AppendLine();
                 }
 

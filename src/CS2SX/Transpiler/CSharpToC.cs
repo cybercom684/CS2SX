@@ -303,7 +303,8 @@ public sealed class CSharpToC : CSharpSyntaxWalker
                 && !string.IsNullOrEmpty(baseType)
                 && baseType != SwitchAppBase
                 && !IsControlSubclass(baseType)
-                && _ctx.VTableTypes.Contains(baseType))
+                && _ctx.VTableTypes.Contains(baseType)
+                && _ctx.VTableRoot.ContainsKey(node.Identifier.Text))   // a class vtable, not only interfaces
             {
                 // Use the vtable-declaring root as the instance's struct type
                 // (overrides reuse the root's `_vtable`, so a 3-level chain must

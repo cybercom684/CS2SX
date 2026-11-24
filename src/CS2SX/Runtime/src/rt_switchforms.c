@@ -398,7 +398,10 @@ StringBuilder* StringBuilder_AppendDouble(StringBuilder* sb, double val)
 StringBuilder* StringBuilder_Insert(StringBuilder* sb, int index, const char* s)
 {
     if (!sb) CS2SX_ThrowNullRef();
-    if (index < 0 || index > sb->length) CS2SX_ThrowArgOutOfRange("index");
+    // index counts UTF-16 units like .NET; the buffer is UTF-8.
+    int at = CS2SX_Str16Offset(sb->buf, index);
+    if (at < 0) CS2SX_ThrowArgOutOfRange("index");
+    index = at;
     if (!s) return sb;
     int len = (int)strlen(s);
     StringBuilder__grow(sb, len);

@@ -122,6 +122,11 @@ internal static class UnsupportedSyntax
     private static string? Check(SyntaxNode node, SemanticModel? model) => node switch
     {
         EnumMemberDeclarationSyntax em when EnumNameClash(em) is { } clash => clash,
+        // Generic interfaces are specialised per type beforehand (GenericStructMonomorphizer);
+        // one that is still generic is implemented by a generic class (Repo<T> : IRepo<T>).
+        InterfaceDeclarationSyntax { TypeParameterList: not null } gi =>
+            $"Das generische Interface {gi.Identifier.Text}<…> wird hier mit einem Typparameter verwendet (z. B. class Repo<T> : {gi.Identifier.Text}<T>) — das wird nicht unterstützt; "
+            + $"konkrete Typen verwenden (class IntRepo : {gi.Identifier.Text}<int>) oder das Interface nicht generisch machen.",
 
         VariableDeclaratorSyntax { Identifier.Text: "self", Parent.Parent: LocalDeclarationStatementSyntax } v
             when InInstanceMember(v) => SelfName,

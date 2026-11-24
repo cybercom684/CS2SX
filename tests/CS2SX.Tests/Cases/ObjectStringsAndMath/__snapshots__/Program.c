@@ -586,7 +586,6 @@ void ObjectStringsAndMathApp_OnInit(ObjectStringsAndMathApp* self)
         if (setjmp(_exf_41.buf) == 0)
         {
             CS2SX_LINE(90);
-            /* checked/unchecked — no overflow checking in C */
             {
                 CS2SX_LINE(90);
                 int t = big;
@@ -648,7 +647,6 @@ void ObjectStringsAndMathApp_OnInit(ObjectStringsAndMathApp* self)
         if (setjmp(_exf_45.buf) == 0)
         {
             CS2SX_LINE(95);
-            /* checked/unchecked — no overflow checking in C */
             {
                 CS2SX_LINE(95);
                 int m = CS2SX_CHECKED(mul, int, big, 2);

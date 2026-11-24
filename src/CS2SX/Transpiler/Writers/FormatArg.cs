@@ -71,6 +71,9 @@ internal static class FormatArg
                 : "\"" + t + "\"";
         if (CS2SX.Core.TypeRegistry.ArcRoot(t) != null)
             return "CS2SX_Obj_ToString((void*)(" + code + "))";
+        // An interface value: the ToString() of the object it holds.
+        if (CS2SX.Core.TypeRegistry.IsRegisteredInterface(t))
+            return "({ " + t + "* _isv = (" + code + "); _isv ? CS2SX_Obj_ToString(_isv->obj) : \"\"; })";
         return null;
     }
 }
