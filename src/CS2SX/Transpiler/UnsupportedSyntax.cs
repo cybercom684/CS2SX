@@ -93,11 +93,23 @@ internal static class UnsupportedSyntax
     private const string SelfName =
         "Der Name self ist in Instanzmethoden vergeben (so heißt this im erzeugten C) — die Variable umbenennen.";
 
-    /// Identifiers of the libnx headers (Perm_None, Result_…): a C name of the program
-    /// that equals one of them does not compile. Read once; empty without devkitPro.
+    /// Identifiers of libnx (Perm_None, Result_…): a C name of the program that equals
+    /// one of them does not compile. Read once, from the libnx bindings embedded in the
+    /// tool (so the check works without devkitPro, e.g. for `cs2sx check` and in CI)
+    /// and, when installed, from the libnx headers.
     private static readonly Lazy<HashSet<string>> s_libnxNames = new(() =>
     {
         var names = new HashSet<string>(StringComparer.Ordinal);
+        var ident = new System.Text.RegularExpressions.Regex(@"\b[A-Za-z][A-Za-z0-9]*_[A-Za-z0-9_]+\b");
+        var asm = typeof(UnsupportedSyntax).Assembly;
+        foreach (var res in asm.GetManifestResourceNames().Where(r => r.Contains(".Stubs.LibNX.")))
+        {
+            using var stream = asm.GetManifestResourceStream(res);
+            if (stream == null) continue;
+            using var reader = new System.IO.StreamReader(stream);
+            foreach (System.Text.RegularExpressions.Match m in ident.Matches(reader.ReadToEnd()))
+                names.Add(m.Value);
+        }
         var roots = new[] { Environment.GetEnvironmentVariable("DEVKITPRO"), @"C:\devkitPro", "/opt/devkitpro" };
         foreach (var root in roots)
         {
@@ -105,8 +117,7 @@ internal static class UnsupportedSyntax
             var dir = System.IO.Path.Combine(root, "libnx", "include");
             if (!System.IO.Directory.Exists(dir)) continue;
             foreach (var h in System.IO.Directory.EnumerateFiles(dir, "*.h", System.IO.SearchOption.AllDirectories))
-                foreach (System.Text.RegularExpressions.Match m in System.Text.RegularExpressions.Regex.Matches(
-                             System.IO.File.ReadAllText(h), @"\b[A-Za-z][A-Za-z0-9]*_[A-Za-z0-9_]+\b"))
+                foreach (System.Text.RegularExpressions.Match m in ident.Matches(System.IO.File.ReadAllText(h)))
                     names.Add(m.Value);
             break;
         }
