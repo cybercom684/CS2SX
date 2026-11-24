@@ -1,0 +1,13 @@
+iface hi c C! C!
+set x1 t2
+dlg 4,2 4,3,2,1 True 4 0 False
+rm 2 2,1 n4,n3,n2,n1
+arr 2ab z
+vec 8 8
+ovf
+ovf2
+conv 5 ffff
+note 2
+sb True 4 3
+dt 30 12 0015000
+done

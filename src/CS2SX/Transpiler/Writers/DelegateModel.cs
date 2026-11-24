@@ -17,7 +17,19 @@ internal static class DelegateModel
 
     /// C typedef of a delegate type: Action_int_t.
     public static string CTypedef(ITypeSymbol type) =>
-        TypeRegistry.MapType(TranspilerContext.FormatTypeSymbol(type));
+        TypeRegistry.MapType(AsFuncText(type) ?? TranspilerContext.FormatTypeSymbol(type));
+
+    /// Predicate<T>, Comparison<T>, Converter<TIn, TOut> as the Func<…> with the same
+    /// signature (one delegate model; the C# lowering does the same for written types).
+    public static string? AsFuncText(ITypeSymbol type)
+    {
+        if (type is not INamedTypeSymbol { TypeKind: TypeKind.Delegate, ContainingNamespace.Name: "System",
+                Name: "Predicate" or "Comparison" or "Converter" } d || d.DelegateInvokeMethod is not { } inv)
+            return null;
+        var parts = inv.Parameters.Select(p => TranspilerContext.FormatTypeSymbol(p.Type))
+            .Append(TranspilerContext.FormatTypeSymbol(inv.ReturnType));
+        return "Func<" + string.Join(", ", parts) + ">";
+    }
 
     public static string InvokeName(string cTypedef) =>
         (cTypedef.EndsWith("_t") ? cTypedef[..^2] : cTypedef) + "_Invoke";
@@ -142,6 +154,12 @@ internal static class DelegateModel
         var type = ctx.SemanticModel?.GetTypeInfo(arg).ConvertedType;
         var value = write(arg);
         if (!IsDelegate(type)) return a => value + "(" + a + ")";
+        // Predicate<T> / Comparison<T> from a method group: its Func typedef and invoker
+        // (guarded, so defining it here as well as in _forward.h is fine).
+        if (AsFuncText(type!) != null && type is INamedTypeSymbol { DelegateInvokeMethod: { } dim })
+            ctx.PendingLambdaPreludes.Add(TypedefDecl(CTypedef(type),
+                dim.Parameters.Select(p => SignatureCType(TranspilerContext.FormatTypeSymbol(p.Type))).ToList(),
+                SignatureCType(TranspilerContext.FormatTypeSymbol(dim.ReturnType))));
         var tmp = ctx.NextTmp("cb");
         ctx.WriteLine("__auto_type " + tmp + " = " + value + ";");
         var invoke = InvokeName(type!);

@@ -505,10 +505,8 @@ public sealed class StringMethodHandler : InvocationHandlerBase
         if (expr is LiteralExpressionSyntax charLit
             && charLit.Token.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.CharacterLiteralToken))
         {
-            var ch = charLit.Token.ValueText;
-            if (ch == "\\") return "\"\\\\\"";
-            if (ch == "\"") return "\"\\\"\"";
-            return "\"" + ch + "\"";
+            // Escaped: Split('\n'), Split('"'), Split('\\') must stay valid C strings.
+            return "\"" + StringEscaper.EscapeRaw(charLit.Token.ValueText) + "\"";
         }
 
         // new char[] { '/', '\\' } — take first element
@@ -519,8 +517,7 @@ public sealed class StringMethodHandler : InvocationHandlerBase
             if (first is LiteralExpressionSyntax flit
                 && flit.Token.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.CharacterLiteralToken))
             {
-                var ch = flit.Token.ValueText;
-                return "\"" + ch + "\"";
+                return "\"" + StringEscaper.EscapeRaw(flit.Token.ValueText) + "\"";
             }
         }
 
@@ -531,7 +528,7 @@ public sealed class StringMethodHandler : InvocationHandlerBase
             var first = implArr.Initializer.Expressions[0];
             if (first is LiteralExpressionSyntax flit
                 && flit.Token.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.CharacterLiteralToken))
-                return "\"" + flit.Token.ValueText + "\"";
+                return "\"" + StringEscaper.EscapeRaw(flit.Token.ValueText) + "\"";
         }
 
         return fallback;
