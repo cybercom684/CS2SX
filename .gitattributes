@@ -61,3 +61,7 @@
 #*.PDF   diff=astextplain
 #*.rtf   diff=astextplain
 #*.RTF   diff=astextplain
+
+# Test programs with multi-line string literals: their text depends on the line
+# endings, so they stay LF in every checkout (snapshots and output stay the same).
+tests/CS2SX.Tests/Cases/ReviewFixes/Program.cs text eol=lf
