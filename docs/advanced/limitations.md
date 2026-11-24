@@ -1,6 +1,6 @@
 # Grenzen und Workarounds
 
-Diese Seite beschreibt, was CS2SX nicht unterstützt und wie man die häufigsten Einschränkungen umgeht. Stand: 0.9, jeder Punkt ist gegen den aktuellen Transpiler geprüft.
+Diese Seite beschreibt, was CS2SX nicht unterstützt und wie man die häufigsten Einschränkungen umgeht. Stand: 0.10, jeder Punkt ist gegen den aktuellen Transpiler geprüft.
 
 ---
 

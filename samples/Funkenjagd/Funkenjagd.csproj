@@ -7,7 +7,7 @@
 
   <ItemGroup>
     <!-- Switch API + `dotnet build` -> Funkenjagd.nro (needs the cs2sx tool on PATH). -->
-    <PackageReference Include="CS2SX.Switch" Version="0.9.0" />
+    <PackageReference Include="CS2SX.Switch" Version="0.10.0" />
   </ItemGroup>
 
 </Project>
