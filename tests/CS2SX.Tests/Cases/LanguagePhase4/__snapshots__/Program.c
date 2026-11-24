@@ -87,7 +87,7 @@ Point* Point_New_3(int x, int y, const char* tag)
     return self;
 }
 
-const CS2SX_ClassInfo Point_ClassInfo = { "Point", NULL };
+const CS2SX_ClassInfo Point_ClassInfo = { "Point", NULL, NULL };
 
 void Point_Gc(void* _self, CS2SX_GcVisit visit)
 {
@@ -158,7 +158,7 @@ Point3* Point3_New_1(int v)
     return self;
 }
 
-const CS2SX_ClassInfo Point3_ClassInfo = { "Point3", &Point_ClassInfo };
+const CS2SX_ClassInfo Point3_ClassInfo = { "Point3", &Point_ClassInfo, NULL };
 
 void Point3_Gc(void* _self, CS2SX_GcVisit visit)
 {
@@ -240,7 +240,7 @@ void Counter_Add(Counter* self, int n)
     (self->f_Changed != NULL ? Action_int_Invoke(self->f_Changed, self->value) : (void)0);
 }
 
-const CS2SX_ClassInfo Counter_ClassInfo = { "Counter", NULL };
+const CS2SX_ClassInfo Counter_ClassInfo = { "Counter", NULL, NULL };
 
 void Counter_Gc(void* _self, CS2SX_GcVisit visit)
 {

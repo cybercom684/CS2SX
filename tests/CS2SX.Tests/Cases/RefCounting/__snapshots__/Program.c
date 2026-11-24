@@ -21,7 +21,7 @@ Counter* Counter_New(void)
     return self;
 }
 
-const CS2SX_ClassInfo Counter_ClassInfo = { "Counter", NULL };
+const CS2SX_ClassInfo Counter_ClassInfo = { "Counter", NULL, NULL };
 
 void Counter_Gc(void* _self, CS2SX_GcVisit visit)
 {
@@ -71,7 +71,7 @@ Node* Node_New(int v)
     return self;
 }
 
-const CS2SX_ClassInfo Node_ClassInfo = { "Node", NULL };
+const CS2SX_ClassInfo Node_ClassInfo = { "Node", NULL, NULL };
 
 void Node_Gc(void* _self, CS2SX_GcVisit visit)
 {
@@ -121,7 +121,7 @@ Shape* Shape_New(void)
     return self;
 }
 
-const CS2SX_ClassInfo Shape_ClassInfo = { "Shape", NULL };
+const CS2SX_ClassInfo Shape_ClassInfo = { "Shape", NULL, NULL };
 
 void Shape_Gc(void* _self, CS2SX_GcVisit visit)
 {
@@ -173,7 +173,7 @@ Circle* Circle_New(void)
     return self;
 }
 
-const CS2SX_ClassInfo Circle_ClassInfo = { "Circle", &Shape_ClassInfo };
+const CS2SX_ClassInfo Circle_ClassInfo = { "Circle", &Shape_ClassInfo, NULL };
 
 void Circle_Gc(void* _self, CS2SX_GcVisit visit)
 {
@@ -225,7 +225,7 @@ Holder* Holder_New(void)
     return self;
 }
 
-const CS2SX_ClassInfo Holder_ClassInfo = { "Holder", NULL };
+const CS2SX_ClassInfo Holder_ClassInfo = { "Holder", NULL, NULL };
 
 void Holder_Gc(void* _self, CS2SX_GcVisit visit)
 {
@@ -300,7 +300,7 @@ Pair* Pair_Retain(Pair* self)
 }
 
 const CS2SX_GcKind Pair_GcKind = { offsetof(Pair, _rc), CS2SX_GcLeaf, (CS2SX_FreeFn)Pair_Free };
-const CS2SX_ClassInfo Pair_ClassInfo = { "Pair", NULL };
+const CS2SX_ClassInfo Pair_ClassInfo = { "Pair", NULL, (const char* (*)(void*))Pair_ToString };
 
 void RefCountingApp_Init(RefCountingApp* self)
 {

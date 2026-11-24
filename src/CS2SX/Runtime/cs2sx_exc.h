@@ -122,6 +122,9 @@ static inline void CS2SX_ExPop(CS2SX_ExFrame* f)
 
 __attribute__((noreturn)) void CS2SX_Throw(Exception* ex);
 __attribute__((noreturn)) void CS2SX_ThrowNew(const CS2SX_TypeInfo* type, const char* message);
+/// checked(a + b), checked((int)l): OverflowException when the exact result does not
+/// fit T (op: add, sub, mul; a cast is add with b = 0).
+#define CS2SX_CHECKED(op, T, a, b) ({ T _ck_r;     if (__builtin_##op##_overflow((a), (b), &_ck_r)) CS2SX_ThrowNew(&CS2SX_TI_OverflowException, NULL);     _ck_r; })
 /// The exceptions the runtime library throws itself (messages as in .NET).
 __attribute__((noreturn)) void CS2SX_ThrowNullRef(void);
 __attribute__((noreturn)) void CS2SX_ThrowArgNull(const char* paramName);

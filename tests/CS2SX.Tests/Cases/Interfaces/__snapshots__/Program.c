@@ -35,7 +35,7 @@ int Bullet_IsAlive(Bullet* self)
     return self->f_Y > 0;
 }
 
-const CS2SX_ClassInfo Bullet_ClassInfo = { "Bullet", NULL };
+const CS2SX_ClassInfo Bullet_ClassInfo = { "Bullet", NULL, NULL };
 
 void Bullet_Gc(void* _self, CS2SX_GcVisit visit)
 {
@@ -105,7 +105,7 @@ int Timer_IsAlive(Timer* self)
     return self->f_Left > 0;
 }
 
-const CS2SX_ClassInfo Timer_ClassInfo = { "Timer", NULL };
+const CS2SX_ClassInfo Timer_ClassInfo = { "Timer", NULL, NULL };
 
 void Timer_Gc(void* _self, CS2SX_GcVisit visit)
 {

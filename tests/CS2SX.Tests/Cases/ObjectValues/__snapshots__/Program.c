@@ -24,7 +24,7 @@ Foo* Foo_New(void)
     return self;
 }
 
-const CS2SX_ClassInfo Foo_ClassInfo = { "Foo", NULL };
+const CS2SX_ClassInfo Foo_ClassInfo = { "Foo", NULL, NULL };
 
 void Foo_Gc(void* _self, CS2SX_GcVisit visit)
 {
@@ -80,7 +80,7 @@ int Bar_Size(Bar* self)
     return 7;
 }
 
-const CS2SX_ClassInfo Bar_ClassInfo = { "Bar", &Foo_ClassInfo };
+const CS2SX_ClassInfo Bar_ClassInfo = { "Bar", &Foo_ClassInfo, NULL };
 
 void Bar_Gc(void* _self, CS2SX_GcVisit visit)
 {
@@ -133,7 +133,7 @@ Other* Other_New(void)
     return self;
 }
 
-const CS2SX_ClassInfo Other_ClassInfo = { "Other", NULL };
+const CS2SX_ClassInfo Other_ClassInfo = { "Other", NULL, NULL };
 
 void Other_Gc(void* _self, CS2SX_GcVisit visit)
 {

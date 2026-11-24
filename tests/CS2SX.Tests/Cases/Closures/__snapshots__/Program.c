@@ -244,7 +244,7 @@ __Ref_int* __Ref_int_New(int v)
     return self;
 }
 
-const CS2SX_ClassInfo __Ref_int_ClassInfo = { "__Ref_int", NULL };
+const CS2SX_ClassInfo __Ref_int_ClassInfo = { "__Ref_int", NULL, NULL };
 
 void __Ref_int_Gc(void* _self, CS2SX_GcVisit visit)
 {

@@ -445,10 +445,41 @@ public sealed class TranspilerContext
         try
         {
             var type = SemanticModel.GetTypeInfo(node).Type;
-            if (type == null || type is IErrorTypeSymbol) return null;
+            if (type == null || type is IErrorTypeSymbol) return AmbiguousApiType(node);
             return FormatTypeSymbol(type);
         }
         catch { return null; }
+    }
+
+    /// `using System.IO;` makes File, Path, Directory … ambiguous between System.IO and
+    /// the CS2SX.Switch API (which is what the transpiler maps them to): the type of
+    /// `File.Exists(p)`, `Path.GetFileName(p)` from the CS2SX.Switch candidate.
+    private string? AmbiguousApiType(SyntaxNode node)
+    {
+        var (access, argCount) = node switch
+        {
+            Microsoft.CodeAnalysis.CSharp.Syntax.InvocationExpressionSyntax
+                { Expression: Microsoft.CodeAnalysis.CSharp.Syntax.MemberAccessExpressionSyntax m } inv
+                => (m, inv.ArgumentList.Arguments.Count),
+            Microsoft.CodeAnalysis.CSharp.Syntax.MemberAccessExpressionSyntax m => (m, -1),
+            _ => (null, 0),
+        };
+        if (access == null || SemanticModel == null) return null;
+        var info = SemanticModel.GetSymbolInfo(access.Expression);
+        if (info.CandidateReason != CandidateReason.Ambiguous) return null;
+        var api = info.CandidateSymbols.OfType<INamedTypeSymbol>()
+            .FirstOrDefault(t => t.ContainingNamespace?.ToDisplayString() == "CS2SX.Switch");
+        if (api == null) return null;
+        var name = access.Name.Identifier.Text;
+        ITypeSymbol? result = argCount < 0
+            ? api.GetMembers(name).OfType<IPropertySymbol>().FirstOrDefault()?.Type
+              ?? api.GetMembers(name).OfType<IFieldSymbol>().FirstOrDefault()?.Type
+            : api.GetMembers(name).OfType<IMethodSymbol>()
+                .Where(mm => mm.Parameters.Length == argCount
+                    || (mm.Parameters.Length > argCount && mm.Parameters.Skip(argCount).All(p => p.IsOptional || p.IsParams)))
+                .Select(mm => mm.ReturnType).Distinct<ITypeSymbol>(SymbolEqualityComparer.Default)
+                .SingleOrDefault();
+        return result == null ? null : FormatTypeSymbol(result);
     }
 
     public string? GetSemanticType(SyntaxNode node)

@@ -374,6 +374,8 @@ public sealed class ExpressionWriter : IExpressionWriter
             ObjectCreationExpressionSyntax obj => WriteObjectCreation(obj),
             ImplicitObjectCreationExpressionSyntax implNew => WriteImplicitObjectCreation(implNew),
             ParenthesizedExpressionSyntax par => "(" + Write(par.Expression) + ")",
+            // checked(e) / unchecked(e): the operators inside know their context.
+            CheckedExpressionSyntax ck => "(" + Write(ck.Expression) + ")",
             ConditionalExpressionSyntax cond => WriteConditional(cond),
             CastExpressionSyntax cast => WriteCast(cast),
             ElementAccessExpressionSyntax elem => WriteElementAccess(elem),
@@ -823,6 +825,9 @@ public sealed class ExpressionWriter : IExpressionWriter
             catch { return "(" + left + " != NULL)"; }
         }
 
+        if (op is "+" or "-" or "*" && CheckedIntType(bin) is { } ckT)
+            return "CS2SX_CHECKED(" + CheckedBuiltin(op) + ", " + ckT + ", " + left + ", " + right + ")";
+
         // DateTime - DateTime → TimeSpan
         if (op == "-" && leftCsType == "DateTime" && rightCsType == "DateTime")
             return "CS2SX_DateTime_Subtract((time_t)" + left + ", (time_t)" + right + ")";
@@ -1069,6 +1074,15 @@ public sealed class ExpressionWriter : IExpressionWriter
     private string WriteAssignment(AssignmentExpressionSyntax assign)
     {
         var op = assign.OperatorToken.Text;
+
+        // checked { x += y; }: x = checked(x + y) — for plain variables and fields.
+        if (op is "+=" or "-=" or "*=" && CheckedIntType(assign) is { } ckT
+            && assign.Left is IdentifierNameSyntax or MemberAccessExpressionSyntax { Expression: IdentifierNameSyntax or ThisExpressionSyntax })
+        {
+            var target = Write(assign.Left);
+            return target + " = CS2SX_CHECKED(" + CheckedBuiltin(op[..1]) + ", " + ckT + ", " + target + ", " + Write(assign.Right) + ")";
+        }
+
         var right = Write(assign.Right);
 
         // A property with its own setter (not an auto-property): call it —
@@ -2153,8 +2167,8 @@ public sealed class ExpressionWriter : IExpressionWriter
         // DateTime.Now.* properties
         if (full is "DateTime.Now" or "DateTime.UtcNow")
             return "_cs2sx_now()";
-        if (full.StartsWith("DateTime.Now.", StringComparison.Ordinal)
-         || full.StartsWith("DateTime.UtcNow.", StringComparison.Ordinal))
+        // Only DateTime.Now.Year etc. — not DateTime.Now.ToString(…).Length.
+        if (mem.Expression.ToString() is "DateTime.Now" or "DateTime.UtcNow")
         {
             var dotIdx = full.LastIndexOf('.');
             var part = full[(dotIdx + 1)..];
@@ -3299,6 +3313,13 @@ public sealed class ExpressionWriter : IExpressionWriter
         }
         if (TypeRegistry.IsControlType(targetType) || TypeRegistry.NeedsPointerSuffix(targetType))
             return "((" + cType + "*)" + inner + ")";
+        // checked((int)l) from another integer type: OverflowException when it does not fit.
+        if (CheckedIntType(cast) is { } ckT
+            && _ctx.SemanticModel?.GetTypeInfo(cast.Expression).Type?.SpecialType is SpecialType.System_Int32
+                or SpecialType.System_UInt32 or SpecialType.System_Int64 or SpecialType.System_UInt64
+                or SpecialType.System_Int16 or SpecialType.System_UInt16 or SpecialType.System_Byte
+                or SpecialType.System_SByte or SpecialType.System_Char)
+            return "CS2SX_CHECKED(add, " + ckT + ", " + inner + ", 0)";
         return "((" + cType + ")" + inner + ")";
     }
 
@@ -3415,6 +3436,33 @@ public sealed class ExpressionWriter : IExpressionWriter
 
         return objExpr + "[" + index + "]";
     }
+
+    /// C type of an integer + - * (or compound assignment, or cast) in a `checked`
+    /// context: it throws OverflowException instead of wrapping. Null otherwise.
+    private string? CheckedIntType(SyntaxNode node)
+    {
+        if (_ctx.SemanticModel == null) return null;
+        try
+        {
+            var operation = _ctx.SemanticModel.GetOperation(node);
+            bool isChecked = operation switch
+            {
+                Microsoft.CodeAnalysis.Operations.IBinaryOperation b => b.IsChecked,
+                Microsoft.CodeAnalysis.Operations.ICompoundAssignmentOperation c => c.IsChecked,
+                Microsoft.CodeAnalysis.Operations.IConversionOperation v => v.IsChecked,
+                _ => false,
+            };
+            if (!isChecked || operation!.Type is not { } t) return null;
+            if (t.SpecialType is not (SpecialType.System_Int32 or SpecialType.System_UInt32
+                    or SpecialType.System_Int64 or SpecialType.System_UInt64 or SpecialType.System_Int16
+                    or SpecialType.System_UInt16 or SpecialType.System_Byte or SpecialType.System_SByte))
+                return null;
+            return TypeRegistry.MapType(TranspilerContext.FormatTypeSymbol(t));
+        }
+        catch { return null; }
+    }
+
+    private static string CheckedBuiltin(string op) => op switch { "+" => "add", "-" => "sub", _ => "mul" };
 
     /// Integer division/modulo whose divisor is not a non-zero constant: C# throws
     /// DivideByZeroException, AArch64 silently yields 0 — so it gets checked.

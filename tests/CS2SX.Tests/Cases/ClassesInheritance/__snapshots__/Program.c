@@ -39,7 +39,7 @@ const char* Shape_Describe(Shape* self)
     return _sb0;
 }
 
-const CS2SX_ClassInfo Shape_ClassInfo = { "Shape", NULL };
+const CS2SX_ClassInfo Shape_ClassInfo = { "Shape", NULL, NULL };
 
 void Shape_Gc(void* _self, CS2SX_GcVisit visit)
 {
@@ -103,7 +103,7 @@ float Rect_Area(Rect* self)
     return self->f_W * self->f_H;
 }
 
-const CS2SX_ClassInfo Rect_ClassInfo = { "Rect", &Shape_ClassInfo };
+const CS2SX_ClassInfo Rect_ClassInfo = { "Rect", &Shape_ClassInfo, NULL };
 
 void Rect_Gc(void* _self, CS2SX_GcVisit visit)
 {
@@ -171,7 +171,7 @@ const char* Square_Describe(Square* self)
     return _sb0;
 }
 
-const CS2SX_ClassInfo Square_ClassInfo = { "Square", &Rect_ClassInfo };
+const CS2SX_ClassInfo Square_ClassInfo = { "Square", &Rect_ClassInfo, NULL };
 
 void Square_Gc(void* _self, CS2SX_GcVisit visit)
 {
@@ -237,7 +237,7 @@ float Circle_Area(Circle* self)
     return 3.14159f * self->f_r * self->f_r;
 }
 
-const CS2SX_ClassInfo Circle_ClassInfo = { "Circle", &Shape_ClassInfo };
+const CS2SX_ClassInfo Circle_ClassInfo = { "Circle", &Shape_ClassInfo, NULL };
 
 void Circle_Gc(void* _self, CS2SX_GcVisit visit)
 {

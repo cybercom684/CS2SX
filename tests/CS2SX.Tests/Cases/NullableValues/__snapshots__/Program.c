@@ -41,7 +41,7 @@ int Profile_Add(Profile* self, Nullable_int bonus)
     return 1 + (((bonus).has ? (bonus).value : (0)));
 }
 
-const CS2SX_ClassInfo Profile_ClassInfo = { "Profile", NULL };
+const CS2SX_ClassInfo Profile_ClassInfo = { "Profile", NULL, NULL };
 
 void Profile_Gc(void* _self, CS2SX_GcVisit visit)
 {

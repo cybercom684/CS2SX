@@ -26,7 +26,7 @@ Player* Player_New(void)
     return self;
 }
 
-const CS2SX_ClassInfo Player_ClassInfo = { "Player", NULL };
+const CS2SX_ClassInfo Player_ClassInfo = { "Player", NULL, NULL };
 
 void Player_Gc(void* _self, CS2SX_GcVisit visit)
 {

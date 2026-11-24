@@ -25,7 +25,7 @@ CS2SX_Step* CS2SX_Step_New(void)
     return self;
 }
 
-const CS2SX_ClassInfo CS2SX_Step_ClassInfo = { "CS2SX_Step", NULL };
+const CS2SX_ClassInfo CS2SX_Step_ClassInfo = { "CS2SX_Step", NULL, NULL };
 
 void CS2SX_Step_Gc(void* _self, CS2SX_GcVisit visit)
 {
@@ -319,7 +319,7 @@ void CS2SX_Task_Tick(long long nowMs)
     }
 }
 
-const CS2SX_ClassInfo CS2SX_Task_ClassInfo = { "CS2SX_Task", NULL };
+const CS2SX_ClassInfo CS2SX_Task_ClassInfo = { "CS2SX_Task", NULL, NULL };
 
 void CS2SX_Task_Gc(void* _self, CS2SX_GcVisit visit)
 {
@@ -445,7 +445,7 @@ void CS2SX_WhenAll_cs2sx_resume(CS2SX_WhenAll* self)
     CS2SX_Task_Finish(CS2SX_NN(self->f_Done));
 }
 
-const CS2SX_ClassInfo CS2SX_WhenAll_ClassInfo = { "CS2SX_WhenAll", &CS2SX_Step_ClassInfo };
+const CS2SX_ClassInfo CS2SX_WhenAll_ClassInfo = { "CS2SX_WhenAll", &CS2SX_Step_ClassInfo, NULL };
 
 void CS2SX_WhenAll_Gc(void* _self, CS2SX_GcVisit visit)
 {
@@ -556,7 +556,7 @@ CS2SX_Task_int* CS2SX_Task_int_Run(Func_int_t work)
     return t;
 }
 
-const CS2SX_ClassInfo CS2SX_Task_int_ClassInfo = { "CS2SX_Task_int", &CS2SX_Task_ClassInfo };
+const CS2SX_ClassInfo CS2SX_Task_int_ClassInfo = { "CS2SX_Task_int", &CS2SX_Task_ClassInfo, NULL };
 
 void CS2SX_Task_int_Gc(void* _self, CS2SX_GcVisit visit)
 {
@@ -665,7 +665,7 @@ CS2SX_Task_str* CS2SX_Task_str_Run(Func_str_t work)
     return t;
 }
 
-const CS2SX_ClassInfo CS2SX_Task_str_ClassInfo = { "CS2SX_Task_str", &CS2SX_Task_ClassInfo };
+const CS2SX_ClassInfo CS2SX_Task_str_ClassInfo = { "CS2SX_Task_str", &CS2SX_Task_ClassInfo, NULL };
 
 void CS2SX_Task_str_Gc(void* _self, CS2SX_GcVisit visit)
 {
@@ -756,7 +756,7 @@ CS2SX_Task_str* Loader_Name(Loader* self, int id)
     return cs2sx_sm->f_cs2sx_task;
 }
 
-const CS2SX_ClassInfo Loader_ClassInfo = { "Loader", NULL };
+const CS2SX_ClassInfo Loader_ClassInfo = { "Loader", NULL, NULL };
 
 void Loader_Gc(void* _self, CS2SX_GcVisit visit)
 {
@@ -870,7 +870,7 @@ void Fetch_Async_cs2sx_run(Fetch_Async* self)
     CS2SX_Task_Finish((CS2SX_Task*)CS2SX_NN(self->f_cs2sx_task));
 }
 
-const CS2SX_ClassInfo Fetch_Async_ClassInfo = { "Fetch_Async", &CS2SX_Step_ClassInfo };
+const CS2SX_ClassInfo Fetch_Async_ClassInfo = { "Fetch_Async", &CS2SX_Step_ClassInfo, NULL };
 
 void Fetch_Async_Gc(void* _self, CS2SX_GcVisit visit)
 {
@@ -996,7 +996,7 @@ void Name_Async_cs2sx_run(Name_Async* self)
     CS2SX_Task_Finish((CS2SX_Task*)CS2SX_NN(self->f_cs2sx_task));
 }
 
-const CS2SX_ClassInfo Name_Async_ClassInfo = { "Name_Async", &CS2SX_Step_ClassInfo };
+const CS2SX_ClassInfo Name_Async_ClassInfo = { "Name_Async", &CS2SX_Step_ClassInfo, NULL };
 
 void Name_Async_Gc(void* _self, CS2SX_GcVisit visit)
 {
@@ -1374,7 +1374,7 @@ void Greet_Async_cs2sx_run(Greet_Async* self)
     CS2SX_Task_Finish((CS2SX_Task*)CS2SX_NN(self->f_cs2sx_task));
 }
 
-const CS2SX_ClassInfo Greet_Async_ClassInfo = { "Greet_Async", &CS2SX_Step_ClassInfo };
+const CS2SX_ClassInfo Greet_Async_ClassInfo = { "Greet_Async", &CS2SX_Step_ClassInfo, NULL };
 
 void Greet_Async_Gc(void* _self, CS2SX_GcVisit visit)
 {
@@ -1482,7 +1482,7 @@ void Twice_Async_cs2sx_run(Twice_Async* self)
     CS2SX_Task_int_SetResult(CS2SX_NN(self->f_cs2sx_task), CS2SX_Task_int_get_Result(CS2SX_NN(self->f_cs2sx_a1)) * 2);
 }
 
-const CS2SX_ClassInfo Twice_Async_ClassInfo = { "Twice_Async", &CS2SX_Step_ClassInfo };
+const CS2SX_ClassInfo Twice_Async_ClassInfo = { "Twice_Async", &CS2SX_Step_ClassInfo, NULL };
 
 void Twice_Async_Gc(void* _self, CS2SX_GcVisit visit)
 {
@@ -1633,7 +1633,7 @@ void Sum_Async_cs2sx_run(Sum_Async* self)
     CS2SX_Task_Finish((CS2SX_Task*)CS2SX_NN(self->f_cs2sx_task));
 }
 
-const CS2SX_ClassInfo Sum_Async_ClassInfo = { "Sum_Async", &CS2SX_Step_ClassInfo };
+const CS2SX_ClassInfo Sum_Async_ClassInfo = { "Sum_Async", &CS2SX_Step_ClassInfo, NULL };
 
 void Sum_Async_Gc(void* _self, CS2SX_GcVisit visit)
 {
@@ -1823,7 +1823,7 @@ void Sequence_Async_cs2sx_run(Sequence_Async* self)
     CS2SX_Task_Finish(CS2SX_NN(self->f_cs2sx_task));
 }
 
-const CS2SX_ClassInfo Sequence_Async_ClassInfo = { "Sequence_Async", &CS2SX_Step_ClassInfo };
+const CS2SX_ClassInfo Sequence_Async_ClassInfo = { "Sequence_Async", &CS2SX_Step_ClassInfo, NULL };
 
 void Sequence_Async_Gc(void* _self, CS2SX_GcVisit visit)
 {
@@ -1954,7 +1954,7 @@ void Fails_Async_cs2sx_run(Fails_Async* self)
     CS2SX_Task_Finish(CS2SX_NN(self->f_cs2sx_task));
 }
 
-const CS2SX_ClassInfo Fails_Async_ClassInfo = { "Fails_Async", &CS2SX_Step_ClassInfo };
+const CS2SX_ClassInfo Fails_Async_ClassInfo = { "Fails_Async", &CS2SX_Step_ClassInfo, NULL };
 
 void Fails_Async_Gc(void* _self, CS2SX_GcVisit visit)
 {
@@ -2067,7 +2067,7 @@ void Outer_Async_cs2sx_run(Outer_Async* self)
     CS2SX_Task_Finish(CS2SX_NN(self->f_cs2sx_task));
 }
 
-const CS2SX_ClassInfo Outer_Async_ClassInfo = { "Outer_Async", &CS2SX_Step_ClassInfo };
+const CS2SX_ClassInfo Outer_Async_ClassInfo = { "Outer_Async", &CS2SX_Step_ClassInfo, NULL };
 
 void Outer_Async_Gc(void* _self, CS2SX_GcVisit visit)
 {
@@ -2177,7 +2177,7 @@ void Fire_Async_cs2sx_run(Fire_Async* self)
     CS2SX_Task_Finish(CS2SX_NN(self->f_cs2sx_task));
 }
 
-const CS2SX_ClassInfo Fire_Async_ClassInfo = { "Fire_Async", &CS2SX_Step_ClassInfo };
+const CS2SX_ClassInfo Fire_Async_ClassInfo = { "Fire_Async", &CS2SX_Step_ClassInfo, NULL };
 
 void Fire_Async_Gc(void* _self, CS2SX_GcVisit visit)
 {
@@ -2293,7 +2293,7 @@ void Pulse_Async_cs2sx_run(Pulse_Async* self)
     CS2SX_Task_Finish(CS2SX_NN(self->f_cs2sx_task));
 }
 
-const CS2SX_ClassInfo Pulse_Async_ClassInfo = { "Pulse_Async", &CS2SX_Step_ClassInfo };
+const CS2SX_ClassInfo Pulse_Async_ClassInfo = { "Pulse_Async", &CS2SX_Step_ClassInfo, NULL };
 
 void Pulse_Async_Gc(void* _self, CS2SX_GcVisit visit)
 {

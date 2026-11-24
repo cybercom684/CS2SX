@@ -32,7 +32,7 @@ int Task1_CompareTo(Task1* self, Task1* other)
     return self->f_Weight - CS2SX_NN(other)->f_Weight;
 }
 
-const CS2SX_ClassInfo Task1_ClassInfo = { "Task1", NULL };
+const CS2SX_ClassInfo Task1_ClassInfo = { "Task1", NULL, NULL };
 
 void Task1_Gc(void* _self, CS2SX_GcVisit visit)
 {

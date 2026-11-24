@@ -32,7 +32,7 @@ int Item_Get(Item* self)
     return self->f_V;
 }
 
-const CS2SX_ClassInfo Item_ClassInfo = { "Item", NULL };
+const CS2SX_ClassInfo Item_ClassInfo = { "Item", NULL, NULL };
 
 void Item_Gc(void* _self, CS2SX_GcVisit visit)
 {
@@ -92,7 +92,7 @@ int Thing_Value(Thing* self)
     return 2;
 }
 
-const CS2SX_ClassInfo Thing_ClassInfo = { "Thing", NULL };
+const CS2SX_ClassInfo Thing_ClassInfo = { "Thing", NULL, NULL };
 
 void Thing_Gc(void* _self, CS2SX_GcVisit visit)
 {
@@ -258,7 +258,7 @@ void Holder_Fire(Holder* self)
     (self->f_Changed != NULL ? Action_Invoke(self->f_Changed) : (void)0);
 }
 
-const CS2SX_ClassInfo Holder_ClassInfo = { "Holder", NULL };
+const CS2SX_ClassInfo Holder_ClassInfo = { "Holder", NULL, NULL };
 
 void Holder_Gc(void* _self, CS2SX_GcVisit visit)
 {

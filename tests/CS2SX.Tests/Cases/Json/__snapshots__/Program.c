@@ -24,7 +24,7 @@ Item* Item_New(void)
     return self;
 }
 
-const CS2SX_ClassInfo Item_ClassInfo = { "Item", NULL };
+const CS2SX_ClassInfo Item_ClassInfo = { "Item", NULL, NULL };
 
 void Item_Gc(void* _self, CS2SX_GcVisit visit)
 {
@@ -81,7 +81,7 @@ SaveGame* SaveGame_New(void)
     return self;
 }
 
-const CS2SX_ClassInfo SaveGame_ClassInfo = { "SaveGame", NULL };
+const CS2SX_ClassInfo SaveGame_ClassInfo = { "SaveGame", NULL, NULL };
 
 void SaveGame_Gc(void* _self, CS2SX_GcVisit visit)
 {
@@ -159,7 +159,7 @@ Point* Point_Retain(Point* self)
 }
 
 const CS2SX_GcKind Point_GcKind = { offsetof(Point, _rc), CS2SX_GcLeaf, (CS2SX_FreeFn)Point_Free };
-const CS2SX_ClassInfo Point_ClassInfo = { "Point", NULL };
+const CS2SX_ClassInfo Point_ClassInfo = { "Point", NULL, (const char* (*)(void*))Point_ToString };
 
 void Card_Ctor(Card* self)
 {
@@ -181,7 +181,7 @@ Card* Card_New(void)
     return self;
 }
 
-const CS2SX_ClassInfo Card_ClassInfo = { "Card", NULL };
+const CS2SX_ClassInfo Card_ClassInfo = { "Card", NULL, NULL };
 
 void Card_Gc(void* _self, CS2SX_GcVisit visit)
 {

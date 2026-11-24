@@ -39,7 +39,7 @@ TreeNode* TreeNode_Add(TreeNode* self, const char* name)
     return c;
 }
 
-const CS2SX_ClassInfo TreeNode_ClassInfo = { "TreeNode", NULL };
+const CS2SX_ClassInfo TreeNode_ClassInfo = { "TreeNode", NULL, NULL };
 
 void TreeNode_Gc(void* _self, CS2SX_GcVisit visit)
 {
@@ -99,7 +99,7 @@ Link* Link_New(void)
     return self;
 }
 
-const CS2SX_ClassInfo Link_ClassInfo = { "Link", NULL };
+const CS2SX_ClassInfo Link_ClassInfo = { "Link", NULL, NULL };
 
 void Link_Gc(void* _self, CS2SX_GcVisit visit)
 {
@@ -153,7 +153,7 @@ Boss* Boss_New(void)
     return self;
 }
 
-const CS2SX_ClassInfo Boss_ClassInfo = { "Boss", &Link_ClassInfo };
+const CS2SX_ClassInfo Boss_ClassInfo = { "Boss", &Link_ClassInfo, NULL };
 
 void Boss_Gc(void* _self, CS2SX_GcVisit visit)
 {

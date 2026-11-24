@@ -38,7 +38,7 @@ Hub* Hub_Child(Hub* self)
     return c;
 }
 
-const CS2SX_ClassInfo Hub_ClassInfo = { "Hub", NULL };
+const CS2SX_ClassInfo Hub_ClassInfo = { "Hub", NULL, NULL };
 
 void Hub_Gc(void* _self, CS2SX_GcVisit visit)
 {

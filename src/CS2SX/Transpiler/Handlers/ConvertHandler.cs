@@ -60,6 +60,14 @@ public sealed class ConvertHandler : InvocationHandlerBase
                 : "int";
             var spec = TypeRegistry.FormatSpecifier(TypeRegistry.MapType(csType));
 
+            // Convert.ToString(value, toBase): 2, 8, 10 or 16.
+            if (args.Count == 2 && csType is "int" or "long" or "short" or "byte" or "sbyte" or "uint" or "ushort" or "ulong")
+            {
+                var bits = csType switch { "long" or "ulong" => 64, "short" or "ushort" => 16, "byte" or "sbyte" => 8, _ => 32 };
+                result = $"CS2SX_ToBase((long long)({args[0]}), {bits}, {args[1]})";
+                return true;
+            }
+
             if (csType == "string" || csType == "const char*")
             {
                 // Already a string — return as-is

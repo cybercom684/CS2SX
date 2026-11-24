@@ -40,7 +40,7 @@ float Square_Area(Square* self, Painter* p, float factor)
     return self->f_side * self->f_side * factor * Shape_Scale;
 }
 
-const CS2SX_ClassInfo Square_ClassInfo = { "Square", &Shape_ClassInfo };
+const CS2SX_ClassInfo Square_ClassInfo = { "Square", &Shape_ClassInfo, NULL };
 
 void Square_Gc(void* _self, CS2SX_GcVisit visit)
 {

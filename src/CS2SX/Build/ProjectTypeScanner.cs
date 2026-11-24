@@ -38,12 +38,14 @@ public static class ProjectTypeScanner
 
                     case StructDeclarationSyntax st:
                         TypeRegistry.RegisterUserStruct(st.Identifier.Text, HasInstanceCtor(st));
+                        if (OverridesToString(st)) TypeRegistry.RegisterStructToString(st.Identifier.Text);
                         RegisterOperators(st);
                         break;
 
                     case RecordDeclarationSyntax rec
                         when rec.ClassOrStructKeyword.IsKind(SyntaxKind.StructKeyword):
                         TypeRegistry.RegisterUserStruct(rec.Identifier.Text, HasInstanceCtor(rec));
+                        if (OverridesToString(rec)) TypeRegistry.RegisterStructToString(rec.Identifier.Text);
                         RegisterOperators(rec);
                         break;
 
@@ -96,6 +98,12 @@ public static class ProjectTypeScanner
         }
         TypeRegistry.SetArcRoots(roots);
     }
+
+    /// Declares `override string ToString()`.
+    internal static bool OverridesToString(TypeDeclarationSyntax type) =>
+        type.Members.OfType<MethodDeclarationSyntax>().Any(m => m.Identifier.Text == "ToString"
+            && m.ParameterList.Parameters.Count == 0
+            && m.Modifiers.Any(x => x.IsKind(SyntaxKind.OverrideKeyword)));
 
     private static bool HasInstanceCtor(TypeDeclarationSyntax type) =>
         type.Members.OfType<ConstructorDeclarationSyntax>()

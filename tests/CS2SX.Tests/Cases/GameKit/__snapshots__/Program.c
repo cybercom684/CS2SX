@@ -19,7 +19,7 @@ Score* Score_New(void)
     return self;
 }
 
-const CS2SX_ClassInfo Score_ClassInfo = { "Score", NULL };
+const CS2SX_ClassInfo Score_ClassInfo = { "Score", NULL, NULL };
 
 void Score_Gc(void* _self, CS2SX_GcVisit visit)
 {

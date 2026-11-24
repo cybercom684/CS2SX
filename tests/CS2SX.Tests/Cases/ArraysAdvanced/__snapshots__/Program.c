@@ -58,7 +58,7 @@ int* Board_Doubled(Board* self)
     return result;
 }
 
-const CS2SX_ClassInfo Board_ClassInfo = { "Board", NULL };
+const CS2SX_ClassInfo Board_ClassInfo = { "Board", NULL, NULL };
 
 void Board_Gc(void* _self, CS2SX_GcVisit visit)
 {

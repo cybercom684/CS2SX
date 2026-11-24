@@ -26,7 +26,7 @@ Shape* Shape_New(void)
     return self;
 }
 
-const CS2SX_ClassInfo Shape_ClassInfo = { "Shape", NULL };
+const CS2SX_ClassInfo Shape_ClassInfo = { "Shape", NULL, NULL };
 
 void Shape_Gc(void* _self, CS2SX_GcVisit visit)
 {
@@ -93,7 +93,7 @@ const char* Circle_Kind(Circle* self)
     return "circle";
 }
 
-const CS2SX_ClassInfo Circle_ClassInfo = { "Circle", &Shape_ClassInfo };
+const CS2SX_ClassInfo Circle_ClassInfo = { "Circle", &Shape_ClassInfo, NULL };
 
 void Circle_Gc(void* _self, CS2SX_GcVisit visit)
 {
@@ -157,7 +157,7 @@ const char* Square_Kind(Square* self)
     return "square";
 }
 
-const CS2SX_ClassInfo Square_ClassInfo = { "Square", &Shape_ClassInfo };
+const CS2SX_ClassInfo Square_ClassInfo = { "Square", &Shape_ClassInfo, NULL };
 
 void Square_Gc(void* _self, CS2SX_GcVisit visit)
 {
@@ -220,7 +220,7 @@ const char* Cube_Kind(Cube* self)
     return "cube";
 }
 
-const CS2SX_ClassInfo Cube_ClassInfo = { "Cube", &Square_ClassInfo };
+const CS2SX_ClassInfo Cube_ClassInfo = { "Cube", &Square_ClassInfo, NULL };
 
 void Cube_Gc(void* _self, CS2SX_GcVisit visit)
 {

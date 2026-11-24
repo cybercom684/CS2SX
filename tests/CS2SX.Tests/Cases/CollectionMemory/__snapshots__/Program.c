@@ -43,7 +43,7 @@ Inventory* Inventory_Retain(Inventory* self)
 }
 
 const CS2SX_GcKind Inventory_GcKind = { offsetof(Inventory, _rc), CS2SX_GcLeaf, (CS2SX_FreeFn)Inventory_Free };
-const CS2SX_ClassInfo Inventory_ClassInfo = { "Inventory", NULL };
+const CS2SX_ClassInfo Inventory_ClassInfo = { "Inventory", NULL, (const char* (*)(void*))Inventory_ToString };
 
 void Bag_Ctor(Bag* self)
 {
@@ -66,7 +66,7 @@ Bag* Bag_New(void)
     return self;
 }
 
-const CS2SX_ClassInfo Bag_ClassInfo = { "Bag", NULL };
+const CS2SX_ClassInfo Bag_ClassInfo = { "Bag", NULL, NULL };
 
 void Bag_Gc(void* _self, CS2SX_GcVisit visit)
 {

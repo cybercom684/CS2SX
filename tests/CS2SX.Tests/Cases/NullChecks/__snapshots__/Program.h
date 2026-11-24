@@ -12,11 +12,11 @@ typedef struct Node_vtable
 
 struct Node
 {
-    Node_vtable* vtable;
     int _rc;
     void (*_dtor)(void* self);   // __Destroy of the dynamic type
     void (*_gc)(void* self, CS2SX_GcVisit visit);   // _Gc of the dynamic type
     const CS2SX_ClassInfo* _class;   // run-time type (x is T)
+    Node_vtable* vtable;
     int f_Value;
     Node* f_Next;
     const char* f_Name;

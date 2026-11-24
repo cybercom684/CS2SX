@@ -23,7 +23,7 @@ MenuEntry* MenuEntry_New(const char* title)
     return self;
 }
 
-const CS2SX_ClassInfo MenuEntry_ClassInfo = { "MenuEntry", NULL };
+const CS2SX_ClassInfo MenuEntry_ClassInfo = { "MenuEntry", NULL, NULL };
 
 void MenuEntry_Gc(void* _self, CS2SX_GcVisit visit)
 {

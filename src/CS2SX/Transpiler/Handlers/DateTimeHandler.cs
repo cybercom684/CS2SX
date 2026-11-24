@@ -34,7 +34,7 @@ public sealed class DateTimeHandler : InvocationHandlerBase
                 var strftimeFmt = fmtStr != null ? MapDateFormat(fmtStr) : "%Y-%m-%d %H:%M:%S";
                 var buf = ctx.NextStringBuf();
                 ctx.Out.WriteLine(ctx.Tab
-                    + $"strftime({buf}, sizeof({buf}), \"{strftimeFmt}\", _cs2sx_now());");
+                    + $"strftime({buf}, CS2SX_STRBUF_SIZE, \"{strftimeFmt}\", _cs2sx_now());");
                 result = buf;
                 return true;
             }
@@ -42,7 +42,7 @@ public sealed class DateTimeHandler : InvocationHandlerBase
             {
                 var buf = ctx.NextStringBuf();
                 ctx.Out.WriteLine(ctx.Tab
-                    + $"strftime({buf}, sizeof({buf}), \"%Y-%m-%d %H:%M:%S\", _cs2sx_now());");
+                    + $"strftime({buf}, CS2SX_STRBUF_SIZE, \"%Y-%m-%d %H:%M:%S\", _cs2sx_now());");
                 result = buf;
                 return true;
             }
@@ -111,7 +111,8 @@ public sealed class DateTimeHandler : InvocationHandlerBase
 
     private static string MapDateFormat(string dotNetFmt) => dotNetFmt
         .Replace("yyyy", "%Y").Replace("yy", "%y")
-        .Replace("MM", "%m").Replace("dd", "%d")
+        .Replace("MMMM", "%B").Replace("MMM", "%b").Replace("MM", "%m")
+        .Replace("dddd", "%A").Replace("ddd", "%a").Replace("dd", "%d")
         .Replace("HH", "%H").Replace("hh", "%I")
         .Replace("mm", "%M").Replace("ss", "%S")
         .Replace("tt", "%p");

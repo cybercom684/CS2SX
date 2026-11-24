@@ -39,7 +39,7 @@ const char* Plain_Format_str(Plain* self, const char* value)
     return _sb1;
 }
 
-const CS2SX_ClassInfo Plain_ClassInfo = { "Plain", NULL };
+const CS2SX_ClassInfo Plain_ClassInfo = { "Plain", NULL, NULL };
 
 void Plain_Gc(void* _self, CS2SX_GcVisit visit)
 {
@@ -112,7 +112,7 @@ const char* Bracket_Format_str(Bracket* self, const char* value)
     return _sb1;
 }
 
-const CS2SX_ClassInfo Bracket_ClassInfo = { "Bracket", NULL };
+const CS2SX_ClassInfo Bracket_ClassInfo = { "Bracket", NULL, NULL };
 
 void Bracket_Gc(void* _self, CS2SX_GcVisit visit)
 {
@@ -180,7 +180,7 @@ int Picker_Echo_int(Picker* self, int x)
     return x;
 }
 
-const CS2SX_ClassInfo Picker_ClassInfo = { "Picker", NULL };
+const CS2SX_ClassInfo Picker_ClassInfo = { "Picker", NULL, NULL };
 
 void Picker_Gc(void* _self, CS2SX_GcVisit visit)
 {
@@ -246,7 +246,7 @@ const char* FirstPicker_Pick_str(FirstPicker* self, const char* a, const char* b
     return a;
 }
 
-const CS2SX_ClassInfo FirstPicker_ClassInfo = { "FirstPicker", &Picker_ClassInfo };
+const CS2SX_ClassInfo FirstPicker_ClassInfo = { "FirstPicker", &Picker_ClassInfo, NULL };
 
 void FirstPicker_Gc(void* _self, CS2SX_GcVisit visit)
 {
@@ -325,7 +325,7 @@ int SecondPicker_Echo_int(SecondPicker* self, int x)
     return self->base.vtable->Pick_int(self, x, x);
 }
 
-const CS2SX_ClassInfo SecondPicker_ClassInfo = { "SecondPicker", &Picker_ClassInfo };
+const CS2SX_ClassInfo SecondPicker_ClassInfo = { "SecondPicker", &Picker_ClassInfo, NULL };
 
 void SecondPicker_Gc(void* _self, CS2SX_GcVisit visit)
 {

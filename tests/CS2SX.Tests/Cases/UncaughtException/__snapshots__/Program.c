@@ -27,7 +27,7 @@ void Enemy_Hit(Enemy* self)
     CS2SX_NN(self->f_Target)->f_Hp--;
 }
 
-const CS2SX_ClassInfo Enemy_ClassInfo = { "Enemy", NULL };
+const CS2SX_ClassInfo Enemy_ClassInfo = { "Enemy", NULL, NULL };
 
 void Enemy_Gc(void* _self, CS2SX_GcVisit visit)
 {

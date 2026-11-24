@@ -418,6 +418,20 @@ public sealed class CSharpToC : CSharpSyntaxWalker
         }
     }
 
+    /// The C function of the nearest `override string ToString()` in the class or its
+    /// base classes (CS2SX_ClassInfo.str: "" + obj, obj.ToString()); null: the class name.
+    private string? EffectiveToString(ClassDeclarationSyntax node, string name)
+    {
+        if (Build.ProjectTypeScanner.OverridesToString(node)) return name + "_ToString";
+        if (_ctx.SemanticModel?.GetDeclaredSymbol(node) is not INamedTypeSymbol sym) return null;
+        for (var t = sym.BaseType; t != null && t.SpecialType == SpecialType.None
+             && t.Locations.Any(l => l.IsInSource); t = t.BaseType)
+            if (t.GetMembers("ToString").OfType<IMethodSymbol>()
+                    .Any(m => m.IsOverride && m.Parameters.Length == 0 && !m.IsStatic))
+                return t.Name + "_ToString";
+        return null;
+    }
+
     /// Reference-counted user class (see <see cref="Arc"/>):
     ///   T__Destroy — releases T's own fields, then the base's (no memory freed)
     ///   T_Free    — drops one reference; at zero runs the dynamic type's __Destroy, frees
@@ -439,7 +453,9 @@ public sealed class CSharpToC : CSharpSyntaxWalker
         }
 
         // Run-time type (x is T): linked to the base class.
-        _ctx.Out.WriteLine($"const CS2SX_ClassInfo {name}_ClassInfo = {{ \"{name}\", {(hasBase && TypeRegistry.ArcRoot(baseType) != null ? "&" + baseType + "_ClassInfo" : "NULL")} }};");
+        var strFn = EffectiveToString(node, name);
+        _ctx.Out.WriteLine($"const CS2SX_ClassInfo {name}_ClassInfo = {{ \"{name}\", {(hasBase && TypeRegistry.ArcRoot(baseType) != null ? "&" + baseType + "_ClassInfo" : "NULL")}, "
+            + (strFn != null ? $"(const char* (*)(void*)){strFn}" : "NULL") + " };");
         _ctx.Out.WriteLine();
 
         // Cycle collection (CS2SX_GcKind): visit the objects and lists of objects
@@ -998,13 +1014,12 @@ public sealed class CSharpToC : CSharpSyntaxWalker
         _ctx.Out.WriteLine("{");
         _ctx.Indent();
 
-        // Root classes: vtable pointer FIRST (so subclass upcasts work), then _rc.
-        // Subclasses: embed BASE struct FIRST — base already contains the vtable pointer.
-        // This guarantees (BaseType*)derived correctly addresses the vtable field.
+        // Root classes: the object header (CS2SX_ObjHdr: _rc, _dtor, _gc, _class) first,
+        // so any object reads as `object`; then the vtable pointer.
+        // Subclasses: embed BASE struct FIRST — base already contains header and vtable,
+        // so (BaseType*)derived addresses the same fields.
         if (string.IsNullOrEmpty(baseType))
         {
-            if (VTableBuilder.HasVirtualMethods(node))
-                _ctx.WriteLine(name + "_vtable* vtable;");
             _ctx.WriteLine("int _rc;");
             if (Arc.UsesDispose(DeclaredSymbol(node)))
             {
@@ -1012,6 +1027,8 @@ public sealed class CSharpToC : CSharpSyntaxWalker
                 _ctx.WriteLine("void (*_gc)(void* self, CS2SX_GcVisit visit);   // _Gc of the dynamic type");
                 _ctx.WriteLine("const CS2SX_ClassInfo* _class;   // run-time type (x is T)");
             }
+            if (VTableBuilder.HasVirtualMethods(node))
+                _ctx.WriteLine(name + "_vtable* vtable;");
         }
         else
         {
@@ -2274,7 +2291,7 @@ public sealed class CSharpToC : CSharpSyntaxWalker
             if (TypeRegistry.ArcRoot(name) != null)
             {
                 _ctx.Out.WriteLine($"const CS2SX_GcKind {name}_GcKind = {{ offsetof({name}, _rc), CS2SX_GcLeaf, (CS2SX_FreeFn){name}_Free }};");
-                _ctx.Out.WriteLine($"const CS2SX_ClassInfo {name}_ClassInfo = {{ \"{name}\", NULL }};");
+                _ctx.Out.WriteLine($"const CS2SX_ClassInfo {name}_ClassInfo = {{ \"{name}\", NULL, (const char* (*)(void*)){name}_ToString }};");
                 _ctx.Out.WriteLine();
             }
 

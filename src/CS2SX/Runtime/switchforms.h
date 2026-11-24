@@ -468,6 +468,9 @@ const char* Double_ToString(double val);
 const char* CS2SX_FmtD(double v, const char* fmt);
 const char* CS2SX_FmtI(long long v, int bits, const char* fmt);
 const char* CS2SX_FmtU(unsigned long long v, int bits, const char* fmt);
+/// Convert.ToString(v, 2 | 8 | 10 | 16): negative values in base 2/8/16 as the
+/// two's complement of the type (bits wide), lower-case hex like .NET.
+const char* CS2SX_ToBase(long long v, int bits, int toBase);
 #define CS2SX_BoolStr(b) ((b) ? "True" : "False")
 
 static inline const char* Long_ToString(long long val)

@@ -12,11 +12,11 @@ typedef struct Shape_vtable
 
 struct Shape
 {
-    Shape_vtable* vtable;
     int _rc;
     void (*_dtor)(void* self);   // __Destroy of the dynamic type
     void (*_gc)(void* self, CS2SX_GcVisit visit);   // _Gc of the dynamic type
     const CS2SX_ClassInfo* _class;   // run-time type (x is T)
+    Shape_vtable* vtable;
     const char* f_Name;
 };
 

@@ -1,0 +1,19 @@
+plain Plain Plain
+named Named(x) Named(x) Named(x)
+Named(x)
+virt Animal:Wuff Cat/Animal:Miau
+self=Cat/Animal:Miau
+obj Named(x)
+struct P4 P4 P4 Q
+join Named(a),Named(b)
+null []
+Animal:Wuff;Cat/Animal:Miau;
+io False b.txt .png b
+linq 3 1 15 1.5 30
+arr 5 5 3 5 4
+round 2 4 -2 3 1.23
+base ff 101 ffffffff 100
+date True
+ovf1 ovf2 ovf3 ovf4 Arithmetic operation resulted in an overflow.
+unchecked -2147483648 2147483646
+done

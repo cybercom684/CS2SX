@@ -12,11 +12,11 @@ typedef struct CS2SX_Step_vtable
 
 struct CS2SX_Step
 {
-    CS2SX_Step_vtable* vtable;
     int _rc;
     void (*_dtor)(void* self);   // __Destroy of the dynamic type
     void (*_gc)(void* self, CS2SX_GcVisit visit);   // _Gc of the dynamic type
     const CS2SX_ClassInfo* _class;   // run-time type (x is T)
+    CS2SX_Step_vtable* vtable;
 };
 
 CS2SX_Step* CS2SX_Step_New(void);

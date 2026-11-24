@@ -15,11 +15,11 @@ typedef struct CS2SX_Iter_vtable
 
 struct CS2SX_Iter
 {
-    CS2SX_Iter_vtable* vtable;
     int _rc;
     void (*_dtor)(void* self);   // __Destroy of the dynamic type
     void (*_gc)(void* self, CS2SX_GcVisit visit);   // _Gc of the dynamic type
     const CS2SX_ClassInfo* _class;   // run-time type (x is T)
+    CS2SX_Iter_vtable* vtable;
     void* f_Current;
 };
 
@@ -42,11 +42,11 @@ typedef struct CS2SX_Iter_int_vtable
 
 struct CS2SX_Iter_int
 {
-    CS2SX_Iter_int_vtable* vtable;
     int _rc;
     void (*_dtor)(void* self);   // __Destroy of the dynamic type
     void (*_gc)(void* self, CS2SX_GcVisit visit);   // _Gc of the dynamic type
     const CS2SX_ClassInfo* _class;   // run-time type (x is T)
+    CS2SX_Iter_int_vtable* vtable;
     int f_Current;
 };
 

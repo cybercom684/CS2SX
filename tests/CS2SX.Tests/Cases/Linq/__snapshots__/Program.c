@@ -24,7 +24,7 @@ Enemy* Enemy_New(const char* name, int hp)
     return self;
 }
 
-const CS2SX_ClassInfo Enemy_ClassInfo = { "Enemy", NULL };
+const CS2SX_ClassInfo Enemy_ClassInfo = { "Enemy", NULL, NULL };
 
 void Enemy_Gc(void* _self, CS2SX_GcVisit visit)
 {

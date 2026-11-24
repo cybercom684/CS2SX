@@ -45,7 +45,7 @@ Inner* Outer_Make(Outer* self)
     return Inner_New();
 }
 
-const CS2SX_ClassInfo Outer_ClassInfo = { "Outer", NULL };
+const CS2SX_ClassInfo Outer_ClassInfo = { "Outer", NULL, NULL };
 
 void Outer_Gc(void* _self, CS2SX_GcVisit visit)
 {
@@ -101,7 +101,7 @@ int Inner_Twice(Inner* self)
     return self->f_V * 2;
 }
 
-const CS2SX_ClassInfo Inner_ClassInfo = { "Inner", NULL };
+const CS2SX_ClassInfo Inner_ClassInfo = { "Inner", NULL, NULL };
 
 void Inner_Gc(void* _self, CS2SX_GcVisit visit)
 {
@@ -160,7 +160,7 @@ Registry* Registry_New(void)
     return self;
 }
 
-const CS2SX_ClassInfo Registry_ClassInfo = { "Registry", NULL };
+const CS2SX_ClassInfo Registry_ClassInfo = { "Registry", NULL, NULL };
 
 void Registry_Gc(void* _self, CS2SX_GcVisit visit)
 {
@@ -209,7 +209,7 @@ Link* Link_New(void)
     return self;
 }
 
-const CS2SX_ClassInfo Link_ClassInfo = { "Link", NULL };
+const CS2SX_ClassInfo Link_ClassInfo = { "Link", NULL, NULL };
 
 void Link_Gc(void* _self, CS2SX_GcVisit visit)
 {

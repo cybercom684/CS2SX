@@ -27,7 +27,7 @@ Shape* Shape_New(void)
     return self;
 }
 
-const CS2SX_ClassInfo Shape_ClassInfo = { "Shape", NULL };
+const CS2SX_ClassInfo Shape_ClassInfo = { "Shape", NULL, NULL };
 
 void Shape_Gc(void* _self, CS2SX_GcVisit visit)
 {
@@ -75,7 +75,7 @@ Painter* Painter_New(void)
     return self;
 }
 
-const CS2SX_ClassInfo Painter_ClassInfo = { "Painter", NULL };
+const CS2SX_ClassInfo Painter_ClassInfo = { "Painter", NULL, NULL };
 
 void Painter_Gc(void* _self, CS2SX_GcVisit visit)
 {

@@ -40,6 +40,21 @@ internal static class FormatArg
             "char" => ("%s", "CS2SX_CharStr(" + code + ")"),
             _ when CS2SX.Core.TypeRegistry.IsRecordClass(csType) => ("%s", csType.Trim().TrimEnd('?') + "_ToString(" + code + ")"),
             _ when CS2SX.Core.TypeRegistry.IsUserDefinedEnum(csType) => ("%s", csType + "_ToString(" + code + ")"),
+            _ when ObjectString(csType, code) is { } s => ("%s", s),
             _ => (spec, code),
         };
+
+    /// A user class or struct as a string, as .NET shows it: its (virtual) ToString()
+    /// override, else the type name. Objects: null → "". Null for other types.
+    public static string? ObjectString(string csType, string code)
+    {
+        var t = csType.Trim().TrimEnd('?');
+        if (CS2SX.Core.TypeRegistry.IsUserStruct(t))
+            return CS2SX.Core.TypeRegistry.StructHasToString(t)
+                ? "({ __auto_type _ts = (" + code + "); " + t + "_ToString(&_ts); })"
+                : "\"" + t + "\"";
+        if (CS2SX.Core.TypeRegistry.ArcRoot(t) != null)
+            return "CS2SX_Obj_ToString((void*)(" + code + "))";
+        return null;
+    }
 }

@@ -230,6 +230,8 @@ public sealed class StringMethodHandler : InvocationHandlerBase
             SpecialType.System_Single => ("%s", "Float_ToString(X)"),
             SpecialType.System_Boolean => ("%s", "CS2SX_BoolStr(X)"),
             SpecialType.System_Char => ("%s", "CS2SX_CharStr(X)"),
+            _ when elem.Locations.Any(l => l.IsInSource) && Writers.FormatArg.ObjectString(elem.Name, "X") is { } s
+                => ("%s", s.Replace("(X)", "((X))")),
             _ => (null, null),
         };
         if (spec == null) return null;
@@ -387,10 +389,22 @@ public sealed class StringMethodHandler : InvocationHandlerBase
 
         if (recvType is "object" or "object?")
             return "CS2SX_Obj_ToString(" + receiver + ")";
+        // base.ToString(): the base class's implementation, not the virtual one.
+        if (receiverExpr is Microsoft.CodeAnalysis.CSharp.Syntax.BaseExpressionSyntax)
+        {
+            for (var t = ctx.SemanticModel?.GetTypeInfo(receiverExpr).Type as INamedTypeSymbol;
+                 t != null && t.SpecialType == SpecialType.None && t.Locations.Any(l => l.IsInSource);
+                 t = t.BaseType)
+                if (t.GetMembers("ToString").OfType<IMethodSymbol>().Any(m => m.Parameters.Length == 0 && !m.IsStatic))
+                    return t.Name + "_ToString((" + t.Name + "*)self)";
+            return "((const CS2SX_ObjHdr*)self)->_class->name";
+        }
         if (recvType is "char" or "u16")
             return "CS2SX_CharStr(" + receiver + ")";
         if (CS2SX.Core.TypeRegistry.IsRecordClass(recvType))
             return recvType.Trim().TrimEnd('?') + "_ToString(" + receiver + ")";
+        if (Writers.FormatArg.ObjectString(recvType, receiver) is { } objStr)
+            return objStr;
         // Every user enum has a name function (_forward.h, BuildPipeline).
         if (members != null || CS2SX.Core.TypeRegistry.IsUserDefinedEnum(enumName))
             return enumName + "_ToString(" + receiver + ")";

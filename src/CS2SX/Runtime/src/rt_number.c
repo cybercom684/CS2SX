@@ -417,3 +417,17 @@ const char* CS2SX_FmtU(unsigned long long v, int bits, const char* fmt)
     if ((kind == 'G' || kind == 'g' || kind == 'R' || kind == 'r') && !fmt[1]) return ULong_ToString(v);
     return CS2SX_FmtD((double)v, fmt);
 }
+
+const char* CS2SX_ToBase(long long v, int bits, int toBase)
+{
+    if (toBase == 10) return Long_ToString(v);
+    if (toBase != 2 && toBase != 8 && toBase != 16)
+        CS2SX_ThrowNew(&CS2SX_TI_ArgumentException, "Invalid Base.");
+    unsigned long long u = (unsigned long long)v;
+    if (bits < 64) u &= (1ULL << bits) - 1;
+    char out[72];
+    int i = (int)sizeof out - 1;
+    out[i] = 0;
+    do { out[--i] = "0123456789abcdef"[u % (unsigned)toBase]; u /= (unsigned)toBase; } while (u);
+    return fmt_out(out + i);
+}

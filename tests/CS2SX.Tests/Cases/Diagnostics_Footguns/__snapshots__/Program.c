@@ -19,7 +19,7 @@ Settings* Settings_New(void)
     return self;
 }
 
-const CS2SX_ClassInfo Settings_ClassInfo = { "Settings", NULL };
+const CS2SX_ClassInfo Settings_ClassInfo = { "Settings", NULL, NULL };
 
 void Settings_Gc(void* _self, CS2SX_GcVisit visit)
 {
@@ -95,7 +95,7 @@ void Player_Free(Player* self)
     CS2SX_TRACE("Player.Free", "Program.cs");
 }
 
-const CS2SX_ClassInfo Player_ClassInfo = { "Player", NULL };
+const CS2SX_ClassInfo Player_ClassInfo = { "Player", NULL, NULL };
 
 void Player_Gc(void* _self, CS2SX_GcVisit visit)
 {

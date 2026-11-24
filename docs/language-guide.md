@@ -108,6 +108,8 @@ Console.WriteLine(t.LautMachen()); // → "Wuff" (VTable-Dispatch)
 
 Einfache Vererbung mit virtuellen Methoden funktioniert über eine VTable (Funktionszeiger-Struct).
 
+Objekte in Strings (`"Tier: " + t`, `$"{t}"`, `Console.WriteLine(t)`, `t.ToString()`, `string.Join`) nutzen wie in .NET die überschriebene `ToString()`-Methode, auch die einer Basisklasse und virtuell über die Vererbung hinweg. `base.ToString()` ruft die der Basisklasse. Ohne eigene `ToString()` erscheint der Klassenname, `null` als leerer Text. Bei Structs gilt dasselbe.
+
 ### Interfaces
 
 ```csharp
@@ -196,7 +198,7 @@ if (o is int n) Console.WriteLine(n + 1);        // 6
 string text = o switch { string s => s, int i => "Zahl " + i, Hund h => h.Name, _ => "?" };
 int wert = (int)o;                                // (string)o würde InvalidCastException werfen
 Hund? h2 = o as Hund;                             // null, weil o kein Hund ist
-Console.WriteLine(o);                             // "5", bei Objekten der Klassenname
+Console.WriteLine(o);                             // "5", bei Objekten ihr ToString()
 
 var daten = new Dictionary<string, object> { ["name"] = "Mia", ["level"] = 3 };
 int level = (int)daten["level"];
@@ -358,7 +360,7 @@ int erst = zahlen.First(n => n > 3);
 var sortiert = zahlen.OrderByDescending(n => n).ToList();
 ```
 
-LINQ-Abfragen werden inline zu C-Schleifen expandiert — kein IQueryable, keine Lazy Evaluation.
+LINQ-Abfragen werden inline zu C-Schleifen expandiert — kein IQueryable, keine Lazy Evaluation. `ToArray()` liefert ein echtes Array (`int[] a = liste.ToArray();`, `a.Length`), `Min`/`Max` mit Selektor den Typ des Selektors (`Max(x => x * 3)` über `int` ist ein `int`).
 
 ---
 
@@ -518,7 +520,12 @@ double log = Math.Log(Math.E);       // → log()
 double pow = Math.Pow(2.0, 10.0);    // → pow()
 int min = Math.Min(3, 7);
 int geklammert = Math.Clamp(x, 0, 100);
+double r = Math.Round(2.5);          // → 2, wie .NET: Hälften zur geraden Zahl
+double r2 = Math.Round(2.5, MidpointRounding.AwayFromZero); // → 3
+string hex = Convert.ToString(255, 16); // → "ff" (Basis 2, 8, 10, 16)
 ```
+
+`checked(a + b)`, `checked { … }` und `checked((int)langerWert)` werfen bei Überlauf eine `OverflowException` (für `+`, `-`, `*`, `+=`, `-=`, `*=` und Umwandlungen zwischen Ganzzahltypen). Ohne `checked` laufen Ganzzahlen wie in C# über.
 
 ---
 

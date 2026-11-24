@@ -47,7 +47,7 @@ void CS2SX_Iter_Dispose(CS2SX_Iter* self)
     CS2SX_TRACE("CS2SX_Iter.Dispose", "Program.cs");
 }
 
-const CS2SX_ClassInfo CS2SX_Iter_ClassInfo = { "CS2SX_Iter", NULL };
+const CS2SX_ClassInfo CS2SX_Iter_ClassInfo = { "CS2SX_Iter", NULL, NULL };
 
 void CS2SX_Iter_Gc(void* _self, CS2SX_GcVisit visit)
 {
@@ -115,7 +115,7 @@ void CS2SX_Iter_int_Dispose(CS2SX_Iter_int* self)
     CS2SX_TRACE("CS2SX_Iter_int.Dispose", "Program.cs");
 }
 
-const CS2SX_ClassInfo CS2SX_Iter_int_ClassInfo = { "CS2SX_Iter_int", NULL };
+const CS2SX_ClassInfo CS2SX_Iter_int_ClassInfo = { "CS2SX_Iter_int", NULL, NULL };
 
 void CS2SX_Iter_int_Gc(void* _self, CS2SX_GcVisit visit)
 {
@@ -188,7 +188,7 @@ Pair* Pair_Retain(Pair* self)
 }
 
 const CS2SX_GcKind Pair_GcKind = { offsetof(Pair, _rc), CS2SX_GcLeaf, (CS2SX_FreeFn)Pair_Free };
-const CS2SX_ClassInfo Pair_ClassInfo = { "Pair", NULL };
+const CS2SX_ClassInfo Pair_ClassInfo = { "Pair", NULL, (const char* (*)(void*))Pair_ToString };
 
 int Hero_Equals(Hero* a, Hero* b)
 {
@@ -239,7 +239,7 @@ Hero* Hero_Retain(Hero* self)
 }
 
 const CS2SX_GcKind Hero_GcKind = { offsetof(Hero, _rc), CS2SX_GcLeaf, (CS2SX_FreeFn)Hero_Free };
-const CS2SX_ClassInfo Hero_ClassInfo = { "Hero", NULL };
+const CS2SX_ClassInfo Hero_ClassInfo = { "Hero", NULL, (const char* (*)(void*))Hero_ToString };
 
 void Deck_Ctor(Deck* self)
 {
@@ -275,7 +275,7 @@ CS2SX_Iter_int* Deck_GetEnumerator(Deck* self)
     return ((CS2SX_Iter_int*)cs2sx_sm);
 }
 
-const CS2SX_ClassInfo Deck_ClassInfo = { "Deck", NULL };
+const CS2SX_ClassInfo Deck_ClassInfo = { "Deck", NULL, NULL };
 
 void Deck_Gc(void* _self, CS2SX_GcVisit visit)
 {
@@ -362,7 +362,7 @@ int GetEnumerator_Iter_MoveNext(GetEnumerator_Iter* self)
     return 0;
 }
 
-const CS2SX_ClassInfo GetEnumerator_Iter_ClassInfo = { "GetEnumerator_Iter", &CS2SX_Iter_int_ClassInfo };
+const CS2SX_ClassInfo GetEnumerator_Iter_ClassInfo = { "GetEnumerator_Iter", &CS2SX_Iter_int_ClassInfo, NULL };
 
 void GetEnumerator_Iter_Gc(void* _self, CS2SX_GcVisit visit)
 {
@@ -436,7 +436,7 @@ const char* Node_Name(Node* self, const char* prefix)
     return _sb0;
 }
 
-const CS2SX_ClassInfo Node_ClassInfo = { "Node", NULL };
+const CS2SX_ClassInfo Node_ClassInfo = { "Node", NULL, NULL };
 
 void Node_Gc(void* _self, CS2SX_GcVisit visit)
 {

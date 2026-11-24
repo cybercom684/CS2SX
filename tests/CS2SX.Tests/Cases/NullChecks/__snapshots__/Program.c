@@ -40,7 +40,7 @@ const char* Node_Kind(Node* self)
     return "node";
 }
 
-const CS2SX_ClassInfo Node_ClassInfo = { "Node", NULL };
+const CS2SX_ClassInfo Node_ClassInfo = { "Node", NULL, NULL };
 
 void Node_Gc(void* _self, CS2SX_GcVisit visit)
 {
@@ -99,7 +99,7 @@ int Square_Area(Square* self)
     return 4;
 }
 
-const CS2SX_ClassInfo Square_ClassInfo = { "Square", NULL };
+const CS2SX_ClassInfo Square_ClassInfo = { "Square", NULL, NULL };
 
 void Square_Gc(void* _self, CS2SX_GcVisit visit)
 {

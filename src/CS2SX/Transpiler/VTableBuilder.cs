@@ -174,7 +174,8 @@ public static class VTableBuilder
                             .OfType<Microsoft.CodeAnalysis.IMethodSymbol>()
                             .Where(m => (m.IsVirtual || m.IsAbstract || m.IsOverride) && !m.IsStatic))
                         {
-                            if (!allSlots.ContainsKey(bm.Name) && !bm.IsAbstract)
+                            if (!allSlots.ContainsKey(bm.Name) && !bm.IsAbstract
+                                && !IsObjectMember(bm.Name, bm.Parameters.Length))
                                 allSlots[bm.Name] = (bm, ancestor);
                         }
                         ancestor = ancestor.BaseType;
@@ -381,6 +382,12 @@ public static class VTableBuilder
 
     private static List<MethodDeclarationSyntax> GetOverrideMethods(ClassDeclarationSyntax node)
         => node.Members.OfType<MethodDeclarationSyntax>()
-            .Where(m => m.Modifiers.Any(mod => mod.IsKind(SyntaxKind.OverrideKeyword)))
+            .Where(m => m.Modifiers.Any(mod => mod.IsKind(SyntaxKind.OverrideKeyword))
+                     && !IsObjectMember(m.Identifier.Text, m.ParameterList.Parameters.Count))
             .ToList();
+
+    /// Overrides of System.Object's virtuals: no vtable slot (ToString goes through
+    /// CS2SX_ClassInfo.str, Equals/GetHashCode are called directly).
+    internal static bool IsObjectMember(string name, int paramCount)
+        => (name is "ToString" or "GetHashCode" && paramCount == 0) || (name == "Equals" && paramCount == 1);
 }

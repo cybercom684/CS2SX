@@ -46,7 +46,7 @@ void CS2SX_Iter_Dispose(CS2SX_Iter* self)
     CS2SX_TRACE("CS2SX_Iter.Dispose", "Program.cs");
 }
 
-const CS2SX_ClassInfo CS2SX_Iter_ClassInfo = { "CS2SX_Iter", NULL };
+const CS2SX_ClassInfo CS2SX_Iter_ClassInfo = { "CS2SX_Iter", NULL, NULL };
 
 void CS2SX_Iter_Gc(void* _self, CS2SX_GcVisit visit)
 {
@@ -114,7 +114,7 @@ void CS2SX_Iter_int_Dispose(CS2SX_Iter_int* self)
     CS2SX_TRACE("CS2SX_Iter_int.Dispose", "Program.cs");
 }
 
-const CS2SX_ClassInfo CS2SX_Iter_int_ClassInfo = { "CS2SX_Iter_int", NULL };
+const CS2SX_ClassInfo CS2SX_Iter_int_ClassInfo = { "CS2SX_Iter_int", NULL, NULL };
 
 void CS2SX_Iter_int_Gc(void* _self, CS2SX_GcVisit visit)
 {
@@ -179,7 +179,7 @@ void CS2SX_Iter_str_Dispose(CS2SX_Iter_str* self)
     CS2SX_TRACE("CS2SX_Iter_str.Dispose", "Program.cs");
 }
 
-const CS2SX_ClassInfo CS2SX_Iter_str_ClassInfo = { "CS2SX_Iter_str", NULL };
+const CS2SX_ClassInfo CS2SX_Iter_str_ClassInfo = { "CS2SX_Iter_str", NULL, NULL };
 
 void CS2SX_Iter_str_Gc(void* _self, CS2SX_GcVisit visit)
 {
@@ -234,7 +234,7 @@ Tree* Tree_New(int v, Tree* l, Tree* r)
     return self;
 }
 
-const CS2SX_ClassInfo Tree_ClassInfo = { "Tree", NULL };
+const CS2SX_ClassInfo Tree_ClassInfo = { "Tree", NULL, NULL };
 
 void Tree_Gc(void* _self, CS2SX_GcVisit visit)
 {
@@ -333,7 +333,7 @@ CS2SX_Iter_int* Blinker_Run(Blinker* self, int times)
     return ((CS2SX_Iter_int*)cs2sx_sm);
 }
 
-const CS2SX_ClassInfo Blinker_ClassInfo = { "Blinker", NULL };
+const CS2SX_ClassInfo Blinker_ClassInfo = { "Blinker", NULL, NULL };
 
 void Blinker_Gc(void* _self, CS2SX_GcVisit visit)
 {
@@ -432,7 +432,7 @@ int Run_Iter_MoveNext(Run_Iter* self)
     return 0;
 }
 
-const CS2SX_ClassInfo Run_Iter_ClassInfo = { "Run_Iter", &CS2SX_Iter_int_ClassInfo };
+const CS2SX_ClassInfo Run_Iter_ClassInfo = { "Run_Iter", &CS2SX_Iter_int_ClassInfo, NULL };
 
 void Run_Iter_Gc(void* _self, CS2SX_GcVisit visit)
 {
@@ -835,7 +835,7 @@ int Over_Iter_MoveNext(Over_Iter* self)
     return 0;
 }
 
-const CS2SX_ClassInfo Over_Iter_ClassInfo = { "Over_Iter", &CS2SX_Iter_str_ClassInfo };
+const CS2SX_ClassInfo Over_Iter_ClassInfo = { "Over_Iter", &CS2SX_Iter_str_ClassInfo, NULL };
 
 void Over_Iter_Gc(void* _self, CS2SX_GcVisit visit)
 {
@@ -934,7 +934,7 @@ int FromSequence_Iter_MoveNext(FromSequence_Iter* self)
     return 0;
 }
 
-const CS2SX_ClassInfo FromSequence_Iter_ClassInfo = { "FromSequence_Iter", &CS2SX_Iter_str_ClassInfo };
+const CS2SX_ClassInfo FromSequence_Iter_ClassInfo = { "FromSequence_Iter", &CS2SX_Iter_str_ClassInfo, NULL };
 
 void FromSequence_Iter_Gc(void* _self, CS2SX_GcVisit visit)
 {
@@ -1022,7 +1022,7 @@ int Wait_Iter_MoveNext(Wait_Iter* self)
     return 0;
 }
 
-const CS2SX_ClassInfo Wait_Iter_ClassInfo = { "Wait_Iter", &CS2SX_Iter_ClassInfo };
+const CS2SX_ClassInfo Wait_Iter_ClassInfo = { "Wait_Iter", &CS2SX_Iter_ClassInfo, NULL };
 
 void Wait_Iter_Gc(void* _self, CS2SX_GcVisit visit)
 {

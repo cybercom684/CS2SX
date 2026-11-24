@@ -21,7 +21,7 @@ Item* Item_New(const char* n)
     return self;
 }
 
-const CS2SX_ClassInfo Item_ClassInfo = { "Item", NULL };
+const CS2SX_ClassInfo Item_ClassInfo = { "Item", NULL, NULL };
 
 void Item_Gc(void* _self, CS2SX_GcVisit visit)
 {
@@ -115,7 +115,7 @@ int Bag_Find(Bag* self, const char* name, Item** found)
     return (*found) != NULL;
 }
 
-const CS2SX_ClassInfo Bag_ClassInfo = { "Bag", NULL };
+const CS2SX_ClassInfo Bag_ClassInfo = { "Bag", NULL, NULL };
 
 void Bag_Gc(void* _self, CS2SX_GcVisit visit)
 {
@@ -184,7 +184,7 @@ Grid* Grid_New(void)
     return self;
 }
 
-const CS2SX_ClassInfo Grid_ClassInfo = { "Grid", NULL };
+const CS2SX_ClassInfo Grid_ClassInfo = { "Grid", NULL, NULL };
 
 void Grid_Gc(void* _self, CS2SX_GcVisit visit)
 {
@@ -244,7 +244,7 @@ BigBag* BigBag_New(void)
     return self;
 }
 
-const CS2SX_ClassInfo BigBag_ClassInfo = { "BigBag", &Bag_ClassInfo };
+const CS2SX_ClassInfo BigBag_ClassInfo = { "BigBag", &Bag_ClassInfo, NULL };
 
 void BigBag_Gc(void* _self, CS2SX_GcVisit visit)
 {

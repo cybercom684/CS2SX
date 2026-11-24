@@ -39,7 +39,7 @@ void Game_Step(Game* self, int i)
     printf("%s\n", _ps_0 ? _ps_0 : "");
 }
 
-const CS2SX_ClassInfo Game_ClassInfo = { "Game", NULL };
+const CS2SX_ClassInfo Game_ClassInfo = { "Game", NULL, NULL };
 
 void Game_Gc(void* _self, CS2SX_GcVisit visit)
 {

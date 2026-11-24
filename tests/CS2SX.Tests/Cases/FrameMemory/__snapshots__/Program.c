@@ -22,7 +22,7 @@ Counter* Counter_New(void)
     return self;
 }
 
-const CS2SX_ClassInfo Counter_ClassInfo = { "Counter", NULL };
+const CS2SX_ClassInfo Counter_ClassInfo = { "Counter", NULL, NULL };
 
 void Counter_Gc(void* _self, CS2SX_GcVisit visit)
 {
@@ -72,7 +72,7 @@ Item* Item_New(int v)
     return self;
 }
 
-const CS2SX_ClassInfo Item_ClassInfo = { "Item", NULL };
+const CS2SX_ClassInfo Item_ClassInfo = { "Item", NULL, NULL };
 
 void Item_Gc(void* _self, CS2SX_GcVisit visit)
 {
@@ -131,7 +131,7 @@ int Wrapped_Get(Wrapped* self)
     return self->f_V;
 }
 
-const CS2SX_ClassInfo Wrapped_ClassInfo = { "Wrapped", NULL };
+const CS2SX_ClassInfo Wrapped_ClassInfo = { "Wrapped", NULL, NULL };
 
 void Wrapped_Gc(void* _self, CS2SX_GcVisit visit)
 {

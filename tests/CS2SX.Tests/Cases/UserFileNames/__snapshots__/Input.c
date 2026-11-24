@@ -32,7 +32,7 @@ void InputMapper_Poll(InputMapper* self)
     }
 }
 
-const CS2SX_ClassInfo InputMapper_ClassInfo = { "InputMapper", NULL };
+const CS2SX_ClassInfo InputMapper_ClassInfo = { "InputMapper", NULL, NULL };
 
 void InputMapper_Gc(void* _self, CS2SX_GcVisit visit)
 {

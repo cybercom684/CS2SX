@@ -83,6 +83,14 @@ public sealed class OwnMethodHandler : InvocationHandlerBase
                 var symbol = symbolInfo.Symbol
                               ?? symbolInfo.CandidateSymbols.FirstOrDefault();
 
+                // ToString() on the implicit `this` of an object: virtual, through its type info.
+                if (symbol is IMethodSymbol { Name: "ToString", IsStatic: false, Parameters.Length: 0 }
+                    && TypeRegistry.ArcRoot(ctx.CurrentClass) != null)
+                {
+                    result = "CS2SX_Obj_ToString((void*)self)";
+                    return true;
+                }
+
                 // Virtual/abstract/override method called on the implicit `this`:
                 // C# dispatches dynamically, so go through the vtable (which lives in
                 // the root class of the hierarchy) — never call Class_Method directly,

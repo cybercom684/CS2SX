@@ -20,7 +20,7 @@ Shape* Shape_New(void)
     return self;
 }
 
-const CS2SX_ClassInfo Shape_ClassInfo = { "Shape", NULL };
+const CS2SX_ClassInfo Shape_ClassInfo = { "Shape", NULL, NULL };
 
 void Shape_Gc(void* _self, CS2SX_GcVisit visit)
 {
@@ -191,7 +191,7 @@ const char* Printer_All(Printer* self)
     return _sb9;
 }
 
-const CS2SX_ClassInfo Printer_ClassInfo = { "Printer", NULL };
+const CS2SX_ClassInfo Printer_ClassInfo = { "Printer", NULL, NULL };
 
 void Printer_Gc(void* _self, CS2SX_GcVisit visit)
 {

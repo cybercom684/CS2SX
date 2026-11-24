@@ -21,7 +21,7 @@ Label2* Label2_New(void)
     return self;
 }
 
-const CS2SX_ClassInfo Label2_ClassInfo = { "Label2", NULL };
+const CS2SX_ClassInfo Label2_ClassInfo = { "Label2", NULL, NULL };
 
 void Label2_Gc(void* _self, CS2SX_GcVisit visit)
 {

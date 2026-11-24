@@ -244,6 +244,10 @@ public static class TypeRegistry
         if (hasConstructor) s_userStructsWithCtor.Add(name);
     }
     public static bool IsUserStruct(string csType) => s_userStructTypes.Contains(csType.Trim());
+    // Structs that override ToString(): "" + s, $"{s}" call S_ToString(&s).
+    private static readonly HashSet<string> s_structsWithToString = new(StringComparer.Ordinal);
+    public static void RegisterStructToString(string name) => s_structsWithToString.Add(name);
+    public static bool StructHasToString(string csType) => s_structsWithToString.Contains(csType.Trim().TrimEnd('?'));
 
     // `record` classes: value equality (T_Equals) and "T { A = 1 }" (T_ToString).
     private static readonly HashSet<string> s_recordClasses = new(StringComparer.Ordinal);

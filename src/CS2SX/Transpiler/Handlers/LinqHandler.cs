@@ -124,8 +124,10 @@ public sealed class LinqHandler : InvocationHandlerBase
         {
             try
             {
+                // The receiver's own type: an extension call converts it to IEnumerable<T>,
+                // which would make an array (arr.Where(…), list.ToArray().Where(…)) a list.
                 var typeInfo = ctx.SemanticModel.GetTypeInfo(mem.Expression);
-                var sym = typeInfo.ConvertedType ?? typeInfo.Type;
+                var sym = typeInfo.Type is IArrayTypeSymbol ? typeInfo.Type : typeInfo.ConvertedType ?? typeInfo.Type;
                 if (sym != null && sym is not Microsoft.CodeAnalysis.IErrorTypeSymbol)
                     colType = TranspilerContext.FormatTypeSymbol(sym);
             }
@@ -189,7 +191,8 @@ public sealed class LinqHandler : InvocationHandlerBase
         }
         else
         {
-            listCount = $"(int)(sizeof({sourceExpr})/sizeof({sourceExpr}[0]))";
+            // Header arrays (heap and CS2SX_ARR_LOCAL) carry their length.
+            listCount = $"CS2SX_ArrLen({sourceExpr})";
         }
 
         // Lambda / predicate arg
@@ -515,13 +518,18 @@ public sealed class LinqHandler : InvocationHandlerBase
                 {
                     if (lambdaArg != null)
                     {
-                        var projFn = MakeLifter().LiftLambda(lambdaArg, hintType: $"Func<{inner},double>", elementTypeHint: inner);
+                        // The selector's own type: Max(x => x * 3) over ints is an int.
+                        var keyCs = InferLambdaBody(lambdaArg, inner);
+                        if (keyCs is not ("int" or "long" or "short" or "byte" or "sbyte" or "ushort" or "uint" or "ulong" or "float" or "double" or "char"))
+                            keyCs = "double";
+                        var keyC = TypeRegistry.MapType(keyCs);
+                        var projFn = MakeLifter().LiftLambda(lambdaArg, hintType: $"Func<{inner},{keyCs}>", elementTypeHint: inner);
                         var idxVar = ctx.NextTmp("i");
                         var minVar = ctx.NextTmp("minv");
                         var countExpr = listCount.Replace("_idx", "0");
-                        ctx.WriteLine($"double {minVar} = ({countExpr} > 0) ? (double){projFn}({listGet.Replace("_idx", "0")}) : 0.0;");
+                        ctx.WriteLine($"{keyC} {minVar} = ({countExpr} > 0) ? ({keyC}){projFn}({listGet.Replace("_idx", "0")}) : 0;");
                         ctx.WriteLine($"for (int {idxVar} = 1; {idxVar} < {listCount.Replace("_idx", idxVar)}; {idxVar}++)");
-                        ctx.WriteLine($"{{ double _mv = (double){projFn}({listGet.Replace("_idx", idxVar)}); if (_mv < {minVar}) {minVar} = _mv; }}");
+                        ctx.WriteLine($"{{ {keyC} _mv = ({keyC}){projFn}({listGet.Replace("_idx", idxVar)}); if (_mv < {minVar}) {minVar} = _mv; }}");
                         result = $"({countExpr} > 0 ? {minVar} : (CS2SX_ThrowNoElements(), {minVar}))";
                     }
                     else
@@ -541,13 +549,18 @@ public sealed class LinqHandler : InvocationHandlerBase
                 {
                     if (lambdaArg != null)
                     {
-                        var projFn = MakeLifter().LiftLambda(lambdaArg, hintType: $"Func<{inner},double>", elementTypeHint: inner);
+                        // The selector's own type: Max(x => x * 3) over ints is an int.
+                        var keyCs = InferLambdaBody(lambdaArg, inner);
+                        if (keyCs is not ("int" or "long" or "short" or "byte" or "sbyte" or "ushort" or "uint" or "ulong" or "float" or "double" or "char"))
+                            keyCs = "double";
+                        var keyC = TypeRegistry.MapType(keyCs);
+                        var projFn = MakeLifter().LiftLambda(lambdaArg, hintType: $"Func<{inner},{keyCs}>", elementTypeHint: inner);
                         var idxVar = ctx.NextTmp("i");
                         var maxVar = ctx.NextTmp("maxv");
                         var countExpr = listCount.Replace("_idx", "0");
-                        ctx.WriteLine($"double {maxVar} = ({countExpr} > 0) ? (double){projFn}({listGet.Replace("_idx", "0")}) : 0.0;");
+                        ctx.WriteLine($"{keyC} {maxVar} = ({countExpr} > 0) ? ({keyC}){projFn}({listGet.Replace("_idx", "0")}) : 0;");
                         ctx.WriteLine($"for (int {idxVar} = 1; {idxVar} < {listCount.Replace("_idx", idxVar)}; {idxVar}++)");
-                        ctx.WriteLine($"{{ double _mv = (double){projFn}({listGet.Replace("_idx", idxVar)}); if (_mv > {maxVar}) {maxVar} = _mv; }}");
+                        ctx.WriteLine($"{{ {keyC} _mv = ({keyC}){projFn}({listGet.Replace("_idx", idxVar)}); if (_mv > {maxVar}) {maxVar} = _mv; }}");
                         result = $"({countExpr} > 0 ? {maxVar} : (CS2SX_ThrowNoElements(), {maxVar}))";
                     }
                     else
@@ -644,8 +657,21 @@ public sealed class LinqHandler : InvocationHandlerBase
                     return true;
                 }
 
-            case "ToList":
             case "ToArray":
+                {
+                    // A C# array (length header), not a list: arr.Length, int[] x = …
+                    var elemC = ArrayModel.ElemCType(inner);
+                    var outVar = ctx.NextTmp("toa");
+                    var idxVar = ctx.NextTmp("i");
+                    ctx.WriteLine($"{elemC}* {outVar} = {ArrayModel.NewHeap(elemC, listCount.Replace("_idx", "0"))};");
+                    ctx.WriteLine($"for (int {idxVar} = 0; {idxVar} < {listCount.Replace("_idx", idxVar)}; {idxVar}++)");
+                    ctx.WriteLine($"  {outVar}[{idxVar}] = {listGet.Replace("_idx", idxVar)};");
+                    result = outVar;
+                    ctx.LocalTypes[outVar] = inner + "[]";
+                    return true;
+                }
+
+            case "ToList":
                 {
                     var outVar = ctx.NextTmp("tol");
                     var idxVar = ctx.NextTmp("i");

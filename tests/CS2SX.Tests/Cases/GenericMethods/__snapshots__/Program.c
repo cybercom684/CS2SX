@@ -94,7 +94,7 @@ Node* Node_New(int v)
     return self;
 }
 
-const CS2SX_ClassInfo Node_ClassInfo = { "Node", NULL };
+const CS2SX_ClassInfo Node_ClassInfo = { "Node", NULL, NULL };
 
 void Node_Gc(void* _self, CS2SX_GcVisit visit)
 {

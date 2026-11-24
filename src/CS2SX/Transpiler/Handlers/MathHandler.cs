@@ -118,13 +118,31 @@ public sealed class MathHandler : InvocationHandlerBase
             return true;
         }
 
-        // Math.Round(value, digits): C round() takes one arg, so scale manually.
-        if ((calleeStr is "Math.Round" or "System.Math.Round" or "MathF.Round")
-            && args.Count == 2)
+        // Math.Round(value[, digits][, MidpointRounding]): like .NET, halves go to the
+        // even neighbour by default (rint: 2.5 → 2, 3.5 → 4); C round() rounds them away.
+        if (calleeStr is "Math.Round" or "System.Math.Round" or "MathF.Round" && args.Count >= 1)
         {
-            var roundFn = calleeStr == "MathF.Round" ? "roundf" : "round";
-            var powFn   = calleeStr == "MathF.Round" ? "powf"   : "pow";
-            result = $"({roundFn}(({args[0]}) * {powFn}(10, ({args[1]}))) / {powFn}(10, ({args[1]})))";
+            bool f = calleeStr == "MathF.Round";
+            string? digits = null;
+            var mode = "ToEven";
+            for (int i = 1; i < args.Count && i < inv.ArgumentList.Arguments.Count; i++)
+            {
+                var a = inv.ArgumentList.Arguments[i].Expression.ToString();
+                if (a.Contains("MidpointRounding.")) mode = a[(a.LastIndexOf('.') + 1)..];
+                else digits = args[i];
+            }
+            var fn = mode switch
+            {
+                "AwayFromZero" => "round",
+                "ToZero" => "trunc",
+                "ToNegativeInfinity" => "floor",
+                "ToPositiveInfinity" => "ceil",
+                _ => "rint",
+            } + (f ? "f" : "");
+            var pow = f ? "powf" : "pow";
+            result = digits == null
+                ? $"{fn}({args[0]})"
+                : $"({fn}(({args[0]}) * {pow}(10, ({digits}))) / {pow}(10, ({digits})))";
             return true;
         }
 

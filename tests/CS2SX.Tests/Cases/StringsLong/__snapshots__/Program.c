@@ -21,7 +21,7 @@ Note* Note_New(void)
     return self;
 }
 
-const CS2SX_ClassInfo Note_ClassInfo = { "Note", NULL };
+const CS2SX_ClassInfo Note_ClassInfo = { "Note", NULL, NULL };
 
 void Note_Gc(void* _self, CS2SX_GcVisit visit)
 {

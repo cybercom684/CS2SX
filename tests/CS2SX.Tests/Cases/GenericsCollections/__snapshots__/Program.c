@@ -24,7 +24,7 @@ Item* Item_New(const char* name, int count)
     return self;
 }
 
-const CS2SX_ClassInfo Item_ClassInfo = { "Item", NULL };
+const CS2SX_ClassInfo Item_ClassInfo = { "Item", NULL, NULL };
 
 void Item_Gc(void* _self, CS2SX_GcVisit visit)
 {
