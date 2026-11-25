@@ -2813,14 +2813,28 @@ public sealed class ExpressionWriter : IExpressionWriter
     internal static string CConstantLiteral(object value) => value switch
     {
         bool b => b ? "1" : "0",
-        float f => f.ToString("R", System.Globalization.CultureInfo.InvariantCulture) + "f",
-        double d => d.ToString("R", System.Globalization.CultureInfo.InvariantCulture),
+        float f => FloatingLiteral(f, float.IsNaN(f), float.IsPositiveInfinity(f), float.IsNegativeInfinity(f),
+                                   f.ToString("R", System.Globalization.CultureInfo.InvariantCulture), "f"),
+        double d => FloatingLiteral(d, double.IsNaN(d), double.IsPositiveInfinity(d), double.IsNegativeInfinity(d),
+                                    d.ToString("R", System.Globalization.CultureInfo.InvariantCulture), ""),
         char c => ((int)c).ToString(System.Globalization.CultureInfo.InvariantCulture),
         long l => l.ToString(System.Globalization.CultureInfo.InvariantCulture) + "LL",
         ulong ul => ul.ToString(System.Globalization.CultureInfo.InvariantCulture) + "ULL",
         uint ui => ui.ToString(System.Globalization.CultureInfo.InvariantCulture) + "u",
         _ => Convert.ToString(value, System.Globalization.CultureInfo.InvariantCulture) ?? "0",
     };
+
+    /// A float/double constant as a C literal of that type: 6 → 6.0f (C has no "6f",
+    /// and a plain 6 would be an int: 3 / 2 == 1), NaN/Infinity as the C macros.
+    private static string FloatingLiteral(double v, bool nan, bool pos, bool neg, string text, string suffix)
+    {
+        var c = suffix == "f" ? "float" : "double";
+        if (nan) return $"(({c})NAN)";
+        if (pos) return $"(({c})INFINITY)";
+        if (neg) return $"(-({c})INFINITY)";
+        if (!text.Contains('.') && !text.Contains('E') && !text.Contains('e')) text += ".0";
+        return text + suffix;
+    }
 
     /// The constructor a `new T(...)` resolves to (null without semantic model).
     private IMethodSymbol? ResolveCtor(SyntaxNode? creation)

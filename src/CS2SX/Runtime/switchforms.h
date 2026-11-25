@@ -551,6 +551,12 @@ int CS2SX_CharIsWhiteSpace(uint16_t c);
 
 int String_IndexOf(const char* s, const char* sub);
 int String_IndexOfChar(const char* s, uint16_t c);
+/// s.IndexOf(value, startIndex[, count]) / LastIndexOf(value, startIndex[, count]):
+/// UTF-16 positions, ArgumentOutOfRangeException like .NET; count -1: the rest.
+int String_IndexOfAt(const char* s, const char* sub, int start, int count);
+int String_IndexOfCharAt(const char* s, uint16_t c, int start, int count);
+int String_LastIndexOfAt(const char* s, const char* sub, int start, int count);
+int String_LastIndexOfCharAt(const char* s, uint16_t c, int start, int count);
 const char* String_Insert(const char* s, int index, const char* value);
 const char* String_Remove(const char* s, int start, int count);
 const char* String_RemoveFrom(const char* s, int start);

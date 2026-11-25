@@ -344,13 +344,7 @@ public sealed class StringMethodHandler : InvocationHandlerBase
             // FIX: char-Literal explizit prüfen und auf *Char-Variante routen.
             // IsCharLiteral liest den Syntax-Node bevor er transpiliert wurde,
             // daher ist die Prüfung zuverlässig — auch wenn args[0] bereits '/' (int) ist.
-            "LastIndexOf" => IsCharLiteralArg(inv, 0)
-                ? "String_LastIndexOfChar(" + receiver + ", " + ArgAt(args, 0) + ")"
-                : "String_LastIndexOf(" + receiver + ", " + ArgAt(args, 0) + ")",
-
-            "IndexOf" => IsCharLiteralArg(inv, 0)
-                ? "String_IndexOfChar(" + receiver + ", " + ArgAt(args, 0) + ")"
-                : "String_IndexOf(" + receiver + ", " + ArgAt(args, 0) + ")",
+            "LastIndexOf" or "IndexOf" => BuildIndexOf(inv, receiver, args, ctx, last: methodName == "LastIndexOf"),
 
             "Split" => HandleSplitInstance(inv, receiver, args),
 
@@ -447,6 +441,45 @@ public sealed class StringMethodHandler : InvocationHandlerBase
     // FIX: Umbenannt von IsCharLiteral → IsCharLiteralArg um Verwechslungen zu vermeiden.
     // argIndex ist 0-basiert relativ zu den Argumenten der Instanzmethode
     // (d.h. Argument 0 = erstes Argument nach dem Receiver).
+    /// s.IndexOf(value[, startIndex[, count]][, StringComparison]) and LastIndexOf:
+    /// a char or a string value (also a char variable), the start index and count,
+    /// …IgnoreCase comparisons (both sides lowered; positions stay the same).
+    private static string BuildIndexOf(InvocationExpressionSyntax inv, string receiver, List<string> args,
+        TranspilerContext ctx, bool last)
+    {
+        var model = ctx.SemanticModel;
+        bool isChar = IsCharLiteralArg(inv, 0)
+            || (inv.ArgumentList.Arguments.Count > 0 && model?.GetTypeInfo(inv.ArgumentList.Arguments[0].Expression).Type?.SpecialType == SpecialType.System_Char);
+        var ints = new List<string>();
+        bool ignoreCase = false;
+        for (int i = 1; i < inv.ArgumentList.Arguments.Count && i < args.Count; i++)
+        {
+            var a = inv.ArgumentList.Arguments[i].Expression;
+            var at = model?.GetTypeInfo(a).Type;
+            if (at is INamedTypeSymbol { TypeKind: TypeKind.Enum, Name: "StringComparison" } || a.ToString().Contains("StringComparison."))
+                ignoreCase = a.ToString().Contains("IgnoreCase");
+            else
+                ints.Add(args[i]);
+        }
+        var value = ArgAt(args, 0);
+        var s = receiver;
+        if (ignoreCase && !isChar)
+        {
+            s = "String_ToLower(" + s + ")";
+            value = "String_ToLower(" + value + ")";
+        }
+        if (ints.Count == 0)
+            return (last, isChar) switch
+            {
+                (false, true) => "String_IndexOfChar(" + s + ", " + value + ")",
+                (false, false) => "String_IndexOf(" + s + ", " + value + ")",
+                (true, true) => "String_LastIndexOfChar(" + s + ", " + value + ")",
+                _ => "String_LastIndexOf(" + s + ", " + value + ")",
+            };
+        var fn = (last ? "String_LastIndexOf" : "String_IndexOf") + (isChar ? "CharAt" : "At");
+        return fn + "(" + s + ", " + value + ", " + ints[0] + ", " + (ints.Count > 1 ? ints[1] : "-1") + ")";
+    }
+
     private static bool IsCharLiteralArg(InvocationExpressionSyntax inv, int argIndex)
     {
         if (inv.ArgumentList.Arguments.Count <= argIndex) return false;

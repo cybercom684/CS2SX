@@ -1441,7 +1441,17 @@ public sealed class CSharpToC : CSharpSyntaxWalker
                     if (csType == "string")
                         _ctx.Out.WriteLine($"extern const char* const {name}_{fieldName};");
                     else if (TypeRegistry.IsPrimitive(csType))
-                        _ctx.Out.WriteLine($"#define {name}_{fieldName} ({initVal})");
+                    {
+                        // The value in the field's type: `const double D = 3;` must not be the
+                        // int 3 in C (D / 2 would be 1). A constant is written as a C literal
+                        // of that type; other initializers are cast to it.
+                        var constant = _ctx.SemanticModel?.GetDeclaredSymbol(v) as IFieldSymbol;
+                        var cType = TypeRegistry.MapType(csType);
+                        var value = constant is { HasConstantValue: true, ConstantValue: not null and not string }
+                            ? Writers.ExpressionWriter.CConstantLiteral(constant.ConstantValue)
+                            : "(" + cType + ")(" + initVal + ")";
+                        _ctx.Out.WriteLine($"#define {name}_{fieldName} ({value})");
+                    }
                     else if (csType.EndsWith("[]"))
                     {
                         // Static arrays are header-carrying T* globals (ArrayModel) — a

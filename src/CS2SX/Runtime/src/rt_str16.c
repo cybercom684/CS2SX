@@ -380,6 +380,85 @@ int String_LastIndexOfChar(const char* s, uint16_t c)
     return last;
 }
 
+// ── IndexOf / LastIndexOf with startIndex and count (UTF-16 positions, like .NET) ──
+
+// [start, start + count) of s, checked like .NET; count < 0: to the end.
+static int index_range(const char* s, int start, int* count)
+{
+    int len = CS2SX_Str16Len(s);
+    if (start < 0 || start > len) CS2SX_ThrowArgOutOfRange("startIndex");
+    if (*count < 0) *count = len - start;
+    else if (*count > len - start) CS2SX_ThrowArgOutOfRange("count");
+    return len;
+}
+
+int String_IndexOfAt(const char* s, const char* sub, int start, int count)
+{
+    if (!s) CS2SX_ThrowNullRef();
+    if (!sub) CS2SX_ThrowArgNull("value");
+    index_range(s, start, &count);
+    int b0 = CS2SX_Str16Offset(s, start), b1 = CS2SX_Str16Offset(s, start + count);
+    size_t n = strlen(sub);
+    for (const char* p = strstr(s + b0, sub); p; p = strstr(p + 1, sub))
+    {
+        if ((p - s) + (long)n > b1) break;
+        return CS2SX_Str16Index(s, (int)(p - s));
+    }
+    return -1;
+}
+
+int String_IndexOfCharAt(const char* s, uint16_t c, int start, int count)
+{
+    if (!s) CS2SX_ThrowNullRef();
+    index_range(s, start, &count);
+    CS2SX_Str16It it = { s, 0 };
+    uint16_t x;
+    for (int i = 0; i < start + count && CS2SX_Str16Next(&it, &x); i++)
+        if (i >= start && x == c) return i;
+    return -1;
+}
+
+// LastIndexOf searches backward from startIndex over count characters:
+// the match lies in [startIndex - count + 1, startIndex]. count < 0: to the start.
+static void last_range(const char* s, int* start, int* count)
+{
+    int len = CS2SX_Str16Len(s);
+    if (len == 0) { *start = -1; *count = 0; return; }
+    if (*start == len) (*start)--;   // .NET allows startIndex == Length
+    if (*start < 0 || *start >= len) CS2SX_ThrowArgOutOfRange("startIndex");
+    if (*count < 0) *count = *start + 1;
+    else if (*count > *start + 1) CS2SX_ThrowArgOutOfRange("count");
+}
+
+int String_LastIndexOfAt(const char* s, const char* sub, int start, int count)
+{
+    if (!s) CS2SX_ThrowNullRef();
+    if (!sub) CS2SX_ThrowArgNull("value");
+    last_range(s, &start, &count);
+    if (start < 0) return *sub ? -1 : 0;
+    int lo = start - count + 1, sublen = CS2SX_Str16Len(sub), last = -1;
+    for (const char* p = strstr(s, sub); p; p = *p ? strstr(p + 1, sub) : NULL)
+    {
+        int i = CS2SX_Str16Index(s, (int)(p - s));
+        if (i > start) break;
+        if (i >= lo && i + sublen - 1 <= start) last = i;
+    }
+    return last;
+}
+
+int String_LastIndexOfCharAt(const char* s, uint16_t c, int start, int count)
+{
+    if (!s) CS2SX_ThrowNullRef();
+    last_range(s, &start, &count);
+    if (start < 0) return -1;
+    int lo = start - count + 1, last = -1;
+    CS2SX_Str16It it = { s, 0 };
+    uint16_t x;
+    for (int i = 0; i <= start && CS2SX_Str16Next(&it, &x); i++)
+        if (i >= lo && x == c) last = i;
+    return last;
+}
+
 static const char* pad(const char* s, int totalWidth, uint16_t padChar, int left)
 {
     if (!s) s = "";
