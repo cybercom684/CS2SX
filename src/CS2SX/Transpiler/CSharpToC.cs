@@ -1219,7 +1219,13 @@ public sealed class CSharpToC : CSharpSyntaxWalker
                     {
                         if (v.Initializer == null) continue;
                         var fieldName = v.Identifier.Text.TrimStart('_');
-                        var initVal = _exprWriter.Write(v.Initializer.Value);
+                        // A compile-time constant (also `const string B = A + "/x";`) is written
+                        // as one C literal: writing the expression would hoist a runtime
+                        // concatenation (a StringBuilder) to file scope, which is invalid C.
+                        var sym = _ctx.SemanticModel?.GetDeclaredSymbol(v) as IFieldSymbol;
+                        var initVal = sym is { HasConstantValue: true, ConstantValue: string constStr }
+                            ? "\"" + Writers.StringEscaper.EscapeRaw(constStr) + "\""
+                            : _exprWriter.Write(v.Initializer.Value);
                         _ctx.Out.WriteLine(
                             $"const char* const {name}_{fieldName} = {initVal};");
                     }
@@ -1436,8 +1442,8 @@ public sealed class CSharpToC : CSharpSyntaxWalker
                     var fieldName = v.Identifier.Text.TrimStart('_');
                     if (v.Initializer == null) continue;
 
-                    var initVal = _exprWriter.Write(v.Initializer.Value);
-
+                    // (only written where needed: writing an expression can hoist statements,
+                    // which must never land in a header)
                     if (csType == "string")
                         _ctx.Out.WriteLine($"extern const char* const {name}_{fieldName};");
                     else if (TypeRegistry.IsPrimitive(csType))
@@ -1449,7 +1455,7 @@ public sealed class CSharpToC : CSharpSyntaxWalker
                         var cType = TypeRegistry.MapType(csType);
                         var value = constant is { HasConstantValue: true, ConstantValue: not null and not string }
                             ? Writers.ExpressionWriter.CConstantLiteral(constant.ConstantValue)
-                            : "(" + cType + ")(" + initVal + ")";
+                            : "(" + cType + ")(" + _exprWriter.Write(v.Initializer.Value) + ")";
                         _ctx.Out.WriteLine($"#define {name}_{fieldName} ({value})");
                     }
                     else if (csType.EndsWith("[]"))

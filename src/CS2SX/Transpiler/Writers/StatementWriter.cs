@@ -864,8 +864,7 @@ public sealed class StatementWriter
 
         if (ifStmt.Else.Statement is IfStatementSyntax nested)
         {
-            _ctx.Out.Write(_ctx.Tab + "else ");
-            WriteIfInline(nested);
+            WriteElseIf(nested);
         }
         else
         {
@@ -962,8 +961,7 @@ public sealed class StatementWriter
         if (ifStmt.Else == null) return;
         if (ifStmt.Else.Statement is IfStatementSyntax nested)
         {
-            _ctx.Out.Write(_ctx.Tab + "else ");
-            WriteIfInline(nested);
+            WriteElseIf(nested);
         }
         else
         {
@@ -1031,14 +1029,44 @@ public sealed class StatementWriter
         if (ifStmt.Else == null) return;
         if (ifStmt.Else.Statement is IfStatementSyntax nested)
         {
-            _ctx.Out.Write(_ctx.Tab + "else ");
-            WriteIfInline(nested);
+            WriteElseIf(nested);
         }
         else
         {
             _ctx.WriteLine("else");
             WriteBlockOrStmt(ifStmt.Else.Statement);
         }
+    }
+
+    /// <summary>
+    /// `else if (...)`. When writing the nested condition hoists statements in front of
+    /// it (a string concatenation, an `out var`), they would follow a brace-less `else`,
+    /// which is invalid C — then the nested if goes into a block of its own:
+    /// `else { hoisted; if (...) ... }`.
+    /// </summary>
+    private void WriteElseIf(IfStatementSyntax nested)
+    {
+        var sb = _ctx.Out.GetStringBuilder();
+        int start = sb.Length;
+        var tab = _ctx.Tab;
+        _ctx.Out.Write(tab + "else ");
+        int body = sb.Length;
+        WriteIfInline(nested);
+        if (sb.Length - body >= 4 && sb.ToString(body, 4) == "if (") return;
+
+        var text = sb.ToString(body, sb.Length - body);
+        sb.Length = start;
+        _ctx.WriteLine("else");
+        _ctx.WriteLine("{");
+        var lines = text.Split('\n');
+        for (int i = 0; i < lines.Length; i++)
+        {
+            var line = lines[i];
+            if (i == lines.Length - 1 && line.Length == 0) break;   // after the final newline
+            if (line.StartsWith("if (")) line = tab + line;         // the inline nested if
+            sb.Append(line.TrimEnd('\r').Length == 0 ? line : "    " + line).Append('\n');
+        }
+        _ctx.WriteLine("}");
     }
 
     // ── For ───────────────────────────────────────────────────────────────────

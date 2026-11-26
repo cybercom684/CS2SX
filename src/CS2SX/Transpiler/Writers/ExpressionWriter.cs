@@ -813,6 +813,11 @@ public sealed class ExpressionWriter : IExpressionWriter
         overloaded = OperatorOverloadWriter.TryRewriteBinary(bin, rightCsType, left, right);
         if (overloaded != null) return overloaded;
 
+        // C has no % for floating point: float/double remainder is fmodf/fmod (same sign
+        // rules as C#'s %).
+        if (op == "%" && FloatModFn(bin) is { } fmodFn)
+            return fmodFn + "(" + left + ", " + right + ")";
+
         if ((op == "/" || op == "%") && NeedsZeroDivisorCheck(bin))
             return (op == "/" ? "CS2SX_IDIV(" : "CS2SX_IMOD(") + left + ", " + right + ")";
 
@@ -907,6 +912,20 @@ public sealed class ExpressionWriter : IExpressionWriter
             default:
                 return null;
         }
+    }
+
+    /// <summary>"fmodf"/"fmod" when e is a float/double (decimal) expression, else null.</summary>
+    private string? FloatModFn(ExpressionSyntax e)
+    {
+        SpecialType st;
+        try { st = _ctx.SemanticModel?.GetTypeInfo(e).Type?.SpecialType ?? SpecialType.None; }
+        catch { return null; }
+        return st switch
+        {
+            SpecialType.System_Single => "fmodf",
+            SpecialType.System_Double or SpecialType.System_Decimal => "fmod",
+            _ => null,
+        };
     }
 
     private string WriteCoalesce(BinaryExpressionSyntax coalesce)
@@ -1199,6 +1218,13 @@ public sealed class ExpressionWriter : IExpressionWriter
 
         if (op == "??=")
             return WriteNullCoalescingAssignment(assign, right);
+
+        // x %= y on float/double: fmodf/fmod (C has no floating-point %=).
+        if (op == "%=" && FloatModFn(assign.Left) is { } fmodAssign)
+        {
+            var target = Write(assign.Left);
+            return target + " = " + fmodAssign + "(" + target + ", " + right + ")";
+        }
 
         // x /= y, x %= y on integers: divide-by-zero check like the binary operator.
         if ((op == "/=" || op == "%=") && assign.Left is IdentifierNameSyntax or MemberAccessExpressionSyntax

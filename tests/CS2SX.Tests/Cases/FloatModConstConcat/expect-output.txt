@@ -1,0 +1,9 @@
+mod 1.5 -1.5 0.25 -1
+modeq 3.5 -3.5
+int 1 1
+const sdmc:/switch/app sdmc:/switch/local sdmc:/switch/app/cache/x"q
+chain 0 zero
+chain 1 one
+chain 2 two
+chain 3 other
+done
